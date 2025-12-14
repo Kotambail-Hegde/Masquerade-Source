@@ -58,7 +58,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # --- Dependencies
 if(NOT EMSCRIPTEN)
-    #find_package(Boost REQUIRED)
+if(NOT IS_GITHUB_ACTIONS)
+    find_package(Boost REQUIRED)
+endif()
     find_package(nfd REQUIRED)
     find_package(SDL3 REQUIRED)
 endif()
@@ -105,10 +107,12 @@ set(PROJECT_HEADERS
 )
 
 # --- Third-party headers for IDE visibility only
-set(THIRD_PARTY_HEADERS_GLAD
-    ${GLAD_INCLUDE_DIR}/glad/glad.h
-    ${GLAD_INCLUDE_DIR}/KHR/khrplatform.h
-)
+if(NOT EMSCRIPTEN)
+    set(THIRD_PARTY_HEADERS_GLAD
+        ${GLAD_INCLUDE_DIR}/glad/glad.h
+        ${GLAD_INCLUDE_DIR}/KHR/khrplatform.h
+    )
+endif()
 
 set(THIRD_PARTY_HEADERS_IMGUI
     ${IMGUI_DIR}/imconfig.h
@@ -252,7 +256,9 @@ add_executable(${PROJECT_NAME} ${SOURCES})
 
 # --- IDE groupings for Visual Studio / CLion
 source_group("Headers"                      FILES ${PROJECT_HEADERS})
+if (NOT EMSCRIPTEN)
 source_group("Headers\\Third-party\\GLAD"   FILES ${THIRD_PARTY_HEADERS_GLAD})
+endif()
 source_group("Headers\\Third-party\\IMGUI"  FILES ${THIRD_PARTY_HEADERS_IMGUI})
 source_group("Headers\\Third-party\\MINIZ"  FILES ${THIRD_PARTY_HEADERS_MINIZ})
 source_group("Headers\\Third-party\\NFD"    FILES ${THIRD_PARTY_HEADERS_NFD})
@@ -268,7 +274,9 @@ source_group("Sources\\NES"                 FILES ${NES_SOURCES})
 source_group("Sources\\GBC"                 FILES ${GBC_SOURCES})
 source_group("Sources\\GBA"                 FILES ${GBA_SOURCES})
 source_group("Sources\\Cheats"              FILES ${CHEATS_SOURCES})
+if (NOT EMSCRIPTEN)
 source_group("Sources\\Third-party\\Glad"   FILES ${GLAD_SOURCES})
+endif()
 source_group("Sources\\Third-party\\Miniz"  FILES ${MINIZ_SOURCES})
 source_group("Sources\\Third-party\\ImGui"  FILES ${IMGUI_SOURCES})
 

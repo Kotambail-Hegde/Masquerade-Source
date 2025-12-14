@@ -86,6 +86,7 @@ jobs:
           cd build
           cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release
           cmake --build . --config Release --parallel
+          cmake --build . --config Release --target install
         shell: pwsh
 
       # --- Build NFD
@@ -96,6 +97,7 @@ jobs:
           cd build
           cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release
           cmake --build . --config Release --parallel
+          cmake --build . --config Release --target install
         shell: pwsh
 
       # --- Set environment variables
@@ -214,6 +216,7 @@ jobs:
           cd build
           cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release
           ninja -j$(nproc)
+          ninja install
 
       # --- Build NFD
       - name: Build NFD
@@ -223,6 +226,7 @@ jobs:
           cd build
           cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release
           ninja -j$(nproc)
+          ninja install
 
       # --- Set environment variables
       - name: Set dependency paths
