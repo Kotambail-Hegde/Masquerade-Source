@@ -219,11 +219,11 @@ jobs:
             echo "Extracted contents:"
             ls -la "$TMPDIR"
             
-            echo "Moving $TMPDIR/miniz-3.0.2 -> miniz"
-            mv "$TMPDIR/miniz-3.0.2" miniz
+            echo "Moving $TMPDIR -> miniz"
+            mv "$TMPDIR" miniz
             
             echo "Cleaning up"
-            rm -rf "$TMPDIR" "$ZIP"
+            rm -f "$ZIP"
             
             echo "=== MINIZ ready at $(pwd)/miniz ==="
           else
@@ -358,11 +358,11 @@ jobs:
             echo "Extracted contents:"
             ls -la "$TMPDIR"
             
-            echo "Moving $TMPDIR/miniz-3.0.2 -> miniz"
-            mv "$TMPDIR/miniz-3.0.2" miniz
+            echo "Moving $TMPDIR -> miniz"
+            mv "$TMPDIR" miniz
             
             echo "Cleaning up"
-            rm -rf "$TMPDIR" "$ZIP"
+            rm -f "$ZIP"
             
             echo "=== MINIZ ready at $(pwd)/miniz ==="
           else
