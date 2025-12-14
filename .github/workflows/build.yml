@@ -48,6 +48,26 @@ jobs:
           if (!(Test-Path "nativefiledialog-extended")) { git clone https://github.com/btzy/nativefiledialog-extended.git --depth 1 }
         shell: pwsh
 
+
+      # --- Build Boost
+      - name: Build Boost
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cd external/boost
+
+          # Bootstrap Boost (MSVC)
+          .\bootstrap.bat
+
+          # Build + install (static + shared)
+          .\b2.exe install `
+            variant=release `
+            link=static,shared `
+            threading=multi `
+            runtime-link=shared `
+            --prefix="$($PWD.Path)" `
+            -j$env:NUMBER_OF_PROCESSORS
+
       # --- Build SDL3
       - name: Build SDL3
         run: |
@@ -77,8 +97,8 @@ jobs:
           echo "MINIZ_ROOT=$env:GITHUB_WORKSPACE\external\miniz" >> $env:GITHUB_ENV
           echo "STB_ROOT=$env:GITHUB_WORKSPACE\external\stb" >> $env:GITHUB_ENV
           echo "GLAD_ROOT=$env:GITHUB_WORKSPACE\external\glad" >> $env:GITHUB_ENV
-          echo "BOOST_ROOT=$env:GITHUB_WORKSPACE\external\boost\libs" >> $env:GITHUB_ENV
-          echo "SDL3_ROOT=$env:GITHUB_WORKSPACE\external\SDL" >> $env:GITHUB_ENV
+          echo "BOOST_ROOT=$env:GITHUB_WORKSPACE\external\boost" >> $env:GITHUB_ENV
+          echo "SDL3_ROOT=$env:GITHUB_WORKSPACE\external\SDL\build" >> $env:GITHUB_ENV
           echo "NFD_ROOT=$env:GITHUB_WORKSPACE\external\nativefiledialog-extended" >> $env:GITHUB_ENV
         shell: pwsh
 
@@ -158,6 +178,26 @@ jobs:
           [ ! -d "SDL" ] && git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL
           [ ! -d "nativefiledialog-extended" ] && git clone https://github.com/btzy/nativefiledialog-extended.git --depth 1
 
+      # --- Build Boost
+      - name: Build Boost
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          cd external/boost
+
+          # Ensure script is executable
+          chmod +x bootstrap.sh
+
+          # Bootstrap Boost
+          ./bootstrap.sh --prefix="$PWD"
+
+          # Build + install (static + shared)
+          ./b2 install \
+            variant=release \
+            link=static,shared \
+            threading=multi \
+            -j$(nproc)
+
       # --- Build SDL3
       - name: Build SDL3
         run: |
@@ -185,8 +225,8 @@ jobs:
           echo "MINIZ_ROOT=$GITHUB_WORKSPACE/external/miniz" >> $GITHUB_ENV
           echo "STB_ROOT=$GITHUB_WORKSPACE/external/stb" >> $GITHUB_ENV
           echo "GLAD_ROOT=$GITHUB_WORKSPACE/external/glad" >> $GITHUB_ENV
-          echo "BOOST_ROOT=$GITHUB_WORKSPACE/external/boost/libs" >> $GITHUB_ENV
-          echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL" >> $GITHUB_ENV
+          echo "BOOST_ROOT=$GITHUB_WORKSPACE/external/boost" >> $GITHUB_ENV
+          echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL/build" >> $GITHUB_ENV
           echo "NFD_ROOT=$GITHUB_WORKSPACE/external/nativefiledialog-extended" >> $GITHUB_ENV
 
       # --- Configure CMake
@@ -260,8 +300,8 @@ jobs:
           echo "MINIZ_ROOT=$GITHUB_WORKSPACE/external/miniz" >> $GITHUB_ENV
           echo "STB_ROOT=$GITHUB_WORKSPACE/external/stb" >> $GITHUB_ENV
           echo "EFB_ROOT=$GITHUB_WORKSPACE/external/emscripten-browser-file" >> $GITHUB_ENV
-          echo "BOOST_ROOT=$GITHUB_WORKSPACE/external/boost/libs" >> $GITHUB_ENV
-          echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL/build/install" >> $GITHUB_ENV
+          echo "BOOST_ROOT=$GITHUB_WORKSPACE/external/boost" >> $GITHUB_ENV
+          echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL/build" >> $GITHUB_ENV
 
       # --- Setup Emscripten SDK
       - name: Setup Emscripten
@@ -273,6 +313,27 @@ jobs:
       # --- Install ninja
       - name: Install Ninja
         run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      # --- Build Boost (Emscripten)
+      - name: Build Boost (Emscripten)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          cd external/boost
+
+          chmod +x bootstrap.sh
+
+          # Bootstrap Boost for Emscripten
+          CC=emcc CXX=em++ ./bootstrap.sh --prefix="$PWD"
+
+          # Build ONLY static libs for wasm
+          ./b2 install \
+            toolset=emscripten \
+            variant=release \
+            link=static \
+            threading=single \
+            target-os=none \
+            -j$(nproc)
 
       # --- Build SDL3
       - name: Build SDL3

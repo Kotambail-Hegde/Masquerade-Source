@@ -30,7 +30,7 @@ elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux" AND NOT IS_GITHUB_ACTIONS)
     message(STATUS "Building on Linux")
     include(${CMAKE_SOURCE_DIR}/Paths_lin.cmake)
 elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows" AND IS_GITHUB_ACTIONS)
-    message(STATUS "CI build – skipping local Paths_*.cmake")
+    message(STATUS "CI build (Windows) – skipping local Paths_*.cmake")
     # Boost
     set(BOOST_INCLUDE_DIR "${BOOST_ROOT}")
     # SDL3
@@ -45,7 +45,7 @@ elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows" AND IS_GITHUB_ACTIONS)
     set(NFD_SRC_INCLUDE_DIR "${NFD_ROOT}/src/include")
     set(CMAKE_PREFIX_PATH "${NFD_CMAKE_PATH}")
 elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux" AND IS_GITHUB_ACTIONS)
-    message(STATUS "CI build – skipping local Paths_*.cmake")
+    message(STATUS "CI build (Linux) – skipping local Paths_*.cmake")
     # Boost
     set(BOOST_INCLUDE_DIR "${BOOST_ROOT}")
     # SDL3
