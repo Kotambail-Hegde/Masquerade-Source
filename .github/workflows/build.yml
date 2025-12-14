@@ -1,0 +1,87 @@
+name: Build Masquerade
+
+on:
+  push:
+    branches: [ci_cd_support_1]
+  pull_request:
+    branches: [ci_cd_support_1]
+
+jobs:
+  build_windows:
+    name: Build Windows (MSVC)
+    runs-on: windows-latest
+    env:
+      BUILD_DIR: build/windows
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup MSVC environment
+        uses: microsoft/setup-msvc@v1
+
+      - name: Configure CMake
+        run: cmake -G "Visual Studio 17 2022" ^
+              -DCMAKE_C_COMPILER=cl ^
+              -DCMAKE_CXX_COMPILER=cl ^
+              -DCMAKE_DEFAULT_BUILD_TYPE=Release ^
+              -S . ^
+              -B "%BUILD_DIR%/x86_64/msvc/solution (IDE)/"
+
+      - name: Build
+        run: cmake --build "%BUILD_DIR%/x86_64/msvc/solution (IDE)/" --config Release
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: windows-build
+          path: "%BUILD_DIR%/x86_64/msvc/solution (IDE)/Release/"
+
+  build_linux:
+    name: Build Linux (Ninja)
+    runs-on: ubuntu-latest
+    env:
+      BUILD_DIR: build/linux
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install Dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build build-essential cmake libboost-all-dev
+
+      - name: Configure CMake
+        run: cmake -G "Ninja Multi-Config" -DCMAKE_DEFAULT_BUILD_TYPE=Release -S . -B "$BUILD_DIR/emscripten/ninja/"
+
+      - name: Build
+        run: cmake --build "$BUILD_DIR/emscripten/ninja/" --config Release
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: linux-build
+          path: "$BUILD_DIR/emscripten/ninja/"
+
+  build_emscripten:
+    name: Build Emscripten (Ninja)
+    runs-on: ubuntu-latest
+    env:
+      BUILD_DIR: build/emscripten
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Emscripten
+        uses: emscripten-core/setup-emsdk@v3
+        with:
+          emsdk-version: latest
+
+      - name: Configure CMake
+        run: emcmake cmake -G "Ninja Multi-Config" ^
+              -DCMAKE_DEFAULT_BUILD_TYPE=Release ^
+              -S . ^
+              -B "$BUILD_DIR/emscripten/ninja/"
+
+      - name: Build
+        run: cmake --build "$BUILD_DIR/emscripten/ninja/" --config Release
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: emscripten-build
+          path: "$BUILD_DIR/emscripten/ninja/"

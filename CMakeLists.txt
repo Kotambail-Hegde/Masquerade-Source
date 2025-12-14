@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.24.0)
 project(masquerade)  # MUST come before checking CMAKE_SYSTEM_NAME
 
 # --- Automatically setup the required libraries path from root path
-if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows" AND NOT IS_GITHUB_ACTIONS)
     message(STATUS "Building on Windows")
     include(${CMAKE_SOURCE_DIR}/Paths_win.cmake)
     # Boost
@@ -20,9 +20,11 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
     set(NFD_INCLUDE_DIR "${NFD_ROOT}")
     set(NFD_SRC_INCLUDE_DIR "${NFD_ROOT}/src/include")
     set(CMAKE_PREFIX_PATH "${NFD_CMAKE_PATH}")
-elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
+elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux" AND NOT IS_GITHUB_ACTIONS)
     message(STATUS "Building on Linux")
     include(${CMAKE_SOURCE_DIR}/Paths_lin.cmake)
+elseif(IS_GITHUB_ACTIONS)
+    message(STATUS "CI build – skipping local Paths_*.cmake")
 else()
     message(STATUS "Unsupported OS: ${CMAKE_HOST_SYSTEM_NAME}")
 endif()
@@ -55,7 +57,7 @@ if(NOT EMSCRIPTEN)
 endif()
 
 # --- OpenGL ES for Raspberry Pi / ARM Linux
-if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME  STREQUAL "Linux")
     # Check if building for ARM architecture (Raspberry Pi)
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm" OR CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
         message(STATUS "Detected ARM architecture - using OpenGL ES 3")
@@ -405,7 +407,7 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     endif()
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     message(STATUS "GNU compiler detected")
-    if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
+    if(CMAKE_SYSTEM_NAME  STREQUAL "Windows")
         message(STATUS "Linking Windows libraries")
         target_link_libraries(${PROJECT_NAME} PRIVATE
             Boost::headers
@@ -421,7 +423,7 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
             dwmapi
             stdc++fs
         )
-    elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
+    elseif(CMAKE_SYSTEM_NAME  STREQUAL "Linux")
         message(STATUS "Linking Linux libraries")
         
         # Check if using OpenGL ES or desktop OpenGL
