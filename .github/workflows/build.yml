@@ -203,11 +203,14 @@ jobs:
         run: |
           mkdir -p external
           cd external
-          [ ! -d "imgui" ] && git clone https://github.com/ocornut/imgui.git --branch docking --depth 1
+
+          if [ ! -d "imgui" ]; then
+            git clone https://github.com/ocornut/imgui.git --branch docking --depth 1
+          fi
+
           # --- Miniz
           if [ ! -d "miniz" ]; then
             echo "=== MINIZ not found, downloading release 3.0.2 ==="
-            
             URL="https://github.com/richgel999/miniz/releases/download/3.0.2/miniz-3.0.2.zip"
             ZIP="miniz-3.0.2.zip"
             TMPDIR="_miniz_extract"
@@ -232,10 +235,25 @@ jobs:
           else
             echo "=== MINIZ already exists, skipping ==="
           fi
-          [ ! -d "stb/stb" ] && git clone --depth 1 https://github.com/nothings/stb.git stb/stb
-          if [ ! -d "boost" ]; then git clone https://github.com/boostorg/boost.git --branch boost-1.84.0 --depth 1; cd boost; git submodule update --init --depth 1; cd ..; fi
-          [ ! -d "SDL" ] && git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL
-          [ ! -d "nativefiledialog-extended" ] && git clone https://github.com/btzy/nativefiledialog-extended.git --depth 1
+
+          if [ ! -d "stb/stb" ]; then
+            git clone --depth 1 https://github.com/nothings/stb.git stb/stb
+          fi
+
+          if [ ! -d "boost" ]; then
+            git clone https://github.com/boostorg/boost.git --branch boost-1.84.0 --depth 1
+            cd boost
+            git submodule update --init --depth 1
+            cd ..
+          fi
+
+          if [ ! -d "SDL" ]; then
+            git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL
+          fi
+
+          if [ ! -d "nativefiledialog-extended" ]; then
+            git clone https://github.com/btzy/nativefiledialog-extended.git --depth 1
+          fi
 
       # --- Build Boost
       - name: Build Boost
