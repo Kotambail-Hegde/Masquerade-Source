@@ -42,32 +42,31 @@ jobs:
           if (!(Test-Path "miniz")) {
               Write-Host "=== MINIZ: not found, downloading ==="
 
-              $url = "https://github.com/richgel999/miniz/archive/refs/tags/3.0.2.zip"
+              $url = "https://github.com/richgel999/miniz/releases/download/3.0.2/miniz-3.0.2.zip"
               $zip = "miniz-3.0.2.zip"
-              $tmp = "_miniz_extract"
+              $tmpDir = "_miniz_extract"
 
               Write-Host "Downloading: $url"
               Invoke-WebRequest -Uri $url -OutFile $zip
 
-              Write-Host "Extracting $zip into $tmp/"
-              Expand-Archive $zip -DestinationPath $tmp -Force
+              Write-Host "Extracting $zip into ${tmpDir}/"
+              Expand-Archive $zip -DestinationPath $tmpDir -Force
 
-              Write-Host "Contents of $tmp:"
-              Get-ChildItem $tmp | Format-Table Name, Mode
+              Write-Host "Contents of ${tmpDir}:"
+              Get-ChildItem $tmpDir | Format-Table Name, Mode
 
-              Write-Host "Moving $tmp/miniz-3.0.2 -> miniz"
-              Move-Item "$tmp/miniz-3.0.2" "miniz" -Force
+              Write-Host "Moving ${tmpDir}/miniz-3.0.2 -> miniz"
+              Move-Item -Path "${tmpDir}/miniz-3.0.2" -Destination "miniz" -Force
 
               Write-Host "Contents of external/ after move:"
               Get-ChildItem . | Format-Table Name, Mode
 
               Write-Host "Cleaning up"
-              Remove-Item $zip
-              Remove-Item $tmp -Recurse -Force
+              Remove-Item -Path $zip -Force
+              Remove-Item -Path $tmpDir -Recurse -Force
 
               Write-Host "=== MINIZ setup complete ==="
-          }
-          else {
+          } else {
               Write-Host "=== MINIZ already exists, skipping ==="
               Write-Host "Contents of external/:"
               Get-ChildItem . | Format-Table Name, Mode
@@ -205,27 +204,27 @@ jobs:
           # --- Miniz
           if [ ! -d "miniz" ]; then
             echo "=== MINIZ not found, downloading release 3.0.2 ==="
-
-            URL="https://github.com/richgel999/miniz/archive/refs/tags/3.0.2.tar.gz"
-            TAR="miniz-3.0.2.tar.gz"
-            TMP="_miniz_extract"
-
+            
+            URL="https://github.com/richgel999/miniz/releases/download/3.0.2/miniz-3.0.2.zip"
+            ZIP="miniz-3.0.2.zip"
+            TMPDIR="_miniz_extract"
+            
             echo "Downloading $URL"
-            curl -L "$URL" -o "$TAR"
-
-            echo "Extracting $TAR into $TMP/"
-            mkdir -p "$TMP"
-            tar -xzf "$TAR" -C "$TMP"
-
+            curl -L "$URL" -o "$ZIP"
+            
+            echo "Extracting $ZIP into $TMPDIR/"
+            mkdir -p "$TMPDIR"
+            unzip "$ZIP" -d "$TMPDIR"
+            
             echo "Extracted contents:"
-            ls -la "$TMP"
-
-            echo "Renaming $TMP/miniz-3.0.2 -> miniz"
-            mv "$TMP/miniz-3.0.2" miniz
-
+            ls -la "$TMPDIR"
+            
+            echo "Moving $TMPDIR/miniz-3.0.2 -> miniz"
+            mv "$TMPDIR/miniz-3.0.2" miniz
+            
             echo "Cleaning up"
-            rm -rf "$TMP" "$TAR"
-
+            rm -rf "$TMPDIR" "$ZIP"
+            
             echo "=== MINIZ ready at $(pwd)/miniz ==="
           else
             echo "=== MINIZ already exists, skipping ==="
@@ -344,27 +343,27 @@ jobs:
           # --- Miniz
           if [ ! -d "miniz" ]; then
             echo "=== MINIZ not found, downloading release 3.0.2 ==="
-
-            URL="https://github.com/richgel999/miniz/archive/refs/tags/3.0.2.tar.gz"
-            TAR="miniz-3.0.2.tar.gz"
-            TMP="_miniz_extract"
-
+            
+            URL="https://github.com/richgel999/miniz/releases/download/3.0.2/miniz-3.0.2.zip"
+            ZIP="miniz-3.0.2.zip"
+            TMPDIR="_miniz_extract"
+            
             echo "Downloading $URL"
-            curl -L "$URL" -o "$TAR"
-
-            echo "Extracting $TAR into $TMP/"
-            mkdir -p "$TMP"
-            tar -xzf "$TAR" -C "$TMP"
-
+            curl -L "$URL" -o "$ZIP"
+            
+            echo "Extracting $ZIP into $TMPDIR/"
+            mkdir -p "$TMPDIR"
+            unzip "$ZIP" -d "$TMPDIR"
+            
             echo "Extracted contents:"
-            ls -la "$TMP"
-
-            echo "Renaming $TMP/miniz-3.0.2 -> miniz"
-            mv "$TMP/miniz-3.0.2" miniz
-
+            ls -la "$TMPDIR"
+            
+            echo "Moving $TMPDIR/miniz-3.0.2 -> miniz"
+            mv "$TMPDIR/miniz-3.0.2" miniz
+            
             echo "Cleaning up"
-            rm -rf "$TMP" "$TAR"
-
+            rm -rf "$TMPDIR" "$ZIP"
+            
             echo "=== MINIZ ready at $(pwd)/miniz ==="
           else
             echo "=== MINIZ already exists, skipping ==="
