@@ -16,41 +16,43 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      # --- Cache vcpkg
+      # Cache vcpkg packages
       - name: Cache vcpkg
         uses: actions/cache@v3
         with:
-          path: ${{ env.BUILD_ROOT }}/vcpkg/packages
+          path: ${{ env.BUILD_ROOT }}\vcpkg\packages
           key: vcpkg-windows-${{ hashFiles('vcpkg.json') }}
           restore-keys: |
             vcpkg-windows-
 
-      # --- Bootstrap vcpkg
+      # Bootstrap vcpkg
       - name: Clone vcpkg
-        run: git clone https://github.com/microsoft/vcpkg.git "${{ env.BUILD_ROOT }}\\vcpkg"
-      
-      - name: Bootstrap vcpkg
-        run: & "${{ env.BUILD_ROOT }}\\vcpkg\\bootstrap-vcpkg.bat"
+        run: git clone https://github.com/microsoft/vcpkg.git "${{ env.BUILD_ROOT }}\vcpkg"
 
-      # --- Install dependencies
+      - name: Bootstrap vcpkg
+        run: |
+          & "${{ env.BUILD_ROOT }}\vcpkg\bootstrap-vcpkg.bat"
+
+      # Install dependencies
       - name: Install libraries
         run: |
           & "${{ env.BUILD_ROOT }}\vcpkg\vcpkg.exe" install boost:x64-windows sdl3:x64-windows glad:x64-windows
           & "${{ env.BUILD_ROOT }}\vcpkg\vcpkg.exe" integrate install
 
-      # --- Configure CMake
+      # Configure CMake
       - name: Configure CMake
-        run: cmake -G "Visual Studio 17 2022" `
-              -DCMAKE_TOOLCHAIN_FILE="${{ env.BUILD_ROOT }}\vcpkg\scripts\buildsystems\vcpkg.cmake" `
-              -DCMAKE_DEFAULT_BUILD_TYPE=Release `
-              -S . `
-              -B "${{ env.BUILD_ROOT }}\windows\x86_64\msvc\solution_IDE"
+        run: |
+          cmake -G "Visual Studio 17 2022" `
+                -DCMAKE_TOOLCHAIN_FILE="${{ env.BUILD_ROOT }}\vcpkg\scripts\buildsystems\vcpkg.cmake" `
+                -DCMAKE_DEFAULT_BUILD_TYPE=Release `
+                -S . `
+                -B "${{ env.BUILD_ROOT }}\windows\x86_64\msvc\solution_IDE"
 
-      # --- Build
+      # Build
       - name: Build
         run: cmake --build "${{ env.BUILD_ROOT }}\windows\x86_64\msvc\solution_IDE" --config Release
 
-      # --- Upload artifacts
+      # Upload artifacts
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -63,7 +65,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      # --- Cache vcpkg
+      # Cache vcpkg packages
       - name: Cache vcpkg
         uses: actions/cache@v3
         with:
@@ -72,36 +74,37 @@ jobs:
           restore-keys: |
             vcpkg-linux-
 
-      # --- Install system deps
+      # Install system deps
       - name: Install system packages
         run: sudo apt-get update && sudo apt-get install -y ninja-build build-essential cmake git
 
-      # --- Bootstrap vcpkg
+      # Bootstrap vcpkg
       - name: Clone vcpkg
         run: git clone https://github.com/microsoft/vcpkg.git "${{ env.BUILD_ROOT }}/vcpkg"
 
       - name: Bootstrap vcpkg
         run: "${{ env.BUILD_ROOT }}/vcpkg/bootstrap-vcpkg.sh"
 
-      # --- Install dependencies
+      # Install dependencies
       - name: Install libraries
         run: |
           "${{ env.BUILD_ROOT }}/vcpkg/vcpkg" install boost sdl3 glad
           "${{ env.BUILD_ROOT }}/vcpkg/vcpkg" integrate install
 
-      # --- Configure CMake
+      # Configure CMake
       - name: Configure CMake
-        run: cmake -G "Ninja Multi-Config" \
-              -DCMAKE_TOOLCHAIN_FILE="${{ env.BUILD_ROOT }}/vcpkg/scripts/buildsystems/vcpkg.cmake" \
-              -DCMAKE_DEFAULT_BUILD_TYPE=Release \
-              -S . \
-              -B "${{ env.BUILD_ROOT }}/linux/ninja"
+        run: |
+          cmake -G "Ninja Multi-Config" \
+                -DCMAKE_TOOLCHAIN_FILE="${{ env.BUILD_ROOT }}/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+                -DCMAKE_DEFAULT_BUILD_TYPE=Release \
+                -S . \
+                -B "${{ env.BUILD_ROOT }}/linux/ninja"
 
-      # --- Build
+      # Build
       - name: Build
         run: cmake --build "${{ env.BUILD_ROOT }}/linux/ninja" --config Release
 
-      # --- Upload artifacts
+      # Upload artifacts
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -114,28 +117,28 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      # --- Install system deps
+      # Install system deps
       - name: Install system packages
         run: sudo apt-get update && sudo apt-get install -y ninja-build cmake git python3
 
-      # --- Setup Emscripten
+      # Setup Emscripten
       - name: Setup Emscripten
         uses: emscripten-core/setup-emsdk@v4
         with:
           emsdk-version: latest
 
-      # --- Configure CMake
+      # Configure CMake
       - name: Configure CMake
         run: emcmake cmake -G "Ninja Multi-Config" \
               -DCMAKE_DEFAULT_BUILD_TYPE=Release \
               -S . \
               -B "${{ env.BUILD_ROOT }}/emscripten/ninja"
 
-      # --- Build
+      # Build
       - name: Build
         run: cmake --build "${{ env.BUILD_ROOT }}/emscripten/ninja" --config Release
 
-      # --- Upload artifacts
+      # Upload artifacts
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
