@@ -108,10 +108,10 @@ set(PROJECT_HEADERS
 
 # --- Third-party headers for IDE visibility only
 if(NOT EMSCRIPTEN)
-    set(THIRD_PARTY_HEADERS_GLAD
-        ${GLAD_INCLUDE_DIR}/glad/glad.h
-        ${GLAD_INCLUDE_DIR}/KHR/khrplatform.h
-    )
+set(THIRD_PARTY_HEADERS_GLAD
+	${GLAD_INCLUDE_DIR}/glad/glad.h
+	${GLAD_INCLUDE_DIR}/KHR/khrplatform.h
+)
 endif()
 
 set(THIRD_PARTY_HEADERS_IMGUI

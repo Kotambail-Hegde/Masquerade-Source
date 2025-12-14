@@ -54,7 +54,7 @@ jobs:
           cd external/SDL
           mkdir -p build
           cd build
-          cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PWD/install
+          cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PWD
           cmake --build . --config Release --parallel
           cmake --build . --config Release --target install
         shell: pwsh
@@ -65,7 +65,7 @@ jobs:
           cd external/nativefiledialog-extended
           mkdir -p build
           cd build
-          cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PWD/install
+          cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PWD
           cmake --build . --config Release --parallel
           cmake --build . --config Release --target install
         shell: pwsh
@@ -77,12 +77,10 @@ jobs:
           echo "MINIZ_ROOT=$env:GITHUB_WORKSPACE\external\miniz" >> $env:GITHUB_ENV
           echo "STB_ROOT=$env:GITHUB_WORKSPACE\external\stb" >> $env:GITHUB_ENV
           echo "GLAD_ROOT=$env:GITHUB_WORKSPACE\external\glad" >> $env:GITHUB_ENV
-          echo "GLAD_INCLUDE_DIR=$env:GITHUB_WORKSPACE\external\glad/include" >> $env:GITHUB_ENV
-          echo "GLAD_SRC_DIR=$env:GITHUB_WORKSPACE\external\glad/src" >> $env:GITHUB_ENV
           echo "BOOST_ROOT=$env:GITHUB_WORKSPACE\external\boost" >> $env:GITHUB_ENV
           echo "BOOST_INCLUDEDIR=$env:GITHUB_WORKSPACE\external\boost" >> $env:GITHUB_ENV
-          echo "SDL3_ROOT=$env:GITHUB_WORKSPACE\external\SDL\build\install" >> $env:GITHUB_ENV
-          echo "NFD_ROOT=$env:GITHUB_WORKSPACE\external\nativefiledialog-extended\build\install" >> $env:GITHUB_ENV
+          echo "SDL3_ROOT=$env:GITHUB_WORKSPACE\external\SDL" >> $env:GITHUB_ENV
+          echo "NFD_ROOT=$env:GITHUB_WORKSPACE\external\nativefiledialog-extended" >> $env:GITHUB_ENV
         shell: pwsh
 
       # --- Configure CMake
@@ -94,8 +92,6 @@ jobs:
                 -DMINIZ_ROOT=%MINIZ_ROOT% ^
                 -DSTB_ROOT=%STB_ROOT% ^
                 -DGLAD_ROOT=%GLAD_ROOT% ^
-                -DGLAD_INCLUDE_DIR=%GLAD_INCLUDE_DIR% ^
-                -DGLAD_SRC_DIR=%GLAD_SRC_DIR% ^
                 -DBOOST_ROOT=%BOOST_ROOT% ^
                 -DBOOST_INCLUDEDIR=%BOOST_INCLUDEDIR% ^
                 -DSDL3_ROOT=%SDL3_ROOT% ^
@@ -170,7 +166,7 @@ jobs:
           cd external/SDL
           mkdir -p build
           cd build
-          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PWD/install
+          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PWD
           ninja -j$(nproc)
           ninja install
 
@@ -180,7 +176,7 @@ jobs:
           cd external/nativefiledialog-extended
           mkdir -p build
           cd build
-          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PWD/install
+          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PWD
           ninja -j$(nproc)
           ninja install
 
@@ -191,12 +187,10 @@ jobs:
           echo "MINIZ_ROOT=$GITHUB_WORKSPACE/external/miniz" >> $GITHUB_ENV
           echo "STB_ROOT=$GITHUB_WORKSPACE/external/stb" >> $GITHUB_ENV
           echo "GLAD_ROOT=$GITHUB_WORKSPACE/external/glad" >> $GITHUB_ENV
-          echo "GLAD_INCLUDE_DIR=$GITHUB_WORKSPACE/external/glad/include" >> $GITHUB_ENV
-          echo "GLAD_SRC_DIR=$GITHUB_WORKSPACE/external/glad/src" >> $GITHUB_ENV
           echo "BOOST_ROOT=$GITHUB_WORKSPACE/external/boost" >> $GITHUB_ENV
           echo "BOOST_INCLUDEDIR=$GITHUB_WORKSPACE/external/boost" >> $GITHUB_ENV
-          echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL/build/install" >> $GITHUB_ENV
-          echo "NFD_ROOT=$GITHUB_WORKSPACE/external/nativefiledialog-extended/build/install" >> $GITHUB_ENV
+          echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL" >> $GITHUB_ENV
+          echo "NFD_ROOT=$GITHUB_WORKSPACE/external/nativefiledialog-extended" >> $GITHUB_ENV
 
       # --- Configure CMake
       - name: Configure CMake
@@ -207,12 +201,10 @@ jobs:
                 -DMINIZ_ROOT=$MINIZ_ROOT \
                 -DSTB_ROOT=$STB_ROOT \
                 -DGLAD_ROOT=$GLAD_ROOT \
-                -DGLAD_INCLUDE_DIR=$GLAD_INCLUDE_DIR \
-                -DGLAD_SRC_DIR=$GLAD_SRC_DIR \
                 -DBOOST_ROOT=$BOOST_ROOT \
                 -DBOOST_INCLUDEDIR=$BOOST_INCLUDEDIR \
                 -DSDL3_ROOT=$SDL3_ROOT \
-                -Dnfd_DIR=$NFD_ROOT/lib/cmake/nfd \
+                -Dnfd_DIR=$NFD_ROOT\lib\cmake\nfd \
                 -S . -B build
 
       # --- Build
@@ -272,7 +264,6 @@ jobs:
           echo "MINIZ_ROOT=$GITHUB_WORKSPACE/external/miniz" >> $GITHUB_ENV
           echo "STB_ROOT=$GITHUB_WORKSPACE/external/stb" >> $GITHUB_ENV
           echo "EFB_ROOT=$GITHUB_WORKSPACE/external/emscripten-browser-file" >> $GITHUB_ENV
-          echo "GLAD_ROOT=$GITHUB_WORKSPACE/external/glad" >> $GITHUB_ENV
           echo "BOOST_ROOT=$GITHUB_WORKSPACE/external/boost" >> $GITHUB_ENV
           echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL/build/install" >> $GITHUB_ENV
 
@@ -307,8 +298,8 @@ jobs:
                 -DMINIZ_ROOT=$MINIZ_ROOT \
                 -DSTB_ROOT=$STB_ROOT \
                 -DEFB_ROOT=$EFB_ROOT \
-                -DGLAD_ROOT=$GLAD_ROOT \
                 -DBOOST_ROOT=$BOOST_ROOT \
+                -DBOOST_INCLUDEDIR=$BOOST_INCLUDEDIR \
                 -S . -B build
 
       # --- Build
