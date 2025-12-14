@@ -32,50 +32,20 @@ jobs:
           restore-keys: |
             windows-external-all-v1-
 
-      # --- Clone all dependencies (only if not cached)
+      # --- Clone all dependencies
       - name: Clone all dependencies
         if: steps.cache-external.outputs.cache-hit != 'true'
         run: |
           New-Item -ItemType Directory -Force -Path external
           cd external
           
-          # ImGui docking
-          if (!(Test-Path "imgui")) {
-            git clone https://github.com/ocornut/imgui.git --branch docking --depth 1
-          }
-          
-          # Miniz
-          if (!(Test-Path "miniz")) {
-            git clone https://github.com/richgel999/miniz.git --depth 1
-          }
-          
-          # STB
-          if (!(Test-Path "stb")) {
-            git clone https://github.com/nothings/stb.git --depth 1 stb/stb
-          }
-          
-          # GLAD
-          if (!(Test-Path "glad")) {
-            git clone https://github.com/Dav1dde/glad.git --depth 1
-          }
-          
-          # Boost (header-only)
-          if (!(Test-Path "boost")) {
-            git clone https://github.com/boostorg/boost.git --branch boost-1.84.0 --depth 1
-            cd boost
-            git submodule update --init --depth 1
-            cd ..
-          }
-          
-          # SDL3
-          if (!(Test-Path "SDL")) {
-            git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL
-          }
-          
-          # NFD
-          if (!(Test-Path "nativefiledialog-extended")) {
-            git clone https://github.com/btzy/nativefiledialog-extended.git --depth 1
-          }
+          if (!(Test-Path "imgui")) { git clone https://github.com/ocornut/imgui.git --branch docking --depth 1 }
+          if (!(Test-Path "miniz")) { git clone https://github.com/richgel999/miniz.git --depth 1 }
+          if (!(Test-Path "stb")) { git clone https://github.com/nothings/stb.git --depth 1 stb/stb }
+          if (!(Test-Path "glad")) { git clone https://github.com/Dav1dde/glad.git --depth 1 }
+          if (!(Test-Path "boost")) { git clone https://github.com/boostorg/boost.git --branch boost-1.84.0 --depth 1; cd boost; git submodule update --init --depth 1; cd .. }
+          if (!(Test-Path "SDL")) { git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL }
+          if (!(Test-Path "nativefiledialog-extended")) { git clone https://github.com/btzy/nativefiledialog-extended.git --depth 1 }
         shell: pwsh
 
       # --- Build SDL3
@@ -100,14 +70,15 @@ jobs:
           cmake --build . --config Release --target install
         shell: pwsh
 
-      # --- Set environment variables
+      # --- Set dependency paths
       - name: Set dependency paths
         run: |
           echo "IMGUI_ROOT=$env:GITHUB_WORKSPACE\external\imgui" >> $env:GITHUB_ENV
           echo "MINIZ_ROOT=$env:GITHUB_WORKSPACE\external\miniz" >> $env:GITHUB_ENV
           echo "STB_ROOT=$env:GITHUB_WORKSPACE\external\stb" >> $env:GITHUB_ENV
-          echo "GLAD_ROOT=$env:GITHUB_WORKSPACE\external\glad" >> $env:GITHUB_ENV
+          echo "GLAD_ROOT=$env:GITHUB_WORKSPACE\external\glad\include" >> $env:GITHUB_ENV
           echo "BOOST_ROOT=$env:GITHUB_WORKSPACE\external\boost" >> $env:GITHUB_ENV
+          echo "BOOST_INCLUDEDIR=$GITHUB_WORKSPACE/external/boost" >> $GITHUB_ENV
           echo "SDL3_ROOT=$env:GITHUB_WORKSPACE\external\SDL\build\install" >> $env:GITHUB_ENV
           echo "NFD_ROOT=$env:GITHUB_WORKSPACE\external\nativefiledialog-extended\build\install" >> $env:GITHUB_ENV
         shell: pwsh
@@ -122,6 +93,7 @@ jobs:
                 -DSTB_ROOT=%STB_ROOT% ^
                 -DGLAD_ROOT=%GLAD_ROOT% ^
                 -DBOOST_ROOT=%BOOST_ROOT% ^
+                -DBOOST_INCLUDEDIR=%BOOST_INCLUDEDIR% ^
                 -DSDL3_ROOT=%SDL3_ROOT% ^
                 -Dnfd_DIR=%NFD_ROOT%\lib\cmake\nfd ^
                 -S . -B build
@@ -137,7 +109,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-build
-          path: build/bin/Release/
+          path: build/bin/
 
 
   build_linux:
@@ -182,30 +154,12 @@ jobs:
           mkdir -p external
           cd external
           
-          # ImGui docking
           [ ! -d "imgui" ] && git clone https://github.com/ocornut/imgui.git --branch docking --depth 1
-          
-          # Miniz
           [ ! -d "miniz" ] && git clone https://github.com/richgel999/miniz.git --depth 1
-          
-          # STB
           [ ! -d "stb/stb" ] && git clone --depth 1 https://github.com/nothings/stb.git stb/stb
-          
-          # GLAD
           [ ! -d "glad" ] && git clone https://github.com/Dav1dde/glad.git --depth 1
-          
-          # Boost (header-only)
-          if [ ! -d "boost" ]; then
-            git clone https://github.com/boostorg/boost.git --branch boost-1.84.0 --depth 1
-            cd boost
-            git submodule update --init --depth 1
-            cd ..
-          fi
-          
-          # SDL3
+          if [ ! -d "boost" ]; then git clone https://github.com/boostorg/boost.git --branch boost-1.84.0 --depth 1; cd boost; git submodule update --init --depth 1; cd ..; fi
           [ ! -d "SDL" ] && git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL
-          
-          # NFD
           [ ! -d "nativefiledialog-extended" ] && git clone https://github.com/btzy/nativefiledialog-extended.git --depth 1
 
       # --- Build SDL3
@@ -228,15 +182,16 @@ jobs:
           ninja -j$(nproc)
           ninja install
 
-      # --- Set environment variables
+      # --- Set dependency paths
       - name: Set dependency paths
         run: |
           echo "IMGUI_ROOT=$GITHUB_WORKSPACE/external/imgui" >> $GITHUB_ENV
           echo "MINIZ_ROOT=$GITHUB_WORKSPACE/external/miniz" >> $GITHUB_ENV
           echo "STB_ROOT=$GITHUB_WORKSPACE/external/stb" >> $GITHUB_ENV
-          echo "GLAD_ROOT=$GITHUB_WORKSPACE/external/glad" >> $GITHUB_ENV
+          echo "GLAD_ROOT=$GITHUB_WORKSPACE/external/glad/include" >> $GITHUB_ENV
           echo "BOOST_ROOT=$GITHUB_WORKSPACE/external/boost" >> $GITHUB_ENV
-          echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL/build" >> $GITHUB_ENV
+          echo "BOOST_INCLUDEDIR=$GITHUB_WORKSPACE/external/boost" >> $GITHUB_ENV
+          echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL/build/install" >> $GITHUB_ENV
           echo "NFD_ROOT=$GITHUB_WORKSPACE/external/nativefiledialog-extended/build/install" >> $GITHUB_ENV
 
       # --- Configure CMake
@@ -249,6 +204,7 @@ jobs:
                 -DSTB_ROOT=$STB_ROOT \
                 -DGLAD_ROOT=$GLAD_ROOT \
                 -DBOOST_ROOT=$BOOST_ROOT \
+                -DBOOST_INCLUDEDIR=$BOOST_INCLUDEDIR \
                 -DSDL3_ROOT=$SDL3_ROOT \
                 -Dnfd_DIR=$NFD_ROOT/lib/cmake/nfd \
                 -S . -B build
@@ -263,7 +219,6 @@ jobs:
         with:
           name: linux-build
           path: build/bin/
-
 
   build_emscripten:
     name: Build Emscripten (Web)
@@ -317,6 +272,7 @@ jobs:
           echo "STB_ROOT=$GITHUB_WORKSPACE/external/stb" >> $GITHUB_ENV
           echo "EFB_ROOT=$GITHUB_WORKSPACE/external/emscripten-browser-file" >> $GITHUB_ENV
           echo "BOOST_ROOT=$GITHUB_WORKSPACE/external/boost" >> $GITHUB_ENV
+          echo "BOOST_INCLUDEDIR=$GITHUB_WORKSPACE/external/boost" >> $GITHUB_ENV
 
       # --- Setup Emscripten SDK
       - name: Setup Emscripten
@@ -357,6 +313,7 @@ jobs:
                 -DSTB_ROOT=$STB_ROOT \
                 -DEFB_ROOT=$EFB_ROOT \
                 -DBOOST_ROOT=$BOOST_ROOT \
+                -DBOOST_INCLUDEDIR=$BOOST_INCLUDEDIR \
                 -S . -B build
 
       # --- Build
