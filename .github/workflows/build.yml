@@ -2,53 +2,48 @@ name: Build Masquerade
 
 on:
   push:
-    branches: [ci_cd_support_1]
+    branches: [ci_cd_support_1, main]
   pull_request:
-    branches: [ci_cd_support_1]
+    branches: [ci_cd_support_1, main]
 
 env:
-  BUILD_ROOT: ${{ github.workspace }}/build
+  VCPKG_BINARY_SOURCES: 'clear;x-gha,readwrite'
 
 jobs:
   build_windows:
     name: Build Windows (MSVC + vcpkg)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v3
-
-      # --- Setup vcpkg if missing
-      - name: Clone vcpkg
-        if: not exists('${{ env.BUILD_ROOT }}\\vcpkg')
-        run: git clone https://github.com/microsoft/vcpkg.git ${{ env.BUILD_ROOT }}\vcpkg
-
-      - name: Bootstrap vcpkg
-        run: ${{ env.BUILD_ROOT }}\vcpkg\bootstrap-vcpkg.bat
-        shell: cmd
-
-      # --- Cache vcpkg installed libraries
-      - name: Cache vcpkg
-        uses: actions/cache@v3
+      - uses: actions/checkout@v4
         with:
-          path: ${{ env.BUILD_ROOT }}/vcpkg/installed
-          key: windows-vcpkg-${{ hashFiles('**/vcpkg.json') }}
-          restore-keys: windows-vcpkg-
+          submodules: recursive
 
-      # --- Install dependencies
-      - name: Install libraries
-        run: |
-          ${{ env.BUILD_ROOT }}\vcpkg\vcpkg install boost:x64-windows
-          ${{ env.BUILD_ROOT }}\vcpkg\vcpkg install sdl3:x64-windows
-          ${{ env.BUILD_ROOT }}\vcpkg\vcpkg install glad:x64-windows
-        shell: cmd
+      # --- Export GitHub token for vcpkg binary caching (CRITICAL for speed!)
+      - name: Export GitHub Actions cache environment variables
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      # --- Use vcpkg from tool cache (much faster!)
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: '01f602195983451bc83e72f4214af2cbc495aa94'
 
       # --- Configure CMake
       - name: Configure CMake
-        run: cmake -G "Visual Studio 17 2022" -DCMAKE_TOOLCHAIN_FILE=%BUILD_ROOT%\vcpkg\scripts\buildsystems\vcpkg.cmake -DCMAKE_DEFAULT_BUILD_TYPE=Release -S . -B %BUILD_ROOT%\windows\x86_64\msvc
+        run: |
+          cmake -G "Visual Studio 17 2022" -A x64 ^
+                -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake ^
+                -DCMAKE_BUILD_TYPE=Release ^
+                -S . -B build
         shell: cmd
 
-      # --- Build
+      # --- Build with parallel compilation
       - name: Build
-        run: cmake --build %BUILD_ROOT%\windows\x86_64\msvc --config Release
+        run: cmake --build build --config Release --parallel
         shell: cmd
 
       # --- Upload artifacts
@@ -56,118 +51,160 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-build
-          path: ${{ env.BUILD_ROOT }}/windows/x86_64/msvc/Release
+          path: build/bin/Release/
 
 
   build_linux:
     name: Build Linux (Ninja + vcpkg)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       # --- Install system dependencies
       - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y ninja-build build-essential cmake git wget curl
-
-      # --- Setup vcpkg
-      - name: Clone vcpkg
-        if: not exists('${{ env.BUILD_ROOT }}/vcpkg')
-        run: git clone https://github.com/microsoft/vcpkg.git ${{ env.BUILD_ROOT }}/vcpkg
-
-      - name: Bootstrap vcpkg
-        run: ${{ env.BUILD_ROOT }}/vcpkg/bootstrap-vcpkg.sh
-        shell: bash
-
-      # --- Cache vcpkg installed libraries
-      - name: Cache vcpkg
-        uses: actions/cache@v3
-        with:
-          path: ${{ env.BUILD_ROOT }}/vcpkg/installed
-          key: linux-vcpkg-${{ hashFiles('**/vcpkg.json') }}
-          restore-keys: linux-vcpkg-
-
-      # --- Install dependencies
-      - name: Install libraries
         run: |
-          ${{ env.BUILD_ROOT }}/vcpkg/vcpkg install boost
-          ${{ env.BUILD_ROOT }}/vcpkg/vcpkg install sdl3
-          ${{ env.BUILD_ROOT }}/vcpkg/vcpkg install glad
-        shell: bash
+          sudo apt-get update
+          sudo apt-get install -y ninja-build build-essential cmake git \
+                                  libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev \
+                                  libxi-dev libgl1-mesa-dev libglu1-mesa-dev \
+                                  libgtk-3-dev
+
+      # --- Export GitHub token for vcpkg binary caching
+      - name: Export GitHub Actions cache environment variables
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      # --- Use vcpkg from tool cache
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: '01f602195983451bc83e72f4214af2cbc495aa94'
 
       # --- Configure CMake
       - name: Configure CMake
-        run: cmake -G "Ninja Multi-Config" \
-              -DCMAKE_TOOLCHAIN_FILE=${{ env.BUILD_ROOT }}/vcpkg/scripts/buildsystems/vcpkg.cmake \
-              -DCMAKE_DEFAULT_BUILD_TYPE=Release \
-              -S . -B ${{ env.BUILD_ROOT }}/linux/ninja
-        shell: bash
+        run: |
+          cmake -G "Ninja Multi-Config" \
+                -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
+                -DCMAKE_BUILD_TYPE=Release \
+                -S . -B build
 
-      # --- Build
+      # --- Build with parallel compilation
       - name: Build
-        run: cmake --build ${{ env.BUILD_ROOT }}/linux/ninja --config Release
-        shell: bash
+        run: cmake --build build --config Release --parallel $(nproc)
 
       # --- Upload artifacts
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: linux-build
-          path: ${{ env.BUILD_ROOT }}/linux/ninja
+          path: build/bin/
 
 
   build_emscripten:
-    name: Build Emscripten (Ninja + vcpkg)
+    name: Build Emscripten (Web)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
-      # --- Setup Emscripten SDK
+      # --- Setup Emscripten SDK with caching
       - name: Setup Emscripten
-        uses: emscripten-core/setup-emsdk@v4
+        uses: mymindstorm/setup-emsdk@v14
         with:
-          emsdk-version: latest
+          version: '3.1.56'
+          actions-cache-folder: 'emsdk-cache'
 
-      # --- Setup vcpkg
-      - name: Clone vcpkg
-        if: not exists('${{ env.BUILD_ROOT }}/vcpkg')
-        run: git clone https://github.com/microsoft/vcpkg.git ${{ env.BUILD_ROOT }}/vcpkg
+      # --- Install ninja
+      - name: Install Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
 
-      - name: Bootstrap vcpkg
-        run: ${{ env.BUILD_ROOT }}/vcpkg/bootstrap-vcpkg.sh
-        shell: bash
-
-      # --- Cache vcpkg installed libraries
-      - name: Cache vcpkg
-        uses: actions/cache@v3
+      # --- Cache SDL3 build (saves ~5-7 minutes!)
+      - name: Cache SDL3
+        id: cache-sdl3
+        uses: actions/cache@v4
         with:
-          path: ${{ env.BUILD_ROOT }}/vcpkg/installed
-          key: emscripten-vcpkg-${{ hashFiles('**/vcpkg.json') }}
-          restore-keys: emscripten-vcpkg-
+          path: SDL/build/install
+          key: emscripten-sdl3-v3-${{ runner.os }}-3.1.56
+          restore-keys: |
+            emscripten-sdl3-v3-${{ runner.os }}-
 
-      # --- Install dependencies
-      - name: Install libraries
+      # --- Build SDL3 only if not cached
+      - name: Build SDL3 for Emscripten
+        if: steps.cache-sdl3.outputs.cache-hit != 'true'
         run: |
-          ${{ env.BUILD_ROOT }}/vcpkg/vcpkg install boost:emscripten
-          ${{ env.BUILD_ROOT }}/vcpkg/vcpkg install sdl3:emscripten
-          ${{ env.BUILD_ROOT }}/vcpkg/vcpkg install glad:emscripten
+          echo "Building SDL3 from source..."
+          git clone https://github.com/libsdl-org/SDL.git --branch SDL3 --depth 1
+          cd SDL
+          mkdir -p build
+          cd build
+          emcmake cmake .. -G Ninja \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_INSTALL_PREFIX=$PWD/install \
+                -DSDL_SHARED=OFF \
+                -DSDL_STATIC=ON \
+                -DSDL_TEST=OFF \
+                -DSDL_TESTS=OFF
+          ninja -j$(nproc)
+          ninja install
+          echo "SDL3 build complete!"
         shell: bash
 
-      # --- Configure CMake
+      # --- Set SDL3 path
+      - name: Set SDL3 environment
+        run: echo "SDL3_ROOT=$PWD/SDL/build/install" >> $GITHUB_ENV
+
+      # --- Configure CMake for Emscripten
       - name: Configure CMake
-        run: emcmake cmake -G "Ninja Multi-Config" \
-              -DCMAKE_TOOLCHAIN_FILE=${{ env.BUILD_ROOT }}/vcpkg/scripts/buildsystems/vcpkg.cmake \
-              -DCMAKE_DEFAULT_BUILD_TYPE=Release \
-              -S . -B ${{ env.BUILD_ROOT }}/emscripten/ninja
-        shell: bash
+        run: |
+          emcmake cmake -G Ninja \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DSDL3_ROOT=${{ env.SDL3_ROOT }} \
+                -S . -B build
 
-      # --- Build
+      # --- Build with parallel compilation
       - name: Build
-        run: cmake --build ${{ env.BUILD_ROOT }}/emscripten/ninja --config Release
-        shell: bash
+        run: cmake --build build --config Release --parallel $(nproc)
+
+      # --- Prepare GitHub Pages deployment
+      - name: Prepare Pages Deployment
+        run: |
+          mkdir -p pages
+          # Copy main HTML/JS/WASM files
+          if [ -f build/bin/masquerade.html ]; then
+            cp build/bin/masquerade.html pages/index.html
+          fi
+          if [ -f build/bin/masquerade.js ]; then
+            cp build/bin/masquerade.js pages/
+          fi
+          if [ -f build/bin/masquerade.wasm ]; then
+            cp build/bin/masquerade.wasm pages/
+          fi
+          # Copy data file if it exists
+          if [ -f build/bin/masquerade.data ]; then
+            cp build/bin/masquerade.data pages/
+          fi
+          # List what we're deploying
+          echo "Files to deploy:"
+          ls -lh pages/
 
       # --- Upload artifacts
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: emscripten-build
-          path: ${{ env.BUILD_ROOT }}/emscripten/ninja
+          path: pages/
+
+      # --- Deploy to GitHub Pages (only on push to specified branches)
+      - name: Deploy to GitHub Pages
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/ci_cd_support_1' || github.ref == 'refs/heads/main')
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./pages
+          force_orphan: true
