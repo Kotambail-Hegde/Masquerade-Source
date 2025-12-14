@@ -58,7 +58,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # --- Dependencies
 if(NOT EMSCRIPTEN)
-    find_package(Boost REQUIRED)
+    #find_package(Boost REQUIRED)
     find_package(nfd REQUIRED)
     find_package(SDL3 REQUIRED)
 endif()
