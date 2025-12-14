@@ -95,7 +95,7 @@ jobs:
                 -DBOOST_ROOT=%BOOST_ROOT% ^
                 -DBOOST_INCLUDEDIR=%BOOST_INCLUDEDIR% ^
                 -DSDL3_ROOT=%SDL3_ROOT% ^
-                -Dnfd_DIR=%NFD_ROOT%\lib\cmake\nfd ^
+                -DNFD_ROOT=%NFD_ROOT% ^
                 -S . -B build
         shell: cmd
 
@@ -204,7 +204,7 @@ jobs:
                 -DBOOST_ROOT=$BOOST_ROOT \
                 -DBOOST_INCLUDEDIR=$BOOST_INCLUDEDIR \
                 -DSDL3_ROOT=$SDL3_ROOT \
-                -Dnfd_DIR=$NFD_ROOT\lib\cmake\nfd \
+                -DNFD_ROOT=$NFD_ROOT \
                 -S . -B build
 
       # --- Build
@@ -265,6 +265,7 @@ jobs:
           echo "STB_ROOT=$GITHUB_WORKSPACE/external/stb" >> $GITHUB_ENV
           echo "EFB_ROOT=$GITHUB_WORKSPACE/external/emscripten-browser-file" >> $GITHUB_ENV
           echo "BOOST_ROOT=$GITHUB_WORKSPACE/external/boost" >> $GITHUB_ENV
+          echo "BOOST_INCLUDEDIR=$GITHUB_WORKSPACE/external/boost" >> $GITHUB_ENV
           echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL/build/install" >> $GITHUB_ENV
 
       # --- Setup Emscripten SDK
