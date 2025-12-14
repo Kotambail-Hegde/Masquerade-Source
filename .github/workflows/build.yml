@@ -51,7 +51,7 @@ jobs:
           
           # STB
           if (!(Test-Path "stb")) {
-            git clone https://github.com/nothings/stb.git --depth 1
+            git clone https://github.com/nothings/stb.git --depth 1 stb/stb
           }
           
           # GLAD
@@ -84,7 +84,7 @@ jobs:
           cd external/SDL
           mkdir -p build
           cd build
-          cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release
+          cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PWD/install
           cmake --build . --config Release --parallel
           cmake --build . --config Release --target install
         shell: pwsh
@@ -95,7 +95,7 @@ jobs:
           cd external/nativefiledialog-extended
           mkdir -p build
           cd build
-          cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release
+          cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PWD/install
           cmake --build . --config Release --parallel
           cmake --build . --config Release --target install
         shell: pwsh
@@ -189,7 +189,7 @@ jobs:
           [ ! -d "miniz" ] && git clone https://github.com/richgel999/miniz.git --depth 1
           
           # STB
-          [ ! -d "stb" ] && git clone https://github.com/nothings/stb.git --depth 1
+          [ ! -d "stb/stb" ] && git clone --depth 1 https://github.com/nothings/stb.git stb/stb
           
           # GLAD
           [ ! -d "glad" ] && git clone https://github.com/Dav1dde/glad.git --depth 1
@@ -214,7 +214,7 @@ jobs:
           cd external/SDL
           mkdir -p build
           cd build
-          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PWD/install
           ninja -j$(nproc)
           ninja install
 
@@ -224,7 +224,7 @@ jobs:
           cd external/nativefiledialog-extended
           mkdir -p build
           cd build
-          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PWD/install
           ninja -j$(nproc)
           ninja install
 
@@ -297,7 +297,7 @@ jobs:
           
           [ ! -d "imgui" ] && git clone https://github.com/ocornut/imgui.git --branch docking --depth 1
           [ ! -d "miniz" ] && git clone https://github.com/richgel999/miniz.git --depth 1
-          [ ! -d "stb" ] && git clone https://github.com/nothings/stb.git --depth 1
+          [ ! -d "stb/stb" ] && git clone --depth 1 https://github.com/nothings/stb.git stb/stb
           [ ! -d "SDL" ] && git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL
           [ ! -d "emscripten-browser-file" ] && git clone https://github.com/Armchair-Software/emscripten-browser-file.git --depth 1
 
