@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [ci_cd_support_1, main]
 
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
 jobs:
   build_windows:
     name: Build Windows (MSVC)
@@ -41,30 +46,28 @@ jobs:
           if (!(Test-Path "imgui")) { git clone https://github.com/ocornut/imgui.git --branch docking --depth 1 }
           if (!(Test-Path "miniz")) {
               Write-Host "=== MINIZ: not found, downloading ==="
-
               $url = "https://github.com/richgel999/miniz/releases/download/3.0.2/miniz-3.0.2.zip"
               $zip = "miniz-3.0.2.zip"
               $tmpDir = "_miniz_extract"
-
+              
               Write-Host "Downloading: $url"
               Invoke-WebRequest -Uri $url -OutFile $zip
-
+              
               Write-Host "Extracting $zip into ${tmpDir}/"
               Expand-Archive $zip -DestinationPath $tmpDir -Force
-
+              
               Write-Host "Contents of ${tmpDir}:"
               Get-ChildItem $tmpDir | Format-Table Name, Mode
-
-              Write-Host "Moving ${tmpDir}/miniz-3.0.2 -> miniz"
-              Move-Item -Path "${tmpDir}/miniz-3.0.2" -Destination "miniz" -Force
-
+              
+              Write-Host "Moving ${tmpDir} -> miniz"
+              Move-Item -Path $tmpDir -Destination "miniz" -Force
+              
               Write-Host "Contents of external/ after move:"
               Get-ChildItem . | Format-Table Name, Mode
-
+              
               Write-Host "Cleaning up"
               Remove-Item -Path $zip -Force
-              Remove-Item -Path $tmpDir -Recurse -Force
-
+              
               Write-Host "=== MINIZ setup complete ==="
           } else {
               Write-Host "=== MINIZ already exists, skipping ==="
