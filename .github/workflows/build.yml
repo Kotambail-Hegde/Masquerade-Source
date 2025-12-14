@@ -22,35 +22,36 @@ jobs:
         with:
           path: ${{ env.BUILD_ROOT }}\vcpkg\packages
           key: vcpkg-windows-${{ hashFiles('vcpkg.json') }}
-          restore-keys: |
-            vcpkg-windows-
+          restore-keys: vcpkg-windows-
 
       # Bootstrap vcpkg
-      - name: Clone vcpkg
-        run: git clone https://github.com/microsoft/vcpkg.git "${{ env.BUILD_ROOT }}\vcpkg"
-
-      - name: Bootstrap vcpkg
+      - name: Clone and bootstrap vcpkg
+        shell: powershell
         run: |
-          & "${{ env.BUILD_ROOT }}\vcpkg\bootstrap-vcpkg.bat"
+          git clone https://github.com/microsoft/vcpkg.git "${env:BUILD_ROOT}\vcpkg"
+          & "${env:BUILD_ROOT}\vcpkg\bootstrap-vcpkg.bat"
 
       # Install dependencies
       - name: Install libraries
+        shell: powershell
         run: |
-          & "${{ env.BUILD_ROOT }}\vcpkg\vcpkg.exe" install boost:x64-windows sdl3:x64-windows glad:x64-windows
-          & "${{ env.BUILD_ROOT }}\vcpkg\vcpkg.exe" integrate install
+          & "${env:BUILD_ROOT}\vcpkg\vcpkg.exe" install boost:x64-windows sdl3:x64-windows glad:x64-windows
+          & "${env:BUILD_ROOT}\vcpkg\vcpkg.exe" integrate install
 
       # Configure CMake
       - name: Configure CMake
+        shell: powershell
         run: |
           cmake -G "Visual Studio 17 2022" `
-                -DCMAKE_TOOLCHAIN_FILE="${{ env.BUILD_ROOT }}\vcpkg\scripts\buildsystems\vcpkg.cmake" `
-                -DCMAKE_DEFAULT_BUILD_TYPE=Release `
-                -S . `
-                -B "${{ env.BUILD_ROOT }}\windows\x86_64\msvc\solution_IDE"
+            -DCMAKE_TOOLCHAIN_FILE="${env:BUILD_ROOT}\vcpkg\scripts\buildsystems\vcpkg.cmake" `
+            -DCMAKE_DEFAULT_BUILD_TYPE=Release `
+            -S . `
+            -B "${env:BUILD_ROOT}\windows\x86_64\msvc\solution_IDE"
 
       # Build
       - name: Build
-        run: cmake --build "${{ env.BUILD_ROOT }}\windows\x86_64\msvc\solution_IDE" --config Release
+        shell: powershell
+        run: cmake --build "${env:BUILD_ROOT}\windows\x86_64\msvc\solution_IDE" --config Release
 
       # Upload artifacts
       - name: Upload Artifacts
@@ -71,19 +72,17 @@ jobs:
         with:
           path: ${{ env.BUILD_ROOT }}/vcpkg/packages
           key: vcpkg-linux-${{ hashFiles('vcpkg.json') }}
-          restore-keys: |
-            vcpkg-linux-
+          restore-keys: vcpkg-linux-
 
       # Install system deps
       - name: Install system packages
         run: sudo apt-get update && sudo apt-get install -y ninja-build build-essential cmake git
 
       # Bootstrap vcpkg
-      - name: Clone vcpkg
-        run: git clone https://github.com/microsoft/vcpkg.git "${{ env.BUILD_ROOT }}/vcpkg"
-
-      - name: Bootstrap vcpkg
-        run: "${{ env.BUILD_ROOT }}/vcpkg/bootstrap-vcpkg.sh"
+      - name: Clone and bootstrap vcpkg
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git "${{ env.BUILD_ROOT }}/vcpkg"
+          "${{ env.BUILD_ROOT }}/vcpkg/bootstrap-vcpkg.sh"
 
       # Install dependencies
       - name: Install libraries
@@ -95,10 +94,10 @@ jobs:
       - name: Configure CMake
         run: |
           cmake -G "Ninja Multi-Config" \
-                -DCMAKE_TOOLCHAIN_FILE="${{ env.BUILD_ROOT }}/vcpkg/scripts/buildsystems/vcpkg.cmake" \
-                -DCMAKE_DEFAULT_BUILD_TYPE=Release \
-                -S . \
-                -B "${{ env.BUILD_ROOT }}/linux/ninja"
+            -DCMAKE_TOOLCHAIN_FILE="${{ env.BUILD_ROOT }}/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+            -DCMAKE_DEFAULT_BUILD_TYPE=Release \
+            -S . \
+            -B "${{ env.BUILD_ROOT }}/linux/ninja"
 
       # Build
       - name: Build
