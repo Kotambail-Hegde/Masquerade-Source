@@ -32,6 +32,20 @@ elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux" AND NOT IS_GITHUB_ACTIONS)
     include(${CMAKE_SOURCE_DIR}/Paths_lin.cmake)
 elseif(IS_GITHUB_ACTIONS)
     message(STATUS "CI build – skipping local Paths_*.cmake")
+    # Boost
+    set(BOOST_INCLUDE_DIR "${BOOST_ROOT}")
+    set(BOOST_LIBRARYDIR "${BOOST_ROOT}/stage/lib")
+    set(BOOST_BUILD_DIR "${BOOST_ROOT}/build")
+    # SDL3
+    set(SDL3_CMAKE_PATH "${SDL3_ROOT}/cmake")
+    set(SDL3_LIB_PATH "${SDL3_ROOT}/lib/libSDL3.a") # For Emscripten
+    set(SDL3_INCLUDE_DIR "${SDL3_ROOT}/include")
+    set(CMAKE_PREFIX_PATH "${SDL3_CMAKE_PATH}")
+    # Nativefiledialog-extended
+    set(NFD_CMAKE_PATH "${NFD_ROOT}/build/lib/cmake/nfd")
+    set(NFD_INCLUDE_DIR "${NFD_ROOT}")
+    set(NFD_SRC_INCLUDE_DIR "${NFD_ROOT}/src/include")
+    set(CMAKE_PREFIX_PATH "${NFD_CMAKE_PATH}")
 else()
     message(STATUS "Unsupported OS: ${CMAKE_HOST_SYSTEM_NAME}")
 endif()
