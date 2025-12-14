@@ -48,7 +48,6 @@ jobs:
           if (!(Test-Path "nativefiledialog-extended")) { git clone https://github.com/btzy/nativefiledialog-extended.git --depth 1 }
         shell: pwsh
 
-
       # --- Build Boost
       - name: Build Boost
         if: runner.os == 'Windows'
@@ -56,10 +55,15 @@ jobs:
         run: |
           cd external/boost
 
-          # Bootstrap Boost (MSVC)
+          # Remove CI-injected job variables that break b2
+          Remove-Item Env:B2_JOBS -ErrorAction SilentlyContinue
+          Remove-Item Env:BOOST_BUILD_JOBS -ErrorAction SilentlyContinue
+          Remove-Item Env:MAKEFLAGS -ErrorAction SilentlyContinue
+
+          if (Test-Path project-config.jam) { Remove-Item project-config.jam }
+
           .\bootstrap.bat
 
-          # Build + install (static + shared)
           .\b2.exe install `
             variant=release `
             link=static,shared `
@@ -316,23 +320,17 @@ jobs:
 
       # --- Build Boost (Emscripten)
       - name: Build Boost (Emscripten)
-        if: runner.os == 'Linux'
         shell: bash
         run: |
           cd external/boost
-
+          rm -f project-config.jam
           chmod +x bootstrap.sh
-
-          # Bootstrap Boost for Emscripten
           CC=emcc CXX=em++ ./bootstrap.sh --prefix="$PWD"
-
-          # Build ONLY static libs for wasm
           ./b2 install \
             toolset=emscripten \
             variant=release \
             link=static \
             threading=single \
-            target-os=none \
             -j$(nproc)
 
       # --- Build SDL3
