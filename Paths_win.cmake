@@ -12,9 +12,6 @@ set(SDL3_ROOT "C:/SDL3")
 # Python
 set(PYTHON_ROOT "C:/Users/saura/AppData/Local/Programs/Python/Python312")
 
-# Glad
-set(GLAD_ROOT "C:/Data/Softwares/Glad/OpenGL3")
-
 # ImGui
 set(IMGUI_ROOT "C:/Data/Softwares/ImGui/Docking/imgui")
 

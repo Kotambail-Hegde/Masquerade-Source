@@ -24,7 +24,6 @@ jobs:
             external/imgui
             external/miniz
             external/stb
-            external/glad
             external/boost
             external/SDL
             external/nativefiledialog-extended
@@ -42,7 +41,6 @@ jobs:
           if (!(Test-Path "imgui")) { git clone https://github.com/ocornut/imgui.git --branch docking --depth 1 }
           if (!(Test-Path "miniz")) { git clone https://github.com/richgel999/miniz.git --depth 1 }
           if (!(Test-Path "stb")) { git clone https://github.com/nothings/stb.git --depth 1 stb/stb }
-          if (!(Test-Path "glad")) { git clone https://github.com/Dav1dde/glad.git --depth 1 }
           if (!(Test-Path "boost")) { git clone https://github.com/boostorg/boost.git --branch boost-1.84.0 --depth 1; cd boost; git submodule update --init --depth 1; cd .. }
           if (!(Test-Path "SDL")) { git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL }
           if (!(Test-Path "nativefiledialog-extended")) { git clone https://github.com/btzy/nativefiledialog-extended.git --depth 1 }
@@ -55,7 +53,7 @@ jobs:
         run: |
           cd external/boost
 
-          # Remove CI-injected job variables that break b2
+          # Clean environment that confuses b2
           Remove-Item Env:B2_JOBS -ErrorAction SilentlyContinue
           Remove-Item Env:BOOST_BUILD_JOBS -ErrorAction SilentlyContinue
           Remove-Item Env:MAKEFLAGS -ErrorAction SilentlyContinue
@@ -70,7 +68,7 @@ jobs:
             threading=multi `
             runtime-link=shared `
             --prefix="$($PWD.Path)" `
-            -j$env:NUMBER_OF_PROCESSORS
+            --jobs=$env:NUMBER_OF_PROCESSORS
 
       # --- Build SDL3
       - name: Build SDL3
@@ -100,7 +98,6 @@ jobs:
           echo "IMGUI_ROOT=$env:GITHUB_WORKSPACE\external\imgui" >> $env:GITHUB_ENV
           echo "MINIZ_ROOT=$env:GITHUB_WORKSPACE\external\miniz" >> $env:GITHUB_ENV
           echo "STB_ROOT=$env:GITHUB_WORKSPACE\external\stb" >> $env:GITHUB_ENV
-          echo "GLAD_ROOT=$env:GITHUB_WORKSPACE\external\glad" >> $env:GITHUB_ENV
           echo "BOOST_ROOT=$env:GITHUB_WORKSPACE\external\boost" >> $env:GITHUB_ENV
           echo "SDL3_ROOT=$env:GITHUB_WORKSPACE\external\SDL\build" >> $env:GITHUB_ENV
           echo "NFD_ROOT=$env:GITHUB_WORKSPACE\external\nativefiledialog-extended" >> $env:GITHUB_ENV
@@ -114,7 +111,6 @@ jobs:
                 -DIMGUI_ROOT=%IMGUI_ROOT% ^
                 -DMINIZ_ROOT=%MINIZ_ROOT% ^
                 -DSTB_ROOT=%STB_ROOT% ^
-                -DGLAD_ROOT=%GLAD_ROOT% ^
                 -DBOOST_ROOT=%BOOST_ROOT% ^
                 -DSDL3_ROOT=%SDL3_ROOT% ^
                 -DNFD_ROOT=%NFD_ROOT% ^
@@ -160,7 +156,6 @@ jobs:
             external/imgui
             external/miniz
             external/stb
-            external/glad
             external/boost
             external/SDL
             external/nativefiledialog-extended
@@ -177,7 +172,6 @@ jobs:
           [ ! -d "imgui" ] && git clone https://github.com/ocornut/imgui.git --branch docking --depth 1
           [ ! -d "miniz" ] && git clone https://github.com/richgel999/miniz.git --depth 1
           [ ! -d "stb/stb" ] && git clone --depth 1 https://github.com/nothings/stb.git stb/stb
-          [ ! -d "glad" ] && git clone https://github.com/Dav1dde/glad.git --depth 1
           if [ ! -d "boost" ]; then git clone https://github.com/boostorg/boost.git --branch boost-1.84.0 --depth 1; cd boost; git submodule update --init --depth 1; cd ..; fi
           [ ! -d "SDL" ] && git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL
           [ ! -d "nativefiledialog-extended" ] && git clone https://github.com/btzy/nativefiledialog-extended.git --depth 1
@@ -228,7 +222,6 @@ jobs:
           echo "IMGUI_ROOT=$GITHUB_WORKSPACE/external/imgui" >> $GITHUB_ENV
           echo "MINIZ_ROOT=$GITHUB_WORKSPACE/external/miniz" >> $GITHUB_ENV
           echo "STB_ROOT=$GITHUB_WORKSPACE/external/stb" >> $GITHUB_ENV
-          echo "GLAD_ROOT=$GITHUB_WORKSPACE/external/glad" >> $GITHUB_ENV
           echo "BOOST_ROOT=$GITHUB_WORKSPACE/external/boost" >> $GITHUB_ENV
           echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL/build" >> $GITHUB_ENV
           echo "NFD_ROOT=$GITHUB_WORKSPACE/external/nativefiledialog-extended" >> $GITHUB_ENV
@@ -241,7 +234,6 @@ jobs:
                 -DIMGUI_ROOT=$IMGUI_ROOT \
                 -DMINIZ_ROOT=$MINIZ_ROOT \
                 -DSTB_ROOT=$STB_ROOT \
-                -DGLAD_ROOT=$GLAD_ROOT \
                 -DBOOST_ROOT=$BOOST_ROOT \
                 -DSDL3_ROOT=$SDL3_ROOT \
                 -DNFD_ROOT=$NFD_ROOT \
@@ -278,7 +270,6 @@ jobs:
             external/SDL
             external/emscripten-browser-file
             external/boost
-            external/glad
           key: emscripten-external-all-v1-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: |
             emscripten-external-all-v1-
@@ -295,7 +286,6 @@ jobs:
           [ ! -d "stb/stb" ] && git clone --depth 1 https://github.com/nothings/stb.git stb/stb
           [ ! -d "SDL" ] && git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL
           [ ! -d "emscripten-browser-file" ] && git clone https://github.com/Armchair-Software/emscripten-browser-file.git --depth 1
-          [ ! -d "glad" ] && git clone https://github.com/Dav1dde/glad.git --depth 1
 
       # --- Set environment variables
       - name: Set dependency paths
@@ -323,14 +313,19 @@ jobs:
         shell: bash
         run: |
           cd external/boost
+
           rm -f project-config.jam
           chmod +x bootstrap.sh
-          CC=emcc CXX=em++ ./bootstrap.sh --prefix="$PWD"
+
+          CC=emcc CXX=em++ ./bootstrap.sh --prefix="$PWD/install"
+
           ./b2 install \
             toolset=emscripten \
             variant=release \
             link=static \
             threading=single \
+            define=BOOST_FILESYSTEM_SINGLE_THREADED \
+            --without-mpi \
             -j$(nproc)
 
       # --- Build SDL3

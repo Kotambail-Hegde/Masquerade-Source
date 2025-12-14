@@ -62,9 +62,6 @@ elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux" AND IS_GITHUB_ACTIONS)
 else()
     message(STATUS "Unsupported OS: ${CMAKE_HOST_SYSTEM_NAME}")
 endif()
-# Glad
-set(GLAD_INCLUDE_DIR "${GLAD_ROOT}/include")
-set(GLAD_SRC_DIR "${GLAD_ROOT}/src")
 # ImGui
 set(IMGUI_DIR "${IMGUI_ROOT}")
 set(IMGUI_BACKENDS_DIR "${IMGUI_ROOT}/backends")
@@ -133,8 +130,8 @@ set(PROJECT_HEADERS
 # --- Third-party headers for IDE visibility only
 if(NOT EMSCRIPTEN)
 set(THIRD_PARTY_HEADERS_GLAD
-	${GLAD_INCLUDE_DIR}/glad/glad.h
-	${GLAD_INCLUDE_DIR}/KHR/khrplatform.h
+	ui/glad/glad.h
+	ui/KHR/khrplatform.h
 )
 endif()
 
@@ -248,7 +245,7 @@ if (NOT EMSCRIPTEN)
     # Don't include GLAD for ARM/OpenGL ES builds
     if(NOT (CMAKE_SYSTEM_PROCESSOR MATCHES "arm" OR CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64"))
         set(GLAD_SOURCES
-            ${GLAD_SRC_DIR}/glad.c
+            ui/glad.c
         )
     endif()
 endif()
@@ -377,13 +374,6 @@ target_include_directories(${PROJECT_NAME} PUBLIC
     "${SDL3_INCLUDE_DIR}"
     "${MINIZ_DIR}"
 )
-
-# Only include GLAD for non-ARM, non-Emscripten builds
-if(NOT EMSCRIPTEN AND NOT (CMAKE_SYSTEM_PROCESSOR MATCHES "arm" OR CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64"))
-    target_include_directories(${PROJECT_NAME} PUBLIC
-        "${GLAD_INCLUDE_DIR}"
-    )
-endif()
 
 # --- Platform-specific include directories
 if(EMSCRIPTEN)
