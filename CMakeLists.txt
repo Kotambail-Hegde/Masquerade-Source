@@ -16,7 +16,7 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows" AND NOT IS_GITHUB_ACTIONS)
     # Boost
     set(BOOST_INCLUDE_DIR "${BOOST_ROOT}")
     # SDL3
-    set(SDL3_CMAKE_PATH "${SDL3_ROOT}/cmake")
+    set(SDL3_CMAKE_PATH "${SDL3_ROOT}/lib/cmake/SDL3")
     set(SDL3_LIB_PATH "${SDL3_ROOT}/lib/libSDL3.a") # For Emscripten
     set(SDL3_INCLUDE_DIR "${SDL3_ROOT}/include")
     set(CMAKE_PREFIX_PATH "${SDL3_CMAKE_PATH}")
@@ -33,7 +33,7 @@ elseif(IS_GITHUB_ACTIONS)
     # Boost
     set(BOOST_INCLUDE_DIR "${BOOST_ROOT}")
     # SDL3
-    set(SDL3_CMAKE_PATH "${SDL3_ROOT}/cmake")
+    set(SDL3_CMAKE_PATH "${SDL3_ROOT}/lib/cmake/SDL3")
     set(SDL3_LIB_PATH "${SDL3_ROOT}/lib/libSDL3.a") # For Emscripten
     set(SDL3_INCLUDE_DIR "${SDL3_ROOT}/include")
     set(CMAKE_PREFIX_PATH "${SDL3_CMAKE_PATH}")
