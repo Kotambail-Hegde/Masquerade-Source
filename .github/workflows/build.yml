@@ -28,9 +28,9 @@ jobs:
             external/miniz
             external/stb
             external/glad
-          key: windows-external-deps-v1-${{ hashFiles('.github/workflows/*.yml') }}
+          key: windows-external-deps-v2-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: |
-            windows-external-deps-v1-
+            windows-external-deps-v2-
 
       # --- Clone ImGui docking branch (only if not cached)
       - name: Clone ImGui (docking branch)
@@ -141,9 +141,9 @@ jobs:
             external/miniz
             external/stb
             external/glad
-          key: linux-external-deps-v1-${{ hashFiles('.github/workflows/*.yml') }}
+          key: linux-external-deps-v2-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: |
-            linux-external-deps-v1-
+            linux-external-deps-v2-
 
       # --- Clone ImGui docking branch (only if not cached)
       - name: Clone ImGui (docking branch)
@@ -240,9 +240,9 @@ jobs:
             external/miniz
             external/stb
             external/emscripten-browser-file
-          key: emscripten-external-deps-v1-${{ hashFiles('.github/workflows/*.yml') }}
+          key: emscripten-external-deps-v2-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: |
-            emscripten-external-deps-v1-
+            emscripten-external-deps-v2-
 
       # --- Clone ImGui docking branch (only if not cached)
       - name: Clone ImGui (docking branch)
