@@ -69,7 +69,7 @@ jobs:
           
           # SDL3
           if (!(Test-Path "SDL")) {
-            git clone https://github.com/libsdl-org/SDL.git --branch SDL3 --depth 1
+            git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL
           }
           
           # NFD
@@ -200,7 +200,7 @@ jobs:
           fi
           
           # SDL3
-          [ ! -d "SDL" ] && git clone https://github.com/libsdl-org/SDL.git --branch SDL3 --depth 1
+          [ ! -d "SDL" ] && git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL
           
           # NFD
           [ ! -d "nativefiledialog-extended" ] && git clone https://github.com/btzy/nativefiledialog-extended.git --depth 1
@@ -293,7 +293,7 @@ jobs:
           [ ! -d "imgui" ] && git clone https://github.com/ocornut/imgui.git --branch docking --depth 1
           [ ! -d "miniz" ] && git clone https://github.com/richgel999/miniz.git --depth 1
           [ ! -d "stb" ] && git clone https://github.com/nothings/stb.git --depth 1
-          [ ! -d "SDL" ] && git clone https://github.com/libsdl-org/SDL.git --branch SDL3 --depth 1
+          [ ! -d "SDL" ] && git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL
           [ ! -d "emscripten-browser-file" ] && git clone https://github.com/Armchair-Software/emscripten-browser-file.git --depth 1
 
       # --- Set environment variables
