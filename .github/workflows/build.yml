@@ -15,8 +15,11 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Setup MSVC environment
-        uses: microsoft/setup-msvc@v1
+      # Setup MSVC environment (modern replacement)
+      - name: Setup Visual Studio
+        uses: windows-setup-msvc@v1
+        with:
+          visual-studio-version: '2022'
 
       - name: Configure CMake
         run: cmake -G "Visual Studio 17 2022" ^
@@ -30,7 +33,7 @@ jobs:
         run: cmake --build "%BUILD_DIR%/x86_64/msvc/solution (IDE)/" --config Release
 
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: windows-build
           path: "%BUILD_DIR%/x86_64/msvc/solution (IDE)/Release/"
@@ -53,7 +56,7 @@ jobs:
         run: cmake --build "$BUILD_DIR/emscripten/ninja/" --config Release
 
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: linux-build
           path: "$BUILD_DIR/emscripten/ninja/"
@@ -81,7 +84,7 @@ jobs:
         run: cmake --build "$BUILD_DIR/emscripten/ninja/" --config Release
 
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: emscripten-build
           path: "$BUILD_DIR/emscripten/ninja/"
