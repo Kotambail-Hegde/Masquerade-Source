@@ -7,18 +7,7 @@
   },
   "configurePresets": [
     {
-      "name": "vcpkg-base",
-      "hidden": true,
-      "cacheVariables": {
-        "CMAKE_TOOLCHAIN_FILE": {
-          "type": "FILEPATH",
-          "value": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
-        }
-      }
-    },
-    {
       "name": "windows-release",
-      "inherits": "vcpkg-base",
       "generator": "Visual Studio 17 2022",
       "architecture": "x64",
       "binaryDir": "${sourceDir}/build",
@@ -33,7 +22,6 @@
     },
     {
       "name": "linux-release",
-      "inherits": "vcpkg-base",
       "generator": "Ninja Multi-Config",
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
