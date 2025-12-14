@@ -15,12 +15,6 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      # Setup MSVC environment (modern replacement)
-      - name: Setup Visual Studio
-        uses: windows-setup-msvc@v1
-        with:
-          visual-studio-version: '2022'
-
       - name: Configure CMake
         run: cmake -G "Visual Studio 17 2022" ^
               -DCMAKE_C_COMPILER=cl ^
