@@ -40,14 +40,37 @@ jobs:
           
           if (!(Test-Path "imgui")) { git clone https://github.com/ocornut/imgui.git --branch docking --depth 1 }
           if (!(Test-Path "miniz")) {
+              Write-Host "=== MINIZ: not found, downloading ==="
+
               $url = "https://github.com/richgel999/miniz/archive/refs/tags/3.0.2.zip"
               $zip = "miniz-3.0.2.zip"
+              $tmp = "_miniz_extract"
 
+              Write-Host "Downloading: $url"
               Invoke-WebRequest -Uri $url -OutFile $zip
-              Expand-Archive $zip -DestinationPath .
-              Rename-Item "miniz-3.0.2" "miniz"
 
+              Write-Host "Extracting $zip into $tmp/"
+              Expand-Archive $zip -DestinationPath $tmp -Force
+
+              Write-Host "Contents of $tmp:"
+              Get-ChildItem $tmp | Format-Table Name, Mode
+
+              Write-Host "Moving $tmp/miniz-3.0.2 -> miniz"
+              Move-Item "$tmp/miniz-3.0.2" "miniz" -Force
+
+              Write-Host "Contents of external/ after move:"
+              Get-ChildItem . | Format-Table Name, Mode
+
+              Write-Host "Cleaning up"
               Remove-Item $zip
+              Remove-Item $tmp -Recurse -Force
+
+              Write-Host "=== MINIZ setup complete ==="
+          }
+          else {
+              Write-Host "=== MINIZ already exists, skipping ==="
+              Write-Host "Contents of external/:"
+              Get-ChildItem . | Format-Table Name, Mode
           }
           if (!(Test-Path "stb")) { git clone https://github.com/nothings/stb.git --depth 1 stb/stb }
           if (!(Test-Path "boost")) { git clone https://github.com/boostorg/boost.git --branch boost-1.84.0 --depth 1; cd boost; git submodule update --init --depth 1; cd .. }
@@ -179,13 +202,34 @@ jobs:
           mkdir -p external
           cd external
           [ ! -d "imgui" ] && git clone https://github.com/ocornut/imgui.git --branch docking --depth 1
-          [ ! -d "miniz" ] && (
-            curl -L -o miniz-3.0.2.tar.gz \
-              https://github.com/richgel999/miniz/archive/refs/tags/3.0.2.tar.gz &&
-            tar -xzf miniz-3.0.2.tar.gz &&
-            mv miniz-3.0.2 miniz &&
-            rm miniz-3.0.2.tar.gz
-          )
+          # --- Miniz
+          if [ ! -d "miniz" ]; then
+            echo "=== MINIZ not found, downloading release 3.0.2 ==="
+
+            URL="https://github.com/richgel999/miniz/archive/refs/tags/3.0.2.tar.gz"
+            TAR="miniz-3.0.2.tar.gz"
+            TMP="_miniz_extract"
+
+            echo "Downloading $URL"
+            curl -L "$URL" -o "$TAR"
+
+            echo "Extracting $TAR into $TMP/"
+            mkdir -p "$TMP"
+            tar -xzf "$TAR" -C "$TMP"
+
+            echo "Extracted contents:"
+            ls -la "$TMP"
+
+            echo "Renaming $TMP/miniz-3.0.2 -> miniz"
+            mv "$TMP/miniz-3.0.2" miniz
+
+            echo "Cleaning up"
+            rm -rf "$TMP" "$TAR"
+
+            echo "=== MINIZ ready at $(pwd)/miniz ==="
+          else
+            echo "=== MINIZ already exists, skipping ==="
+          fi
           [ ! -d "stb/stb" ] && git clone --depth 1 https://github.com/nothings/stb.git stb/stb
           if [ ! -d "boost" ]; then git clone https://github.com/boostorg/boost.git --branch boost-1.84.0 --depth 1; cd boost; git submodule update --init --depth 1; cd ..; fi
           [ ! -d "SDL" ] && git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL
@@ -297,13 +341,34 @@ jobs:
           cd external
           [ ! -d "boost" ] && git clone https://github.com/boostorg/boost.git --branch boost-1.84.0 --depth 1 && cd boost && git submodule update --init --depth 1 && cd ..
           [ ! -d "imgui" ] && git clone https://github.com/ocornut/imgui.git --branch docking --depth 1
-          [ ! -d "miniz" ] && (
-            curl -L -o miniz-3.0.2.tar.gz \
-              https://github.com/richgel999/miniz/archive/refs/tags/3.0.2.tar.gz &&
-            tar -xzf miniz-3.0.2.tar.gz &&
-            mv miniz-3.0.2 miniz &&
-            rm miniz-3.0.2.tar.gz
-          )
+          # --- Miniz
+          if [ ! -d "miniz" ]; then
+            echo "=== MINIZ not found, downloading release 3.0.2 ==="
+
+            URL="https://github.com/richgel999/miniz/archive/refs/tags/3.0.2.tar.gz"
+            TAR="miniz-3.0.2.tar.gz"
+            TMP="_miniz_extract"
+
+            echo "Downloading $URL"
+            curl -L "$URL" -o "$TAR"
+
+            echo "Extracting $TAR into $TMP/"
+            mkdir -p "$TMP"
+            tar -xzf "$TAR" -C "$TMP"
+
+            echo "Extracted contents:"
+            ls -la "$TMP"
+
+            echo "Renaming $TMP/miniz-3.0.2 -> miniz"
+            mv "$TMP/miniz-3.0.2" miniz
+
+            echo "Cleaning up"
+            rm -rf "$TMP" "$TAR"
+
+            echo "=== MINIZ ready at $(pwd)/miniz ==="
+          else
+            echo "=== MINIZ already exists, skipping ==="
+          fi
           [ ! -d "stb/stb" ] && git clone --depth 1 https://github.com/nothings/stb.git stb/stb
           [ ! -d "SDL" ] && git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL
           [ ! -d "emscripten-browser-file" ] && git clone https://github.com/Armchair-Software/emscripten-browser-file.git --depth 1
