@@ -6,126 +6,123 @@ on:
   pull_request:
     branches: [ci_cd_support_1]
 
+env:
+  BUILD_ROOT: build
+
 jobs:
   build_windows:
     name: Build Windows (MSVC + vcpkg)
     runs-on: windows-latest
     env:
-      BUILD_DIR: build/windows/x86_64/msvc
+      BUILD_DIR: ${{ env.BUILD_ROOT }}/windows/x86_64/msvc
     steps:
       - uses: actions/checkout@v3
 
-      # --- Setup MSVC
-      - name: Setup MSVC
-        uses: microsoft/setup-msvc@v1
+      # Bootstrap vcpkg manually
+      - name: Bootstrap vcpkg
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git $env:BUILD_DIR\vcpkg
+          $env:BUILD_DIR\vcpkg\bootstrap-vcpkg.bat
 
-      # --- Setup vcpkg
-      - name: Setup vcpkg
-        uses: microsoft/vcpkg-action@v2
-        with:
-          vcpkg-root: "${{ github.workspace }}/vcpkg"
-
-      # --- Install dependencies
+      # Install Boost using vcpkg
       - name: Install Boost
         run: |
-          .\vcpkg\vcpkg install boost:x64-windows
-          .\vcpkg\vcpkg integrate install
+          $env:BUILD_DIR\vcpkg\vcpkg install boost:x64-windows
+          $env:BUILD_DIR\vcpkg\vcpkg integrate install
 
-      # --- Configure CMake
+      # Configure CMake
       - name: Configure CMake
-        run: cmake -G "Visual Studio 17 2022" `
-              -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake `
-              -DCMAKE_DEFAULT_BUILD_TYPE=Release `
-              -S . `
-              -B "$env:BUILD_DIR"
+        shell: powershell
+        run: |
+          cmake -G "Visual Studio 17 2022" `
+            -DCMAKE_TOOLCHAIN_FILE="$env:BUILD_DIR\vcpkg\scripts\buildsystems\vcpkg.cmake" `
+            -DCMAKE_DEFAULT_BUILD_TYPE=Release `
+            -S . `
+            -B "$env:BUILD_DIR/solution_IDE"
 
+      # Build
       - name: Build
-        run: cmake --build "$env:BUILD_DIR" --config Release
+        shell: powershell
+        run: cmake --build "$env:BUILD_DIR/solution_IDE" --config Release
 
+      # Upload artifacts
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: windows-build
-          path: "$env:BUILD_DIR/Release/"
+          path: "$env:BUILD_DIR/solution_IDE/Release/"
 
   build_linux:
     name: Build Linux (Ninja + vcpkg)
     runs-on: ubuntu-latest
     env:
-      BUILD_DIR: build/linux
+      BUILD_DIR: ${{ env.BUILD_ROOT }}/linux/x86_64
     steps:
       - uses: actions/checkout@v3
 
-      # --- Install system dependencies for bootstrap
-      - name: Install build tools
-        run: sudo apt-get update && sudo apt-get install -y build-essential cmake ninja-build git
+      # Install system dependencies
+      - name: Install Dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build build-essential cmake git
 
-      # --- Bootstrap vcpkg
+      # Bootstrap vcpkg manually
       - name: Bootstrap vcpkg
         run: |
-          git clone https://github.com/microsoft/vcpkg.git ${{ github.workspace }}/vcpkg
-          ./vcpkg/bootstrap-vcpkg.sh
+          git clone https://github.com/microsoft/vcpkg.git $BUILD_DIR/vcpkg
+          $BUILD_DIR/vcpkg/bootstrap-vcpkg.sh
 
-      # --- Install dependencies
+      # Install Boost using vcpkg
       - name: Install Boost
         run: |
-          ./vcpkg/vcpkg install boost
-          ./vcpkg/vcpkg integrate install
+          $BUILD_DIR/vcpkg/vcpkg install boost
+          $BUILD_DIR/vcpkg/vcpkg integrate install
 
-      # --- Configure CMake
+      # Configure CMake
       - name: Configure CMake
         run: cmake -G "Ninja Multi-Config" \
-              -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake \
-              -DCMAKE_DEFAULT_BUILD_TYPE=Release \
-              -S . \
-              -B "$BUILD_DIR"
+          -DCMAKE_TOOLCHAIN_FILE="$BUILD_DIR/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+          -DCMAKE_DEFAULT_BUILD_TYPE=Release \
+          -S . \
+          -B "$BUILD_DIR/ninja/"
 
+      # Build
       - name: Build
-        run: cmake --build "$BUILD_DIR" --config Release
+        run: cmake --build "$BUILD_DIR/ninja/" --config Release
 
+      # Upload artifacts
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: linux-build
-          path: "$BUILD_DIR"
+          path: "$BUILD_DIR/ninja/"
 
   build_emscripten:
-    name: Build Emscripten (Ninja + vcpkg)
+    name: Build Emscripten (Ninja)
     runs-on: ubuntu-latest
     env:
-      BUILD_DIR: build/emscripten
+      BUILD_DIR: ${{ env.BUILD_ROOT }}/emscripten
     steps:
       - uses: actions/checkout@v3
 
-      # --- Setup Emscripten
+      # Setup Emscripten
       - name: Setup Emscripten
-        uses: emscripten-core/setup-emsdk@v3
+        uses: emscripten-core/setup-emsdk@v4
         with:
           emsdk-version: latest
 
-      # --- Bootstrap vcpkg (optional, for native deps like Boost)
-      - name: Bootstrap vcpkg
-        run: |
-          git clone https://github.com/microsoft/vcpkg.git ${{ github.workspace }}/vcpkg
-          ./vcpkg/bootstrap-vcpkg.sh
-
-      # --- Install Boost (native, can still use for header-only parts)
-      - name: Install Boost
-        run: ./vcpkg/vcpkg install boost
-
-      # --- Configure CMake for Emscripten
+      # Configure CMake
       - name: Configure CMake
         run: emcmake cmake -G "Ninja Multi-Config" \
-              -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake \
-              -DCMAKE_DEFAULT_BUILD_TYPE=Release \
-              -S . \
-              -B "$BUILD_DIR"
+          -DCMAKE_DEFAULT_BUILD_TYPE=Release \
+          -S . \
+          -B "$BUILD_DIR/ninja/"
 
+      # Build
       - name: Build
-        run: cmake --build "$BUILD_DIR" --config Release
+        run: cmake --build "$BUILD_DIR/ninja/" --config Release
 
+      # Upload artifacts
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: emscripten-build
-          path: "$BUILD_DIR"
+          path: "$BUILD_DIR/ninja/"
