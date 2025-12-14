@@ -32,7 +32,7 @@ jobs:
           restore-keys: |
             windows-external-all-v1-
 
-      # --- Clone all dependencies
+      # --- Clone all dependencies (only if not cached)
       - name: Clone all dependencies
         if: steps.cache-external.outputs.cache-hit != 'true'
         run: |
@@ -70,15 +70,17 @@ jobs:
           cmake --build . --config Release --target install
         shell: pwsh
 
-      # --- Set dependency paths
+      # --- Set environment variables
       - name: Set dependency paths
         run: |
           echo "IMGUI_ROOT=$env:GITHUB_WORKSPACE\external\imgui" >> $env:GITHUB_ENV
           echo "MINIZ_ROOT=$env:GITHUB_WORKSPACE\external\miniz" >> $env:GITHUB_ENV
           echo "STB_ROOT=$env:GITHUB_WORKSPACE\external\stb" >> $env:GITHUB_ENV
-          echo "GLAD_ROOT=$env:GITHUB_WORKSPACE\external\glad\include" >> $env:GITHUB_ENV
+          echo "GLAD_ROOT=$env:GITHUB_WORKSPACE\external\glad" >> $env:GITHUB_ENV
+          echo "GLAD_INCLUDE_DIR=$env:GITHUB_WORKSPACE\external\glad/include" >> $env:GITHUB_ENV
+          echo "GLAD_SRC_DIR=$env:GITHUB_WORKSPACE\external\glad/src" >> $env:GITHUB_ENV
           echo "BOOST_ROOT=$env:GITHUB_WORKSPACE\external\boost" >> $env:GITHUB_ENV
-          echo "BOOST_INCLUDEDIR=$GITHUB_WORKSPACE/external/boost" >> $GITHUB_ENV
+          echo "BOOST_INCLUDEDIR=$env:GITHUB_WORKSPACE\external\boost" >> $env:GITHUB_ENV
           echo "SDL3_ROOT=$env:GITHUB_WORKSPACE\external\SDL\build\install" >> $env:GITHUB_ENV
           echo "NFD_ROOT=$env:GITHUB_WORKSPACE\external\nativefiledialog-extended\build\install" >> $env:GITHUB_ENV
         shell: pwsh
@@ -92,6 +94,8 @@ jobs:
                 -DMINIZ_ROOT=%MINIZ_ROOT% ^
                 -DSTB_ROOT=%STB_ROOT% ^
                 -DGLAD_ROOT=%GLAD_ROOT% ^
+                -DGLAD_INCLUDE_DIR=%GLAD_INCLUDE_DIR% ^
+                -DGLAD_SRC_DIR=%GLAD_SRC_DIR% ^
                 -DBOOST_ROOT=%BOOST_ROOT% ^
                 -DBOOST_INCLUDEDIR=%BOOST_INCLUDEDIR% ^
                 -DSDL3_ROOT=%SDL3_ROOT% ^
@@ -110,7 +114,6 @@ jobs:
         with:
           name: windows-build
           path: build/bin/
-
 
   build_linux:
     name: Build Linux (Ninja)
@@ -153,7 +156,6 @@ jobs:
         run: |
           mkdir -p external
           cd external
-          
           [ ! -d "imgui" ] && git clone https://github.com/ocornut/imgui.git --branch docking --depth 1
           [ ! -d "miniz" ] && git clone https://github.com/richgel999/miniz.git --depth 1
           [ ! -d "stb/stb" ] && git clone --depth 1 https://github.com/nothings/stb.git stb/stb
@@ -182,13 +184,15 @@ jobs:
           ninja -j$(nproc)
           ninja install
 
-      # --- Set dependency paths
+      # --- Set environment variables
       - name: Set dependency paths
         run: |
           echo "IMGUI_ROOT=$GITHUB_WORKSPACE/external/imgui" >> $GITHUB_ENV
           echo "MINIZ_ROOT=$GITHUB_WORKSPACE/external/miniz" >> $GITHUB_ENV
           echo "STB_ROOT=$GITHUB_WORKSPACE/external/stb" >> $GITHUB_ENV
-          echo "GLAD_ROOT=$GITHUB_WORKSPACE/external/glad/include" >> $GITHUB_ENV
+          echo "GLAD_ROOT=$GITHUB_WORKSPACE/external/glad" >> $GITHUB_ENV
+          echo "GLAD_INCLUDE_DIR=$GITHUB_WORKSPACE/external/glad/include" >> $GITHUB_ENV
+          echo "GLAD_SRC_DIR=$GITHUB_WORKSPACE/external/glad/src" >> $GITHUB_ENV
           echo "BOOST_ROOT=$GITHUB_WORKSPACE/external/boost" >> $GITHUB_ENV
           echo "BOOST_INCLUDEDIR=$GITHUB_WORKSPACE/external/boost" >> $GITHUB_ENV
           echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL/build/install" >> $GITHUB_ENV
@@ -203,6 +207,8 @@ jobs:
                 -DMINIZ_ROOT=$MINIZ_ROOT \
                 -DSTB_ROOT=$STB_ROOT \
                 -DGLAD_ROOT=$GLAD_ROOT \
+                -DGLAD_INCLUDE_DIR=$GLAD_INCLUDE_DIR \
+                -DGLAD_SRC_DIR=$GLAD_SRC_DIR \
                 -DBOOST_ROOT=$BOOST_ROOT \
                 -DBOOST_INCLUDEDIR=$BOOST_INCLUDEDIR \
                 -DSDL3_ROOT=$SDL3_ROOT \
@@ -240,6 +246,7 @@ jobs:
             external/SDL
             external/emscripten-browser-file
             external/boost
+            external/glad
           key: emscripten-external-all-v1-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: |
             emscripten-external-all-v1-
@@ -250,19 +257,13 @@ jobs:
         run: |
           mkdir -p external
           cd external
-          
-          # Boost (header-only)
-          if [ ! -d "boost" ]; then
-            git clone https://github.com/boostorg/boost.git --branch boost-1.84.0 --depth 1
-            cd boost
-            git submodule update --init --depth 1
-            cd ..
-          fi
+          [ ! -d "boost" ] && git clone https://github.com/boostorg/boost.git --branch boost-1.84.0 --depth 1 && cd boost && git submodule update --init --depth 1 && cd ..
           [ ! -d "imgui" ] && git clone https://github.com/ocornut/imgui.git --branch docking --depth 1
           [ ! -d "miniz" ] && git clone https://github.com/richgel999/miniz.git --depth 1
           [ ! -d "stb/stb" ] && git clone --depth 1 https://github.com/nothings/stb.git stb/stb
           [ ! -d "SDL" ] && git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL
           [ ! -d "emscripten-browser-file" ] && git clone https://github.com/Armchair-Software/emscripten-browser-file.git --depth 1
+          [ ! -d "glad" ] && git clone https://github.com/Dav1dde/glad.git --depth 1
 
       # --- Set environment variables
       - name: Set dependency paths
@@ -271,8 +272,9 @@ jobs:
           echo "MINIZ_ROOT=$GITHUB_WORKSPACE/external/miniz" >> $GITHUB_ENV
           echo "STB_ROOT=$GITHUB_WORKSPACE/external/stb" >> $GITHUB_ENV
           echo "EFB_ROOT=$GITHUB_WORKSPACE/external/emscripten-browser-file" >> $GITHUB_ENV
+          echo "GLAD_ROOT=$GITHUB_WORKSPACE/external/glad" >> $GITHUB_ENV
           echo "BOOST_ROOT=$GITHUB_WORKSPACE/external/boost" >> $GITHUB_ENV
-          echo "BOOST_INCLUDEDIR=$GITHUB_WORKSPACE/external/boost" >> $GITHUB_ENV
+          echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL/build/install" >> $GITHUB_ENV
 
       # --- Setup Emscripten SDK
       - name: Setup Emscripten
@@ -285,22 +287,15 @@ jobs:
       - name: Install Ninja
         run: sudo apt-get update && sudo apt-get install -y ninja-build
 
-      # --- Build SDL3 for Emscripten
+      # --- Build SDL3
       - name: Build SDL3
         run: |
           cd external/SDL
           mkdir -p build
           cd build
-          emcmake cmake .. -G Ninja \
-                -DCMAKE_BUILD_TYPE=Release \
-                -DCMAKE_INSTALL_PREFIX=$PWD/install \
-                -DSDL_SHARED=OFF \
-                -DSDL_STATIC=ON \
-                -DSDL_TEST=OFF \
-                -DSDL_TESTS=OFF
+          emcmake cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PWD/install -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST=OFF -DSDL_TESTS=OFF
           ninja -j$(nproc)
           ninja install
-          echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL/build/install" >> $GITHUB_ENV
 
       # --- Configure CMake
       - name: Configure CMake
@@ -312,8 +307,8 @@ jobs:
                 -DMINIZ_ROOT=$MINIZ_ROOT \
                 -DSTB_ROOT=$STB_ROOT \
                 -DEFB_ROOT=$EFB_ROOT \
+                -DGLAD_ROOT=$GLAD_ROOT \
                 -DBOOST_ROOT=$BOOST_ROOT \
-                -DBOOST_INCLUDEDIR=$BOOST_INCLUDEDIR \
                 -S . -B build
 
       # --- Build
