@@ -54,7 +54,7 @@ jobs:
           cd external/SDL
           mkdir -p build
           cd build
-          cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PWD
+          cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$($PWD.Path)" -DSDL_SHARED=ON -DSDL_STATIC=ON
           cmake --build . --config Release --parallel
           cmake --build . --config Release --target install
         shell: pwsh
@@ -65,7 +65,7 @@ jobs:
           cd external/nativefiledialog-extended
           mkdir -p build
           cd build
-          cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PWD
+          cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$($PWD.Path)"
           cmake --build . --config Release --parallel
           cmake --build . --config Release --target install
         shell: pwsh
@@ -166,7 +166,7 @@ jobs:
           cd external/SDL
           mkdir -p build
           cd build
-          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PWD
+          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PWD -DSDL_SHARED=ON -DSDL_STATIC=ON
           ninja -j$(nproc)
           ninja install
 
