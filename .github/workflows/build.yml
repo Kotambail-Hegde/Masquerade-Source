@@ -18,6 +18,62 @@ jobs:
         with:
           submodules: recursive
 
+      # --- Cache external dependencies (ImGui, miniz, stb, glad)
+      - name: Cache external dependencies
+        id: cache-external
+        uses: actions/cache@v4
+        with:
+          path: |
+            external/imgui
+            external/miniz
+            external/stb
+            external/glad
+          key: windows-external-deps-v1-${{ hashFiles('.github/workflows/*.yml') }}
+          restore-keys: |
+            windows-external-deps-v1-
+
+      # --- Clone ImGui docking branch (only if not cached)
+      - name: Clone ImGui (docking branch)
+        if: steps.cache-external.outputs.cache-hit != 'true'
+        run: |
+          New-Item -ItemType Directory -Force -Path external
+          cd external
+          if (!(Test-Path "imgui")) {
+            git clone https://github.com/ocornut/imgui.git --branch docking --depth 1
+          }
+        shell: pwsh
+
+      # --- Clone other dependencies (only if not cached)
+      - name: Clone additional dependencies
+        if: steps.cache-external.outputs.cache-hit != 'true'
+        run: |
+          cd external
+          
+          # Miniz
+          if (!(Test-Path "miniz")) {
+            git clone https://github.com/richgel999/miniz.git --depth 1
+          }
+          
+          # STB
+          if (!(Test-Path "stb")) {
+            git clone https://github.com/nothings/stb.git --depth 1
+          }
+          
+          # GLAD
+          if (!(Test-Path "glad")) {
+            git clone https://github.com/Dav1dde/glad.git --depth 1
+          }
+        shell: pwsh
+
+      # --- Set environment variables for dependencies
+      - name: Set dependency paths
+        run: |
+          echo "IMGUI_ROOT=$env:GITHUB_WORKSPACE\external\imgui" >> $env:GITHUB_ENV
+          echo "MINIZ_ROOT=$env:GITHUB_WORKSPACE\external\miniz" >> $env:GITHUB_ENV
+          echo "STB_ROOT=$env:GITHUB_WORKSPACE\external\stb" >> $env:GITHUB_ENV
+          echo "GLAD_ROOT=$env:GITHUB_WORKSPACE\external\glad" >> $env:GITHUB_ENV
+        shell: pwsh
+
       # --- Export GitHub token for vcpkg binary caching (CRITICAL for speed!)
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@v7
@@ -30,7 +86,7 @@ jobs:
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
         with:
-          vcpkgGitCommitId: '01f602195983451bc83e72f4214af2cbc495aa94'
+          vcpkgGitCommitId: '7ba0ba7334c3346e7eee1e049ba85da193a8d821'
 
       # --- Configure CMake
       - name: Configure CMake
@@ -38,6 +94,10 @@ jobs:
           cmake -G "Visual Studio 17 2022" -A x64 ^
                 -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake ^
                 -DCMAKE_BUILD_TYPE=Release ^
+                -DIMGUI_ROOT=%IMGUI_ROOT% ^
+                -DMINIZ_ROOT=%MINIZ_ROOT% ^
+                -DSTB_ROOT=%STB_ROOT% ^
+                -DGLAD_ROOT=%GLAD_ROOT% ^
                 -S . -B build
         shell: cmd
 
@@ -71,6 +131,59 @@ jobs:
                                   libxi-dev libgl1-mesa-dev libglu1-mesa-dev \
                                   libgtk-3-dev
 
+      # --- Cache external dependencies (ImGui, miniz, stb, glad)
+      - name: Cache external dependencies
+        id: cache-external
+        uses: actions/cache@v4
+        with:
+          path: |
+            external/imgui
+            external/miniz
+            external/stb
+            external/glad
+          key: linux-external-deps-v1-${{ hashFiles('.github/workflows/*.yml') }}
+          restore-keys: |
+            linux-external-deps-v1-
+
+      # --- Clone ImGui docking branch (only if not cached)
+      - name: Clone ImGui (docking branch)
+        if: steps.cache-external.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p external
+          cd external
+          if [ ! -d "imgui" ]; then
+            git clone https://github.com/ocornut/imgui.git --branch docking --depth 1
+          fi
+
+      # --- Clone other dependencies (only if not cached)
+      - name: Clone additional dependencies
+        if: steps.cache-external.outputs.cache-hit != 'true'
+        run: |
+          cd external
+          
+          # Miniz
+          if [ ! -d "miniz" ]; then
+            git clone https://github.com/richgel999/miniz.git --depth 1
+          fi
+          
+          # STB
+          if [ ! -d "stb" ]; then
+            git clone https://github.com/nothings/stb.git --depth 1
+          fi
+          
+          # GLAD
+          if [ ! -d "glad" ]; then
+            git clone https://github.com/Dav1dde/glad.git --depth 1
+          fi
+
+      # --- Set environment variables for dependencies
+      - name: Set dependency paths
+        run: |
+          echo "IMGUI_ROOT=$GITHUB_WORKSPACE/external/imgui" >> $GITHUB_ENV
+          echo "MINIZ_ROOT=$GITHUB_WORKSPACE/external/miniz" >> $GITHUB_ENV
+          echo "STB_ROOT=$GITHUB_WORKSPACE/external/stb" >> $GITHUB_ENV
+          echo "GLAD_ROOT=$GITHUB_WORKSPACE/external/glad" >> $GITHUB_ENV
+
       # --- Export GitHub token for vcpkg binary caching
       - name: Export GitHub Actions cache environment variables
         uses: actions/github-script@v7
@@ -83,7 +196,7 @@ jobs:
       - name: Setup vcpkg
         uses: lukka/run-vcpkg@v11
         with:
-          vcpkgGitCommitId: '01f602195983451bc83e72f4214af2cbc495aa94'
+          vcpkgGitCommitId: '7ba0ba7334c3346e7eee1e049ba85da193a8d821'
 
       # --- Configure CMake
       - name: Configure CMake
@@ -91,6 +204,10 @@ jobs:
           cmake -G "Ninja Multi-Config" \
                 -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake \
                 -DCMAKE_BUILD_TYPE=Release \
+                -DIMGUI_ROOT=$IMGUI_ROOT \
+                -DMINIZ_ROOT=$MINIZ_ROOT \
+                -DSTB_ROOT=$STB_ROOT \
+                -DGLAD_ROOT=$GLAD_ROOT \
                 -S . -B build
 
       # --- Build with parallel compilation
@@ -113,6 +230,59 @@ jobs:
         with:
           submodules: recursive
 
+      # --- Cache external dependencies (ImGui, miniz, stb, efb)
+      - name: Cache external dependencies
+        id: cache-external
+        uses: actions/cache@v4
+        with:
+          path: |
+            external/imgui
+            external/miniz
+            external/stb
+            external/emscripten-browser-file
+          key: emscripten-external-deps-v1-${{ hashFiles('.github/workflows/*.yml') }}
+          restore-keys: |
+            emscripten-external-deps-v1-
+
+      # --- Clone ImGui docking branch (only if not cached)
+      - name: Clone ImGui (docking branch)
+        if: steps.cache-external.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p external
+          cd external
+          if [ ! -d "imgui" ]; then
+            git clone https://github.com/ocornut/imgui.git --branch docking --depth 1
+          fi
+
+      # --- Clone other dependencies (only if not cached)
+      - name: Clone additional dependencies
+        if: steps.cache-external.outputs.cache-hit != 'true'
+        run: |
+          cd external
+          
+          # Miniz
+          if [ ! -d "miniz" ]; then
+            git clone https://github.com/richgel999/miniz.git --depth 1
+          fi
+          
+          # STB
+          if [ ! -d "stb" ]; then
+            git clone https://github.com/nothings/stb.git --depth 1
+          fi
+          
+          # Emscripten Browser File (if you use it)
+          if [ ! -d "emscripten-browser-file" ]; then
+            git clone https://github.com/Armchair-Software/emscripten-browser-file.git --depth 1
+          fi
+
+      # --- Set environment variables for dependencies
+      - name: Set dependency paths
+        run: |
+          echo "IMGUI_ROOT=$GITHUB_WORKSPACE/external/imgui" >> $GITHUB_ENV
+          echo "MINIZ_ROOT=$GITHUB_WORKSPACE/external/miniz" >> $GITHUB_ENV
+          echo "STB_ROOT=$GITHUB_WORKSPACE/external/stb" >> $GITHUB_ENV
+          echo "EFB_ROOT=$GITHUB_WORKSPACE/external/emscripten-browser-file" >> $GITHUB_ENV
+
       # --- Setup Emscripten SDK with caching
       - name: Setup Emscripten
         uses: mymindstorm/setup-emsdk@v14
@@ -129,7 +299,7 @@ jobs:
         id: cache-sdl3
         uses: actions/cache@v4
         with:
-          path: SDL/build/install
+          path: external/SDL/build/install
           key: emscripten-sdl3-v3-${{ runner.os }}-3.1.56
           restore-keys: |
             emscripten-sdl3-v3-${{ runner.os }}-
@@ -139,6 +309,8 @@ jobs:
         if: steps.cache-sdl3.outputs.cache-hit != 'true'
         run: |
           echo "Building SDL3 from source..."
+          mkdir -p external
+          cd external
           git clone https://github.com/libsdl-org/SDL.git --branch SDL3 --depth 1
           cd SDL
           mkdir -p build
@@ -157,14 +329,18 @@ jobs:
 
       # --- Set SDL3 path
       - name: Set SDL3 environment
-        run: echo "SDL3_ROOT=$PWD/SDL/build/install" >> $GITHUB_ENV
+        run: echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL/build/install" >> $GITHUB_ENV
 
       # --- Configure CMake for Emscripten
       - name: Configure CMake
         run: |
           emcmake cmake -G Ninja \
                 -DCMAKE_BUILD_TYPE=Release \
-                -DSDL3_ROOT=${{ env.SDL3_ROOT }} \
+                -DSDL3_ROOT=$SDL3_ROOT \
+                -DIMGUI_ROOT=$IMGUI_ROOT \
+                -DMINIZ_ROOT=$MINIZ_ROOT \
+                -DSTB_ROOT=$STB_ROOT \
+                -DEFB_ROOT=$EFB_ROOT \
                 -S . -B build
 
       # --- Build with parallel compilation
