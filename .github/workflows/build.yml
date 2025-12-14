@@ -15,9 +15,6 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Setup MSVC environment
-        uses: windows-setup-msvc@v1
-
       - name: Configure CMake
         shell: powershell
         run: |
@@ -47,10 +44,14 @@ jobs:
       - uses: actions/checkout@v3
 
       - name: Install Dependencies
-        run: sudo apt-get update && sudo apt-get install -y ninja-build build-essential cmake libboost-all-dev
+        run: sudo apt-get update && sudo apt-get install -y \
+              ninja-build build-essential cmake libboost-all-dev
 
       - name: Configure CMake
-        run: cmake -G "Ninja Multi-Config" -DCMAKE_DEFAULT_BUILD_TYPE=Release -S . -B "$BUILD_DIR"
+        run: cmake -G "Ninja Multi-Config" \
+              -DCMAKE_DEFAULT_BUILD_TYPE=Release \
+              -S . \
+              -B "$BUILD_DIR"
 
       - name: Build
         run: cmake --build "$BUILD_DIR" --config Release
@@ -69,13 +70,16 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Setup Emscripten
-        uses: emscripten/emsdk@v1
+      - name: Setup Emscripten SDK
+        uses: emscripten-core/setup-emsdk@v2
         with:
           emsdk-version: latest
 
       - name: Configure CMake
-        run: emcmake cmake -G "Ninja Multi-Config" -DCMAKE_DEFAULT_BUILD_TYPE=Release -S . -B "$BUILD_DIR"
+        run: emcmake cmake -G "Ninja Multi-Config" \
+              -DCMAKE_DEFAULT_BUILD_TYPE=Release \
+              -S . \
+              -B "$BUILD_DIR"
 
       - name: Build
         run: cmake --build "$BUILD_DIR" --config Release
