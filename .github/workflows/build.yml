@@ -309,23 +309,23 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ninja-build
 
       # --- Build Boost (Emscripten)
-      - name: Build Boost (Emscripten)
+      - name: Build Boost
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           cd external/boost
 
-          rm -f project-config.jam
+          # Ensure script is executable
           chmod +x bootstrap.sh
 
-          CC=emcc CXX=em++ ./bootstrap.sh --prefix="$PWD/install"
+          # Bootstrap Boost
+          ./bootstrap.sh --prefix="$PWD"
 
+          # Build + install (static + shared)
           ./b2 install \
-            toolset=emscripten \
             variant=release \
-            link=static \
-            threading=single \
-            define=BOOST_FILESYSTEM_SINGLE_THREADED \
-            --without-mpi \
+            link=static,shared \
+            threading=multi \
             -j$(nproc)
 
       # --- Build SDL3

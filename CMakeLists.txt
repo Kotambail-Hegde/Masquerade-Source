@@ -71,8 +71,10 @@ set(IMGUI_EXAMPLES_LIBS_DIR "${IMGUI_ROOT}/examples/libs")
 set(MINIZ_DIR "${MINIZ_ROOT}")
 # STB
 set(STB_INCLUDE_DIR "${STB_ROOT}/stb")
+if (EMSCRIPTEN)
 # Emscripten Browser File Library
 set(EFB_INCLUDE_DIR "${EFB_ROOT}")
+endif()
 
 # --- Set language standards
 set(CMAKE_C_STANDARD 11)
@@ -152,17 +154,21 @@ set(THIRD_PARTY_HEADERS_MINIZ
     ${MINIZ_DIR}/miniz.h
 )
 
+if(NOT EMSCRIPTEN)
 # set(THIRD_PARTY_HEADERS_NFD
 #     "${NFD_SRC_INCLUDE_DIR}/nfd.hpp"
 # )
+endif()
 
 set(THIRD_PARTY_HEADERS_STB
     "${STB_INCLUDE_DIR}/stb_image.h"
 )
 
+if (EMSCRIPTEN)
 set(THIRD_PARTY_HEADERS_EFB
     "${EFB_INCLUDE_DIR}/emscripten_browser_file.h"
 )
+endif()
 
 set(THIRD_PARTY_HEADERS
     ${THIRD_PARTY_HEADERS_GLAD}
@@ -170,8 +176,13 @@ set(THIRD_PARTY_HEADERS
     ${THIRD_PARTY_HEADERS_MINIZ}
     ${THIRD_PARTY_HEADERS_NFD}
     ${THIRD_PARTY_HEADERS_STB}
-    ${THIRD_PARTY_HEADERS_EFB}
 )
+
+if (EMSCRIPTEN)
+    list(APPEND THIRD_PARTY_HEADERS
+        ${THIRD_PARTY_HEADERS_EFB}
+    )
+endif()
 
 # --- Core source files
 set(CORE_SOURCES
@@ -284,8 +295,9 @@ source_group("Headers\\Third-party\\IMGUI"  FILES ${THIRD_PARTY_HEADERS_IMGUI})
 source_group("Headers\\Third-party\\MINIZ"  FILES ${THIRD_PARTY_HEADERS_MINIZ})
 source_group("Headers\\Third-party\\NFD"    FILES ${THIRD_PARTY_HEADERS_NFD})
 source_group("Headers\\Third-party\\STB"    FILES ${THIRD_PARTY_HEADERS_STB})
+if (EMSCRIPTEN)
 source_group("Headers\\Third-party\\EFB"    FILES ${THIRD_PARTY_HEADERS_EFB})
-
+endif()
 source_group("Sources\\Core"                FILES ${CORE_SOURCES})
 source_group("Sources\\Game Of Life"        FILES ${GOL_SOURCES})
 source_group("Sources\\Chip8"               FILES ${CHIP8_SOURCES})
