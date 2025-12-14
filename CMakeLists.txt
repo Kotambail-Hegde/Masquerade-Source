@@ -15,10 +15,8 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows" AND NOT IS_GITHUB_ACTIONS)
     include(${CMAKE_SOURCE_DIR}/Paths_win.cmake)
     # Boost
     set(BOOST_INCLUDE_DIR "${BOOST_ROOT}")
-    set(BOOST_LIBRARYDIR "${BOOST_ROOT}/stage/lib")
-    set(BOOST_BUILD_DIR "${BOOST_ROOT}/build")
     # SDL3
-    set(SDL3_CMAKE_PATH "${SDL3_ROOT}/lib/cmake/SDL3")
+    set(SDL3_CMAKE_PATH "${SDL3_ROOT}/cmake")
     set(SDL3_LIB_PATH "${SDL3_ROOT}/lib/libSDL3.a") # For Emscripten
     set(SDL3_INCLUDE_DIR "${SDL3_ROOT}/include")
     set(CMAKE_PREFIX_PATH "${SDL3_CMAKE_PATH}")
@@ -34,10 +32,8 @@ elseif(IS_GITHUB_ACTIONS)
     message(STATUS "CI build – skipping local Paths_*.cmake")
     # Boost
     set(BOOST_INCLUDE_DIR "${BOOST_ROOT}")
-    set(BOOST_LIBRARYDIR "${BOOST_ROOT}/stage/lib")
-    set(BOOST_BUILD_DIR "${BOOST_ROOT}/build")
     # SDL3
-    set(SDL3_CMAKE_PATH "${SDL3_ROOT}/lib/cmake/SDL3")
+    set(SDL3_CMAKE_PATH "${SDL3_ROOT}/cmake")
     set(SDL3_LIB_PATH "${SDL3_ROOT}/lib/libSDL3.a") # For Emscripten
     set(SDL3_INCLUDE_DIR "${SDL3_ROOT}/include")
     set(CMAKE_PREFIX_PATH "${SDL3_CMAKE_PATH}")
@@ -72,9 +68,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # --- Dependencies
 if(NOT EMSCRIPTEN)
-if(NOT IS_GITHUB_ACTIONS)
-    find_package(Boost REQUIRED)
-endif()
     find_package(nfd REQUIRED)
     find_package(SDL3 REQUIRED)
 endif()
@@ -359,7 +352,6 @@ target_include_directories(${PROJECT_NAME} PUBLIC
 # --- Third-party/common libraries
 target_include_directories(${PROJECT_NAME} PUBLIC
     "${BOOST_INCLUDE_DIR}"
-    "${BOOST_BUILD_DIR}"
     "${IMGUI_DIR}"
     "${IMGUI_BACKENDS_DIR}"
     "${IMGUI_MISC_CPP_DIR}"
@@ -429,7 +421,6 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     else()
         message(STATUS "Using native Clang")
         target_link_libraries(${PROJECT_NAME} PRIVATE
-            Boost::headers
             nfd::nfd
             # SDL3::SDL3-static
         )
@@ -439,7 +430,6 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     if(CMAKE_SYSTEM_NAME  STREQUAL "Windows")
         message(STATUS "Linking Windows libraries")
         target_link_libraries(${PROJECT_NAME} PRIVATE
-            Boost::headers
             nfd::nfd
             ${SDL3_IMPLIB}
             ws2_32
@@ -459,7 +449,6 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
         if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm" OR CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
             message(STATUS "Linking OpenGL ES 3 libraries for ARM")
             target_link_libraries(${PROJECT_NAME} PRIVATE
-                Boost::headers
                 nfd::nfd
                 SDL3::SDL3
                 OpenGL::GLES3  # Use GLES3 instead of GL
@@ -471,7 +460,6 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
         else()
             message(STATUS "Linking desktop OpenGL libraries for x86/x64")
             target_link_libraries(${PROJECT_NAME} PRIVATE
-                Boost::headers
                 nfd::nfd
                 SDL3::SDL3
                 GL            # Desktop OpenGL for x86/x64
@@ -488,7 +476,6 @@ elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     message(STATUS "MSVC")
         target_link_libraries(${PROJECT_NAME} PRIVATE
-        Boost::headers
         nfd::nfd
         # SDL3::SDL3-static
         "${SDL3_IMPLIB}"

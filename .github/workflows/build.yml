@@ -78,7 +78,6 @@ jobs:
           echo "STB_ROOT=$env:GITHUB_WORKSPACE\external\stb" >> $env:GITHUB_ENV
           echo "GLAD_ROOT=$env:GITHUB_WORKSPACE\external\glad" >> $env:GITHUB_ENV
           echo "BOOST_ROOT=$env:GITHUB_WORKSPACE\external\boost" >> $env:GITHUB_ENV
-          echo "BOOST_INCLUDEDIR=$env:GITHUB_WORKSPACE\external\boost" >> $env:GITHUB_ENV
           echo "SDL3_ROOT=$env:GITHUB_WORKSPACE\external\SDL" >> $env:GITHUB_ENV
           echo "NFD_ROOT=$env:GITHUB_WORKSPACE\external\nativefiledialog-extended" >> $env:GITHUB_ENV
         shell: pwsh
@@ -93,7 +92,6 @@ jobs:
                 -DSTB_ROOT=%STB_ROOT% ^
                 -DGLAD_ROOT=%GLAD_ROOT% ^
                 -DBOOST_ROOT=%BOOST_ROOT% ^
-                -DBOOST_INCLUDEDIR=%BOOST_INCLUDEDIR% ^
                 -DSDL3_ROOT=%SDL3_ROOT% ^
                 -DNFD_ROOT=%NFD_ROOT% ^
                 -S . -B build
@@ -188,7 +186,6 @@ jobs:
           echo "STB_ROOT=$GITHUB_WORKSPACE/external/stb" >> $GITHUB_ENV
           echo "GLAD_ROOT=$GITHUB_WORKSPACE/external/glad" >> $GITHUB_ENV
           echo "BOOST_ROOT=$GITHUB_WORKSPACE/external/boost" >> $GITHUB_ENV
-          echo "BOOST_INCLUDEDIR=$GITHUB_WORKSPACE/external/boost" >> $GITHUB_ENV
           echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL" >> $GITHUB_ENV
           echo "NFD_ROOT=$GITHUB_WORKSPACE/external/nativefiledialog-extended" >> $GITHUB_ENV
 
@@ -202,7 +199,6 @@ jobs:
                 -DSTB_ROOT=$STB_ROOT \
                 -DGLAD_ROOT=$GLAD_ROOT \
                 -DBOOST_ROOT=$BOOST_ROOT \
-                -DBOOST_INCLUDEDIR=$BOOST_INCLUDEDIR \
                 -DSDL3_ROOT=$SDL3_ROOT \
                 -DNFD_ROOT=$NFD_ROOT \
                 -S . -B build
@@ -265,7 +261,6 @@ jobs:
           echo "STB_ROOT=$GITHUB_WORKSPACE/external/stb" >> $GITHUB_ENV
           echo "EFB_ROOT=$GITHUB_WORKSPACE/external/emscripten-browser-file" >> $GITHUB_ENV
           echo "BOOST_ROOT=$GITHUB_WORKSPACE/external/boost" >> $GITHUB_ENV
-          echo "BOOST_INCLUDEDIR=$GITHUB_WORKSPACE/external/boost" >> $GITHUB_ENV
           echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL/build/install" >> $GITHUB_ENV
 
       # --- Setup Emscripten SDK
@@ -300,7 +295,6 @@ jobs:
                 -DSTB_ROOT=$STB_ROOT \
                 -DEFB_ROOT=$EFB_ROOT \
                 -DBOOST_ROOT=$BOOST_ROOT \
-                -DBOOST_INCLUDEDIR=$BOOST_INCLUDEDIR \
                 -S . -B build
 
       # --- Build
