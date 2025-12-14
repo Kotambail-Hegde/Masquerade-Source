@@ -1,0 +1,206 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{661198c0-58cc-4e3f-9a6e-b6a67e014058}</ProjectGuid>
+    <RootNamespace>masqueradeOTA</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <LinkIncremental>true</LinkIncremental>
+    <PublicIncludeDirectories>$(PublicIncludeDirectories)</PublicIncludeDirectories>
+    <ExternalIncludePath>C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\pacMan;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\spaceInvaders;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\updater;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\gameOfLife;C:\Data\Softwares\Boost C++\boost_1_84_0;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\helpers;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\debugger;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\ui;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\core;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\n64;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\chip8;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\bios;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\gb-gbc;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade;C:\Data\Softwares\OneLoneCoder\Fork\Prototype-1\OneLoneCoder\olcPixelGameEngine\Extensions;C:\Data\Softwares\OneLoneCoder\olcSoundWaveEngine;C:\Data\Softwares\OneLoneCoder\Fork\Prototype-1\OneLoneCoder\olcPixelGameEngine;$(ExternalIncludePath)</ExternalIncludePath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <LinkIncremental>false</LinkIncremental>
+    <PublicIncludeDirectories>$(PublicIncludeDirectories)</PublicIncludeDirectories>
+    <ExternalIncludePath>C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\pacMan;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\spaceInvaders;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\updater;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\gameOfLife;C:\Data\Softwares\Boost C++\boost_1_84_0;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\helpers;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\debugger;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\ui;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\core;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\n64;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\chip8;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\bios;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\gb-gbc;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade;C:\Data\Softwares\OneLoneCoder\Fork\Prototype-1\OneLoneCoder\olcPixelGameEngine\Extensions;C:\Data\Softwares\OneLoneCoder\olcSoundWaveEngine;C:\Data\Softwares\OneLoneCoder\Fork\Prototype-1\OneLoneCoder\olcPixelGameEngine;$(ExternalIncludePath)</ExternalIncludePath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <LinkIncremental>true</LinkIncremental>
+    <PublicIncludeDirectories>$(PublicIncludeDirectories)</PublicIncludeDirectories>
+    <ExternalIncludePath>C:\Data\Softwares\stb\stb;C:\Data\Softwares\Miniz\miniz-3.0.2;C:\Data\Softwares\Emscripten\emscripten-browser-file;C:\Data\Softwares\ImGui\Docking\imgui;C:\Data\Softwares\ImGui\Docking\imgui\backends;C:\Data\Softwares\ImGui\Docking\imgui\examples\libs;C:\Data\Softwares\ImGui\Docking\imgui\misc\cpp;C:\Data\Softwares\Nativefiledialog-extended\nativefiledialog-extended;C:\Data\Softwares\Nativefiledialog-extended\nativefiledialog-extended\src\include;C:\Data\Softwares\Boost C++\boost_1_89_0;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\cheats;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\pacMan;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\spaceInvaders;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\ota;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\gameOfLife;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\helpers;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\debugger;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\ui;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\core;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\n64;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\chip8;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\bios;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\gba;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\gb-gbc;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\nes;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade</ExternalIncludePath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <LinkIncremental>false</LinkIncremental>
+    <PublicIncludeDirectories>$(PublicIncludeDirectories)</PublicIncludeDirectories>
+    <ExternalIncludePath>C:\Data\Softwares\stb\stb;C:\Data\Softwares\Miniz\miniz-3.0.2;C:\Data\Softwares\Emscripten\emscripten-browser-file;C:\Data\Softwares\ImGui\Docking\imgui;C:\Data\Softwares\ImGui\Docking\imgui\backends;C:\Data\Softwares\ImGui\Docking\imgui\examples\libs;C:\Data\Softwares\ImGui\Docking\imgui\misc\cpp;C:\Data\Softwares\Nativefiledialog-extended\nativefiledialog-extended;C:\Data\Softwares\Nativefiledialog-extended\nativefiledialog-extended\src\include;C:\Data\Softwares\Boost C++\boost_1_89_0;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\cheats;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\pacMan;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\spaceInvaders;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\ota;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\gameOfLife;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\helpers;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\debugger;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\ui;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\core;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\n64;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\chip8;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\bios;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\gba;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\gb-gbc;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\nes;C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade</ExternalIncludePath>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions);_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>C:\Data\Softwares\Boost C++\boost_1_84_0\bin\x64\lib;C:\Data\Softwares\Boost C++\boost_1_84_0\libs;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions);_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>C:\Data\Softwares\Boost C++\boost_1_84_0\bin\x64\lib;C:\Data\Softwares\Boost C++\boost_1_84_0\libs;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions);_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS;_CRT_SECURE_NO_WARNINGS;ENABLE_OTA_EXECUTABLE</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpplatest</LanguageStandard>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <AdditionalIncludeDirectories>C:\Data\Softwares\Glad\OpenGL3\include;C:\SDL3\include;C:\OpenSSL-install\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <GenerateXMLDocumentationFiles>true</GenerateXMLDocumentationFiles>
+      <GenerateSourceDependencies>true</GenerateSourceDependencies>
+      <AdditionalOptions>/Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
+      <TreatWarningAsError>true</TreatWarningAsError>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>C:\Data\Softwares\Nativefiledialog-extended\nativefiledialog-extended\build\lib;C:\SDL3\lib;C:\OpenSSL-install\lib</AdditionalLibraryDirectories>
+      <AdditionalDependencies>opengl32.lib;C:\Data\Softwares\Nativefiledialog-extended\nativefiledialog-extended\build\lib\nfd.lib;C:\SDL3\lib\SDL3.lib;C:\OpenSSL-install\lib\libssl.lib;C:\OpenSSL-install\lib\libcrypto.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <PostBuildEvent>
+      <Command>:: Copy OpenSSL DLLs
+xcopy /y "C:\OpenSSL-install\bin\libssl-4-x64.dll" "$(OutDir)"
+xcopy /y "C:\OpenSSL-install\bin\libcrypto-4-x64.dll" "$(OutDir)"</Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions);_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS;_CRT_SECURE_NO_WARNINGS;ENABLE_OTA_EXECUTABLE</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpplatest</LanguageStandard>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <AdditionalIncludeDirectories>C:\Data\Softwares\Glad\OpenGL3\include;C:\SDL3\include;C:\OpenSSL-install\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <GenerateXMLDocumentationFiles>true</GenerateXMLDocumentationFiles>
+      <GenerateSourceDependencies>true</GenerateSourceDependencies>
+      <AdditionalOptions>/Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
+      <TreatWarningAsError>true</TreatWarningAsError>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>C:\Data\Softwares\Nativefiledialog-extended\nativefiledialog-extended\build\lib;C:\SDL3\lib;C:\OpenSSL-install\lib</AdditionalLibraryDirectories>
+      <AdditionalDependencies>opengl32.lib;C:\Data\Softwares\Nativefiledialog-extended\nativefiledialog-extended\build\lib\nfd.lib;C:\SDL3\lib\SDL3.lib;C:\OpenSSL-install\lib\libssl.lib;C:\OpenSSL-install\lib\libcrypto.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <LinkTimeCodeGeneration>Default</LinkTimeCodeGeneration>
+    </Link>
+    <PostBuildEvent>
+      <Command>:: Copy OpenSSL DLLs
+xcopy /y "C:\OpenSSL-install\bin\libssl-4-x64.dll" "$(OutDir)"
+xcopy /y "C:\OpenSSL-install\bin\libcrypto-4-x64.dll" "$(OutDir)"</Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="..\..\..\..\..\..\Softwares\Miniz\miniz-3.0.2\miniz.c" />
+    <ClCompile Include="..\ota\masquerade-OTA.cpp" />
+    <ClCompile Include="..\ota\ota.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\..\..\..\..\..\Softwares\Miniz\miniz-3.0.2\miniz.h" />
+    <ClInclude Include="..\ota\ota.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="..\masquerade.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="..\assets\ui\icons\masquerade.ico" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>
