@@ -6,31 +6,26 @@ on:
   pull_request:
     branches: [ci_cd_support_1]
 
-env:
-  BUILD_ROOT: build
-
 jobs:
   build_windows:
     name: Build Windows (MSVC + vcpkg)
     runs-on: windows-latest
     env:
-      BUILD_DIR: ${{ env.BUILD_ROOT }}/windows/x86_64/msvc
+      BUILD_ROOT: build
+      BUILD_DIR: build/windows/x86_64/msvc
     steps:
       - uses: actions/checkout@v3
 
-      # Bootstrap vcpkg manually
       - name: Bootstrap vcpkg
         run: |
           git clone https://github.com/microsoft/vcpkg.git $env:BUILD_DIR\vcpkg
           $env:BUILD_DIR\vcpkg\bootstrap-vcpkg.bat
 
-      # Install Boost using vcpkg
       - name: Install Boost
         run: |
           $env:BUILD_DIR\vcpkg\vcpkg install boost:x64-windows
           $env:BUILD_DIR\vcpkg\vcpkg integrate install
 
-      # Configure CMake
       - name: Configure CMake
         shell: powershell
         run: |
@@ -40,12 +35,10 @@ jobs:
             -S . `
             -B "$env:BUILD_DIR/solution_IDE"
 
-      # Build
       - name: Build
         shell: powershell
         run: cmake --build "$env:BUILD_DIR/solution_IDE" --config Release
 
-      # Upload artifacts
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -56,27 +49,24 @@ jobs:
     name: Build Linux (Ninja + vcpkg)
     runs-on: ubuntu-latest
     env:
-      BUILD_DIR: ${{ env.BUILD_ROOT }}/linux/x86_64
+      BUILD_ROOT: build
+      BUILD_DIR: build/linux/x86_64
     steps:
       - uses: actions/checkout@v3
 
-      # Install system dependencies
       - name: Install Dependencies
         run: sudo apt-get update && sudo apt-get install -y ninja-build build-essential cmake git
 
-      # Bootstrap vcpkg manually
       - name: Bootstrap vcpkg
         run: |
           git clone https://github.com/microsoft/vcpkg.git $BUILD_DIR/vcpkg
           $BUILD_DIR/vcpkg/bootstrap-vcpkg.sh
 
-      # Install Boost using vcpkg
       - name: Install Boost
         run: |
           $BUILD_DIR/vcpkg/vcpkg install boost
           $BUILD_DIR/vcpkg/vcpkg integrate install
 
-      # Configure CMake
       - name: Configure CMake
         run: cmake -G "Ninja Multi-Config" \
           -DCMAKE_TOOLCHAIN_FILE="$BUILD_DIR/vcpkg/scripts/buildsystems/vcpkg.cmake" \
@@ -84,11 +74,9 @@ jobs:
           -S . \
           -B "$BUILD_DIR/ninja/"
 
-      # Build
       - name: Build
         run: cmake --build "$BUILD_DIR/ninja/" --config Release
 
-      # Upload artifacts
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -99,28 +87,25 @@ jobs:
     name: Build Emscripten (Ninja)
     runs-on: ubuntu-latest
     env:
-      BUILD_DIR: ${{ env.BUILD_ROOT }}/emscripten
+      BUILD_ROOT: build
+      BUILD_DIR: build/emscripten
     steps:
       - uses: actions/checkout@v3
 
-      # Setup Emscripten
       - name: Setup Emscripten
         uses: emscripten-core/setup-emsdk@v4
         with:
           emsdk-version: latest
 
-      # Configure CMake
       - name: Configure CMake
         run: emcmake cmake -G "Ninja Multi-Config" \
           -DCMAKE_DEFAULT_BUILD_TYPE=Release \
           -S . \
           -B "$BUILD_DIR/ninja/"
 
-      # Build
       - name: Build
         run: cmake --build "$BUILD_DIR/ninja/" --config Release
 
-      # Upload artifacts
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
