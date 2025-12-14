@@ -39,7 +39,16 @@ jobs:
           cd external
           
           if (!(Test-Path "imgui")) { git clone https://github.com/ocornut/imgui.git --branch docking --depth 1 }
-          if (!(Test-Path "miniz")) { git clone https://github.com/richgel999/miniz.git --depth 1 }
+          if (!(Test-Path "miniz")) {
+              $url = "https://github.com/richgel999/miniz/archive/refs/tags/3.0.2.zip"
+              $zip = "miniz-3.0.2.zip"
+
+              Invoke-WebRequest -Uri $url -OutFile $zip
+              Expand-Archive $zip -DestinationPath .
+              Rename-Item "miniz-3.0.2" "miniz"
+
+              Remove-Item $zip
+          }
           if (!(Test-Path "stb")) { git clone https://github.com/nothings/stb.git --depth 1 stb/stb }
           if (!(Test-Path "boost")) { git clone https://github.com/boostorg/boost.git --branch boost-1.84.0 --depth 1; cd boost; git submodule update --init --depth 1; cd .. }
           if (!(Test-Path "SDL")) { git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL }
@@ -170,7 +179,13 @@ jobs:
           mkdir -p external
           cd external
           [ ! -d "imgui" ] && git clone https://github.com/ocornut/imgui.git --branch docking --depth 1
-          [ ! -d "miniz" ] && git clone https://github.com/richgel999/miniz.git --depth 1
+          [ ! -d "miniz" ] && (
+            curl -L -o miniz-3.0.2.tar.gz \
+              https://github.com/richgel999/miniz/archive/refs/tags/3.0.2.tar.gz &&
+            tar -xzf miniz-3.0.2.tar.gz &&
+            mv miniz-3.0.2 miniz &&
+            rm miniz-3.0.2.tar.gz
+          )
           [ ! -d "stb/stb" ] && git clone --depth 1 https://github.com/nothings/stb.git stb/stb
           if [ ! -d "boost" ]; then git clone https://github.com/boostorg/boost.git --branch boost-1.84.0 --depth 1; cd boost; git submodule update --init --depth 1; cd ..; fi
           [ ! -d "SDL" ] && git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL
@@ -282,7 +297,13 @@ jobs:
           cd external
           [ ! -d "boost" ] && git clone https://github.com/boostorg/boost.git --branch boost-1.84.0 --depth 1 && cd boost && git submodule update --init --depth 1 && cd ..
           [ ! -d "imgui" ] && git clone https://github.com/ocornut/imgui.git --branch docking --depth 1
-          [ ! -d "miniz" ] && git clone https://github.com/richgel999/miniz.git --depth 1
+          [ ! -d "miniz" ] && (
+            curl -L -o miniz-3.0.2.tar.gz \
+              https://github.com/richgel999/miniz/archive/refs/tags/3.0.2.tar.gz &&
+            tar -xzf miniz-3.0.2.tar.gz &&
+            mv miniz-3.0.2 miniz &&
+            rm miniz-3.0.2.tar.gz
+          )
           [ ! -d "stb/stb" ] && git clone --depth 1 https://github.com/nothings/stb.git stb/stb
           [ ! -d "SDL" ] && git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL
           [ ! -d "emscripten-browser-file" ] && git clone https://github.com/Armchair-Software/emscripten-browser-file.git --depth 1
@@ -334,7 +355,7 @@ jobs:
           cd external/SDL
           mkdir -p build
           cd build
-          emcmake cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PWD/install -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST=OFF -DSDL_TESTS=OFF
+          emcmake cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PWD -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST=OFF -DSDL_TESTS=OFF
           ninja -j$(nproc)
           ninja install
 
