@@ -6,138 +6,145 @@ on:
   pull_request:
     branches: [ci_cd_support_1]
 
-env:
-  BUILD_ROOT: ${{ github.workspace }}/build
-
 jobs:
   build_windows:
     name: Build Windows (MSVC + vcpkg)
     runs-on: windows-latest
+    defaults:
+      run:
+        shell: powershell
+    env:
+      BUILD_ROOT: ${{ github.workspace }}/build/windows
     steps:
       - uses: actions/checkout@v3
 
-      # --- Cache vcpkg repo
-      - name: Cache vcpkg repo
+      # --- Setup caching for vcpkg
+      - name: Cache vcpkg and installed packages
         uses: actions/cache@v3
         with:
-          path: ${{ env.BUILD_ROOT }}/vcpkg
-          key: vcpkg-repo-windows
-
-      # --- Cache installed packages
-      - name: Cache vcpkg installed packages
-        uses: actions/cache@v3
-        with:
-          path: ${{ env.BUILD_ROOT }}/vcpkg/installed
-          key: vcpkg-installed-windows
+          path: |
+            ${{ env.BUILD_ROOT }}/vcpkg
+            ${{ env.BUILD_ROOT }}/vcpkg_installed
+          key: windows-vcpkg-${{ hashFiles('vcpkg.json') }}
+          restore-keys: windows-vcpkg-
 
       # --- Clone and bootstrap vcpkg if not cached
-      - name: Bootstrap vcpkg
+      - name: Setup vcpkg
         run: |
-          if (-Not (Test-Path "${{ env.BUILD_ROOT }}\vcpkg\vcpkg.exe")) {
-            git clone https://github.com/microsoft/vcpkg.git ${{ env.BUILD_ROOT }}\vcpkg
-            & "${{ env.BUILD_ROOT }}\vcpkg\bootstrap-vcpkg.bat"
+          if (-Not (Test-Path -Path "${env.BUILD_ROOT}\vcpkg")) {
+            git clone https://github.com/microsoft/vcpkg.git "${env.BUILD_ROOT}\vcpkg"
           }
+          & "${env.BUILD_ROOT}\vcpkg\bootstrap-vcpkg.bat"
 
-      # --- Install Boost
+      # --- Install Boost via vcpkg
       - name: Install Boost
         run: |
-          & "${{ env.BUILD_ROOT }}\vcpkg\vcpkg.exe" install boost:x64-windows
+          & "${env.BUILD_ROOT}\vcpkg\vcpkg.exe" install boost:x64-windows --triplet x64-windows
+          & "${env.BUILD_ROOT}\vcpkg\vcpkg.exe" integrate install
 
       # --- Configure CMake
       - name: Configure CMake
         run: cmake -G "Visual Studio 17 2022" `
-              -DCMAKE_TOOLCHAIN_FILE="${{ env.BUILD_ROOT }}\vcpkg\scripts\buildsystems\vcpkg.cmake" `
-              -DCMAKE_DEFAULT_BUILD_TYPE=Release `
+              -DCMAKE_TOOLCHAIN_FILE="${env.BUILD_ROOT}\vcpkg\scripts\buildsystems\vcpkg.cmake" `
+              -DCMAKE_BUILD_TYPE=Release `
               -S . `
-              -B "${{ env.BUILD_ROOT }}\windows\x86_64\msvc\solution_IDE"
+              -B "${env.BUILD_ROOT}\msvc_solution"
 
       # --- Build
       - name: Build
-        run: cmake --build "${{ env.BUILD_ROOT }}\windows\x86_64\msvc\solution_IDE" --config Release
+        run: cmake --build "${env.BUILD_ROOT}\msvc_solution" --config Release
 
       # --- Upload artifacts
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-build
-          path: "${{ env.BUILD_ROOT }}\windows\x86_64\msvc\solution_IDE\Release"
+          path: "${env.BUILD_ROOT}\msvc_solution\Release"
 
   build_linux:
     name: Build Linux (Ninja + vcpkg)
     runs-on: ubuntu-latest
+    env:
+      BUILD_ROOT: ${{ github.workspace }}/build/linux
     steps:
       - uses: actions/checkout@v3
 
-      # --- Cache vcpkg repo
-      - uses: actions/cache@v3
-        with:
-          path: ${{ env.BUILD_ROOT }}/vcpkg
-          key: vcpkg-repo-linux
+      - name: Install Dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build build-essential cmake git curl
 
-      # --- Cache installed packages
-      - uses: actions/cache@v3
+      # --- Cache vcpkg and installed packages
+      - name: Cache vcpkg and installed packages
+        uses: actions/cache@v3
         with:
-          path: ${{ env.BUILD_ROOT }}/vcpkg/installed
-          key: vcpkg-installed-linux
+          path: |
+            ${{ env.BUILD_ROOT }}/vcpkg
+            ${{ env.BUILD_ROOT }}/vcpkg_installed
+          key: linux-vcpkg-${{ hashFiles('vcpkg.json') }}
+          restore-keys: linux-vcpkg-
 
-      # --- Bootstrap vcpkg
-      - name: Bootstrap vcpkg
+      # --- Clone and bootstrap vcpkg
+      - name: Setup vcpkg
         run: |
-          if [ ! -f "${{ env.BUILD_ROOT }}/vcpkg/vcpkg" ]; then
-            git clone https://github.com/microsoft/vcpkg.git ${{ env.BUILD_ROOT }}/vcpkg
-            ./vcpkg/bootstrap-vcpkg.sh
+          if [ ! -d "${BUILD_ROOT}/vcpkg" ]; then
+            git clone https://github.com/microsoft/vcpkg.git "${BUILD_ROOT}/vcpkg"
           fi
+          bash "${BUILD_ROOT}/vcpkg/bootstrap-vcpkg.sh"
 
       # --- Install Boost
       - name: Install Boost
         run: |
-          ${{ env.BUILD_ROOT }}/vcpkg/vcpkg install boost
+          "${BUILD_ROOT}/vcpkg/vcpkg" install boost
+          "${BUILD_ROOT}/vcpkg/vcpkg" integrate install
 
       # --- Configure CMake
       - name: Configure CMake
-        run: cmake -G "Ninja Multi-Config" \
-              -DCMAKE_TOOLCHAIN_FILE="${{ env.BUILD_ROOT }}/vcpkg/scripts/buildsystems/vcpkg.cmake" \
-              -DCMAKE_DEFAULT_BUILD_TYPE=Release \
+        run: cmake -G "Ninja" \
+              -DCMAKE_TOOLCHAIN_FILE="${BUILD_ROOT}/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+              -DCMAKE_BUILD_TYPE=Release \
               -S . \
-              -B "${{ env.BUILD_ROOT }}/linux/ninja"
+              -B "${BUILD_ROOT}/ninja_build"
 
       # --- Build
       - name: Build
-        run: cmake --build "${{ env.BUILD_ROOT }}/linux/ninja" --config Release
+        run: cmake --build "${BUILD_ROOT}/ninja_build"
 
       # --- Upload artifacts
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: linux-build
-          path: "${{ env.BUILD_ROOT }}/linux/ninja"
+          path: "${BUILD_ROOT}/ninja_build"
 
   build_emscripten:
     name: Build Emscripten (Ninja)
     runs-on: ubuntu-latest
+    env:
+      BUILD_ROOT: ${{ github.workspace }}/build/emscripten
     steps:
       - uses: actions/checkout@v3
 
-      # --- Setup Emscripten
+      - name: Install Dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build build-essential cmake git curl python3
+
       - name: Setup Emscripten
-        uses: emscripten-core/setup-emsdk@v4
+        uses: emscripten-core/setup-emsdk@v3
         with:
           emsdk-version: latest
 
       # --- Configure CMake
       - name: Configure CMake
-        run: emcmake cmake -G "Ninja Multi-Config" \
-              -DCMAKE_DEFAULT_BUILD_TYPE=Release \
+        run: emcmake cmake -G "Ninja" \
+              -DCMAKE_BUILD_TYPE=Release \
               -S . \
-              -B "${{ env.BUILD_ROOT }}/emscripten/ninja"
+              -B "${BUILD_ROOT}/ninja_build"
 
       # --- Build
       - name: Build
-        run: cmake --build "${{ env.BUILD_ROOT }}/emscripten/ninja" --config Release
+        run: cmake --build "${BUILD_ROOT}/ninja_build"
 
       # --- Upload artifacts
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: emscripten-build
-          path: "${{ env.BUILD_ROOT }}/emscripten/ninja"
+          path: "${BUILD_ROOT}/ninja_build"
