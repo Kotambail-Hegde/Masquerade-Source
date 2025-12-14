@@ -2,6 +2,13 @@ cmake_minimum_required(VERSION 3.24.0)
 
 project(masquerade)  # MUST come before checking CMAKE_SYSTEM_NAME
 
+# Detect if we are running inside GitHub Actions
+if(DEFINED ENV{GITHUB_ACTIONS} AND $ENV{GITHUB_ACTIONS} STREQUAL "true")
+    set(IS_GITHUB_ACTIONS TRUE)
+else()
+    set(IS_GITHUB_ACTIONS FALSE)
+endif()
+
 # --- Automatically setup the required libraries path from root path
 if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows" AND NOT IS_GITHUB_ACTIONS)
     message(STATUS "Building on Windows")
