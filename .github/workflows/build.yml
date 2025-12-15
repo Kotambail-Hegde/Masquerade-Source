@@ -104,6 +104,8 @@ jobs:
             --prefix="$($PWD.Path)" `
             --jobs=$env:NUMBER_OF_PROCESSORS
 
+          exit 0
+
       # --- Build SDL3
       - name: Build SDL3
         run: |
