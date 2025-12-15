@@ -40,44 +40,70 @@ jobs:
       - name: Clone all dependencies
         if: steps.cache-external.outputs.cache-hit != 'true'
         run: |
-          New-Item -ItemType Directory -Force -Path external
+          # Ensure external folder exists
+          if (-not (Test-Path "external")) { New-Item -ItemType Directory -Path "external" }
+
           cd external
-          
-          if (!(Test-Path "imgui")) { git clone https://github.com/ocornut/imgui.git --branch docking --depth 1 }
-          if (!(Test-Path "miniz")) {
+
+          # --- ImGui
+          if (-not (Test-Path "imgui")) {
+              git clone https://github.com/ocornut/imgui.git --branch docking --depth 1
+          }
+
+          # --- Miniz
+          if (-not (Test-Path "miniz")) {
               Write-Host "=== MINIZ: not found, downloading ==="
               $url = "https://github.com/richgel999/miniz/releases/download/3.0.2/miniz-3.0.2.zip"
               $zip = "miniz-3.0.2.zip"
               $tmpDir = "_miniz_extract"
-              
+
               Write-Host "Downloading: $url"
               Invoke-WebRequest -Uri $url -OutFile $zip
-              
+
               Write-Host "Extracting $zip into ${tmpDir}/"
               Expand-Archive $zip -DestinationPath $tmpDir -Force
-              
+
               Write-Host "Contents of ${tmpDir}:"
               Get-ChildItem $tmpDir | Format-Table Name, Mode
-              
+
               Write-Host "Moving ${tmpDir} -> miniz"
               Move-Item -Path $tmpDir -Destination "miniz" -Force
-              
+
               Write-Host "Contents of external/ after move:"
               Get-ChildItem . | Format-Table Name, Mode
-              
+
               Write-Host "Cleaning up"
               Remove-Item -Path $zip -Force
-              
+
               Write-Host "=== MINIZ setup complete ==="
           } else {
               Write-Host "=== MINIZ already exists, skipping ==="
               Write-Host "Contents of external/:"
               Get-ChildItem . | Format-Table Name, Mode
           }
-          if (!(Test-Path "stb")) { git clone https://github.com/nothings/stb.git --depth 1 stb/stb }
-          if (!(Test-Path "boost")) { git clone https://github.com/boostorg/boost.git --branch boost-1.84.0 --depth 1; cd boost; git submodule update --init --depth 1; cd .. }
-          if (!(Test-Path "SDL")) { git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL }
-          if (!(Test-Path "nativefiledialog-extended")) { git clone https://github.com/btzy/nativefiledialog-extended.git --depth 1 }
+
+          # --- stb
+          if (-not (Test-Path "stb/stb")) {
+              git clone https://github.com/nothings/stb.git --depth 1 stb/stb
+          }
+
+          # --- Boost
+          if (-not (Test-Path "boost")) {
+              git clone https://github.com/boostorg/boost.git --branch boost-1.84.0 --depth 1
+              cd boost
+              git submodule update --init --depth 1
+              cd ..
+          }
+
+          # --- SDL
+          if (-not (Test-Path "SDL")) {
+              git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL
+          }
+
+          # --- NativeFileDialog-Extended
+          if (-not (Test-Path "nativefiledialog-extended")) {
+              git clone https://github.com/btzy/nativefiledialog-extended.git --depth 1
+          }
         shell: pwsh
 
       # --- Build Boost
