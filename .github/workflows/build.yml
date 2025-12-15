@@ -139,7 +139,7 @@ jobs:
       - name: Build SDL3
         run: |
           cd external/SDL
-          mkdir -p build
+          if (-not (Test-Path "build")) { New-Item -ItemType Directory -Path "build" | Out-Null }
           cd build
           cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$($PWD.Path)" -DSDL_SHARED=ON -DSDL_STATIC=ON
           cmake --build . --config Release --parallel
@@ -150,7 +150,7 @@ jobs:
       - name: Build NFD
         run: |
           cd external/nativefiledialog-extended
-          mkdir -p build
+          if (-not (Test-Path "build")) { New-Item -ItemType Directory -Path "build" | Out-Null }
           cd build
           cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$($PWD.Path)"
           cmake --build . --config Release --parallel
@@ -463,7 +463,7 @@ jobs:
             echo "STB_ROOT=$GITHUB_WORKSPACE/external/stb" >> $GITHUB_ENV
             echo "EFB_ROOT=$GITHUB_WORKSPACE/external/emscripten-browser-file" >> $GITHUB_ENV
             echo "BOOST_ROOT=$GITHUB_WORKSPACE/external/boost" >> $GITHUB_ENV
-            echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL-install/emscripten/build" >> $GITHUB_ENV
+            echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL-install/emscripten" >> $GITHUB_ENV
 
         # --- Setup Emscripten SDK
         - name: Setup Emscripten
@@ -495,13 +495,13 @@ jobs:
             fi
 
             mkdir -p external/SDL-build/emscripten
-            mkdir -p external/SDL-install/emscripten
+            mkdir -p external/SDL-install/emscripten/build
 
             cd external/SDL-build/emscripten
 
             emcmake cmake ../../SDL -G Ninja \
               -DCMAKE_BUILD_TYPE=Release \
-              -DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/external/SDL-install/emscripten \
+              -DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/external/SDL-install/emscripten/build \
               -DSDL_SHARED=OFF \
               -DSDL_STATIC=ON \
               -DSDL_TEST=OFF \
