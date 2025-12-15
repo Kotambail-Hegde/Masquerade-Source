@@ -32,9 +32,9 @@ jobs:
             external/boost
             external/SDL
             external/nativefiledialog-extended
-          key: windows-external-all-v2-${{ hashFiles('.github/workflows/*.yml') }}
+          key: windows-external-all-v3-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: |
-            windows-external-all-v2-
+            windows-external-all-v3-
 
       # --- Clone all dependencies (only if not cached)
       - name: Clone all dependencies
@@ -116,15 +116,30 @@ jobs:
         run: |
           cd external/boost
 
-          # Clean environment that confuses b2
+          # Check if Boost is already completely built
+          if ((Test-Path "lib/libboost_*.lib") -and (Test-Path "include/boost/config.hpp")) {
+            Write-Host "=== Boost already built and complete, skipping ==="
+            exit 0
+          }
+
+          # Clean any partial/corrupted build state
+          Write-Host "=== Cleaning partial Boost build ==="
+          if (Test-Path "bin.v2") { Remove-Item -Recurse -Force "bin.v2" }
+          if (Test-Path "stage") { Remove-Item -Recurse -Force "stage" }
+          if (Test-Path "project-config.jam") { Remove-Item "project-config.jam" }
+
+          # Clean environment
           Remove-Item Env:B2_JOBS -ErrorAction SilentlyContinue
           Remove-Item Env:BOOST_BUILD_JOBS -ErrorAction SilentlyContinue
           Remove-Item Env:MAKEFLAGS -ErrorAction SilentlyContinue
 
-          if (Test-Path project-config.jam) { Remove-Item project-config.jam }
-
+          Write-Host "=== Building Boost ==="
           .\bootstrap.bat
 
+          # Generate headers FIRST
+          .\b2.exe headers
+
+          # Then build and install
           .\b2.exe install `
             variant=release `
             link=static,shared `
@@ -132,8 +147,6 @@ jobs:
             runtime-link=shared `
             --prefix="$($PWD.Path)" `
             --jobs=$env:NUMBER_OF_PROCESSORS
-
-          exit 0
 
       # --- Build SDL3
       - name: Build SDL3
