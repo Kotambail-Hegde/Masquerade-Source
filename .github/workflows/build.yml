@@ -434,7 +434,7 @@ jobs:
             echo "STB_ROOT=$GITHUB_WORKSPACE/external/stb" >> $GITHUB_ENV
             echo "EFB_ROOT=$GITHUB_WORKSPACE/external/emscripten-browser-file" >> $GITHUB_ENV
             echo "BOOST_ROOT=$GITHUB_WORKSPACE/external/boost" >> $GITHUB_ENV
-            echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL-install/emscripten" >> $GITHUB_ENV
+            echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL-install/emscripten/build" >> $GITHUB_ENV
 
         # --- Setup Emscripten SDK
         - name: Setup Emscripten
@@ -460,19 +460,19 @@ jobs:
         # --- Build SDL3 (Emscripten)
         - name: Build SDL3 (Emscripten)
           run: |
-            if [ -f external/SDL-install/emscripten/lib/libSDL3.a ]; then
+            if [ -f external/SDL-install/emscripten/build/lib/libSDL3.a ]; then
               echo "=== SDL3 Emscripten already built, skipping ==="
               exit 0
             fi
 
             mkdir -p external/SDL-build/emscripten
-            mkdir -p external/SDL-install/emscripten
+            mkdir -p external/SDL-install/emscripten/build
 
             cd external/SDL-build/emscripten
 
             emcmake cmake ../../SDL -G Ninja \
               -DCMAKE_BUILD_TYPE=Release \
-              -DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/external/SDL-install/emscripten \
+              -DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/external/SDL-install/emscripten/build \
               -DSDL_SHARED=OFF \
               -DSDL_STATIC=ON \
               -DSDL_TEST=OFF \
