@@ -332,179 +332,195 @@ jobs:
           path: build/bin/
 
   build_emscripten:
-    name: Build Emscripten (Web)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
+      name: Build Emscripten (Web)
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v4
+          with:
+            submodules: recursive
 
-      # --- Cache external dependencies
-      - name: Cache external dependencies
-        id: cache-external
-        uses: actions/cache@v4
-        with:
-          path: |
-            external/imgui
-            external/miniz
-            external/stb
-            external/SDL
-            external/emscripten-browser-file
-            external/boost
-          key: emscripten-external-all-v1-${{ hashFiles('.github/workflows/*.yml') }}
-          restore-keys: |
-            emscripten-external-all-v1-
+        # --- Cache external dependencies
+        - name: Cache external dependencies
+          id: cache-external
+          uses: actions/cache@v4
+          with:
+            path: |
+              external/imgui
+              external/miniz
+              external/stb
+              external/SDL
+              external/emscripten-browser-file
+              external/boost
+            key: emscripten-external-all-v1-${{ hashFiles('.github/workflows/*.yml') }}
+            restore-keys: |
+              emscripten-external-all-v1-
 
-      # --- Clone dependencies
-      - name: Clone dependencies
-        if: steps.cache-external.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p external
-          cd external
+        # --- Cache SDL3 (Emscripten build + install)
+        - name: Cache SDL3 Emscripten
+          id: cache-sdl-emscripten
+          uses: actions/cache@v4
+          with:
+            path: |
+              external/SDL-build/emscripten
+              external/SDL-install/emscripten
+            key: sdl3-emscripten-v1-${{ hashFiles('external/SDL/**') }}
+            restore-keys: |
+              sdl3-emscripten-v1-
 
-          if [ ! -d "boost" ]; then
-            git clone https://github.com/boostorg/boost.git --branch boost-1.84.0 --depth 1
-            cd boost
-            git submodule update --init --depth 1
-            cd ..
-          fi
+        # --- Clone dependencies
+        - name: Clone dependencies
+          if: steps.cache-external.outputs.cache-hit != 'true'
+          run: |
+            mkdir -p external
+            cd external
 
-          if [ ! -d "imgui" ]; then
-            git clone https://github.com/ocornut/imgui.git --branch docking --depth 1
-          fi
+            if [ ! -d "boost" ]; then
+              git clone https://github.com/boostorg/boost.git --branch boost-1.84.0 --depth 1
+              cd boost
+              git submodule update --init --depth 1
+              cd ..
+            fi
 
-          # --- Miniz
-          if [ ! -d "miniz" ]; then
-            echo "=== MINIZ not found, downloading release 3.0.2 ==="
-            
-            URL="https://github.com/richgel999/miniz/releases/download/3.0.2/miniz-3.0.2.zip"
-            ZIP="miniz-3.0.2.zip"
-            TMPDIR="_miniz_extract"
-            
-            echo "Downloading $URL"
-            curl -L "$URL" -o "$ZIP"
-            
-            echo "Extracting $ZIP into $TMPDIR/"
-            mkdir -p "$TMPDIR"
-            unzip "$ZIP" -d "$TMPDIR"
-            
-            echo "Extracted contents:"
-            ls -la "$TMPDIR"
-            
-            echo "Moving $TMPDIR -> miniz"
-            mv "$TMPDIR" miniz
-            
-            echo "Cleaning up"
-            rm -f "$ZIP"
-            
-            echo "=== MINIZ ready at $(pwd)/miniz ==="
-          else
-            echo "=== MINIZ already exists, skipping ==="
-          fi
+            if [ ! -d "imgui" ]; then
+              git clone https://github.com/ocornut/imgui.git --branch docking --depth 1
+            fi
 
-          if [ ! -d "stb/stb" ]; then
-            git clone --depth 1 https://github.com/nothings/stb.git stb/stb
-          fi
+            # --- Miniz
+            if [ ! -d "miniz" ]; then
+              echo "=== MINIZ not found, downloading release 3.0.2 ==="
+              
+              URL="https://github.com/richgel999/miniz/releases/download/3.0.2/miniz-3.0.2.zip"
+              ZIP="miniz-3.0.2.zip"
+              TMPDIR="_miniz_extract"
+              
+              echo "Downloading $URL"
+              curl -L "$URL" -o "$ZIP"
+              
+              echo "Extracting $ZIP into $TMPDIR/"
+              mkdir -p "$TMPDIR"
+              unzip "$ZIP" -d "$TMPDIR"
+              
+              echo "Extracted contents:"
+              ls -la "$TMPDIR"
+              
+              echo "Moving $TMPDIR -> miniz"
+              mv "$TMPDIR" miniz
+              
+              echo "Cleaning up"
+              rm -f "$ZIP"
+              
+              echo "=== MINIZ ready at $(pwd)/miniz ==="
+            else
+              echo "=== MINIZ already exists, skipping ==="
+            fi
 
-          if [ ! -d "SDL" ]; then
-            git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL
-          fi
+            if [ ! -d "stb/stb" ]; then
+              git clone --depth 1 https://github.com/nothings/stb.git stb/stb
+            fi
 
-          if [ ! -d "emscripten-browser-file" ]; then
-            git clone https://github.com/Armchair-Software/emscripten-browser-file.git --depth 1
-          fi
+            if [ ! -d "SDL" ]; then
+              git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL
+            fi
 
-      # --- Set environment variables
-      - name: Set dependency paths
-        run: |
-          echo "IMGUI_ROOT=$GITHUB_WORKSPACE/external/imgui" >> $GITHUB_ENV
-          echo "MINIZ_ROOT=$GITHUB_WORKSPACE/external/miniz" >> $GITHUB_ENV
-          echo "STB_ROOT=$GITHUB_WORKSPACE/external/stb" >> $GITHUB_ENV
-          echo "EFB_ROOT=$GITHUB_WORKSPACE/external/emscripten-browser-file" >> $GITHUB_ENV
-          echo "BOOST_ROOT=$GITHUB_WORKSPACE/external/boost" >> $GITHUB_ENV
-          echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL/build" >> $GITHUB_ENV
+            if [ ! -d "emscripten-browser-file" ]; then
+              git clone https://github.com/Armchair-Software/emscripten-browser-file.git --depth 1
+            fi
 
-      # --- Setup Emscripten SDK
-      - name: Setup Emscripten
-        uses: mymindstorm/setup-emsdk@v14
-        with:
-          version: '3.1.56'
-          actions-cache-folder: 'emsdk-cache'
+        # --- Set environment variables
+        - name: Set dependency paths
+          run: |
+            echo "IMGUI_ROOT=$GITHUB_WORKSPACE/external/imgui" >> $GITHUB_ENV
+            echo "MINIZ_ROOT=$GITHUB_WORKSPACE/external/miniz" >> $GITHUB_ENV
+            echo "STB_ROOT=$GITHUB_WORKSPACE/external/stb" >> $GITHUB_ENV
+            echo "EFB_ROOT=$GITHUB_WORKSPACE/external/emscripten-browser-file" >> $GITHUB_ENV
+            echo "BOOST_ROOT=$GITHUB_WORKSPACE/external/boost" >> $GITHUB_ENV
+            echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL-install/emscripten" >> $GITHUB_ENV
 
-      # --- Install ninja
-      - name: Install Ninja
-        run: sudo apt-get update && sudo apt-get install -y ninja-build
+        # --- Setup Emscripten SDK
+        - name: Setup Emscripten
+          uses: mymindstorm/setup-emsdk@v14
+          with:
+            version: '3.1.56'
+            actions-cache-folder: 'emsdk-cache'
 
-      # --- Build Boost (Emscripten)
-      - name: Build Boost
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          cd external/boost
+        # --- Install ninja
+        - name: Install Ninja
+          run: sudo apt-get update && sudo apt-get install -y ninja-build
 
-          # Ensure script is executable
-          chmod +x bootstrap.sh
+        # --- Build Boost (Emscripten)
+        - name: Build Boost
+          if: runner.os == 'Linux'
+          shell: bash
+          run: |
+            cd external/boost
+            chmod +x bootstrap.sh
+            ./bootstrap.sh --prefix="$PWD"
+            ./b2 install variant=release link=static,shared threading=multi -j$(nproc)
 
-          # Bootstrap Boost
-          ./bootstrap.sh --prefix="$PWD"
+        # --- Build SDL3 (Emscripten)
+        - name: Build SDL3 (Emscripten)
+          run: |
+            if [ -f external/SDL-install/emscripten/lib/libSDL3.a ]; then
+              echo "=== SDL3 Emscripten already built, skipping ==="
+              exit 0
+            fi
 
-          # Build + install (static + shared)
-          ./b2 install \
-            variant=release \
-            link=static,shared \
-            threading=multi \
-            -j$(nproc)
+            mkdir -p external/SDL-build/emscripten
+            mkdir -p external/SDL-install/emscripten
 
-      # --- Build SDL3
-      - name: Build SDL3
-        run: |
-          cd external/SDL
-          mkdir -p build
-          cd build
-          emcmake cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PWD -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST=OFF -DSDL_TESTS=OFF
-          ninja -j$(nproc)
-          ninja install
+            cd external/SDL-build/emscripten
 
-      # --- Configure CMake
-      - name: Configure CMake
-        run: |
-          emcmake cmake -G Ninja \
-                -DCMAKE_BUILD_TYPE=Release \
-                -DSDL3_ROOT=$SDL3_ROOT \
-                -DIMGUI_ROOT=$IMGUI_ROOT \
-                -DMINIZ_ROOT=$MINIZ_ROOT \
-                -DSTB_ROOT=$STB_ROOT \
-                -DEFB_ROOT=$EFB_ROOT \
-                -DBOOST_ROOT=$BOOST_ROOT \
-                -S . -B build
+            emcmake cmake ../../SDL -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/external/SDL-install/emscripten \
+              -DSDL_SHARED=OFF \
+              -DSDL_STATIC=ON \
+              -DSDL_TEST=OFF \
+              -DSDL_TESTS=OFF
 
-      # --- Build
-      - name: Build
-        run: cmake --build build --config Release --parallel $(nproc)
+            ninja -j$(nproc)
+            ninja install
 
-      # --- Prepare Pages
-      - name: Prepare Pages Deployment
-        run: |
-          mkdir -p pages
-          [ -f build/bin/masquerade.html ] && cp build/bin/masquerade.html pages/index.html
-          [ -f build/bin/masquerade.js ] && cp build/bin/masquerade.js pages/
-          [ -f build/bin/masquerade.wasm ] && cp build/bin/masquerade.wasm pages/
-          [ -f build/bin/masquerade.data ] && cp build/bin/masquerade.data pages/
-          echo "Files to deploy:"
-          ls -lh pages/
+        # --- Configure CMake
+        - name: Configure CMake
+          run: |
+            emcmake cmake -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DSDL3_ROOT=$SDL3_ROOT \
+              -DIMGUI_ROOT=$IMGUI_ROOT \
+              -DMINIZ_ROOT=$MINIZ_ROOT \
+              -DSTB_ROOT=$STB_ROOT \
+              -DEFB_ROOT=$EFB_ROOT \
+              -DBOOST_ROOT=$BOOST_ROOT \
+              -S . -B build
 
-      # --- Upload artifacts
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: emscripten-build
-          path: pages/
+        # --- Build
+        - name: Build
+          run: cmake --build build --config Release --parallel $(nproc)
 
-      # --- Deploy to GitHub Pages
-      - name: Deploy to GitHub Pages
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/ci_cd_support_1' || github.ref == 'refs/heads/main')
-        uses: peaceiris/actions-gh-pages@v3
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./pages
-          force_orphan: true
+        # --- Prepare Pages
+        - name: Prepare Pages Deployment
+          run: |
+            mkdir -p pages
+            [ -f build/bin/masquerade.html ] && cp build/bin/masquerade.html pages/index.html
+            [ -f build/bin/masquerade.js ] && cp build/bin/masquerade.js pages/
+            [ -f build/bin/masquerade.wasm ] && cp build/bin/masquerade.wasm pages/
+            [ -f build/bin/masquerade.data ] && cp build/bin/masquerade.data pages/
+            echo "Files to deploy:"
+            ls -lh pages/
+
+        # --- Upload artifacts
+        - name: Upload artifacts
+          uses: actions/upload-artifact@v4
+          with:
+            name: emscripten-build
+            path: pages/
+
+        # --- Deploy to GitHub Pages
+        - name: Deploy to GitHub Pages
+          if: github.event_name == 'push' && (github.ref == 'refs/heads/ci_cd_support_1' || github.ref == 'refs/heads/main')
+          uses: peaceiris/actions-gh-pages@v3
+          with:
+            github_token: ${{ secrets.GITHUB_TOKEN }}
+            publish_dir: ./pages
+            force_orphan: true
