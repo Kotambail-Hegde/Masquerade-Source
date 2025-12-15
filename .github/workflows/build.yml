@@ -40,8 +40,9 @@ jobs:
       - name: Clone all dependencies
         if: steps.cache-external.outputs.cache-hit != 'true'
         run: |
-          # Ensure external folder exists
-          if (-not (Test-Path "external")) { New-Item -ItemType Directory -Path "external" }
+          # --- Ensure external folder exists
+          $externalDir = "external"
+          if (-not (Test-Path $externalDir)) { New-Item -ItemType Directory -Path $externalDir | Out-Null }
 
           cd external
 
@@ -61,13 +62,15 @@ jobs:
               Invoke-WebRequest -Uri $url -OutFile $zip
 
               Write-Host "Extracting $zip into ${tmpDir}/"
+              if (Test-Path $tmpDir) { Remove-Item -Recurse -Force $tmpDir }
               Expand-Archive $zip -DestinationPath $tmpDir -Force
 
               Write-Host "Contents of ${tmpDir}:"
               Get-ChildItem $tmpDir | Format-Table Name, Mode
 
               Write-Host "Moving ${tmpDir} -> miniz"
-              Move-Item -Path $tmpDir -Destination "miniz" -Force
+              if (Test-Path "miniz") { Remove-Item -Recurse -Force "miniz" }
+              Move-Item -Path $tmpDir -Destination "miniz"
 
               Write-Host "Contents of external/ after move:"
               Get-ChildItem . | Format-Table Name, Mode
