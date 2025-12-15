@@ -492,13 +492,13 @@ jobs:
             fi
 
             mkdir -p external/SDL-build/emscripten
-            mkdir -p external/SDL-install/emscripten/build
+            mkdir -p external/SDL-install/emscripten
 
             cd external/SDL-build/emscripten
 
             emcmake cmake ../../SDL -G Ninja \
               -DCMAKE_BUILD_TYPE=Release \
-              -DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/external/SDL-install/emscripten/build \
+              -DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/external/SDL-install/emscripten \
               -DSDL_SHARED=OFF \
               -DSDL_STATIC=ON \
               -DSDL_TEST=OFF \
