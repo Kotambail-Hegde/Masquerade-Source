@@ -31,37 +31,59 @@ elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux" AND NOT IS_GITHUB_ACTIONS)
     include(${CMAKE_SOURCE_DIR}/Paths_lin.cmake)
 elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows" AND IS_GITHUB_ACTIONS)
     message(STATUS "CI build (Windows) – skipping local Paths_*.cmake")
+    # Normalize paths to forward slashes
+    file(TO_CMAKE_PATH "${BOOST_ROOT}" BOOST_ROOT)
+    file(TO_CMAKE_PATH "${IMGUI_ROOT}" IMGUI_ROOT)
+    file(TO_CMAKE_PATH "${MINIZ_ROOT}" MINIZ_ROOT)
+    file(TO_CMAKE_PATH "${STB_ROOT}" STB_ROOT)
+    file(TO_CMAKE_PATH "${SDL3_ROOT}" SDL3_ROOT)
+    file(TO_CMAKE_PATH "${NFD_ROOT}" NFD_ROOT)
     # Boost
     set(BOOST_INCLUDE_DIR "${BOOST_ROOT}")
     # SDL3
-    set(SDL3_CMAKE_PATH "${SDL3_ROOT}/cmake")
-    set(SDL3_LIB_PATH "${SDL3_ROOT}/lib/libSDL3.a") # For Emscripten
-    set(SDL3_INCLUDE_DIR "${SDL3_ROOT}/include")
-    set(CMAKE_PREFIX_PATH "${SDL3_CMAKE_PATH}")
+    set(SDL3_DIR "${SDL3_ROOT}/build/lib/cmake/SDL3")
+    set(SDL3_LIB_PATH "${SDL3_ROOT}/build/lib/libSDL3.a") # For Emscripten
+    set(SDL3_INCLUDE_DIR "${SDL3_ROOT}/build/include")
+    list(APPEND CMAKE_PREFIX_PATH "${SDL3_DIR}")
     # Nativefiledialog-extended
     set(NFD_CMAKE_PATH "${NFD_ROOT}/build/lib/cmake/nfd")
     set(nfd_DIR "${NFD_ROOT}/build/lib/cmake/nfd")
     set(NFD_INCLUDE_DIR "${NFD_ROOT}")
     set(NFD_SRC_INCLUDE_DIR "${NFD_ROOT}/src/include")
-    set(CMAKE_PREFIX_PATH "${NFD_CMAKE_PATH}")
+    list(APPEND CMAKE_PREFIX_PATH "${nfd_DIR}")
 elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux" AND IS_GITHUB_ACTIONS)
     message(STATUS "CI build (Linux) – skipping local Paths_*.cmake")
     # Boost
     set(BOOST_INCLUDE_DIR "${BOOST_ROOT}")
     # SDL3
-    set(SDL3_CMAKE_PATH "${SDL3_ROOT}/lib/cmake/SDL3")
-    set(SDL3_LIB_PATH "${SDL3_ROOT}/lib/libSDL3.a") # For Emscripten
-    set(SDL3_INCLUDE_DIR "${SDL3_ROOT}/include")
-    set(CMAKE_PREFIX_PATH "${SDL3_CMAKE_PATH}")
+    set(SDL3_DIR "${SDL3_ROOT}/build/lib/cmake/SDL3")
+    set(SDL3_LIB_PATH "${SDL3_ROOT}/build/lib/libSDL3.a") # For Emscripten
+    set(SDL3_INCLUDE_DIR "${SDL3_ROOT}/build/include")
+    list(APPEND CMAKE_PREFIX_PATH "${SDL3_DIR}")
     # Nativefiledialog-extended
     set(NFD_CMAKE_PATH "${NFD_ROOT}/build/lib/cmake/nfd")
     set(nfd_DIR "${NFD_ROOT}/build/lib/cmake/nfd")
     set(NFD_INCLUDE_DIR "${NFD_ROOT}")
     set(NFD_SRC_INCLUDE_DIR "${NFD_ROOT}/src/include")
-    set(CMAKE_PREFIX_PATH "${NFD_CMAKE_PATH}")
+    list(APPEND CMAKE_PREFIX_PATH "${nfd_DIR}")
 else()
     message(STATUS "Unsupported OS: ${CMAKE_HOST_SYSTEM_NAME}")
 endif()
+
+# Normalize all root paths for consistent path handling across platforms
+if(DEFINED IMGUI_ROOT)
+    file(TO_CMAKE_PATH "${IMGUI_ROOT}" IMGUI_ROOT)
+endif()
+if(DEFINED MINIZ_ROOT)
+    file(TO_CMAKE_PATH "${MINIZ_ROOT}" MINIZ_ROOT)
+endif()
+if(DEFINED STB_ROOT)
+    file(TO_CMAKE_PATH "${STB_ROOT}" STB_ROOT)
+endif()
+if(DEFINED EFB_ROOT)
+    file(TO_CMAKE_PATH "${EFB_ROOT}" EFB_ROOT)
+endif()
+
 # ImGui
 set(IMGUI_DIR "${IMGUI_ROOT}")
 set(IMGUI_BACKENDS_DIR "${IMGUI_ROOT}/backends")
