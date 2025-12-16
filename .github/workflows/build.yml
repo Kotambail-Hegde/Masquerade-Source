@@ -32,9 +32,9 @@ jobs:
             external/boost
             external/SDL
             external/nativefiledialog-extended
-          key: windows-external-all-v4-${{ hashFiles('.github/workflows/*.yml') }}
+          key: windows-external-all-v3-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: |
-            windows-external-all-v4-
+            windows-external-all-v3-
 
       # --- Clone all dependencies (only if not cached)
       - name: Clone all dependencies
@@ -116,31 +116,18 @@ jobs:
         run: |
           cd external/boost
 
-          .\bootstrap.bat
-          .\b2.exe headers
+          Write-Host "=== Boost root: $PWD ==="
 
-          # Check if Boost is already completely built
-          $boostLibs = Get-ChildItem -Path "lib" -Filter "*.lib" -ErrorAction SilentlyContinue
-
-          if (($boostLibs.Count -gt 0) -and (Test-Path "libs/config/include/boost/config.hpp")) {
-              Write-Host "=== Boost already built and complete (found $($boostLibs.Count) libraries), skipping ==="
-              exit 0
+          # Bootstrap only if b2.exe does not exist
+          if (!(Test-Path ".\b2.exe")) {
+              Write-Host "=== Bootstrapping Boost ==="
+              .\bootstrap.bat
+          } else {
+              Write-Host "=== b2.exe already exists, skipping bootstrap ==="
           }
 
-          # Clean any partial/corrupted build state
-          Write-Host "=== Cleaning partial Boost build ==="
-          if (Test-Path "bin.v2") { Remove-Item -Recurse -Force "bin.v2" }
-          if (Test-Path "stage") { Remove-Item -Recurse -Force "stage" }
-          if (Test-Path "project-config.jam") { Remove-Item "project-config.jam" }
-
-          # Clean environment
-          Remove-Item Env:B2_JOBS -ErrorAction SilentlyContinue
-          Remove-Item Env:BOOST_BUILD_JOBS -ErrorAction SilentlyContinue
-          Remove-Item Env:MAKEFLAGS -ErrorAction SilentlyContinue
-
-          Write-Host "=== Building Boost ==="
-
-          # Build and install - ONLY 64-bit
+          # Always run install (repairs partial cache, incremental if complete)
+          Write-Host "=== Building + installing Boost ==="
           .\b2.exe install `
             variant=release `
             link=static,shared `
@@ -149,15 +136,19 @@ jobs:
             address-model=64 `
             --prefix="$($PWD.Path)" `
             --jobs=$env:NUMBER_OF_PROCESSORS
-          
-          # Check if essential libraries were built
-          if (-not (Test-Path "lib/*.lib")) {
-            Write-Error "Boost build failed - no libraries generated"
-            exit 1
+
+          # Hard validation (headers + libs)
+          if (!(Test-Path "boost/config.hpp")) {
+              Write-Error "Boost headers missing after build"
+              exit 1
           }
-          
+
+          if (!(Get-ChildItem -Path "lib" -Filter "*.lib" -ErrorAction SilentlyContinue)) {
+              Write-Error "Boost libraries missing after build"
+              exit 1
+          }
+
           Write-Host "=== Boost build completed successfully ==="
-          exit 0
 
       # --- Build SDL3
       - name: Build SDL3
