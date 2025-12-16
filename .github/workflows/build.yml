@@ -116,9 +116,12 @@ jobs:
         run: |
           cd external/boost
 
+          .\bootstrap.bat
+          .\b2.exe headers
+
           # Check if Boost is already completely built
           $boostLibs = Get-ChildItem -Path "lib" -Filter "*.lib" -ErrorAction SilentlyContinue
-          if (($boostLibs.Count -gt 0) -and (Test-Path "include/boost/config.hpp")) {
+          if (($boostLibs.Count -gt 0) -and (Test-Path "boost/boost/config.hpp")) {
             Write-Host "=== Boost already built and complete (found $($boostLibs.Count) libraries), skipping ==="
             exit 0
           }
@@ -135,7 +138,6 @@ jobs:
           Remove-Item Env:MAKEFLAGS -ErrorAction SilentlyContinue
 
           Write-Host "=== Building Boost ==="
-          .\bootstrap.bat
 
           # Build and install - ONLY 64-bit
           .\b2.exe install `
