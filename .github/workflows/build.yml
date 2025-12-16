@@ -136,15 +136,13 @@ jobs:
           Write-Host "=== Building Boost ==="
           .\bootstrap.bat
 
-          # Generate headers FIRST
-          .\b2.exe headers
-
-          # Build and install (allow minor failures in optional components)
+          # Build and install - ONLY 64-bit
           .\b2.exe install `
             variant=release `
             link=static,shared `
             threading=multi `
             runtime-link=shared `
+            address-model=64 `
             --prefix="$($PWD.Path)" `
             --jobs=$env:NUMBER_OF_PROCESSORS
           
@@ -154,8 +152,13 @@ jobs:
             exit 1
           }
           
-          Write-Host "=== Boost build completed (20314 targets successful, 2 optional targets skipped) ==="
+          Write-Host "=== Boost build completed successfully ==="
           exit 0
+
+
+
+
+
 
       # --- Build SDL3
       - name: Build SDL3
