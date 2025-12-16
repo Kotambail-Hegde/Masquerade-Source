@@ -117,8 +117,9 @@ jobs:
           cd external/boost
 
           # Check if Boost is already completely built
-          if ((Test-Path "lib/libboost_*.lib") -and (Test-Path "include/boost/config.hpp")) {
-            Write-Host "=== Boost already built and complete, skipping ==="
+          $boostLibs = Get-ChildItem -Path "lib" -Filter "*.lib" -ErrorAction SilentlyContinue
+          if (($boostLibs.Count -gt 0) -and (Test-Path "include/boost/config.hpp")) {
+            Write-Host "=== Boost already built and complete (found $($boostLibs.Count) libraries), skipping ==="
             exit 0
           }
 
