@@ -1,0 +1,595 @@
+name: Build Masquerade
+
+on:
+  # Manual trigger for any branch
+  workflow_dispatch:
+
+  # Automatically on PRs from any branch to any branch
+  pull_request:
+
+  # Scheduled run every Friday at 5 PM IST (11:30 AM UTC)
+  schedule:
+    - cron: '30 11 * * 5'
+
+  push:
+    paths:
+      - '**/*.c'
+      - '**/*.h'
+      - '**/*.a'
+      - '**/*.lib'
+      - '**/*.dll'
+      - '**/CMakeLists.txt'
+      - '**/*.html'
+      - '**/*.exe'
+      - '**/*.cpp'
+      - '.github/workflows/build.yml'
+      - '**/*.hpp'
+      - '**/*.bin'
+      - '**/*.cxx'
+      - '**/*.hxx'
+      - '**/*.py'
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  build_windows:
+    name: Build Windows (MSVC)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # --- Cache all external dependencies
+      - name: Cache external dependencies
+        id: cache-external
+        uses: actions/cache@v4
+        with:
+          path: |
+            external/imgui
+            external/miniz
+            external/stb
+            external/boost
+            external/SDL
+            external/nativefiledialog-extended
+          key: windows-external-all-v9-${{ hashFiles('.github/workflows/*.yml') }}
+          restore-keys: |
+            windows-external-all-v9-
+
+      # --- Clone all dependencies (only if not cached)
+      - name: Clone all dependencies
+        if: steps.cache-external.outputs.cache-hit != 'true'
+        run: |
+          # --- Ensure external folder exists
+          $externalDir = "external"
+          if (-not (Test-Path $externalDir)) { New-Item -ItemType Directory -Path $externalDir | Out-Null }
+
+          cd external
+
+          # --- ImGui
+          if (-not (Test-Path "imgui")) {
+              git clone https://github.com/ocornut/imgui.git --branch docking --depth 1
+          }
+
+          # --- Miniz
+          if (-not (Test-Path "miniz")) {
+              Write-Host "=== MINIZ: not found, downloading ==="
+              $url = "https://github.com/richgel999/miniz/releases/download/3.0.2/miniz-3.0.2.zip"
+              $zip = "miniz-3.0.2.zip"
+              $tmpDir = "_miniz_extract"
+
+              Write-Host "Downloading: $url"
+              Invoke-WebRequest -Uri $url -OutFile $zip
+
+              Write-Host "Extracting $zip into ${tmpDir}/"
+              if (Test-Path $tmpDir) { Remove-Item -Recurse -Force $tmpDir }
+              Expand-Archive $zip -DestinationPath $tmpDir -Force
+
+              Write-Host "Moving ${tmpDir} -> miniz"
+              if (Test-Path "miniz") { Remove-Item -Recurse -Force "miniz" }
+              Move-Item -Path $tmpDir -Destination "miniz"
+
+              Write-Host "Cleaning up"
+              Remove-Item -Path $zip -Force
+
+              Write-Host "=== MINIZ setup complete ==="
+          } else {
+              Write-Host "=== MINIZ already exists, skipping ==="
+          }
+
+          # --- stb
+          if (-not (Test-Path "stb/stb")) {
+              git clone https://github.com/nothings/stb.git --depth 1 stb/stb
+          }
+
+          # --- SDL
+          if (-not (Test-Path "SDL")) {
+              git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL
+          }
+
+          # --- NativeFileDialog-Extended
+          if (-not (Test-Path "nativefiledialog-extended")) {
+              git clone https://github.com/btzy/nativefiledialog-extended.git --depth 1
+          }
+
+          # --- Boost source
+          if (-not (Test-Path "boost")) {
+              $boostZip = "boost_1_84_0.zip"
+              $boostUrl = "https://archives.boost.io/release/1.84.0/source/boost_1_84_0.zip"
+              Write-Host "Downloading Boost source from $boostUrl..."
+              Invoke-WebRequest -Uri $boostUrl -OutFile $boostZip
+
+              Write-Host "Extracting Boost source..."
+              Expand-Archive $boostZip -DestinationPath .
+              Rename-Item -Path "boost_1_84_0" -NewName "boost"
+
+              Write-Host "Cleaning up Boost zip..."
+              Remove-Item -Path $boostZip -Force
+
+              Write-Host "=== Boost source setup complete ==="
+          } else {
+              Write-Host "=== Boost already exists, skipping ==="
+          }
+        shell: pwsh
+
+      # --- Build Boost with b2
+      - name: Build Boost
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cd external/boost
+
+          Write-Host "=== Boost root: $PWD ==="
+
+          # Bootstrap b2 if not exists
+          if (!(Test-Path ".\b2.exe")) {
+              Write-Host "Bootstrapping Boost..."
+              .\bootstrap.bat
+          } else {
+              Write-Host "b2.exe already exists, skipping bootstrap"
+          }
+
+          Write-Host "Building Boost (this may take several minutes)..."
+          .\b2.exe install `
+              variant=release `
+              link=static,shared `
+              threading=multi `
+              runtime-link=shared `
+              address-model=64 `
+              --prefix="$($PWD.Path)" `
+              --jobs=$env:NUMBER_OF_PROCESSORS
+
+          # Validate installation
+          if (-not (Test-Path "boost/config.hpp")) {
+              Write-Error "Boost headers missing after build"
+              exit 1
+          }
+
+          if (-not (Get-ChildItem -Path "lib" -Filter "*.lib" -ErrorAction SilentlyContinue)) {
+              Write-Error "Boost libraries missing after build"
+              exit 1
+          }
+
+          Write-Host "=== Boost built successfully ==="
+
+      # --- Build SDL3
+      - name: Build SDL3
+        run: |
+          cd external/SDL
+          if (-not (Test-Path "build")) { New-Item -ItemType Directory -Path "build" | Out-Null }
+          cd build
+          cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$($PWD.Path)" -DSDL_SHARED=ON -DSDL_STATIC=ON
+          cmake --build . --config Release --parallel
+          cmake --build . --config Release --target install
+        shell: pwsh
+
+      # --- Build NFD
+      - name: Build NFD
+        run: |
+          cd external/nativefiledialog-extended
+          if (-not (Test-Path "build")) { New-Item -ItemType Directory -Path "build" | Out-Null }
+          cd build
+          cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$($PWD.Path)"
+          cmake --build . --config Release --parallel
+          cmake --build . --config Release --target install
+        shell: pwsh
+
+      # --- Set environment variables
+      - name: Set dependency paths
+        run: |
+          echo "IMGUI_ROOT=$env:GITHUB_WORKSPACE\external\imgui" >> $env:GITHUB_ENV
+          echo "MINIZ_ROOT=$env:GITHUB_WORKSPACE\external\miniz" >> $env:GITHUB_ENV
+          echo "STB_ROOT=$env:GITHUB_WORKSPACE\external\stb" >> $env:GITHUB_ENV
+          echo "BOOST_ROOT=$env:GITHUB_WORKSPACE\external\boost" >> $env:GITHUB_ENV
+          echo "SDL3_ROOT=$env:GITHUB_WORKSPACE\external\SDL\build" >> $env:GITHUB_ENV
+          echo "NFD_ROOT=$env:GITHUB_WORKSPACE\external\nativefiledialog-extended" >> $env:GITHUB_ENV
+        shell: pwsh
+
+      # --- Configure CMake
+      - name: Configure CMake
+        run: |
+          cmake -G "Visual Studio 17 2022" -A x64 ^
+                -DCMAKE_BUILD_TYPE=Release ^
+                -DIMGUI_ROOT=%IMGUI_ROOT% ^
+                -DMINIZ_ROOT=%MINIZ_ROOT% ^
+                -DSTB_ROOT=%STB_ROOT% ^
+                -DBOOST_ROOT=%BOOST_ROOT% ^
+                -DSDL3_ROOT=%SDL3_ROOT% ^
+                -DNFD_ROOT=%NFD_ROOT% ^
+                -S . -B build
+        shell: cmd
+
+      # --- Build
+      - name: Build
+        run: cmake --build build --config Release --parallel
+        shell: cmd
+
+      # --- Upload artifacts
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: build/bin/
+
+  build_linux:
+    name: Build Linux (Ninja)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # --- Install system dependencies
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build build-essential cmake git \
+                                  libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev \
+                                  libxi-dev libgl1-mesa-dev libglu1-mesa-dev \
+                                  libgtk-3-dev libxss-dev libasound2-dev libpulse-dev libpipewire-0.3-dev \
+                                  libwayland-dev wayland-protocols libxkbcommon-dev
+
+      # --- Cache external dependencies
+      - name: Cache external dependencies
+        id: cache-external
+        uses: actions/cache@v4
+        with:
+          path: |
+            external/imgui
+            external/miniz
+            external/stb
+            external/boost
+            external/SDL
+            external/nativefiledialog-extended
+          key: linux-external-all-v1-${{ hashFiles('.github/workflows/*.yml') }}
+          restore-keys: |
+            linux-external-all-v1-
+
+      # --- Clone all dependencies
+      - name: Clone all dependencies
+        if: steps.cache-external.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p external
+          cd external
+
+          if [ ! -d "imgui" ]; then
+            git clone https://github.com/ocornut/imgui.git --branch docking --depth 1
+          fi
+
+          # --- Miniz
+          if [ ! -d "miniz" ]; then
+            echo "=== MINIZ not found, downloading release 3.0.2 ==="
+            URL="https://github.com/richgel999/miniz/releases/download/3.0.2/miniz-3.0.2.zip"
+            ZIP="miniz-3.0.2.zip"
+            TMPDIR="_miniz_extract"
+            
+            echo "Downloading $URL"
+            curl -L "$URL" -o "$ZIP"
+            
+            echo "Extracting $ZIP into $TMPDIR/"
+            mkdir -p "$TMPDIR"
+            unzip "$ZIP" -d "$TMPDIR"
+            
+            echo "Extracted contents:"
+            ls -la "$TMPDIR"
+            
+            echo "Moving $TMPDIR -> miniz"
+            mv "$TMPDIR" miniz
+            
+            echo "Cleaning up"
+            rm -f "$ZIP"
+            
+            echo "=== MINIZ ready at $(pwd)/miniz ==="
+          else
+            echo "=== MINIZ already exists, skipping ==="
+          fi
+
+          if [ ! -d "stb/stb" ]; then
+            git clone --depth 1 https://github.com/nothings/stb.git stb/stb
+          fi
+
+          if [ ! -d "boost" ]; then
+            git clone https://github.com/boostorg/boost.git --branch boost-1.84.0 --depth 1
+            cd boost
+            git submodule update --init --depth 1
+            cd ..
+          fi
+
+          if [ ! -d "SDL" ]; then
+            git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL
+          fi
+
+          if [ ! -d "nativefiledialog-extended" ]; then
+            git clone https://github.com/btzy/nativefiledialog-extended.git --depth 1
+          fi
+
+      # --- Build Boost
+      - name: Build Boost
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          cd external/boost
+
+          # Ensure script is executable
+          chmod +x bootstrap.sh
+
+          # Bootstrap Boost
+          ./bootstrap.sh --prefix="$PWD"
+
+          # Build + install (static + shared)
+          ./b2 install \
+            variant=release \
+            link=static,shared \
+            threading=multi \
+            -j$(nproc)
+
+      # --- Build SDL3
+      - name: Build SDL3
+        run: |
+          cd external/SDL
+          mkdir -p build
+          cd build
+          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PWD -DSDL_SHARED=ON -DSDL_STATIC=ON
+          ninja -j$(nproc)
+          ninja install
+
+      # --- Build NFD
+      - name: Build NFD
+        run: |
+          cd external/nativefiledialog-extended
+          mkdir -p build
+          cd build
+          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PWD
+          ninja -j$(nproc)
+          ninja install
+
+      # --- Set environment variables
+      - name: Set dependency paths
+        run: |
+          echo "IMGUI_ROOT=$GITHUB_WORKSPACE/external/imgui" >> $GITHUB_ENV
+          echo "MINIZ_ROOT=$GITHUB_WORKSPACE/external/miniz" >> $GITHUB_ENV
+          echo "STB_ROOT=$GITHUB_WORKSPACE/external/stb" >> $GITHUB_ENV
+          echo "BOOST_ROOT=$GITHUB_WORKSPACE/external/boost" >> $GITHUB_ENV
+          echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL/build" >> $GITHUB_ENV
+          echo "NFD_ROOT=$GITHUB_WORKSPACE/external/nativefiledialog-extended" >> $GITHUB_ENV
+
+      # --- Configure CMake
+      - name: Configure CMake
+        run: |
+          cmake -G Ninja \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DIMGUI_ROOT=$IMGUI_ROOT \
+                -DMINIZ_ROOT=$MINIZ_ROOT \
+                -DSTB_ROOT=$STB_ROOT \
+                -DBOOST_ROOT=$BOOST_ROOT \
+                -DSDL3_ROOT=$SDL3_ROOT \
+                -DNFD_ROOT=$NFD_ROOT \
+                -S . -B build
+
+      # --- Build
+      - name: Build
+        run: cmake --build build --config Release --parallel $(nproc)
+
+      # --- Upload artifacts
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: build/bin/
+
+  build_emscripten:
+      name: Build Emscripten (Web)
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v4
+          with:
+            submodules: recursive
+
+        # --- Cache external dependencies
+        - name: Cache external dependencies
+          id: cache-external
+          uses: actions/cache@v4
+          with:
+            path: |
+              external/imgui
+              external/miniz
+              external/stb
+              external/SDL
+              external/emscripten-browser-file
+              external/boost
+            key: emscripten-external-all-v1-${{ hashFiles('.github/workflows/*.yml') }}
+            restore-keys: |
+              emscripten-external-all-v1-
+
+        # --- Cache SDL3 (Emscripten build + install)
+        - name: Cache SDL3 Emscripten
+          id: cache-sdl-emscripten
+          uses: actions/cache@v4
+          with:
+            path: |
+              external/SDL-build/emscripten
+              external/SDL-install/emscripten
+            key: sdl3-emscripten-v1-${{ hashFiles('external/SDL/**') }}
+            restore-keys: |
+              sdl3-emscripten-v1-
+
+        # --- Clone dependencies
+        - name: Clone dependencies
+          if: steps.cache-external.outputs.cache-hit != 'true'
+          run: |
+            mkdir -p external
+            cd external
+
+            if [ ! -d "boost" ]; then
+              git clone https://github.com/boostorg/boost.git --branch boost-1.84.0 --depth 1
+              cd boost
+              git submodule update --init --depth 1
+              cd ..
+            fi
+
+            if [ ! -d "imgui" ]; then
+              git clone https://github.com/ocornut/imgui.git --branch docking --depth 1
+            fi
+
+            # --- Miniz
+            if [ ! -d "miniz" ]; then
+              echo "=== MINIZ not found, downloading release 3.0.2 ==="
+              
+              URL="https://github.com/richgel999/miniz/releases/download/3.0.2/miniz-3.0.2.zip"
+              ZIP="miniz-3.0.2.zip"
+              TMPDIR="_miniz_extract"
+              
+              echo "Downloading $URL"
+              curl -L "$URL" -o "$ZIP"
+              
+              echo "Extracting $ZIP into $TMPDIR/"
+              mkdir -p "$TMPDIR"
+              unzip "$ZIP" -d "$TMPDIR"
+              
+              echo "Extracted contents:"
+              ls -la "$TMPDIR"
+              
+              echo "Moving $TMPDIR -> miniz"
+              mv "$TMPDIR" miniz
+              
+              echo "Cleaning up"
+              rm -f "$ZIP"
+              
+              echo "=== MINIZ ready at $(pwd)/miniz ==="
+            else
+              echo "=== MINIZ already exists, skipping ==="
+            fi
+
+            if [ ! -d "stb/stb" ]; then
+              git clone --depth 1 https://github.com/nothings/stb.git stb/stb
+            fi
+
+            if [ ! -d "SDL" ]; then
+              git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL
+            fi
+
+            if [ ! -d "emscripten-browser-file" ]; then
+              git clone https://github.com/Armchair-Software/emscripten-browser-file.git --depth 1
+            fi
+
+        # --- Set environment variables
+        - name: Set dependency paths
+          run: |
+            echo "IMGUI_ROOT=$GITHUB_WORKSPACE/external/imgui" >> $GITHUB_ENV
+            echo "MINIZ_ROOT=$GITHUB_WORKSPACE/external/miniz" >> $GITHUB_ENV
+            echo "STB_ROOT=$GITHUB_WORKSPACE/external/stb" >> $GITHUB_ENV
+            echo "EFB_ROOT=$GITHUB_WORKSPACE/external/emscripten-browser-file" >> $GITHUB_ENV
+            echo "BOOST_ROOT=$GITHUB_WORKSPACE/external/boost" >> $GITHUB_ENV
+            echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL-install/emscripten" >> $GITHUB_ENV
+
+        # --- Setup Emscripten SDK
+        - name: Setup Emscripten
+          uses: mymindstorm/setup-emsdk@v14
+          with:
+            version: '3.1.56'
+            actions-cache-folder: 'emsdk-cache'
+
+        # --- Install ninja
+        - name: Install Ninja
+          run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+        # --- Build Boost (Emscripten)
+        - name: Build Boost
+          if: runner.os == 'Linux'
+          shell: bash
+          run: |
+            cd external/boost
+            chmod +x bootstrap.sh
+            ./bootstrap.sh --prefix="$PWD"
+            ./b2 install variant=release link=static,shared threading=multi -j$(nproc)
+
+        # --- Build SDL3 (Emscripten)
+        - name: Build SDL3 (Emscripten)
+          run: |
+            if [ -f external/SDL-install/emscripten/build/lib/libSDL3.a ]; then
+              echo "=== SDL3 Emscripten already built, skipping ==="
+              exit 0
+            fi
+
+            mkdir -p external/SDL-build/emscripten
+            mkdir -p external/SDL-install/emscripten/build
+
+            cd external/SDL-build/emscripten
+
+            emcmake cmake ../../SDL -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/external/SDL-install/emscripten/build \
+              -DSDL_SHARED=OFF \
+              -DSDL_STATIC=ON \
+              -DSDL_TEST=OFF \
+              -DSDL_TESTS=OFF
+
+            ninja -j$(nproc)
+            ninja install
+
+        # --- Configure CMake
+        - name: Configure CMake
+          run: |
+            emcmake cmake -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DSDL3_ROOT=$SDL3_ROOT \
+              -DIMGUI_ROOT=$IMGUI_ROOT \
+              -DMINIZ_ROOT=$MINIZ_ROOT \
+              -DSTB_ROOT=$STB_ROOT \
+              -DEFB_ROOT=$EFB_ROOT \
+              -DBOOST_ROOT=$BOOST_ROOT \
+              -S . -B build
+
+        # --- Build
+        - name: Build
+          run: cmake --build build --config Release --parallel $(nproc)
+
+        # --- Prepare Pages
+        - name: Prepare Pages Deployment
+          run: |
+            mkdir -p pages
+            [ -f build/bin/masquerade.html ] && cp build/bin/masquerade.html pages/index.html
+            [ -f build/bin/masquerade.js ] && cp build/bin/masquerade.js pages/
+            [ -f build/bin/masquerade.wasm ] && cp build/bin/masquerade.wasm pages/
+            [ -f build/bin/masquerade.data ] && cp build/bin/masquerade.data pages/
+            echo "Files to deploy:"
+            ls -lh pages/
+
+        # --- Upload artifacts
+        - name: Upload artifacts
+          uses: actions/upload-artifact@v4
+          with:
+            name: emscripten-build
+            path: pages/
+
+        # --- Deploy to GitHub Pages
+        - name: Deploy to GitHub Pages
+          if: github.event_name == 'push' && (github.ref == 'refs/heads/ci_cd_support_1' || github.ref == 'refs/heads/main')
+          uses: peaceiris/actions-gh-pages@v3
+          with:
+            github_token: ${{ secrets.GITHUB_TOKEN }}
+            publish_dir: ./pages
+            force_orphan: true

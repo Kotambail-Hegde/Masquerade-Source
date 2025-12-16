@@ -2855,7 +2855,7 @@ public:
 #else
 										ImGui::Text("Build Type");     ImGui::NextColumn(); ImGui::Text(": Debug");               ImGui::NextColumn();
 #endif
-										ImGui::Text("Commit");       ImGui::NextColumn(); ImGui::Text(": "); ImGui::NextColumn();
+										ImGui::Text("Commit");       ImGui::NextColumn(); ImGui::Text(": --------"); ImGui::NextColumn();
 
 										ImGui::Text("C++ Standard");   ImGui::NextColumn();
 #if __cplusplus == 199711L

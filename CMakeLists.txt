@@ -2,14 +2,19 @@ cmake_minimum_required(VERSION 3.24.0)
 
 project(masquerade)  # MUST come before checking CMAKE_SYSTEM_NAME
 
+# Detect if we are running inside GitHub Actions
+if(DEFINED ENV{GITHUB_ACTIONS} AND $ENV{GITHUB_ACTIONS} STREQUAL "true")
+    set(IS_GITHUB_ACTIONS TRUE)
+else()
+    set(IS_GITHUB_ACTIONS FALSE)
+endif()
+
 # --- Automatically setup the required libraries path from root path
-if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows" AND NOT IS_GITHUB_ACTIONS)
     message(STATUS "Building on Windows")
     include(${CMAKE_SOURCE_DIR}/Paths_win.cmake)
     # Boost
     set(BOOST_INCLUDE_DIR "${BOOST_ROOT}")
-    set(BOOST_LIBRARYDIR "${BOOST_ROOT}/stage/lib")
-    set(BOOST_BUILD_DIR "${BOOST_ROOT}/build")
     # SDL3
     set(SDL3_CMAKE_PATH "${SDL3_ROOT}/cmake")
     set(SDL3_LIB_PATH "${SDL3_ROOT}/lib/libSDL3.a") # For Emscripten
@@ -17,18 +22,68 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
     set(CMAKE_PREFIX_PATH "${SDL3_CMAKE_PATH}")
     # Nativefiledialog-extended
     set(NFD_CMAKE_PATH "${NFD_ROOT}/build/lib/cmake/nfd")
+    set(nfd_DIR "${NFD_ROOT}/build/lib/cmake/nfd")
     set(NFD_INCLUDE_DIR "${NFD_ROOT}")
     set(NFD_SRC_INCLUDE_DIR "${NFD_ROOT}/src/include")
     set(CMAKE_PREFIX_PATH "${NFD_CMAKE_PATH}")
-elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
+elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux" AND NOT IS_GITHUB_ACTIONS)
     message(STATUS "Building on Linux")
     include(${CMAKE_SOURCE_DIR}/Paths_lin.cmake)
+elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows" AND IS_GITHUB_ACTIONS)
+    message(STATUS "CI build (Windows) – skipping local Paths_*.cmake")
+    # Normalize paths to forward slashes
+    file(TO_CMAKE_PATH "${BOOST_ROOT}" BOOST_ROOT)
+    file(TO_CMAKE_PATH "${IMGUI_ROOT}" IMGUI_ROOT)
+    file(TO_CMAKE_PATH "${MINIZ_ROOT}" MINIZ_ROOT)
+    file(TO_CMAKE_PATH "${STB_ROOT}" STB_ROOT)
+    file(TO_CMAKE_PATH "${SDL3_ROOT}" SDL3_ROOT)
+    file(TO_CMAKE_PATH "${NFD_ROOT}" NFD_ROOT)
+    # Boost
+    set(BOOST_INCLUDE_DIR "${BOOST_ROOT}")
+    # SDL3
+    set(SDL3_DIR "${SDL3_ROOT}/build/lib/cmake/SDL3")
+    set(SDL3_LIB_PATH "${SDL3_ROOT}/build/lib/libSDL3.a") # For Emscripten
+    set(SDL3_INCLUDE_DIR "${SDL3_ROOT}/build/include")
+    list(APPEND CMAKE_PREFIX_PATH "${SDL3_DIR}")
+    # Nativefiledialog-extended
+    set(NFD_CMAKE_PATH "${NFD_ROOT}/build/lib/cmake/nfd")
+    set(nfd_DIR "${NFD_ROOT}/build/lib/cmake/nfd")
+    set(NFD_INCLUDE_DIR "${NFD_ROOT}")
+    set(NFD_SRC_INCLUDE_DIR "${NFD_ROOT}/src/include")
+    list(APPEND CMAKE_PREFIX_PATH "${nfd_DIR}")
+elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux" AND IS_GITHUB_ACTIONS)
+    message(STATUS "CI build (Linux) – skipping local Paths_*.cmake")
+    # Boost
+    set(BOOST_INCLUDE_DIR "${BOOST_ROOT}")
+    # SDL3
+    set(SDL3_DIR "${SDL3_ROOT}/build/lib/cmake/SDL3")
+    set(SDL3_LIB_PATH "${SDL3_ROOT}/build/lib/libSDL3.a") # For Emscripten
+    set(SDL3_INCLUDE_DIR "${SDL3_ROOT}/build/include")
+    list(APPEND CMAKE_PREFIX_PATH "${SDL3_DIR}")
+    # Nativefiledialog-extended
+    set(NFD_CMAKE_PATH "${NFD_ROOT}/build/lib/cmake/nfd")
+    set(nfd_DIR "${NFD_ROOT}/build/lib/cmake/nfd")
+    set(NFD_INCLUDE_DIR "${NFD_ROOT}")
+    set(NFD_SRC_INCLUDE_DIR "${NFD_ROOT}/src/include")
+    list(APPEND CMAKE_PREFIX_PATH "${nfd_DIR}")
 else()
     message(STATUS "Unsupported OS: ${CMAKE_HOST_SYSTEM_NAME}")
 endif()
-# Glad
-set(GLAD_INCLUDE_DIR "${GLAD_ROOT}/include")
-set(GLAD_SRC_DIR "${GLAD_ROOT}/src")
+
+# Normalize all root paths for consistent path handling across platforms
+if(DEFINED IMGUI_ROOT)
+    file(TO_CMAKE_PATH "${IMGUI_ROOT}" IMGUI_ROOT)
+endif()
+if(DEFINED MINIZ_ROOT)
+    file(TO_CMAKE_PATH "${MINIZ_ROOT}" MINIZ_ROOT)
+endif()
+if(DEFINED STB_ROOT)
+    file(TO_CMAKE_PATH "${STB_ROOT}" STB_ROOT)
+endif()
+if(DEFINED EFB_ROOT)
+    file(TO_CMAKE_PATH "${EFB_ROOT}" EFB_ROOT)
+endif()
+
 # ImGui
 set(IMGUI_DIR "${IMGUI_ROOT}")
 set(IMGUI_BACKENDS_DIR "${IMGUI_ROOT}/backends")
@@ -38,8 +93,10 @@ set(IMGUI_EXAMPLES_LIBS_DIR "${IMGUI_ROOT}/examples/libs")
 set(MINIZ_DIR "${MINIZ_ROOT}")
 # STB
 set(STB_INCLUDE_DIR "${STB_ROOT}/stb")
+if (EMSCRIPTEN)
 # Emscripten Browser File Library
 set(EFB_INCLUDE_DIR "${EFB_ROOT}")
+endif()
 
 # --- Set language standards
 set(CMAKE_C_STANDARD 11)
@@ -49,13 +106,12 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # --- Dependencies
 if(NOT EMSCRIPTEN)
-    find_package(Boost REQUIRED)
     find_package(nfd REQUIRED)
     find_package(SDL3 REQUIRED)
 endif()
 
 # --- OpenGL ES for Raspberry Pi / ARM Linux
-if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME  STREQUAL "Linux")
     # Check if building for ARM architecture (Raspberry Pi)
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm" OR CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
         message(STATUS "Detected ARM architecture - using OpenGL ES 3")
@@ -96,10 +152,12 @@ set(PROJECT_HEADERS
 )
 
 # --- Third-party headers for IDE visibility only
+if(NOT EMSCRIPTEN)
 set(THIRD_PARTY_HEADERS_GLAD
-    ${GLAD_INCLUDE_DIR}/glad/glad.h
-    ${GLAD_INCLUDE_DIR}/KHR/khrplatform.h
+	ui/glad/glad.h
+	ui/KHR/khrplatform.h
 )
+endif()
 
 set(THIRD_PARTY_HEADERS_IMGUI
     ${IMGUI_DIR}/imconfig.h
@@ -118,17 +176,21 @@ set(THIRD_PARTY_HEADERS_MINIZ
     ${MINIZ_DIR}/miniz.h
 )
 
+if(NOT EMSCRIPTEN)
 # set(THIRD_PARTY_HEADERS_NFD
 #     "${NFD_SRC_INCLUDE_DIR}/nfd.hpp"
 # )
+endif()
 
 set(THIRD_PARTY_HEADERS_STB
     "${STB_INCLUDE_DIR}/stb_image.h"
 )
 
+if (EMSCRIPTEN)
 set(THIRD_PARTY_HEADERS_EFB
     "${EFB_INCLUDE_DIR}/emscripten_browser_file.h"
 )
+endif()
 
 set(THIRD_PARTY_HEADERS
     ${THIRD_PARTY_HEADERS_GLAD}
@@ -136,8 +198,13 @@ set(THIRD_PARTY_HEADERS
     ${THIRD_PARTY_HEADERS_MINIZ}
     ${THIRD_PARTY_HEADERS_NFD}
     ${THIRD_PARTY_HEADERS_STB}
-    ${THIRD_PARTY_HEADERS_EFB}
 )
+
+if (EMSCRIPTEN)
+    list(APPEND THIRD_PARTY_HEADERS
+        ${THIRD_PARTY_HEADERS_EFB}
+    )
+endif()
 
 # --- Core source files
 set(CORE_SOURCES
@@ -211,7 +278,7 @@ if (NOT EMSCRIPTEN)
     # Don't include GLAD for ARM/OpenGL ES builds
     if(NOT (CMAKE_SYSTEM_PROCESSOR MATCHES "arm" OR CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64"))
         set(GLAD_SOURCES
-            ${GLAD_SRC_DIR}/glad.c
+            ui/glad.c
         )
     endif()
 endif()
@@ -243,13 +310,16 @@ add_executable(${PROJECT_NAME} ${SOURCES})
 
 # --- IDE groupings for Visual Studio / CLion
 source_group("Headers"                      FILES ${PROJECT_HEADERS})
+if (NOT EMSCRIPTEN)
 source_group("Headers\\Third-party\\GLAD"   FILES ${THIRD_PARTY_HEADERS_GLAD})
+endif()
 source_group("Headers\\Third-party\\IMGUI"  FILES ${THIRD_PARTY_HEADERS_IMGUI})
 source_group("Headers\\Third-party\\MINIZ"  FILES ${THIRD_PARTY_HEADERS_MINIZ})
 source_group("Headers\\Third-party\\NFD"    FILES ${THIRD_PARTY_HEADERS_NFD})
 source_group("Headers\\Third-party\\STB"    FILES ${THIRD_PARTY_HEADERS_STB})
+if (EMSCRIPTEN)
 source_group("Headers\\Third-party\\EFB"    FILES ${THIRD_PARTY_HEADERS_EFB})
-
+endif()
 source_group("Sources\\Core"                FILES ${CORE_SOURCES})
 source_group("Sources\\Game Of Life"        FILES ${GOL_SOURCES})
 source_group("Sources\\Chip8"               FILES ${CHIP8_SOURCES})
@@ -259,7 +329,9 @@ source_group("Sources\\NES"                 FILES ${NES_SOURCES})
 source_group("Sources\\GBC"                 FILES ${GBC_SOURCES})
 source_group("Sources\\GBA"                 FILES ${GBA_SOURCES})
 source_group("Sources\\Cheats"              FILES ${CHEATS_SOURCES})
+if (NOT EMSCRIPTEN)
 source_group("Sources\\Third-party\\Glad"   FILES ${GLAD_SOURCES})
+endif()
 source_group("Sources\\Third-party\\Miniz"  FILES ${MINIZ_SOURCES})
 source_group("Sources\\Third-party\\ImGui"  FILES ${IMGUI_SOURCES})
 
@@ -328,7 +400,6 @@ target_include_directories(${PROJECT_NAME} PUBLIC
 # --- Third-party/common libraries
 target_include_directories(${PROJECT_NAME} PUBLIC
     "${BOOST_INCLUDE_DIR}"
-    "${BOOST_BUILD_DIR}"
     "${IMGUI_DIR}"
     "${IMGUI_BACKENDS_DIR}"
     "${IMGUI_MISC_CPP_DIR}"
@@ -337,13 +408,6 @@ target_include_directories(${PROJECT_NAME} PUBLIC
     "${SDL3_INCLUDE_DIR}"
     "${MINIZ_DIR}"
 )
-
-# Only include GLAD for non-ARM, non-Emscripten builds
-if(NOT EMSCRIPTEN AND NOT (CMAKE_SYSTEM_PROCESSOR MATCHES "arm" OR CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64"))
-    target_include_directories(${PROJECT_NAME} PUBLIC
-        "${GLAD_INCLUDE_DIR}"
-    )
-endif()
 
 # --- Platform-specific include directories
 if(EMSCRIPTEN)
@@ -398,17 +462,15 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     else()
         message(STATUS "Using native Clang")
         target_link_libraries(${PROJECT_NAME} PRIVATE
-            Boost::headers
             nfd::nfd
             # SDL3::SDL3-static
         )
     endif()
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     message(STATUS "GNU compiler detected")
-    if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
+    if(CMAKE_SYSTEM_NAME  STREQUAL "Windows")
         message(STATUS "Linking Windows libraries")
         target_link_libraries(${PROJECT_NAME} PRIVATE
-            Boost::headers
             nfd::nfd
             ${SDL3_IMPLIB}
             ws2_32
@@ -421,14 +483,13 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
             dwmapi
             stdc++fs
         )
-    elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
+    elseif(CMAKE_SYSTEM_NAME  STREQUAL "Linux")
         message(STATUS "Linking Linux libraries")
         
         # Check if using OpenGL ES or desktop OpenGL
         if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm" OR CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
             message(STATUS "Linking OpenGL ES 3 libraries for ARM")
             target_link_libraries(${PROJECT_NAME} PRIVATE
-                Boost::headers
                 nfd::nfd
                 SDL3::SDL3
                 OpenGL::GLES3  # Use GLES3 instead of GL
@@ -440,7 +501,6 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
         else()
             message(STATUS "Linking desktop OpenGL libraries for x86/x64")
             target_link_libraries(${PROJECT_NAME} PRIVATE
-                Boost::headers
                 nfd::nfd
                 SDL3::SDL3
                 GL            # Desktop OpenGL for x86/x64
@@ -457,7 +517,6 @@ elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     message(STATUS "MSVC")
         target_link_libraries(${PROJECT_NAME} PRIVATE
-        Boost::headers
         nfd::nfd
         # SDL3::SDL3-static
         "${SDL3_IMPLIB}"
