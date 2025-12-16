@@ -32,7 +32,7 @@ jobs:
             external/boost
             external/SDL
             external/nativefiledialog-extended
-          key: windows-external-all-v3-${{ hashFiles('.github/workflows/*.yml') }}
+          key: windows-external-all-v5-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: |
             windows-external-all-v3-
 
