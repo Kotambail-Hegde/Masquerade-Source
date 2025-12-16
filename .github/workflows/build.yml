@@ -13,201 +13,177 @@ permissions:
 
 jobs:
   build_windows:
-    name: Build Windows (MSVC)
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
+      name: Build Windows (MSVC)
+      runs-on: windows-latest
+      steps:
+        - uses: actions/checkout@v4
+          with:
+            submodules: recursive
 
-      # --- Cache all external dependencies
-      - name: Cache external dependencies
-        id: cache-external
-        uses: actions/cache@v4
-        with:
-          path: |
-            external/imgui
-            external/miniz
-            external/stb
-            external/boost
-            external/SDL
-            external/nativefiledialog-extended
-          key: windows-external-all-v5-${{ hashFiles('.github/workflows/*.yml') }}
-          restore-keys: |
-            windows-external-all-v3-
+        # --- Cache all external dependencies
+        - name: Cache external dependencies
+          id: cache-external
+          uses: actions/cache@v4
+          with:
+            path: |
+              external/imgui
+              external/miniz
+              external/stb
+              external/boost
+              external/boost_installer
+              external/SDL
+              external/nativefiledialog-extended
+            key: windows-external-all-v6-${{ hashFiles('.github/workflows/*.yml') }}
+            restore-keys: |
+              windows-external-all-v6-
 
-      # --- Clone all dependencies (only if not cached)
-      - name: Clone all dependencies
-        if: steps.cache-external.outputs.cache-hit != 'true'
-        run: |
-          # --- Ensure external folder exists
-          $externalDir = "external"
-          if (-not (Test-Path $externalDir)) { New-Item -ItemType Directory -Path $externalDir | Out-Null }
+        # --- Clone all dependencies (only if not cached)
+        - name: Clone all dependencies
+          if: steps.cache-external.outputs.cache-hit != 'true'
+          run: |
+            # --- Ensure external folder exists
+            $externalDir = "external"
+            if (-not (Test-Path $externalDir)) { New-Item -ItemType Directory -Path $externalDir | Out-Null }
 
-          cd external
+            cd external
 
-          # --- ImGui
-          if (-not (Test-Path "imgui")) {
-              git clone https://github.com/ocornut/imgui.git --branch docking --depth 1
-          }
+            # --- ImGui
+            if (-not (Test-Path "imgui")) {
+                git clone https://github.com/ocornut/imgui.git --branch docking --depth 1
+            }
 
-          # --- Miniz
-          if (-not (Test-Path "miniz")) {
-              Write-Host "=== MINIZ: not found, downloading ==="
-              $url = "https://github.com/richgel999/miniz/releases/download/3.0.2/miniz-3.0.2.zip"
-              $zip = "miniz-3.0.2.zip"
-              $tmpDir = "_miniz_extract"
+            # --- Miniz
+            if (-not (Test-Path "miniz")) {
+                Write-Host "=== MINIZ: not found, downloading ==="
+                $url = "https://github.com/richgel999/miniz/releases/download/3.0.2/miniz-3.0.2.zip"
+                $zip = "miniz-3.0.2.zip"
+                $tmpDir = "_miniz_extract"
 
-              Write-Host "Downloading: $url"
-              Invoke-WebRequest -Uri $url -OutFile $zip
+                Write-Host "Downloading: $url"
+                Invoke-WebRequest -Uri $url -OutFile $zip
 
-              Write-Host "Extracting $zip into ${tmpDir}/"
-              if (Test-Path $tmpDir) { Remove-Item -Recurse -Force $tmpDir }
-              Expand-Archive $zip -DestinationPath $tmpDir -Force
+                Write-Host "Extracting $zip into ${tmpDir}/"
+                if (Test-Path $tmpDir) { Remove-Item -Recurse -Force $tmpDir }
+                Expand-Archive $zip -DestinationPath $tmpDir -Force
 
-              Write-Host "Contents of ${tmpDir}:"
-              Get-ChildItem $tmpDir | Format-Table Name, Mode
+                Write-Host "Moving ${tmpDir} -> miniz"
+                if (Test-Path "miniz") { Remove-Item -Recurse -Force "miniz" }
+                Move-Item -Path $tmpDir -Destination "miniz"
 
-              Write-Host "Moving ${tmpDir} -> miniz"
-              if (Test-Path "miniz") { Remove-Item -Recurse -Force "miniz" }
-              Move-Item -Path $tmpDir -Destination "miniz"
+                Write-Host "Cleaning up"
+                Remove-Item -Path $zip -Force
 
-              Write-Host "Contents of external/ after move:"
-              Get-ChildItem . | Format-Table Name, Mode
+                Write-Host "=== MINIZ setup complete ==="
+            } else {
+                Write-Host "=== MINIZ already exists, skipping ==="
+            }
 
-              Write-Host "Cleaning up"
-              Remove-Item -Path $zip -Force
+            # --- stb
+            if (-not (Test-Path "stb/stb")) {
+                git clone https://github.com/nothings/stb.git --depth 1 stb/stb
+            }
 
-              Write-Host "=== MINIZ setup complete ==="
-          } else {
-              Write-Host "=== MINIZ already exists, skipping ==="
-              Write-Host "Contents of external/:"
-              Get-ChildItem . | Format-Table Name, Mode
-          }
+            # --- SDL
+            if (-not (Test-Path "SDL")) {
+                git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL
+            }
 
-          # --- stb
-          if (-not (Test-Path "stb/stb")) {
-              git clone https://github.com/nothings/stb.git --depth 1 stb/stb
-          }
+            # --- NativeFileDialog-Extended
+            if (-not (Test-Path "nativefiledialog-extended")) {
+                git clone https://github.com/btzy/nativefiledialog-extended.git --depth 1
+            }
+          shell: pwsh
 
-          # --- Boost
-          if (-not (Test-Path "boost")) {
-              git clone https://github.com/boostorg/boost.git --branch boost-1.84.0 --depth 1
-              cd boost
-              git submodule update --init --depth 1
-              cd ..
-          }
+        # --- Install Boost (prebuilt, cached)
+        - name: Install Boost (Windows prebuilt)
+          if: runner.os == 'Windows' && steps.cache-external.outputs.cache-hit != 'true'
+          shell: pwsh
+          run: |
+            $boostExe = "boost_1_84_0-msvc-14.3-64.exe"
+            $boostUrl = "https://archives.boost.io/release/1.84.0/binaries/$boostExe"
 
-          # --- SDL
-          if (-not (Test-Path "SDL")) {
-              git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL
-          }
+            $installerDir = "$env:GITHUB_WORKSPACE\external\boost_installer"
+            $installDir   = "$env:GITHUB_WORKSPACE\external\boost"
 
-          # --- NativeFileDialog-Extended
-          if (-not (Test-Path "nativefiledialog-extended")) {
-              git clone https://github.com/btzy/nativefiledialog-extended.git --depth 1
-          }
-        shell: pwsh
+            New-Item -ItemType Directory -Force -Path $installerDir | Out-Null
+            New-Item -ItemType Directory -Force -Path $installDir   | Out-Null
 
-      # --- Build Boost
-      - name: Build Boost
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          cd external/boost
+            $installerPath = Join-Path $installerDir $boostExe
+            if (-not (Test-Path $installerPath)) {
+                Write-Host "Downloading Boost installer..."
+                Invoke-WebRequest -Uri $boostUrl -OutFile $installerPath
+            } else {
+                Write-Host "Boost installer already cached, skipping download"
+            }
 
-          Write-Host "=== Boost root: $PWD ==="
+            Write-Host "Installing Boost to $installDir ..."
+            Start-Process -FilePath $installerPath -ArgumentList "/S /D=$installDir" -Wait
 
-          # Bootstrap only if b2.exe does not exist
-          if (!(Test-Path ".\b2.exe")) {
-              Write-Host "=== Bootstrapping Boost ==="
-              .\bootstrap.bat
-          } else {
-              Write-Host "=== b2.exe already exists, skipping bootstrap ==="
-          }
+            # Validate installation
+            if (-not (Test-Path "$installDir/include/boost/config.hpp")) {
+                Write-Error "Boost installation failed"
+                exit 1
+            }
+            Write-Host "=== Boost installed successfully ==="
 
-          # Always run install (repairs partial cache, incremental if complete)
-          Write-Host "=== Building + installing Boost ==="
-          .\b2.exe install `
-            variant=release `
-            link=static,shared `
-            threading=multi `
-            runtime-link=shared `
-            address-model=64 `
-            --prefix="$($PWD.Path)" `
-            --jobs=$env:NUMBER_OF_PROCESSORS
+        # --- Build SDL3
+        - name: Build SDL3
+          run: |
+            cd external/SDL
+            if (-not (Test-Path "build")) { New-Item -ItemType Directory -Path "build" | Out-Null }
+            cd build
+            cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$($PWD.Path)" -DSDL_SHARED=ON -DSDL_STATIC=ON
+            cmake --build . --config Release --parallel
+            cmake --build . --config Release --target install
+          shell: pwsh
 
-          # Hard validation (headers + libs)
-          if (!(Test-Path "boost/config.hpp")) {
-              Write-Error "Boost headers missing after build"
-              exit 1
-          }
+        # --- Build NFD
+        - name: Build NFD
+          run: |
+            cd external/nativefiledialog-extended
+            if (-not (Test-Path "build")) { New-Item -ItemType Directory -Path "build" | Out-Null }
+            cd build
+            cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$($PWD.Path)"
+            cmake --build . --config Release --parallel
+            cmake --build . --config Release --target install
+          shell: pwsh
 
-          if (!(Get-ChildItem -Path "lib" -Filter "*.lib" -ErrorAction SilentlyContinue)) {
-              Write-Error "Boost libraries missing after build"
-              exit 1
-          }
+        # --- Set environment variables
+        - name: Set dependency paths
+          run: |
+            echo "IMGUI_ROOT=$env:GITHUB_WORKSPACE\external\imgui" >> $env:GITHUB_ENV
+            echo "MINIZ_ROOT=$env:GITHUB_WORKSPACE\external\miniz" >> $env:GITHUB_ENV
+            echo "STB_ROOT=$env:GITHUB_WORKSPACE\external\stb" >> $env:GITHUB_ENV
+            echo "BOOST_ROOT=$env:GITHUB_WORKSPACE\external\boost" >> $env:GITHUB_ENV
+            echo "SDL3_ROOT=$env:GITHUB_WORKSPACE\external\SDL\build" >> $env:GITHUB_ENV
+            echo "NFD_ROOT=$env:GITHUB_WORKSPACE\external\nativefiledialog-extended" >> $env:GITHUB_ENV
+          shell: pwsh
 
-          Write-Host "=== Boost build completed successfully ==="
+        # --- Configure CMake
+        - name: Configure CMake
+          run: |
+            cmake -G "Visual Studio 17 2022" -A x64 ^
+                  -DCMAKE_BUILD_TYPE=Release ^
+                  -DIMGUI_ROOT=%IMGUI_ROOT% ^
+                  -DMINIZ_ROOT=%MINIZ_ROOT% ^
+                  -DSTB_ROOT=%STB_ROOT% ^
+                  -DBOOST_ROOT=%BOOST_ROOT% ^
+                  -DSDL3_ROOT=%SDL3_ROOT% ^
+                  -DNFD_ROOT=%NFD_ROOT% ^
+                  -S . -B build
+          shell: cmd
 
-      # --- Build SDL3
-      - name: Build SDL3
-        run: |
-          cd external/SDL
-          if (-not (Test-Path "build")) { New-Item -ItemType Directory -Path "build" | Out-Null }
-          cd build
-          cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$($PWD.Path)" -DSDL_SHARED=ON -DSDL_STATIC=ON
-          cmake --build . --config Release --parallel
-          cmake --build . --config Release --target install
-        shell: pwsh
+        # --- Build
+        - name: Build
+          run: cmake --build build --config Release --parallel
+          shell: cmd
 
-      # --- Build NFD
-      - name: Build NFD
-        run: |
-          cd external/nativefiledialog-extended
-          if (-not (Test-Path "build")) { New-Item -ItemType Directory -Path "build" | Out-Null }
-          cd build
-          cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$($PWD.Path)"
-          cmake --build . --config Release --parallel
-          cmake --build . --config Release --target install
-        shell: pwsh
-
-      # --- Set environment variables
-      - name: Set dependency paths
-        run: |
-          echo "IMGUI_ROOT=$env:GITHUB_WORKSPACE\external\imgui" >> $env:GITHUB_ENV
-          echo "MINIZ_ROOT=$env:GITHUB_WORKSPACE\external\miniz" >> $env:GITHUB_ENV
-          echo "STB_ROOT=$env:GITHUB_WORKSPACE\external\stb" >> $env:GITHUB_ENV
-          echo "BOOST_ROOT=$env:GITHUB_WORKSPACE\external\boost" >> $env:GITHUB_ENV
-          echo "SDL3_ROOT=$env:GITHUB_WORKSPACE\external\SDL\build" >> $env:GITHUB_ENV
-          echo "NFD_ROOT=$env:GITHUB_WORKSPACE\external\nativefiledialog-extended" >> $env:GITHUB_ENV
-        shell: pwsh
-
-      # --- Configure CMake
-      - name: Configure CMake
-        run: |
-          cmake -G "Visual Studio 17 2022" -A x64 ^
-                -DCMAKE_BUILD_TYPE=Release ^
-                -DIMGUI_ROOT=%IMGUI_ROOT% ^
-                -DMINIZ_ROOT=%MINIZ_ROOT% ^
-                -DSTB_ROOT=%STB_ROOT% ^
-                -DBOOST_ROOT=%BOOST_ROOT% ^
-                -DSDL3_ROOT=%SDL3_ROOT% ^
-                -DNFD_ROOT=%NFD_ROOT% ^
-                -S . -B build
-        shell: cmd
-
-      # --- Build
-      - name: Build
-        run: cmake --build build --config Release --parallel
-        shell: cmd
-
-      # --- Upload artifacts
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-build
-          path: build/bin/
+        # --- Upload artifacts
+        - name: Upload artifacts
+          uses: actions/upload-artifact@v4
+          with:
+            name: windows-build
+            path: build/bin/
 
   build_linux:
     name: Build Linux (Ninja)
