@@ -1,10 +1,33 @@
 name: Build Masquerade
 
 on:
-  push:
-    branches: [ci_cd_support_1, main]
+  # Manual trigger for any branch
+  workflow_dispatch:
+
+  # Automatically on PRs from any branch to any branch
   pull_request:
-    branches: [ci_cd_support_1, main]
+
+  # Scheduled run every Friday at 5 PM IST (11:30 AM UTC)
+  schedule:
+    - cron: '30 11 * * 5'
+
+  push:
+    paths:
+      - '**/*.c'
+      - '**/*.h'
+      - '**/*.a'
+      - '**/*.lib'
+      - '**/*.dll'
+      - '**/CMakeLists.txt'
+      - '**/*.html'
+      - '**/*.exe'
+      - '**/*.cpp'
+      - '.github/workflows/build.yml'
+      - '**/*.hpp'
+      - '**/*.bin'
+      - '**/*.cxx'
+      - '**/*.hxx'
+      - '**/*.py'
 
 permissions:
   contents: write
