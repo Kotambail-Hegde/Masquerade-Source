@@ -70,7 +70,7 @@ Going forward, all bug fixes or feature additions to the following platforms wil
 ## TODOs
 
 ### Masquerade (P0052)
-- [ ] Upload to itch.io?
+- [ ] CI-CD
 
 ### Masquerade (P0052) / GBC
 - [ ] `MMIO_exec_1.gb` should pass in CGB as well

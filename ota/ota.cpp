@@ -11,6 +11,32 @@ const std::string github_host = "api.github.com";
 const std::string github_target = "/repos/Kotambail-Hegde/Masquerade-Emulator/releases/latest";
 const std::string user_agent = "Masquerade-OTA-Updater";
 
+// ----------------------------------------------------------
+// Platform-specific relative paths
+// ----------------------------------------------------------
+#if defined(_WIN32)
+
+const fs::path PLATFORM_DIR = "windows";
+const fs::path APP_RELATIVE_PATH = PLATFORM_DIR / "masquerade.exe";
+const fs::path OTA_RELATIVE_PATH = PLATFORM_DIR / "masquerade-OTA.exe";
+
+#elif defined(__linux__)
+
+const fs::path PLATFORM_DIR = "linux";
+const fs::path APP_RELATIVE_PATH = PLATFORM_DIR / "masquerade";
+const fs::path OTA_RELATIVE_PATH = PLATFORM_DIR / "masquerade-OTA";
+
+#elif defined(__APPLE__)
+
+const fs::path PLATFORM_DIR = "macos";
+const fs::path APP_RELATIVE_PATH = PLATFORM_DIR / "Masquerade.app"; // if bundle
+const fs::path OTA_RELATIVE_PATH = PLATFORM_DIR / "masquerade-OTA";
+
+#else
+#error "Unsupported platform for OTA"
+#endif
+
+
 // ==========================================================
 // OpenSSL runtime loader
 // ==========================================================
@@ -303,8 +329,8 @@ bool ota_t::upgrade(boost::property_tree::ptree& pt)
 
         fs::path current_dir = fs::current_path();
         fs::path temp_zip = current_dir / "masquerade_update.zip";
-        fs::path exe_to_backup = current_dir / "masquerade.exe";        // main exe
-        fs::path ota_exe = current_dir / "masquerade-OTA.exe";          // running OTA exe
+        fs::path exe_to_backup = current_dir / APP_RELATIVE_PATH;           // masquerade
+        fs::path ota_exe = current_dir / OTA_RELATIVE_PATH;                 // running OTA
 
         // === Download ZIP ===
         INFO("Downloading ZIP to: %s", temp_zip.string().c_str());

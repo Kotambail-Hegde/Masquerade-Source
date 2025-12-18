@@ -2,11 +2,47 @@ cmake_minimum_required(VERSION 3.24.0)
 
 project(masquerade)  # MUST come before checking CMAKE_SYSTEM_NAME
 
-# Detect if we are running inside GitHub Actions
-if(DEFINED ENV{GITHUB_ACTIONS} AND $ENV{GITHUB_ACTIONS} STREQUAL "true")
-    set(IS_GITHUB_ACTIONS TRUE)
+# --- Git commit hash with dirty state (CI-safe)
+if (DEFINED GIT_COMMIT_HASH)
+    # CI build (exact commit)
+    set(MASQ_GIT_HASH "${GIT_COMMIT_HASH}")
+    message(STATUS "MASQ_GIT_HASH = ${MASQ_GIT_HASH}")
 else()
-    set(IS_GITHUB_ACTIONS FALSE)
+    # Local build
+    execute_process(
+        COMMAND git rev-parse --short HEAD
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        OUTPUT_VARIABLE _GIT_HASH
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+
+    if (_GIT_HASH)
+        execute_process(
+            COMMAND git diff --quiet
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            RESULT_VARIABLE _GIT_DIRTY
+        )
+
+        if (NOT _GIT_DIRTY EQUAL 0)
+            set(MASQ_GIT_HASH "${_GIT_HASH}-dirty")
+        else()
+            set(MASQ_GIT_HASH "${_GIT_HASH}")
+        endif()
+    else()
+        # Not a git repo at all (zip/tarball/manual copy)
+        set(MASQ_GIT_HASH "nogit")
+    endif()
+endif()
+
+add_compile_definitions(MASQ_GIT_HASH="${MASQ_GIT_HASH}")
+
+# Detect if we are running inside GitHub Actions
+set(IS_GITHUB_ACTIONS FALSE)
+if(DEFINED ENV{GITHUB_ACTIONS})
+    if("$ENV{GITHUB_ACTIONS}" STREQUAL "true")
+        set(IS_GITHUB_ACTIONS TRUE)
+    endif()
 endif()
 
 # --- Automatically setup the required libraries path from root path
