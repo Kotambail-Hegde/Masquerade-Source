@@ -511,6 +511,7 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         message(STATUS "Using native Clang")
         target_link_libraries(${PROJECT_NAME} PRIVATE
             nfd::nfd
+            SDL3::SDL3
             # SDL3::SDL3-static
         )
     endif()
@@ -570,9 +571,10 @@ elseif (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
         "${SDL3_IMPLIB}"
     )
     target_link_options(${PROJECT_NAME} PRIVATE
-        /LTCG:PGOPTIMIZE         # Optimize using profile
-        /USEPROFILE              # Enable profile-guided optimization
-        /PGD:${CMAKE_SOURCE_DIR}/assets/internal/pgo/masquerade.pgd
+        $<$<CONFIG:Release>:/INCREMENTAL:NO>          # Disable incremental linking (required for PGO)
+        $<$<CONFIG:Release>:/LTCG:PGOPTIMIZE>         # Optimize using profile
+        $<$<CONFIG:Release>:/USEPROFILE>              # Enable profile-guided optimization
+        $<$<CONFIG:Release>:/PGD:${CMAKE_SOURCE_DIR}/assets/internal/pgo/masquerade.pgd>
     )
     target_compile_definitions(${PROJECT_NAME} PRIVATE SDL_MAIN_HANDLED __STDC_FORMAT_MACROS)
 endif()
