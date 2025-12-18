@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Masquerade
+Comment=Multi-system emulator
+Exec=@CMAKE_INSTALL_PREFIX@/bin/masquerade
+Icon=masquerade
+Terminal=false
+Categories=Game;Emulator;
