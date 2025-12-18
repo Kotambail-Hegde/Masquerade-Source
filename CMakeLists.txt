@@ -283,8 +283,19 @@ if (NOT EMSCRIPTEN)
     endif()
 endif()
 
+set(PLATFORM_SOURCES "")
 if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-    list(APPEND PLATFORM_SOURCES masquerade.rc masquerade.aps)
+    set(PLATFORM_SOURCES masquerade.rc masquerade.aps)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    configure_file(
+        ${CMAKE_SOURCE_DIR}/masquerade.desktop.in
+        ${CMAKE_BINARY_DIR}/masquerade.desktop
+        @ONLY
+    )
+    install(FILES ${CMAKE_SOURCE_DIR}/assets/ui/icons/masquerade.png 
+            DESTINATION share/icons/hicolor/256x256/apps)
+    install(FILES ${CMAKE_BINARY_DIR}/masquerade.desktop 
+            DESTINATION share/applications)
 endif()
 
 # --- Final unified source list
@@ -303,6 +314,7 @@ set(SOURCES
     ${MINIZ_SOURCES}
     ${IMGUI_SOURCES}
     ${GLAD_SOURCES}
+    ${PLATFORM_SOURCES}
 )
 
 # --- Add the executable target
