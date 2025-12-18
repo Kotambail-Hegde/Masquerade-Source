@@ -1277,6 +1277,16 @@ private:
 private:
 
 #if defined(_WIN32) && (ENABLED_IMGUI_DEFAULT_THEME == NO)
+
+// ---- MinGW / older Windows SDK compatibility ----
+#ifndef DWMWA_BORDER_COLOR
+    #define DWMWA_BORDER_COLOR   34
+#endif
+
+#ifndef DWMWA_CAPTION_COLOR
+    #define DWMWA_CAPTION_COLOR  35
+#endif
+
 	void SetDWMTitlebarColor(SDL_Window* window, ImVec4 color)
 	{
 		struct Vec3
@@ -2855,7 +2865,7 @@ public:
 #else
 										ImGui::Text("Build Type");     ImGui::NextColumn(); ImGui::Text(": Debug");               ImGui::NextColumn();
 #endif
-										ImGui::Text("Commit");       ImGui::NextColumn(); ImGui::Text(": --------"); ImGui::NextColumn();
+										ImGui::Text("Commit");       ImGui::NextColumn(); ImGui::Text(": %s", MASQ_GIT_HASH); ImGui::NextColumn();
 
 										ImGui::Text("C++ Standard");   ImGui::NextColumn();
 #if __cplusplus == 199711L
