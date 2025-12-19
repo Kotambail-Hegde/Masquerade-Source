@@ -2,7 +2,7 @@
 
 #pragma region ADDITIONAL_FUNCTIONALITIES_PRE
 #define UNICODE										1
-#define VERSION										static_cast<float>(0.7007)
+#define VERSION										static_cast<float>(0.7008)
 #define WINDOW_PADDING								16
 #define NOMINMAX
 #define GL_FIXED_FUNCTION_PIPELINE					NO
