@@ -11,23 +11,23 @@ on:
   schedule:
     - cron: '30 11 * * 5'
 
-  push:
-    paths:
-      - '**/*.c'
-      - '**/*.h'
-      - '**/*.a'
-      - '**/*.lib'
-      - '**/*.dll'
-      - '**/CMakeLists.txt'
-      - '**/*.html'
-      - '**/*.exe'
-      - '**/*.cpp'
-      - '.github/workflows/build.yml'
-      - '**/*.hpp'
-      - '**/*.bin'
-      - '**/*.cxx'
-      - '**/*.hxx'
-      - '**/*.py'
+  # push:
+  #   paths:
+  #     - '**/*.c'
+  #     - '**/*.h'
+  #     - '**/*.a'
+  #     - '**/*.lib'
+  #     - '**/*.dll'
+  #     - '**/CMakeLists.txt'
+  #     - '**/*.html'
+  #     - '**/*.exe'
+  #     - '**/*.cpp'
+  #     - '.github/workflows/build.yml'
+  #     - '**/*.hpp'
+  #     - '**/*.bin'
+  #     - '**/*.cxx'
+  #     - '**/*.hxx'
+  #     - '**/*.py'
 
 permissions:
   contents: write
