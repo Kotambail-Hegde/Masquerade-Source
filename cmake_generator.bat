@@ -44,7 +44,7 @@ goto :eof
 
 :vs
     echo === 1) Visual Studio Solution 2022 + MSVC ===
-    cmake -G "Visual Studio 17 2022" -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl -S . -B "%BUILD_DIR%/x86_64/msvc/solution (IDE)/"
+    cmake -G "Visual Studio 17 2022" -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl -S . -B "%BUILD_DIR%/x86_64/msvc/solution/"
     goto :eof
 
 :ninja_msvc
