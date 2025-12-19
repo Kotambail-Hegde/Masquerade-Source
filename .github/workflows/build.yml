@@ -10,24 +10,27 @@ on:
   # Scheduled run every Friday at 5 PM IST (11:30 AM UTC)
   schedule:
     - cron: '30 11 * * 5'
-
-  # push:
-  #   paths:
-  #     - '**/*.c'
-  #     - '**/*.h'
-  #     - '**/*.a'
-  #     - '**/*.lib'
-  #     - '**/*.dll'
-  #     - '**/CMakeLists.txt'
-  #     - '**/*.html'
-  #     - '**/*.exe'
-  #     - '**/*.cpp'
-  #     - '.github/workflows/build.yml'
-  #     - '**/*.hpp'
-  #     - '**/*.bin'
-  #     - '**/*.cxx'
-  #     - '**/*.hxx'
-  #     - '**/*.py'
+  
+  # On pushes to master affecting relevant files   
+  push:
+    branches:
+      - master
+    paths:
+      - '**/*.c'
+      - '**/*.h'
+      - '**/*.a'
+      - '**/*.lib'
+      - '**/*.dll'
+      - '**/CMakeLists.txt'
+      - '**/*.html'
+      - '**/*.exe'
+      - '**/*.cpp'
+      - '.github/workflows/build.yml'
+      - '**/*.hpp'
+      - '**/*.bin'
+      - '**/*.cxx'
+      - '**/*.hxx'
+      - '**/*.py'
 
 permissions:
   contents: write
