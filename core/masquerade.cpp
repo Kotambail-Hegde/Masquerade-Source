@@ -303,7 +303,7 @@ void runProfiler()
 #pragma endregion PROFILER
 #pragma region SPECIAL_EFFECTS
 
-VIDEO_FILTERS currEnVFilter = VIDEO_FILTERS::NO_FILTER;
+VIDEO_FILTERS currEnVFilter = VIDEO_FILTERS::NEAREST_FILTER;
 PALETTE_ID currEnGbPalette = PALETTE_ID::PALETTE_1;
 PALETTE_ID currEnGbcPalette = PALETTE_ID::PALETTE_1;
 
@@ -2239,10 +2239,19 @@ public:
 											if (ImGui::BeginMenu("Scaling / Shaders"))
 											{
 												int selection = TO_UINT(currEnVFilter);
-												ImGui::RadioButton("None", &selection, TO_UINT(VIDEO_FILTERS::NO_FILTER));
+												ImGui::RadioButton("Nearest", &selection, TO_UINT(VIDEO_FILTERS::NEAREST_FILTER));
+#ifdef __EMSCRIPTEN__
+												ImGui::BeginDisabled();
+#endif
 												ImGui::RadioButton("Bilinear", &selection, TO_UINT(VIDEO_FILTERS::BILINEAR_FILTER));
 												ImGui::RadioButton("LCD", &selection, TO_UINT(VIDEO_FILTERS::LCD_FILTER));
+#ifdef __EMSCRIPTEN__
+												ImGui::EndDisabled();
+#endif
+												ImGui::BeginDisabled();
 												ImGui::RadioButton("CRT", &selection, TO_UINT(VIDEO_FILTERS::CRT_FILTER));
+												ImGui::EndDisabled();
+
 												if (currEnVFilter != (VIDEO_FILTERS)selection)
 												{
 													config.put<std::string>("mods._VIDEO_EFFECTS", vFiltersToConfig.at((VIDEO_FILTERS)selection));
