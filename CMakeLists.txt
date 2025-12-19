@@ -413,10 +413,31 @@ elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
 
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-    # target_compile_options(${PROJECT_NAME} PRIVATE /std:c++20) # optional if not set elsewhere
+    # Match manual Visual Studio project settings
     target_compile_options(${PROJECT_NAME} PRIVATE
         $<$<CONFIG:Debug>:/W4 /RTC1>
-        $<$<CONFIG:Release>:/GL /O2 /Ot /Oi>
+        $<$<CONFIG:Release>:
+            /GL              # Whole program optimization
+            /O2              # Maximum speed
+            /Ot              # Favor fast code
+            /Oi              # Intrinsic functions
+            /Oy              # Omit frame pointers
+            /Ob2             # Inline expansion - any suitable
+            /GS-             # Buffer security check disabled
+            /fp:fast         # Fast floating-point model
+            /arch:AVX2       # AVX2 vectorization
+            /Qpar            # Auto-parallelization
+            /W3              # Warning level 3
+            /WX              # Treat warnings as errors
+            /sdl-            # Disable SDL checks
+            /Zc:__cplusplus  # Correct __cplusplus macro
+        >
+    )
+    
+    # Use C++23 (matching stdcpplatest)
+    set_target_properties(${PROJECT_NAME} PROPERTIES
+        CXX_STANDARD 23
+        CXX_STANDARD_REQUIRED ON
     )
 endif()
 
@@ -577,6 +598,12 @@ elseif (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
         $<$<CONFIG:Release>:/PGD:${CMAKE_SOURCE_DIR}/assets/internal/pgo/masquerade.pgd>
     )
     target_compile_definitions(${PROJECT_NAME} PRIVATE SDL_MAIN_HANDLED __STDC_FORMAT_MACROS)
+    
+    # Add missing preprocessor definitions to match manual VS project
+    target_compile_definitions(${PROJECT_NAME} PRIVATE
+        $<$<CONFIG:Release>:_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS _CRT_SECURE_NO_WARNINGS>
+        $<$<CONFIG:Debug>:_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS _CRT_SECURE_NO_WARNINGS>
+    )
 endif()
 
 # --- PRE/POST Build Scripts
