@@ -27,17 +27,6 @@
 #define GBA_HALFWORD									uint16_t
 #define GBA_WORD										uint32_t
 
-// DEBUG
-#define GBA_AGS_PATCHED_TEST_ENABLED					NO
-
-// APU
-#define GBA_ENABLE_AUDIO								YES
-
-// PPU
-#define GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN	YES	// Refer : https://nba-emu.github.io/hw-docs/ppu/background.html
-#define GBA_LIMIT_ALL_SLAVE_SUBSYSTEM_TICKS				NO	// Probably more accurate, but will bringdown the FPS drastically!
-#define GBA_PPU_ENABLE_LAMBDA_FUNCTIONS					YES // Setting this to NO causes gfx issues, needs to be looked into again
-
 // GBA specific definitions
 #define SYSTEM_ROM_START_ADDRESS						0x00000000
 #define SYSTEM_ROM_END_ADDRESS							0x00003FFF
@@ -433,7 +422,7 @@ private:
 		CPSR_RES = 0b1111
 	};
 
-	enum class MEMORY_ACCESS_WIDTH
+	enum MEMORY_ACCESS_WIDTH : uint8_t
 	{
 		EIGHT_BIT,
 		SIXTEEN_BIT,
@@ -441,7 +430,7 @@ private:
 		TOTAL_ACCESS_WIDTH_POSSIBLE
 	};
 
-	enum class MEMORY_ACCESS_TYPE
+	enum MEMORY_ACCESS_TYPE : uint8_t
 	{
 		NON_SEQUENTIAL_CYCLE,
 		SEQUENTIAL_CYCLE,
@@ -1074,7 +1063,7 @@ private:
 
 private:
 
-	enum class MEMORY_REGIONS
+	enum MEMORY_REGIONS : uint8_t
 	{
 		REGION_SYS_ROM = 0x00,
 		REGION_DUMMY = 0x01,
@@ -3516,9 +3505,7 @@ private:
 		FLAG ppuModeTransition;
 		uint16_t currentWinPixel; // gives x coord info
 		uint16_t currentBgPixel; // gives x coord info
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == YES)
 		uint16_t currentBgPixelInTextMode[FOUR]; // gives x coord info
-#endif
 		uint16_t currentMergePixel; // gives x coord info
 		INC64 extraPPUCyclesForProcessPPUModesDuringModeChange;
 		LCD_MODES currentLCDMode;
@@ -4934,88 +4921,6 @@ private:
 	void playTheAudioFrame();
 
 private:
-
-#if (GBA_PPU_ENABLE_LAMBDA_FUNCTIONS == NO)
-	void RESET_PIXEL(uint32_t x, uint32_t y);
-
-	FLAG GET_WINDOW_OUTPUT(uint32_t x, uint32_t y, FLAG win0in, FLAG win1in, FLAG winout, FLAG objin);
-
-	void HANDLE_WINDOW_FOR_BG(uint32_t x, uint32_t y, ID bgID);
-
-	void HANDLE_WINDOW_FOR_OBJ(uint32_t x, uint32_t y);
-
-	FLAG DOES_WINDOW_ALLOW_BLENDING(uint32_t x, uint32_t y);
-
-	gbaColor_t BLEND(gbaColor_t layer1Pixel, gbaColor_t layer2Pixel, BYTE eva, BYTE evb);
-
-	gbaColor_t BRIGHTEN(gbaColor_t color, BYTE evy);
-
-	gbaColor_t DARKEN(gbaColor_t color, BYTE evy);
-
-	void MERGE_AND_DISPLAY_PHASE1();
-
-	void MERGE_AND_DISPLAY_PHASE2();
-
-	void SET_INITIAL_OBJ_MODE();
-
-	FLAG OBJ_A01_OBJ_CYCLE(ID oamID);
-
-	void OBJ_A2_OBJ_CYCLE(ID oamID);
-
-	void OBJ_PA_OBJ_CYCLE(ID oamID);
-
-	void OBJ_PB_OBJ_CYCLE(ID oamID);
-
-	void OBJ_PC_OBJ_CYCLE(ID oamID);
-
-	void OBJ_PD_OBJ_CYCLE(ID oamID);
-
-	void OBJ_V_OBJ_CYCLE(ID oamID, OBJECT_TYPE isAffine, STATE8 state);
-
-	INC8 INCREMENT_OAM_ID();
-
-	void WIN_CYCLE();
-
-	void MODE0_M_BG_CYCLE(ID bgID);
-
-	void MODE0_T_BG_CYCLE(ID bgID);
-
-	void MODE1_M_TEXT_BG_CYCLE(ID bgID);
-
-	void MODE1_T_TEXT_BG_CYCLE(ID bgID);
-
-	void RENDER_MODE0_MODE1_PIXEL_X(ID bgID, GBA_HALFWORD pixelData, STATE8 state);
-
-	void MODE1_M_AFFINE_BG_CYCLE();
-
-	void MODE1_T_AFFINE_BG_CYCLE();
-
-	void MODE2_M_BG_CYCLE(ID bgID);
-
-	void MODE2_T_BG_CYCLE(ID bgID);
-
-	void MODE3_B_BG_CYCLE();
-
-	void MODE4_B_BG_CYCLE();
-
-	void MODE5_B_BG_CYCLE();
-
-	void MODE0_BG_SEQUENCE(SSTATE32 state);
-
-	void MODE1_BG_SEQUENCE(SSTATE32 state);
-
-	void MODE2_BG_SEQUENCE(SSTATE32 state);
-
-	void MODE3_BG_SEQUENCE(SSTATE32 state);
-
-	void MODE4_BG_SEQUENCE(SSTATE32 state);
-
-	void MODE5_BG_SEQUENCE(SSTATE32 state);
-
-	void HANDLE_VCOUNT();
-
-	void PROCESS_PPU_MODES(uint32_t ppuCycles, FLAG renderBG, FLAG renderWindow, FLAG renderObj, FLAG renderMerge);
-#endif
 
 	void processPPU(INC64 ppuCycles);
 
