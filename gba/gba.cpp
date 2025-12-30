@@ -51,7 +51,8 @@
 #pragma region GBA_SPECIFIC_MACROS
 #pragma region WIP
 #define GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN	YES	// Refer : https://nba-emu.github.io/hw-docs/ppu/background.html
-#define GBA_ENABLE_CYCLE_ACCURATE_PPU_TICK				NO	// Probably more accurate, but will bringdown the FPS drastically!
+#define GBA_ENABLE_CYCLE_ACCURATE_PPU_TICK				YES	// More accurate, needed to pass the AGS DMA priority tests; note that enabling this will bringdown the FPS!
+#define GBA_ENABLE_DELAYED_MMIO_WRITE					YES
 #define GBA_ENABLE_AGS_PATCHED_TEST						NO
 #pragma endregion WIP
 
@@ -104,7 +105,11 @@ static std::string _JSON_LOCATION;
 static COUNTER64 logCounter = ZERO;
 static COUNTER64 emulationCounter[100] = { ZERO };
 
-// for audio
+// For DMA
+// TODO: This needs to be non-zero as per spec
+constexpr uint16_t DMA_START_DELAY = 0;
+
+// For audio
 // maximum number of inputs
 static uint32_t const MAX_INPUT_LEN = (uint32_t)(EMULATED_AUDIO_SAMPLING_RATE_FOR_GBA / CEIL(GBA_FPS));
 // length of filter than can be handled
@@ -117,7 +122,7 @@ static uint32_t const BUFFER_LEN = (MAX_FLT_LEN - 1 + MAX_INPUT_LEN);
 static double doubleInput[(uint32_t)(EMULATED_AUDIO_SAMPLING_RATE_FOR_GBA / CEIL(GBA_FPS))];
 static double doubleOutput[(uint32_t)(EMULATED_AUDIO_SAMPLING_RATE_FOR_GBA / CEIL(GBA_FPS))];
 
-// for video
+// For video
 static uint32_t gameboyAdvance_texture;
 static uint32_t matrix_texture;
 static uint32_t matrix[16] = { 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0x000000FF, 0x000000FF, 0x000000FF, 0x000000FF };
@@ -2766,10 +2771,16 @@ void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH acc
 	}
 	case IO_DMA0CNT_H:
 	{
+		//if (source == MEMORY_ACCESS_SOURCE::DMA)
+		//{
+		//	INFO("DMA updating DMA");
+		//}
+
+		FLAG oldEnable = pGBA_peripherals->mDMA0CNT_H.mDMAnCNT_HFields.DMA_EN;
 		pGBA_peripherals->mDMA0CNT_H.mDMAnCNT_HHalfWord = data;
-		pGBA_instance->GBA_state.dma.cache[TO_UINT8(DMA::DMA0)].enSetTime = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.globalTimerCounter;
-		pGBA_instance->GBA_state.dma.cache[TO_UINT8(DMA::DMA0)].needStartupDelay = YES;
-		scheduleDMATrigger(DMA_TIMING::IMMEDIATE);
+		FLAG newEnable = pGBA_peripherals->mDMA0CNT_H.mDMAnCNT_HFields.DMA_EN;
+
+		OnDMAChannelWritten(DMA::DMA0, oldEnable, newEnable);
 		RETURN;
 	}
 	case IO_DMA1SAD_L:
@@ -2799,10 +2810,16 @@ void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH acc
 	}
 	case IO_DMA1CNT_H:
 	{
+		//if (source == MEMORY_ACCESS_SOURCE::DMA)
+		//{
+		//	INFO("DMA updating DMA");
+		//}
+
+		FLAG oldEnable = pGBA_peripherals->mDMA1CNT_H.mDMAnCNT_HFields.DMA_EN;
 		pGBA_peripherals->mDMA1CNT_H.mDMAnCNT_HHalfWord = data;
-		pGBA_instance->GBA_state.dma.cache[TO_UINT8(DMA::DMA1)].enSetTime = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.globalTimerCounter;
-		pGBA_instance->GBA_state.dma.cache[TO_UINT8(DMA::DMA1)].needStartupDelay = YES;
-		scheduleDMATrigger(DMA_TIMING::IMMEDIATE);
+		FLAG newEnable = pGBA_peripherals->mDMA1CNT_H.mDMAnCNT_HFields.DMA_EN;
+
+		OnDMAChannelWritten(DMA::DMA1, oldEnable, newEnable);
 		RETURN;
 	}
 	case IO_DMA2SAD_L:
@@ -2832,10 +2849,16 @@ void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH acc
 	}
 	case IO_DMA2CNT_H:
 	{
+		//if (source == MEMORY_ACCESS_SOURCE::DMA)
+		//{
+		//	INFO("DMA updating DMA");
+		//}
+
+		FLAG oldEnable = pGBA_peripherals->mDMA2CNT_H.mDMAnCNT_HFields.DMA_EN;
 		pGBA_peripherals->mDMA2CNT_H.mDMAnCNT_HHalfWord = data;
-		pGBA_instance->GBA_state.dma.cache[TO_UINT8(DMA::DMA2)].enSetTime = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.globalTimerCounter;
-		pGBA_instance->GBA_state.dma.cache[TO_UINT8(DMA::DMA2)].needStartupDelay = YES;
-		scheduleDMATrigger(DMA_TIMING::IMMEDIATE);
+		FLAG newEnable = pGBA_peripherals->mDMA2CNT_H.mDMAnCNT_HFields.DMA_EN;
+
+		OnDMAChannelWritten(DMA::DMA2, oldEnable, newEnable);
 		RETURN;
 	}
 	case IO_DMA3SAD_L:
@@ -2865,10 +2888,16 @@ void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH acc
 	}
 	case IO_DMA3CNT_H:
 	{
+		//if (source == MEMORY_ACCESS_SOURCE::DMA)
+		//{
+		//	INFO("DMA updating DMA");
+		//}
+
+		FLAG oldEnable = pGBA_peripherals->mDMA3CNT_H.mDMAnCNT_HFields.DMA_EN;
 		pGBA_peripherals->mDMA3CNT_H.mDMAnCNT_HHalfWord = data;
-		pGBA_instance->GBA_state.dma.cache[TO_UINT8(DMA::DMA3)].enSetTime = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.globalTimerCounter;
-		pGBA_instance->GBA_state.dma.cache[TO_UINT8(DMA::DMA3)].needStartupDelay = YES;
-		scheduleDMATrigger(DMA_TIMING::IMMEDIATE);
+		FLAG newEnable = pGBA_peripherals->mDMA3CNT_H.mDMAnCNT_HFields.DMA_EN;
+
+		OnDMAChannelWritten(DMA::DMA3, oldEnable, newEnable);
 		RETURN;
 	}
 	case IO_40000E0:
@@ -2890,10 +2919,60 @@ void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH acc
 	{
 		RETURN;
 	}
+#if (GBA_ENABLE_DELAYED_MMIO_WRITE == YES)
+	case IO_TM0CNT_L:
+	{
+		SETBIT(pGBA_instance->GBA_state.timerPendMap, ZERO);
+		pGBA_instance->GBA_state.timer[TIMER::TIMER0].cache.io_tmxcnt_l = data;
+		RETURN;
+	}
+	case IO_TM0CNT_H:
+	{
+		SETBIT(pGBA_instance->GBA_state.timerPendMap, ONE);
+		pGBA_instance->GBA_state.timer[TIMER::TIMER0].cache.io_tmxcnt_h = data;
+		RETURN;
+	}
+	case IO_TM1CNT_L:
+	{
+		SETBIT(pGBA_instance->GBA_state.timerPendMap, TWO);
+		pGBA_instance->GBA_state.timer[TIMER::TIMER1].cache.io_tmxcnt_l = data;
+		RETURN;
+	}
+	case IO_TM1CNT_H:
+	{
+		SETBIT(pGBA_instance->GBA_state.timerPendMap, THREE);
+		pGBA_instance->GBA_state.timer[TIMER::TIMER1].cache.io_tmxcnt_h = data;
+		RETURN;
+	}
+	case IO_TM2CNT_L:
+	{
+		SETBIT(pGBA_instance->GBA_state.timerPendMap, FOUR);
+		pGBA_instance->GBA_state.timer[TIMER::TIMER2].cache.io_tmxcnt_l = data;
+		RETURN;
+	}
+	case IO_TM2CNT_H:
+	{
+		SETBIT(pGBA_instance->GBA_state.timerPendMap, FIVE);
+		pGBA_instance->GBA_state.timer[TIMER::TIMER2].cache.io_tmxcnt_h = data;
+		RETURN;
+	}
+	case IO_TM3CNT_L:
+	{
+		SETBIT(pGBA_instance->GBA_state.timerPendMap, SIX);
+		pGBA_instance->GBA_state.timer[TIMER::TIMER3].cache.io_tmxcnt_l = data;
+		RETURN;
+	}
+	case IO_TM3CNT_H:
+	{
+		SETBIT(pGBA_instance->GBA_state.timerPendMap, SEVEN);
+		pGBA_instance->GBA_state.timer[TIMER::TIMER3].cache.io_tmxcnt_h = data;
+		RETURN;
+	}
+#else
 	case IO_TM0CNT_L:
 	{
 		// Write should directly happen to "reload" instead of the actual mTIMERxCNT_L)
-		pGBA_instance->GBA_state.timer[TO_UINT(TIMER::TIMER0)].cache.reload = data; // Store the new value in "reload"
+		pGBA_instance->GBA_state.timer[TIMER::TIMER0].cache.reload = data; // Store the new value in "reload"
 		RETURN;
 	}
 	case IO_TM0CNT_H:
@@ -2904,21 +2983,21 @@ void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH acc
 		// Handles loading of "reload" to "counter" when timer is enabled (0 -> 1)
 		if (timer0EnBeforeUpdate == RESET && pGBA_peripherals->mTIMER0CNT_H.mTIMERnCNT_HFields.TIMER_START_STOP == SET)
 		{
-			pGBA_instance->GBA_state.timer[TO_UINT(TIMER::TIMER0)].cache.counter = pGBA_instance->GBA_state.timer[TO_UINT(TIMER::TIMER0)].cache.reload;
-			pGBA_peripherals->mTIMER0CNT_L = pGBA_instance->GBA_state.timer[TO_UINT(TIMER::TIMER0)].cache.counter;
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.timerCounter[TO_UINT(TIMER::TIMER0)] = RESET;
+			pGBA_instance->GBA_state.timer[TIMER::TIMER0].cache.counter = pGBA_instance->GBA_state.timer[TIMER::TIMER0].cache.reload;
+			pGBA_peripherals->mTIMER0CNT_L = pGBA_instance->GBA_state.timer[TIMER::TIMER0].cache.counter;
+			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.timerCounter[TIMER::TIMER0] = RESET;
 			// Takes 2 cycles for CNTH to get applied after writing to control/reload
 			// Refer : https://discordapp.com/channels/465585922579103744/465586361731121162/1034239922602782801
-			pGBA_instance->GBA_state.timer[TO_UINT(TIMER::TIMER0)].currentState = DISABLED;
+			pGBA_instance->GBA_state.timer[TIMER::TIMER0].currentState = DISABLED;
 			TODO("For some reason, instead of 2, we need to put 3 for prescalar tests to pass in AGS");
-			pGBA_instance->GBA_state.timer[TO_UINT(TIMER::TIMER0)].startupDelay = TWO;
+			pGBA_instance->GBA_state.timer[TIMER::TIMER0].startupDelay = TWO;
 		}
 		RETURN;
 	}
 	case IO_TM1CNT_L:
 	{
 		// Write should directly happen to "reload" instead of the actual mTIMERxCNT_L)
-		pGBA_instance->GBA_state.timer[TO_UINT(TIMER::TIMER1)].cache.reload = data; // Store the new value in "reload"
+		pGBA_instance->GBA_state.timer[TIMER::TIMER1].cache.reload = data; // Store the new value in "reload"
 		RETURN;
 	}
 	case IO_TM1CNT_H:
@@ -2927,21 +3006,21 @@ void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH acc
 		pGBA_peripherals->mTIMER1CNT_H.mTIMERnCNT_HHalfWord = data;
 		if (timer1EnBeforeUpdate == RESET && pGBA_peripherals->mTIMER1CNT_H.mTIMERnCNT_HFields.TIMER_START_STOP == SET)
 		{
-			pGBA_instance->GBA_state.timer[TO_UINT(TIMER::TIMER1)].cache.counter = pGBA_instance->GBA_state.timer[TO_UINT(TIMER::TIMER1)].cache.reload;
-			pGBA_peripherals->mTIMER1CNT_L = pGBA_instance->GBA_state.timer[TO_UINT(TIMER::TIMER1)].cache.counter;
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.timerCounter[TO_UINT(TIMER::TIMER1)] = RESET;
+			pGBA_instance->GBA_state.timer[TIMER::TIMER1].cache.counter = pGBA_instance->GBA_state.timer[TIMER::TIMER1].cache.reload;
+			pGBA_peripherals->mTIMER1CNT_L = pGBA_instance->GBA_state.timer[TIMER::TIMER1].cache.counter;
+			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.timerCounter[TIMER::TIMER1] = RESET;
 			// Takes 2 cycles for CNTH to get applied after writing to control/reload
 			// Refer : https://discordapp.com/channels/465585922579103744/465586361731121162/1034239922602782801
-			pGBA_instance->GBA_state.timer[TO_UINT(TIMER::TIMER1)].currentState = DISABLED;
+			pGBA_instance->GBA_state.timer[TIMER::TIMER1].currentState = DISABLED;
 			TODO("For some reason, instead of 2, we need to put 3 for prescalar tests to pass in AGS");
-			pGBA_instance->GBA_state.timer[TO_UINT(TIMER::TIMER1)].startupDelay = TWO;
+			pGBA_instance->GBA_state.timer[TIMER::TIMER1].startupDelay = TWO;
 		}
 		RETURN;
 	}
 	case IO_TM2CNT_L:
 	{
 		// Write should directly happen to "reload" instead of the actual mTIMERxCNT_L)
-		pGBA_instance->GBA_state.timer[TO_UINT(TIMER::TIMER2)].cache.reload = data; // Store the new value in "reload"
+		pGBA_instance->GBA_state.timer[TIMER::TIMER2].cache.reload = data; // Store the new value in "reload"
 		RETURN;
 	}
 	case IO_TM2CNT_H:
@@ -2950,21 +3029,21 @@ void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH acc
 		pGBA_peripherals->mTIMER2CNT_H.mTIMERnCNT_HHalfWord = data;
 		if (timer2EnBeforeUpdate == RESET && pGBA_peripherals->mTIMER2CNT_H.mTIMERnCNT_HFields.TIMER_START_STOP == SET)
 		{
-			pGBA_instance->GBA_state.timer[TO_UINT(TIMER::TIMER2)].cache.counter = pGBA_instance->GBA_state.timer[TO_UINT(TIMER::TIMER2)].cache.reload;
-			pGBA_peripherals->mTIMER2CNT_L = pGBA_instance->GBA_state.timer[TO_UINT(TIMER::TIMER2)].cache.counter;
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.timerCounter[TO_UINT(TIMER::TIMER2)] = RESET;
+			pGBA_instance->GBA_state.timer[TIMER::TIMER2].cache.counter = pGBA_instance->GBA_state.timer[TIMER::TIMER2].cache.reload;
+			pGBA_peripherals->mTIMER2CNT_L = pGBA_instance->GBA_state.timer[TIMER::TIMER2].cache.counter;
+			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.timerCounter[TIMER::TIMER2] = RESET;
 			// Takes 2 cycles for CNTH to get applied after writing to control/reload
 			// Refer : https://discordapp.com/channels/465585922579103744/465586361731121162/1034239922602782801
-			pGBA_instance->GBA_state.timer[TO_UINT(TIMER::TIMER2)].currentState = DISABLED;
+			pGBA_instance->GBA_state.timer[TIMER::TIMER2].currentState = DISABLED;
 			TODO("For some reason, instead of 2, we need to put 3 for prescalar tests to pass in AGS");
-			pGBA_instance->GBA_state.timer[TO_UINT(TIMER::TIMER2)].startupDelay = TWO;
+			pGBA_instance->GBA_state.timer[TIMER::TIMER2].startupDelay = TWO;
 		}
 		RETURN;
 	}
 	case IO_TM3CNT_L:
 	{
 		// Write should directly happen to "reload" instead of the actual mTIMERxCNT_L)
-		pGBA_instance->GBA_state.timer[TO_UINT(TIMER::TIMER3)].cache.reload = data; // Store the new value in "reload"
+		pGBA_instance->GBA_state.timer[TIMER::TIMER3].cache.reload = data; // Store the new value in "reload"
 		RETURN;
 	}
 	case IO_TM3CNT_H:
@@ -2973,17 +3052,18 @@ void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH acc
 		pGBA_peripherals->mTIMER3CNT_H.mTIMERnCNT_HHalfWord = data;
 		if (timer3EnBeforeUpdate == RESET && pGBA_peripherals->mTIMER3CNT_H.mTIMERnCNT_HFields.TIMER_START_STOP == SET)
 		{
-			pGBA_instance->GBA_state.timer[TO_UINT(TIMER::TIMER3)].cache.counter = pGBA_instance->GBA_state.timer[TO_UINT(TIMER::TIMER3)].cache.reload;
-			pGBA_peripherals->mTIMER3CNT_L = pGBA_instance->GBA_state.timer[TO_UINT(TIMER::TIMER3)].cache.counter;
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.timerCounter[TO_UINT(TIMER::TIMER3)] = RESET;
+			pGBA_instance->GBA_state.timer[TIMER::TIMER3].cache.counter = pGBA_instance->GBA_state.timer[TIMER::TIMER3].cache.reload;
+			pGBA_peripherals->mTIMER3CNT_L = pGBA_instance->GBA_state.timer[TIMER::TIMER3].cache.counter;
+			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.timerCounter[TIMER::TIMER3] = RESET;
 			// Takes 2 cycles for CNTH to get applied after writing to control/reload
 			// Refer : https://discordapp.com/channels/465585922579103744/465586361731121162/1034239922602782801
-			pGBA_instance->GBA_state.timer[TO_UINT(TIMER::TIMER3)].currentState = DISABLED;
+			pGBA_instance->GBA_state.timer[TIMER::TIMER3].currentState = DISABLED;
 			TODO("For some reason, instead of 2, we need to put 3 for prescalar tests to pass in AGS");
-			pGBA_instance->GBA_state.timer[TO_UINT(TIMER::TIMER3)].startupDelay = TWO;
+			pGBA_instance->GBA_state.timer[TIMER::TIMER3].startupDelay = TWO;
 		}
 		RETURN;
 	}
+#endif
 	case IO_SIOMULTI0:
 	{
 		pGBA_peripherals->mSIOMULTI0 = data;
@@ -3215,10 +3295,17 @@ void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH acc
 			}
 			else
 			{
-				TODO("Do we need to check for (IE AND IF)=0 for enabling HALT?");
-				// Refer "4000301h - HALTCNT - BYTE - Undocumented - Low Power Mode Control (W)" of  https://problemkaputt.de/gbatek-gba-system-control.htm
-				CPUEVENT("[RUN] -> [HALT]");
-				pGBA_cpuInstance->haltCntState = HALT_CONTROLLER::HALT;
+				if (shouldUnHaltTheCPU() == YES)
+				{
+					CPUEVENT("[RUN] -> [RUN]");
+					pGBA_cpuInstance->haltCntState = HALT_CONTROLLER::RUN;
+				}
+				else
+				{
+					// Refer "4000301h - HALTCNT - BYTE - Undocumented - Low Power Mode Control (W)" of  https://problemkaputt.de/gbatek-gba-system-control.htm
+					CPUEVENT("[RUN] -> [HALT]");
+					pGBA_cpuInstance->haltCntState = HALT_CONTROLLER::HALT;
+				}
 			}
 		}
 
@@ -3275,24 +3362,16 @@ FLAG GBA_t::processSOC()
 	++emulationCounter[ZERO];
 
 	INC64 cyclesInThisRun = RESET;
+	INC64 dmaCyclesInThisRun = RESET;
 
 	if (pGBA_cpuInstance->haltCntState == HALT_CONTROLLER::RUN)
 	{
-		if ((isAnyDMAInProgress() == YES) || (isAnyDMAScheduled() == YES))
-		{
-			cyclesInThisRun = processDMA();
-		}
-
-		if (cyclesInThisRun == RESET)
-		{
-			runCPUPipeline();
-			cyclesInThisRun = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter;
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter = RESET;
-		}
+		runCPUPipeline();
+		cyclesInThisRun = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter;
 	}
 	else if (pGBA_cpuInstance->haltCntState == HALT_CONTROLLER::HALT)
 	{
-		if ((isAnyDMAInProgress() == YES) || (isAnyDMAScheduled() == YES))
+		if (IsAnyDMARunning() == YES)
 		{
 			// Cycles can never be zero; In actual device, clocks are always running
 			// Since the emulation's clocks are based on CPU, even when other masters (eg: DMA) running, cycles can appear to be zero
@@ -3302,14 +3381,16 @@ FLAG GBA_t::processSOC()
 			// We can use DMA for this if its is running, so basically when CPU is HALTED, "cpuCounter == dmaCounter (if dmaCounter != 0)"
 			// If DMA is also not running, then we just tick by one until we reach vblank
 
-			cyclesInThisRun = processDMA();
+			dmaTick();
 		}
 
-		if (cyclesInThisRun == RESET)
+		dmaCyclesInThisRun = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.dmaCounter;
+		pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.dmaCounter = RESET;
+
+		if (dmaCyclesInThisRun == RESET)
 		{
-			InternalCycles(ONE);
+			busCycles();
 			cyclesInThisRun = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter;
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter = RESET;
 		}
 
 		// Refer to http://problemkaputt.de/gbatek-gba-system-control.htm
@@ -3319,65 +3400,55 @@ FLAG GBA_t::processSOC()
 			CPUEVENT("[HALT] -> [RUN]");
 		}
 	}
-	else if (pGBA_cpuInstance->haltCntState == HALT_CONTROLLER::STOP)
+	else
 	{
 		FATAL("CPU is in STOP mode");
 	}
-	else
-	{
-		FATAL("Unknown Halt Controller State");
-	}
 
-	processBackup();
-
-	if (pGBA_instance->GBA_state.emulatorStatus.isCycleAccurate == NO)
-	{
-		CPUINFRA("CPU Cycles: %" PRId64, cyclesInThisRun);
-
-		if (cyclesInThisRun == ZERO)
-		{
-			RETURN status;
-		}
-
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_TICK == YES)
-		for (INC32 ticks = ZERO; ticks < cyclesInThisRun; ticks++)
-		{
-			processTimer(ONE);
-			processSIO(ONE);
-			processAPU(ONE);
-			processPPU(ONE);
-		}
-#else
-		for (INC32 ticks = ZERO; ticks < cyclesInThisRun; ticks++)
-		{
-			processTimer(ONE);
-			processSIO(ONE);
-			processAPU(ONE);
-		}
-		processPPU(cyclesInThisRun);
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_TICK == NO)
+	processPPU(cyclesInThisRun);
 #endif
 
-	}
+	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter = RESET;
+	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.dmaCounter = RESET;
 
 	RETURN status;
 }
 
-void GBA_t::InternalCycles(uint32_t cycles)
+void GBA_t::busCycles()
 {
-	if (cycles != ONE)
-	{
-		FATAL("I cycles always takes one clock");
-	}
-
-	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter += cycles;
-
-	// Refer https://discord.com/channels/465585922579103744/465586361731121162/1269384605136322571
-	pGBA_memory->setNextMemoryAccessType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
+	cpuTick();
 }
 
-void GBA_t::cpuIdleCycles(uint32_t cycles)
+void GBA_t::cpuIdleCycles()
 {
-	InternalCycles(cycles);
+	// Run DMA if any channel is active
+	if (IsAnyDMARunning() == YES)
+	{
+		dmaTick();
+	}
+
+	auto& ticks = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate;
+
+	// Note that below method of using "free bus cycles" is inspired from NBA
+
+	// Refill free internal cycles using DMA counter
+	ticks.freeBusCyclesCounter += ticks.dmaCounter;
+	ticks.dmaCounter = RESET;
+
+	if (ticks.freeBusCyclesCounter <= RESET)
+	{
+		ticks.freeBusCyclesCounter = RESET;
+		busCycles();
+	}
+	else
+	{
+		--ticks.freeBusCyclesCounter;
+	}
+
+	// Next access after internal cycle is always non-sequential
+	// Ref: https://discord.com/channels/465585922579103744/465586361731121162/1269384605136322571
+	pGBA_memory->setNextMemoryAccessType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
 }
 
 void GBA_t::fetchAndDecode(uint32_t newPC)
@@ -3423,7 +3494,6 @@ void GBA_t::fetchAndDecode(uint32_t newPC)
 		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFC;
 
 		// Stage 2:
-
 		pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode = pGBA_cpuInstance->pipeline.decodeStageOpCode.opCode.rawOpCode;
 		pGBA_cpuInstance->pipeline.decodeStageOpCode.opCode.rawOpCode = pGBA_cpuInstance->pipeline.fetchStageOpCode.opCode.rawOpCode;
 		pGBA_cpuInstance->pipeline.fetchStageOpCode.opCode.rawOpCode = readRawMemory<GBA_WORD>(pGBA_cpuInstance->registers.pc, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE);
@@ -3734,8 +3804,6 @@ void GBA_t::runCPUPipeline()
 			CPUINFO("Skipping instruction because condition %d was not met.", pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.cond);
 			pGBA_cpuInstance->registers.pc += FOUR;
 			pGBA_cpuInstance->registers.pc &= 0xFFFFFFFC;
-
-			cpuIdleCycles(ONE);
 		}
 	}
 	else
@@ -3782,38 +3850,48 @@ void GBA_t::skylersalehLogProcess()
 void GBA_t::dumpCpuStateToConsole()
 {
 	LOG_NEW_LINE;
-	LOG("--------------------------------------------");
+	LOG("------------------------------------------------------------");
 
-	for (uint8_t jj = ZERO; jj < LO_GP_REGISTERS; jj++)
+	/* R0–R7 */
+	for (uint8_t r = ZERO; r < LO_GP_REGISTERS; r++)
 	{
-		LOG("register %d			: %02x", jj, pGBA_instance->GBA_state.cpuInstance.registers.unbankedLORegisters[jj]);
+		LOG("BANK NA R%-2u %-10s : 0x%08X",
+			r,
+			"",
+			pGBA_instance->GBA_state.cpuInstance.registers.unbankedLORegisters[r]);
 	}
-	for (uint8_t ii = ZERO; ii < REGISTER_BANKS; ii++)
+
+	/* Banked registers */
+	for (uint8_t bank = ZERO; bank < REGISTER_BANKS; bank++)
 	{
 		for (uint8_t jj = ZERO; jj < HI_GP_REGISTERS; jj++)
 		{
-			if (jj + LO_GP_REGISTERS == SP)
-			{
-				LOG("bank %d register %d (SP)	: %02x", ii, (LO_GP_REGISTERS + jj), pGBA_instance->GBA_state.cpuInstance.registers.bankedHIRegisters[ii][jj]);
-			}
-			else if (jj + LO_GP_REGISTERS == LR)
-			{
-				LOG("bank %d register %d	(LR)		: %02x", ii, (LO_GP_REGISTERS + jj), pGBA_instance->GBA_state.cpuInstance.registers.bankedHIRegisters[ii][jj]);
-			}
-			else if (jj + LO_GP_REGISTERS == PC)
-			{
-				LOG("bank %d register %d	(PC)		: %02x", ii, (LO_GP_REGISTERS + jj), pGBA_instance->GBA_state.cpuInstance.registers.bankedHIRegisters[ii][jj]);
-			}
-			else
-			{
-				LOG("bank %d register %d			: %02x", ii, (LO_GP_REGISTERS + jj), pGBA_instance->GBA_state.cpuInstance.registers.bankedHIRegisters[ii][jj]);
-			}
-		}
-		LOG("bank %d register (SPSR)		: %02x", ii, pGBA_instance->GBA_state.cpuInstance.registers.spsr[ii].psrMemory);
-	}
-	LOG("register (CPSR)		: %02x", pGBA_instance->GBA_state.cpuInstance.registers.cpsr.psrMemory);
+			uint8_t reg = LO_GP_REGISTERS + jj;
+			const char* tag = "";
 
-	LOG("--------------------------------------------");
+			if (reg == SP)      tag = "(SP)";
+			else if (reg == LR) tag = "(LR)";
+			else if (reg == PC) tag = "(PC)";
+
+			LOG("BANK %-2u R%-2u %-10s : 0x%08X",
+				bank,
+				reg,
+				tag,
+				pGBA_instance->GBA_state.cpuInstance.registers.bankedHIRegisters[bank][jj]);
+		}
+
+		LOG("BANK %-2u %-14s : 0x%08X",
+			bank,
+			"(SPSR)",
+			pGBA_instance->GBA_state.cpuInstance.registers.spsr[bank].psrMemory);
+	}
+
+	/* CPSR */
+	LOG("BANK NA %-14s : 0x%08X",
+		"(CPSR)",
+		pGBA_instance->GBA_state.cpuInstance.registers.cpsr.psrMemory);
+
+	LOG("------------------------------------------------------------");
 }
 
 void GBA_t::unimplementedInstruction()
@@ -3828,36 +3906,95 @@ void GBA_t::unimplementedInstruction()
 #pragma region EMULATION_DEFINITIONS
 
 #pragma region CYCLE_ACCURATE
-void GBA_t::cpuTick()
+void GBA_t::cpuTick(TICK_TYPE type)
 {
-	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter++;
+	if (type == TICK_TYPE::DMA_TICK)
+	{
+		pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.dmaCounter++;
+		pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.dmaCounter++;
+	}
+	else
+	{
+		pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter++;
+		pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter++;
+	}
 
-	syncOtherGBModuleTicks();
-}
-
-void GBA_t::syncOtherGBModuleTicks()
-{
-	timerTick();
-	dmaTick();
-	serialTick();
-	rtcTick();
-	apuTick();
-	ppuTick();
-}
-
-void GBA_t::timerTick()
-{
-	;
+	syncOtherGBAModuleTicks();
 }
 
 void GBA_t::dmaTick()
 {
-	;
+	processDMA();
+}
+
+void GBA_t::syncOtherGBAModuleTicks()
+{
+	timerTick();
+	serialTick();
+	rtcTick();
+	apuTick();
+	ppuTick();
+	processBackup();
+
+#if (GBA_ENABLE_DELAYED_MMIO_WRITE == YES)
+
+	if (pGBA_instance->GBA_state.interrupt.syncDelay > RESET)
+	{
+		--pGBA_instance->GBA_state.interrupt.syncDelay;
+	}
+
+	if (pGBA_instance->GBA_state.irqPend == YES)
+	{
+		ifRegUpdate(pGBA_instance->GBA_state.interrupt.irqQ);
+		pGBA_instance->GBA_state.irqPend = NO;
+		pGBA_instance->GBA_state.interrupt.syncDelay = RESET;
+	}
+
+	if (pGBA_instance->GBA_state.timerPendMap != RESET) MASQ_UNLIKELY
+	{
+		for (uint8_t timerID = ZERO; timerID < FOUR; timerID++)
+		{
+			/* bits (CNT_L | CNT_H) for this timer */
+			uint8_t mask = (uint8_t)(THREE << (timerID << ONE)); // 0x03,0x0C,0x30,0xC0
+			/* nothing pending for this timer */
+			if ((pGBA_instance->GBA_state.timerPendMap & mask) == ZERO)
+			{
+				CONTINUE;
+			}
+			uint8_t bitL = (timerID << ONE);       // 0,2,4,6
+			uint8_t bitH = bitL + ONE;             // 1,3,5,7
+			if (GETBIT(bitL, pGBA_instance->GBA_state.timerPendMap))
+			{
+				cntlRegUpdate(
+					(TIMER)timerID,
+					pGBA_instance->GBA_state.timer[timerID]
+					.cache.io_tmxcnt_l
+				);
+			}
+			if (GETBIT(bitH, pGBA_instance->GBA_state.timerPendMap))
+			{
+				cnthRegUpdate(
+					(TIMER)timerID,
+					pGBA_instance->GBA_state.timer[timerID]
+					.cache.io_tmxcnt_h
+				);
+			}
+		}
+
+		/* clear after processing */
+		pGBA_instance->GBA_state.timerPendMap = RESET;
+	}
+#endif
+}
+
+void GBA_t::timerTick()
+{
+	processTimer(ONE);
 }
 
 void GBA_t::serialTick()
 {
-	;
+	processSIO(ONE);
 }
 
 void GBA_t::rtcTick()
@@ -3867,12 +4004,14 @@ void GBA_t::rtcTick()
 
 void GBA_t::apuTick()
 {
-	;
+	processAPU(ONE);
 }
 
 void GBA_t::ppuTick()
 {
-	;
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_TICK == YES)
+	processPPU(ONE);
+#endif
 }
 #pragma endregion CYCLE_ACCURATE
 
@@ -3881,14 +4020,18 @@ void GBA_t::ppuTick()
 
 void GBA_t::requestInterrupts(GBA_INTERRUPT interrupt)
 {
-	pGBA_peripherals->mIFHalfWord.mIFHalfWord |= (ONE << ((uint16_t)interrupt));
+#if (GBA_ENABLE_DELAYED_MMIO_WRITE == YES)
+	pGBA_instance->GBA_state.irqPend = YES;
+	pGBA_instance->GBA_state.interrupt.irqQ = (uint16_t)interrupt;
+#else
+	ifRegUpdate((uint16_t)interrupt);
+#endif
 }
 
 FLAG GBA_t::shouldUnHaltTheCPU()
 {
-	if ((pGBA_peripherals->mIFHalfWord.mIFHalfWord
-		& pGBA_peripherals->mIEHalfWord.mIEHalfWord
-		& 0x3FFF) != ZERO)
+	if (((pGBA_peripherals->mIFHalfWord.mIFHalfWord & pGBA_peripherals->mIEHalfWord.mIEHalfWord & 0x3FFF) != ZERO)
+		&& (pGBA_instance->GBA_state.interrupt.syncDelay == RESET))
 	{
 		RETURN YES;
 	}
@@ -3898,9 +4041,8 @@ FLAG GBA_t::shouldUnHaltTheCPU()
 
 FLAG GBA_t::isInterruptReadyToBeServed()
 {
-	if ((pGBA_peripherals->mIFHalfWord.mIFHalfWord
-		& pGBA_peripherals->mIEHalfWord.mIEHalfWord
-		& 0x3FFF) != ZERO)
+	if (((pGBA_peripherals->mIFHalfWord.mIFHalfWord & pGBA_peripherals->mIEHalfWord.mIEHalfWord & 0x3FFF) != ZERO)
+		&& (pGBA_instance->GBA_state.interrupt.syncDelay == RESET))
 	{
 		RETURN YES;
 	}
@@ -3940,7 +4082,7 @@ FLAG GBA_t::handleInterruptsIfApplicable()
 
 		// Idle Cycles...
 
-		cpuIdleCycles(ONE);
+		cpuIdleCycles();
 
 		// Switch to ARM state (if in thumb)
 
@@ -4123,14 +4265,13 @@ void GBA_t::processTimer(INC64 timerCycles)
 									// only DMA 1 and DMA 2 can be requested to fill sound FIFO, that too in Special Mode
 
 									mDMAnCNT_HHalfWord_t* dmacntH = ((fifoID == DIRECT_SOUND_A) ? &pGBA_peripherals->mDMA1CNT_H : &pGBA_peripherals->mDMA2CNT_H);
+									ID dmaID = (fifoID == DIRECT_SOUND_A) ? DMA::DMA1 : DMA::DMA2;
 
 									if (dmacntH->mDMAnCNT_HFields.DMA_EN == SET
 										&&
-										dmacntH->mDMAnCNT_HFields.DMA_START_TIMING == TO_UINT8(DMA_TIMING::SPECIAL))
+										dmacntH->mDMAnCNT_HFields.DMA_START_TIMING == DMA_TIMING::SPECIAL)
 									{
-										scheduleDMATrigger(DMA_TIMING::SPECIAL);
-										DMA_SPECIAL_TIMING id = ((fifoID == DIRECT_SOUND_A) ? DMA_SPECIAL_TIMING::FIFO0 : DMA_SPECIAL_TIMING::FIFO1);
-										scheduleSpecialDMATrigger(id);
+										ActivateDMAChannel(dmaID);
 									}
 								}
 							}
@@ -4170,7 +4311,7 @@ void GBA_t::processTimer(INC64 timerCycles)
 
 		FLAG isCountUpMode = (CNTH->mTIMERnCNT_HFields.COUNT_UP_TIMING == SET ? YES : NO);
 
-		if ((isCountUpMode == YES) && (timerID == TO_UINT(TIMER::TIMER0)))
+		if ((isCountUpMode == YES) && (timerID == TIMER::TIMER0))
 		{
 			WARN("Timer 0 cannot be run in Cascade Mode");
 			isCountUpMode = NO;
@@ -4453,411 +4594,299 @@ void GBA_t::latchDMARegisters(ID dmaID)
 	}
 }
 
-void GBA_t::scheduleSpecialDMATrigger(DMA_SPECIAL_TIMING trigger)
+void GBA_t::OnDMAChannelWritten(DMA dmaID, FLAG oldEnable, FLAG newEnable)
 {
-	pGBA_instance->GBA_state.dma.specialTriggersForThisRun |= ((ONE << (TO_UINT8(trigger))) & 0x0F);
-}
+	mDMAnCNT_HHalfWord_t* CNTH = getDMACNTHRegister(dmaID);
+	auto& cache = pGBA_instance->GBA_state.dma.cache[dmaID];
 
-void GBA_t::cancelScheduledSpecialDMATrigger(DMA_SPECIAL_TIMING trigger)
-{
-	pGBA_instance->GBA_state.dma.specialTriggersForThisRun &= ((~(ONE << (TO_UINT8(trigger)))) & 0x0F);
-}
-
-MAP8 GBA_t::getSpecialDMASchedule()
-{
-	RETURN pGBA_instance->GBA_state.dma.specialTriggersForThisRun;
-}
-
-void GBA_t::scheduleDMATrigger(DMA_TIMING trigger)
-{
-	pGBA_instance->GBA_state.dma.triggersForThisRun |= ((ONE << (TO_UINT8(trigger))) & 0x0F);
-}
-
-void GBA_t::cancelScheduledDMATrigger(DMA_TIMING trigger)
-{
-	pGBA_instance->GBA_state.dma.triggersForThisRun &= ((~(ONE << (TO_UINT8(trigger)))) & 0x0F);
-}
-
-MAP8 GBA_t::getDMASchedule()
-{
-	RETURN pGBA_instance->GBA_state.dma.triggersForThisRun;
-}
-
-FLAG GBA_t::isThisDMATriggerScheduled(DMA_TIMING trigger)
-{
-	RETURN((pGBA_instance->GBA_state.dma.triggersForThisRun & ((ONE << (TO_UINT8(trigger))) & 0x0F)) > ZERO ? YES : NO);
-}
-
-FLAG GBA_t::isAnyDMAScheduled()
-{
-	RETURN((pGBA_instance->GBA_state.dma.triggersForThisRun == ZERO) ? NO : YES);
-}
-
-void GBA_t::findNextActiveDMA()
-{
-	if (pGBA_peripherals->mDMA0CNT_H.mDMAnCNT_HFields.DMA_EN == SET)
+	// Remove from all trigger maps
+	for (int timing = DMA_TIMING::IMMEDIATE; timing < DMA_TIMING::TOTAL_DMA_TIMING; timing++)
 	{
-		pGBA_instance->GBA_state.dma.currentlyActiveDMA = DMA::DMA0;
+		UNSETBIT(pGBA_instance->GBA_state.dma.trigCache[timing].dmaIdMap, dmaID);
 	}
-	else if (pGBA_peripherals->mDMA1CNT_H.mDMAnCNT_HFields.DMA_EN == SET)
+
+	if (newEnable == SET)
 	{
-		pGBA_instance->GBA_state.dma.currentlyActiveDMA = DMA::DMA1;
-	}
-	else if (pGBA_peripherals->mDMA2CNT_H.mDMAnCNT_HFields.DMA_EN == SET)
-	{
-		pGBA_instance->GBA_state.dma.currentlyActiveDMA = DMA::DMA2;
-	}
-	else if (pGBA_peripherals->mDMA3CNT_H.mDMAnCNT_HFields.DMA_EN == SET)
-	{
-		pGBA_instance->GBA_state.dma.currentlyActiveDMA = DMA::DMA3;
+		cache.scheduleType = (DMA_TIMING)CNTH->mDMAnCNT_HFields.DMA_START_TIMING;
+
+		if (oldEnable == RESET)
+		{
+			// 0->1: Latch registers
+			latchDMARegisters(dmaID);
+			cache.count = ZERO;
+			cache.target = cache.length;
+			cache.currentState = YES;
+			cache.didAccessRom = NO;
+		}
+		else
+		{
+			// 1->1: If modifying currently active DMA, trigger re-enter
+			if (pGBA_instance->GBA_state.dma.currentlyActiveDMA == dmaID)
+			{
+				pGBA_instance->GBA_state.dma.shouldReenterTransferLoop = YES;
+			}
+		}
+
+		// Add to trigger map
+		SETBIT(pGBA_instance->GBA_state.dma.trigCache[cache.scheduleType].dmaIdMap, dmaID);
+
+		// Activate if IMMEDIATE
+		if (cache.scheduleType == DMA_TIMING::IMMEDIATE)
+		{
+			ActivateDMAChannel(dmaID);
+		}
 	}
 	else
 	{
-		pGBA_instance->GBA_state.dma.currentlyActiveDMA = DMA::NONE;
+		// Disable
+		cache.currentState = NO;
+		UNSETBIT(pGBA_instance->GBA_state.dma.runnableSet, dmaID);
+
+		// Remove from all trigger maps (already done above, but keeping for clarity)
+		for (int timing = DMA_TIMING::IMMEDIATE; timing < DMA_TIMING::TOTAL_DMA_TIMING; timing++)
+		{
+			UNSETBIT(pGBA_instance->GBA_state.dma.trigCache[timing].dmaIdMap, dmaID);
+		}
+
+		if (pGBA_instance->GBA_state.dma.currentlyActiveDMA == dmaID)
+		{
+			pGBA_instance->GBA_state.dma.shouldReenterTransferLoop = YES;
+			SelectNextDMA();
+		}
 	}
 }
 
-FLAG GBA_t::isAnyDMAEnabled()
+void GBA_t::ActivateDMAChannel(ID dmaID)
 {
-	findNextActiveDMA();
-	RETURN((pGBA_instance->GBA_state.dma.currentlyActiveDMA == DMA::NONE) ? NO : YES);
-}
+	auto& dmaState = pGBA_instance->GBA_state.dma;
 
-void GBA_t::updateDMAInProgressFlag(FLAG flag)
-{
-	pGBA_instance->GBA_state.dma.anyDMAInMiddleOfTransaction = flag;
-}
+	//INFO("ActivateDMAChannel(%d): runnableSet=0x%02X, currentActive=%d",
+	//	dmaID, dmaState.runnableSet, dmaState.currentlyActiveDMA);
 
-FLAG GBA_t::isAnyDMAInProgress()
-{
-	RETURN pGBA_instance->GBA_state.dma.anyDMAInMiddleOfTransaction;
-}
-
-INC64 GBA_t::processDMA()
-{
-	MAP8 dmaSchedule = getDMASchedule();
-	MAP8 specialDmaSchedule = getSpecialDMASchedule();
-
-	cancelScheduledDMATrigger(DMA_TIMING::IMMEDIATE);
-	cancelScheduledDMATrigger(DMA_TIMING::VBLANK);
-	cancelScheduledDMATrigger(DMA_TIMING::HBLANK);
-	cancelScheduledDMATrigger(DMA_TIMING::SPECIAL);
-	cancelScheduledSpecialDMATrigger(DMA_SPECIAL_TIMING::FIFO0);
-	cancelScheduledSpecialDMATrigger(DMA_SPECIAL_TIMING::FIFO1);
-	cancelScheduledSpecialDMATrigger(DMA_SPECIAL_TIMING::VIDEO);
-	updateDMAInProgressFlag(CLEAR);
-
-	auto getSourceModifier = [&](DMA dma)
-		{
-			mDMAnCNT_HHalfWord_t* CNTH = getDMACNTHRegister(dma);
-			RETURN sourceModifierLUT[CNTH->mDMAnCNT_HFields.DMA_TRANSFER_TYPE][CNTH->mDMAnCNT_HFields.SRC_ADDR_CTRL];
-		};
-
-	auto getDestinationModifier = [&](DMA dma)
-		{
-			mDMAnCNT_HHalfWord_t* CNTH = getDMACNTHRegister(dma);
-			RETURN destinationModifierLUT[CNTH->mDMAnCNT_HFields.DMA_TRANSFER_TYPE][CNTH->mDMAnCNT_HFields.DEST_ADDR_CTRL];
-		};
-
-	auto oneChunkTransfer = [&](ID dmaID, SBYTE sourceModifier, SBYTE destinationModifier)
-		{
-			TODO("Get more information on the \"Invalid DMA Source Address\" as mentioned below at %d in %s (Source other than NBA and SkyEmu)", __LINE__, __FILE__);
-			// The need for "wordToBeTransfered" and "latchedData":
-			// When DMA accesses invalid memory, it should just store the last latched data
-			// Tricky part is lets assume the last valid access was GBA_HALFWORD and current invalid access in GBA_WORD
-			// In this case, we need to store the GBA_HALFWORD to a 32 bit address (for the GBA_WORD DMA)
-			// Basically the data is just "repeated at higher bits" and hence we do (latchedData = x << 16 | x)
-			// Now Assume a case where last valid access was GBA_WORD and current invalid is GBA_HALFWORD
-			// We can only store the first 16 or the last 16 bits
-			// We decide which GBA_HALFWORD to store based on the destination address
-			// If the 32 bit address is the "lower" 16 bit address (bit 1 is 0; we check bit 1 instead 0 as we are dealing with 16bit address), we store the lower 16 bits
-			// If the 32 bit address is the "higher" 16 bit address (bit 1 is 1; we check bit 1 instead 0 as we are dealing with 16bit address), we store the higher 16 bits
-
-			if (pGBA_instance->GBA_state.dma.cache[dmaID].chunkSize == DMA_SIZE::HALFWORD_PER_TRANSFER)
-			{
-				// If DMA SAD is valid address
-				if (pGBA_instance->GBA_state.dma.cache[dmaID].source >= EXT_WORK_RAM_START_ADDRESS)
-				{
-					pGBA_instance->GBA_state.dma.cache[dmaID].wordToBeTransfered = (GBA_HALFWORD)readRawMemory<GBA_HALFWORD>(
-						pGBA_instance->GBA_state.dma.cache[dmaID].source
-						, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT
-						, MEMORY_ACCESS_SOURCE::DMA
-					);
-
-					pGBA_instance->GBA_state.dma.cache[dmaID].latchedData =
-						(pGBA_instance->GBA_state.dma.cache[dmaID].wordToBeTransfered << SIXTEEN)
-						| pGBA_instance->GBA_state.dma.cache[dmaID].wordToBeTransfered;
-				}
-				else
-				{
-					if (pGBA_instance->GBA_state.dma.cache[dmaID].destination & TWO)
-					{
-						pGBA_instance->GBA_state.dma.cache[dmaID].wordToBeTransfered
-							= (GBA_HALFWORD)(pGBA_instance->GBA_state.dma.cache[dmaID].latchedData >> SIXTEEN);
-					}
-					else
-					{
-						pGBA_instance->GBA_state.dma.cache[dmaID].wordToBeTransfered
-							= (GBA_HALFWORD)(pGBA_instance->GBA_state.dma.cache[dmaID].latchedData);
-					}
-
-					++pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.dmaCounter;
-				}
-
-				writeRawMemory<GBA_HALFWORD>(
-					pGBA_instance->GBA_state.dma.cache[dmaID].destination
-					, (static_cast<GBA_HALFWORD>(pGBA_instance->GBA_state.dma.cache[dmaID].wordToBeTransfered))
-					, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT
-					, MEMORY_ACCESS_SOURCE::DMA
-				);
-			}
-			else if (pGBA_instance->GBA_state.dma.cache[dmaID].chunkSize == DMA_SIZE::WORD_PER_TRANSFER)
-			{
-				// If DMA SAD is valid address
-				if (pGBA_instance->GBA_state.dma.cache[dmaID].source >= EXT_WORK_RAM_START_ADDRESS)
-				{
-					pGBA_instance->GBA_state.dma.cache[dmaID].latchedData = readRawMemory<GBA_WORD>(
-						pGBA_instance->GBA_state.dma.cache[dmaID].source
-						, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT
-						, MEMORY_ACCESS_SOURCE::DMA
-					);
-				}
-				else
-				{
-					++pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.dmaCounter;
-				}
-
-				writeRawMemory<GBA_WORD>(
-					pGBA_instance->GBA_state.dma.cache[dmaID].destination
-					, pGBA_instance->GBA_state.dma.cache[dmaID].latchedData
-					, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT
-					, MEMORY_ACCESS_SOURCE::DMA
-				);
-			}
-			else
-			{
-				FATAL("Unknown DMA Transfer Type");
-			}
-
-			pGBA_instance->GBA_state.dma.cache[dmaID].source += sourceModifier;
-			pGBA_instance->GBA_state.dma.cache[dmaID].destination += destinationModifier;
-			pGBA_instance->GBA_state.dma.cache[dmaID].length -= ONE;
-		};
-
-	// Reset the dma cycles counter
-
-	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.dmaCounter = RESET;
-
-	// Service the DMA
-
-	for (ID dmaID = TO_UINT8(DMA::DMA0); dmaID < TO_UINT8(DMA::TOTAL); dmaID++)
+	if (dmaState.runnableSet == RESET)
 	{
-		mDMAnCNT_HHalfWord_t* CNTH = getDMACNTHRegister((DMA)dmaID);
+		dmaState.currentlyActiveDMA = (DMA)dmaID;
+		//INFO("  First DMA, set currentActive=%d", dmaID);
+	}
+	else if (dmaID < dmaState.currentlyActiveDMA)
+	{
+		//INFO("  Preempting DMA%d with DMA%d", dmaState.currentlyActiveDMA, dmaID);
+		dmaState.currentlyActiveDMA = (DMA)dmaID;
+		dmaState.shouldReenterTransferLoop = YES;
+	}
 
-		// First check whether the DMA is enabled or not
+	SETBIT(dmaState.runnableSet, dmaID);
+}
 
-		FLAG isDMAEnabled = ((CNTH->mDMAnCNT_HFields.DMA_EN == SET) ? YES : NO);
+void GBA_t::RequestDMA(DMA_TIMING timing)
+{
+	MAP8 dmaMap = pGBA_instance->GBA_state.dma.trigCache[timing].dmaIdMap;
 
-		// Handle the DMA start-up delay if just enabled via setting DMA_EN
-		// Refer : https://discord.com/channels/465585922579103744/465586361731121162/1327022839655825428
-
-		if (pGBA_instance->GBA_state.dma.cache[dmaID].needStartupDelay == YES
-			&& ((pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.globalTimerCounter - pGBA_instance->GBA_state.dma.cache[dmaID].enSetTime) < TWO))
+	for (ID dmaID = DMA::DMA0; dmaID < DMA::TOTAL_DMA; dmaID++)
+	{
+		if (GETBIT(dmaID, dmaMap))
 		{
-			// It will definetly take minimum of 1 cpu cycle after DMA is enabled via runCpuPipeline to come till here where we actually check for DMA scheduling
-			// If we took more than 1 cycle, then the start-up delay is already satisifed, so this 'if block' is useless
-			// But, if we took only 1 cycle, we will enter this 'if block', we just clear the 'startDelay' flag, because by the time we come again, we surely would have satified the 2 cycle startup delay 
-
-			pGBA_instance->GBA_state.dma.cache[dmaID].needStartupDelay = NO;
-
-			// Since we cleared the schedule earlier while entering this function, we re-schedule it since we are still handling the start-up delay
-
-			scheduleDMATrigger(DMA_TIMING::IMMEDIATE);
-
-			CONTINUE;
+			ActivateDMAChannel(dmaID);
 		}
+	}
+}
 
-		// Clear 'startDelay' flag ... if we come till here, startup delay was definetely satisfied
+void GBA_t::OnDMAActivated(ID dmaID)
+{
+	auto& dmaState = pGBA_instance->GBA_state.dma;
 
-		pGBA_instance->GBA_state.dma.cache[dmaID].needStartupDelay = NO;
+	if (dmaState.runnableSet == RESET)
+	{
+		// First DMA to activate
+		dmaState.currentlyActiveDMA = (DMA)dmaID;
+	}
+	else if (dmaID < dmaState.currentlyActiveDMA)
+	{
+		// Higher priority DMA - preempt
+		dmaState.currentlyActiveDMA = (DMA)dmaID;
+		dmaState.shouldReenterTransferLoop = YES;
+	}
 
-		if (isDMAEnabled == YES)
+	SETBIT(dmaState.runnableSet, dmaID);
+}
+
+void GBA_t::SelectNextDMA()
+{
+	auto& dmaState = pGBA_instance->GBA_state.dma;
+
+	dmaState.currentlyActiveDMA = DMA::NO_DMA;
+
+	for (ID dmaID = DMA::DMA0; dmaID < DMA::TOTAL_DMA; dmaID++)
+	{
+		if (GETBIT(dmaID, dmaState.runnableSet) == SET)
 		{
-			// If this was a 0 -> 1 transition, latch the DMA registers
-
-			if (pGBA_instance->GBA_state.dma.cache[dmaID].currentState == NO)
-			{
-				pGBA_instance->GBA_state.dma.cache[dmaID].currentState = isDMAEnabled;
-
-				latchDMARegisters(dmaID);
-
-				// Extract the target transfer count
-
-				pGBA_instance->GBA_state.dma.cache[dmaID].target = pGBA_instance->GBA_state.dma.cache[dmaID].length;
-
-				// Reset the count
-
-				pGBA_instance->GBA_state.dma.cache[dmaID].count = RESET;
-			}
-
-			// Run the DMA loop
-
-			SBYTE sourceModifier = getSourceModifier((DMA)dmaID);
-			SBYTE destinationModifier = getDestinationModifier((DMA)dmaID);
-
-			// Handle for FIFO DMA
-
-			if (pGBA_instance->GBA_state.dma.cache[dmaID].isFIFODMA == YES)
-			{
-				destinationModifier = ZERO;	// Refer Sound DMA in http://problemkaputt.de/gbatek-gba-dma-transfers.htm
-			}
-
-			// If we are just about to start a new DMA transfer
-
-			if (pGBA_instance->GBA_state.dma.cache[dmaID].count == RESET)
-			{
-				// Handle Prohibited case for DMA0
-
-				if ((DMA_TIMING)pGBA_peripherals->mDMA0CNT_H.mDMAnCNT_HFields.DMA_START_TIMING == DMA_TIMING::SPECIAL)
-				{
-					WARN("Prohibited to run DMA0 in Special Mode");
-					CONTINUE;
-				}
-
-				// Check whether trigger type is scheduled
-
-				if (GETBIT(CNTH->mDMAnCNT_HFields.DMA_START_TIMING, dmaSchedule) == RESET)
-				{
-					CONTINUE;
-				}
-
-				// NOTE: Below if condition added to handle intro of "Pokemon_Ruby_Working_and_Clock_Fixed_Read_NFO_USA_GBA-MUGS.gba"
-				if (ENABLED)
-				{
-					if ((DMA)dmaID == DMA::DMA1
-						&& (DMA_TIMING)CNTH->mDMAnCNT_HFields.DMA_START_TIMING == DMA_TIMING::SPECIAL
-						&& GETBIT(TO_UINT8(DMA_SPECIAL_TIMING::FIFO0), specialDmaSchedule) == RESET)
-					{
-						CONTINUE;
-					}
-
-					if ((DMA)dmaID == DMA::DMA2
-						&& (DMA_TIMING)CNTH->mDMAnCNT_HFields.DMA_START_TIMING == DMA_TIMING::SPECIAL
-						&& GETBIT(TO_UINT8(DMA_SPECIAL_TIMING::FIFO1), specialDmaSchedule) == RESET)
-					{
-						CONTINUE;
-					}
-				}
-
-				TODO("DMA takes 2I(or 4I) cycles on top of the cycles for memory access. We need to account for one of them in the start of DMA");
-#if (DISABLED)
-				++pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.dmaCounter;
-#endif
-			}
-
-			// If we are in the middle of the DMA transfer
-
-			if (pGBA_instance->GBA_state.dma.cache[dmaID].count < pGBA_instance->GBA_state.dma.cache[dmaID].target)
-			{
-				// Perform the transfer
-
-				oneChunkTransfer(dmaID, sourceModifier, destinationModifier);
-
-				// Update the 'count'
-
-				++pGBA_instance->GBA_state.dma.cache[dmaID].count;
-			}
-
-			// If we are done with the DMA transfer
-
-			if (pGBA_instance->GBA_state.dma.cache[dmaID].count >= pGBA_instance->GBA_state.dma.cache[dmaID].target)
-			{
-				// Reset the count
-
-				pGBA_instance->GBA_state.dma.cache[dmaID].count = RESET;
-
-				// Enable interrupt if requested
-
-				if (CNTH->mDMAnCNT_HFields.WORD_COUNT_END_IRQ == SET)
-				{
-					requestInterrupts((GBA_INTERRUPT)(dmaID + TO_UINT(GBA_INTERRUPT::IRQ_DMA0)));
-				}
-
-				// NOTE: Need to check for "DMA_TRANSFER_TYPE != DMA_TIMING::IMMEDIATE", else when repeat is set with immediate mode, we will remain stuck here for ever
-
-				if ((CNTH->mDMAnCNT_HFields.DMA_REPEAT == SET) && ((DMA_TIMING)CNTH->mDMAnCNT_HFields.DMA_START_TIMING != DMA_TIMING::IMMEDIATE))
-				{
-					// DAD can be set during the Repeat Mode provided DAD is of increment/Reload type
-
-					if (CNTH->mDMAnCNT_HFields.DEST_ADDR_CTRL == THREE)
-					{
-						pGBA_instance->GBA_state.dma.cache[dmaID].destination = getDMADADRegister((DMA)dmaID);
-					}
-
-					// CNTL can be set during the Repeat Mode as well...
-
-					if (pGBA_instance->GBA_state.dma.cache[dmaID].isFIFODMA == YES)
-					{
-						pGBA_instance->GBA_state.dma.cache[dmaID].length = FOUR;	// Refer Sound DMA in http://problemkaputt.de/gbatek-gba-dma-transfers.htm
-					}
-					else
-					{
-						pGBA_instance->GBA_state.dma.cache[dmaID].length = (getDMACNTLRegister((DMA)dmaID) & 0xFFFF);
-
-						// Length of zero is treated as max values; Refer : http://problemkaputt.de/gbatek-gba-dma-transfers.htm
-
-						if (pGBA_instance->GBA_state.dma.cache[dmaID].length == ZERO)
-						{
-							if (((DMA)dmaID) == DMA::DMA3)
-							{
-								pGBA_instance->GBA_state.dma.cache[dmaID].length = 0x10000;
-							}
-							else
-							{
-								pGBA_instance->GBA_state.dma.cache[dmaID].length = 0x4000;
-							}
-						}
-					}
-
-					// Extract the target transfer count
-
-					pGBA_instance->GBA_state.dma.cache[dmaID].target = pGBA_instance->GBA_state.dma.cache[dmaID].length;
-				}
-				else
-				{
-					CNTH->mDMAnCNT_HFields.DMA_EN = RESET;
-					isDMAEnabled = NO;
-				}
-
-				TODO("DMA takes 2I(or 4I) cycles on top of the cycles for memory access.We account for one of them in the end of DMA");
-#if (DISABLED)
-				++pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.dmaCounter;
-#endif
-			}
-		}
-
-		// Update the current state
-
-		pGBA_instance->GBA_state.dma.cache[dmaID].currentState = isDMAEnabled;
-
-		// If we have run atleast one DMA, then we should exit the loop
-
-		if (pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.dmaCounter > ZERO)
-		{
+			dmaState.currentlyActiveDMA = (DMA)dmaID;
 			BREAK;
 		}
 	}
+}
 
-	if (pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.dmaCounter > ZERO)
+FLAG GBA_t::IsAnyDMARunning()
+{
+	RETURN (pGBA_instance->GBA_state.dma.runnableSet != RESET);
+}
+
+void GBA_t::processDMA()
+{
+	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.dmaCounter = RESET;
+
+	if (IsAnyDMARunning() == NO)
 	{
-		updateDMAInProgressFlag(SET);
+		RETURN;
+	}
+
+	cpuTick(TICK_TYPE::DMA_TICK);
+
+	do
+	{
+		RunDMAChannel();
+	}
+	while (IsAnyDMARunning());
+
+	cpuTick(TICK_TYPE::DMA_TICK);
+}
+
+void GBA_t::RunDMAChannel()
+{
+#define DMA_REENTER_EARLY_RETURN(dmaState)								\
+	do																	\
+	{																	\
+		if ((dmaState).shouldReenterTransferLoop == YES) MASQ_UNLIKELY  \
+		{																\
+			(dmaState).shouldReenterTransferLoop = NO;					\
+			RETURN;														\
+		}																\
+	} while (ZERO)
+
+	auto& dmaState = pGBA_instance->GBA_state.dma;
+	ID activeDMA = dmaState.currentlyActiveDMA;
+
+	if (activeDMA >= DMA::TOTAL_DMA)
+	{
+		RETURN;
+	}
+
+	auto& cache = dmaState.cache[activeDMA];
+	mDMAnCNT_HHalfWord_t* CNTH = getDMACNTHRegister((DMA)activeDMA);
+
+	SBYTE srcModifier = sourceModifierLUT[CNTH->mDMAnCNT_HFields.DMA_TRANSFER_TYPE][CNTH->mDMAnCNT_HFields.SRC_ADDR_CTRL];
+	SBYTE dstModifier = destinationModifierLUT[CNTH->mDMAnCNT_HFields.DMA_TRANSFER_TYPE][CNTH->mDMAnCNT_HFields.DEST_ADDR_CTRL];
+
+	if (cache.isFIFODMA == YES)
+	{
+		dstModifier = ZERO;
+	}
+
+	while (cache.count < cache.target)
+	{
+		// Reason for calling this here : https://discord.com/channels/465585922579103744/465586361731121162/959447055967879218
+		DMA_REENTER_EARLY_RETURN(dmaState);
+
+		MEMORY_ACCESS_TYPE srcType = MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE;
+		MEMORY_ACCESS_TYPE dstType = MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE;
+
+		if (cache.didAccessRom == NO)
+		{
+			if (cache.source >= GAMEPAK_ROM_WS0_START_ADDRESS)
+			{
+				srcType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
+				cache.didAccessRom = YES;
+			}
+			else if (cache.destination >= GAMEPAK_ROM_WS0_START_ADDRESS)
+			{
+				dstType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
+				cache.didAccessRom = YES;
+			}
+		}
+
+		if (cache.chunkSize == DMA_SIZE::HALFWORD_PER_TRANSFER)
+		{
+			if (cache.source >= EXT_WORK_RAM_START_ADDRESS)
+			{
+				cache.wordToBeTransfered = readRawMemory<GBA_HALFWORD>(cache.source, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::DMA, srcType);
+
+				cache.latchedData = (cache.wordToBeTransfered << SIXTEEN) | cache.wordToBeTransfered;
+			}
+			else
+			{
+				cache.wordToBeTransfered = (cache.destination & TWO) ? (GBA_HALFWORD)(cache.latchedData >> SIXTEEN) : (GBA_HALFWORD)(cache.latchedData);
+				cpuTick(TICK_TYPE::DMA_TICK);
+			}
+
+			writeRawMemory<GBA_HALFWORD>(cache.destination, cache.wordToBeTransfered, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::DMA, dstType);
+		}
+		else
+		{
+			if (cache.source >= EXT_WORK_RAM_START_ADDRESS)
+			{
+				cache.latchedData = readRawMemory<GBA_WORD>(cache.source, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::DMA, srcType);
+			}
+			else
+			{
+				cpuTick(TICK_TYPE::DMA_TICK);
+			}
+
+			writeRawMemory<GBA_WORD>(cache.destination, cache.latchedData, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::DMA, dstType);
+		}
+
+		cache.source += srcModifier;
+		cache.destination += dstModifier;
+		cache.length--;
+		cache.count++;
+	}
+
+	// Completed
+	UNSETBIT(dmaState.runnableSet, activeDMA);
+	cache.count = ZERO;
+
+	if (CNTH->mDMAnCNT_HFields.WORD_COUNT_END_IRQ == SET)
+	{
+		requestInterrupts((GBA_INTERRUPT)(activeDMA + TO_UINT(GBA_INTERRUPT::IRQ_DMA0)));
+	}
+
+	if (CNTH->mDMAnCNT_HFields.DMA_REPEAT == SET && CNTH->mDMAnCNT_HFields.DMA_START_TIMING != DMA_TIMING::IMMEDIATE)
+	{
+		if (CNTH->mDMAnCNT_HFields.DEST_ADDR_CTRL == THREE)
+		{
+			cache.destination = getDMADADRegister((DMA)activeDMA);
+		}
+
+		if (cache.isFIFODMA == YES)
+		{
+			cache.length = FOUR;
+		}
+		else
+		{
+			cache.length = getDMACNTLRegister((DMA)activeDMA) & 0xFFFF;
+			if (cache.length == ZERO)
+			{
+				cache.length = (activeDMA == DMA::DMA3) ? 0x10000 : 0x4000;
+			}
+		}
+
+		cache.target = cache.length;
+		SETBIT(pGBA_instance->GBA_state.dma.trigCache[CNTH->mDMAnCNT_HFields.DMA_START_TIMING].dmaIdMap, activeDMA);
 	}
 	else
 	{
-		updateDMAInProgressFlag(CLEAR);
+		CNTH->mDMAnCNT_HFields.DMA_EN = RESET;
+		cache.currentState = NO;
+
+		// Remove from all trigger maps
+		for (int timing = DMA_TIMING::IMMEDIATE; timing < DMA_TIMING::TOTAL_DMA_TIMING; timing++)
+		{
+			UNSETBIT(pGBA_instance->GBA_state.dma.trigCache[timing].dmaIdMap, activeDMA);
+		}
 	}
 
-	RETURN pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.dmaCounter;
+	SelectNextDMA();
+
+#undef DMA_REENTER_EARLY_RETURN
 }
 
 DIM16 GBA_t::getChannelPeriod(AUDIO_CHANNELS channel)
@@ -5725,8 +5754,4784 @@ void GBA_t::playTheAudioFrame()
 	RETURN;
 }
 
+MASQ_INLINE void GBA_t::RESET_PIXEL(uint32_t x, uint32_t y)
+{
+
+	pGBA_display->gfx_obj[x][y] = ZERO;
+	pGBA_display->objPriority[x][y] = DEFAULT_OBJ_PRIORITY;
+	pGBA_display->gfx_obj_window[x][y] = DISABLED;
+	pGBA_display->gfx_obj_mode[x][y] = OBJECT_MODE::NORMAL;
+	for (ID bgID = BG0; bgID < BG3; bgID++)
+	{
+		pGBA_display->gfx_bg[bgID][x][y] = ZERO;
+	}
+
+}
+
+MASQ_INLINE FLAG GBA_t::GET_WINDOW_OUTPUT(uint32_t x, uint32_t y, FLAG win0in, FLAG win1in, FLAG winout, FLAG objin)
+{
+
+
+#if (DEACTIVATED)
+	auto isWin = [&](uint32_t x, uint32_t y, uint32_t x1, uint32_t x2, uint32_t y1, uint32_t y2)
+		{
+			if (x2 > getScreenWidth() || x1 > x2)
+			{
+				x2 = getScreenWidth();
+			}
+			if (y2 > getScreenHeight() || y1 > y2)
+			{
+				y2 = getScreenHeight();
+			}
+
+			RETURN(x >= x1 && x <= x2) && (y >= y1 && y <= y2);
+		};
+
+	auto isWin0 = [&](uint32_t x, uint32_t y)
+		{
+			RETURN isWin(
+				x
+				, y
+				, pGBA_peripherals->mWIN0HHalfWord.mWINniFields.i1
+				, pGBA_peripherals->mWIN0HHalfWord.mWINniFields.i2
+				, pGBA_peripherals->mWIN0VHalfWord.mWINniFields.i1
+				, pGBA_peripherals->mWIN0VHalfWord.mWINniFields.i2
+			);
+		};
+
+	auto isWin1 = [&](uint32_t x, uint32_t y)
+		{
+			RETURN isWin(
+				x
+				, y
+				, pGBA_peripherals->mWIN1HHalfWord.mWINniFields.i1
+				, pGBA_peripherals->mWIN1HHalfWord.mWINniFields.i2
+				, pGBA_peripherals->mWIN1VHalfWord.mWINniFields.i1
+				, pGBA_peripherals->mWIN1VHalfWord.mWINniFields.i2
+			);
+		};
+#endif
+
+	FLAG is_win0in = pGBA_display->gfx_window[WIN0][x][y];
+	FLAG is_win1in = pGBA_display->gfx_window[WIN1][x][y];
+	FLAG is_winobj = pGBA_display->gfx_obj_window[x][y];
+
+	FLAG win0_display = pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.WIN0_DISP_FLAG == SET;
+	FLAG win1_display = pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.WIN1_DISP_FLAG == SET;
+	FLAG winobj_display = (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.OBJ_DISP_FLAG == SET && pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.SCREEN_DISP_OBJ == SET);
+
+	// Atleast one window should be enabled for winout to be enabled
+	// Now, if any of the win0, win1 or objwin condition fails (provided one of those windows were enabled), then we enter winout condition
+	FLAG winout_display = win0_display || win1_display || winobj_display;
+
+	if (win0_display && is_win0in)
+	{
+		RETURN win0in;
+	}
+	else if (win1_display && is_win1in)
+	{
+		RETURN win1in;
+	}
+	else if (winobj_display && is_winobj)
+	{
+		RETURN objin;
+	}
+	else if (winout_display)
+	{
+		RETURN winout;
+	}
+
+	RETURN ENABLED;
+
+}
+
+MASQ_INLINE void GBA_t::HANDLE_WINDOW_FOR_BG(uint32_t x, uint32_t y, ID bgID)
+{
+
+	if ((x >= ((uint16_t)LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (y >= ((uint16_t)LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
+	{
+		RETURN;
+	}
+
+	FLAG isWindowAllowingBG = YES;
+
+	FLAG win0in = CLEAR;
+	FLAG win1in = CLEAR;
+	FLAG winout = CLEAR;
+	FLAG objin = CLEAR;
+
+	switch (bgID)
+	{
+	case BG0:
+	{
+		win0in = pGBA_peripherals->mWININHalfWord.mWININFields.WIN0_BG_0_EN == SET;
+		win1in = pGBA_peripherals->mWININHalfWord.mWININFields.WIN1_BG_0_EN == SET;
+		winout = pGBA_peripherals->mWINOUTHalfWord.mWINOUTFields.OUTSIDE_BG_0_EN == SET;
+		objin = pGBA_peripherals->mWINOUTHalfWord.mWINOUTFields.OBJ_WIN_BG_0_EN == SET;
+		BREAK;
+	}
+	case BG1:
+	{
+		win0in = pGBA_peripherals->mWININHalfWord.mWININFields.WIN0_BG_1_EN == SET;
+		win1in = pGBA_peripherals->mWININHalfWord.mWININFields.WIN1_BG_1_EN == SET;
+		winout = pGBA_peripherals->mWINOUTHalfWord.mWINOUTFields.OUTSIDE_BG_1_EN == SET;
+		objin = pGBA_peripherals->mWINOUTHalfWord.mWINOUTFields.OBJ_WIN_BG_1_EN == SET;
+		BREAK;
+	}
+	case BG2:
+	{
+		win0in = pGBA_peripherals->mWININHalfWord.mWININFields.WIN0_BG_2_EN == SET;
+		win1in = pGBA_peripherals->mWININHalfWord.mWININFields.WIN1_BG_2_EN == SET;
+		winout = pGBA_peripherals->mWINOUTHalfWord.mWINOUTFields.OUTSIDE_BG_2_EN == SET;
+		objin = pGBA_peripherals->mWINOUTHalfWord.mWINOUTFields.OBJ_WIN_BG_2_EN == SET;
+		BREAK;
+	}
+	case BG3:
+	{
+		win0in = pGBA_peripherals->mWININHalfWord.mWININFields.WIN0_BG_3_EN == SET;
+		win1in = pGBA_peripherals->mWININHalfWord.mWININFields.WIN1_BG_3_EN == SET;
+		winout = pGBA_peripherals->mWINOUTHalfWord.mWINOUTFields.OUTSIDE_BG_3_EN == SET;
+		objin = pGBA_peripherals->mWINOUTHalfWord.mWINOUTFields.OBJ_WIN_BG_3_EN == SET;
+		BREAK;
+	}
+	default:
+	{
+		FATAL("Unknown BG Layer");
+		RETURN;
+	}
+	}
+
+	isWindowAllowingBG = GET_WINDOW_OUTPUT(
+		x
+		, y
+		, win0in
+		, win1in
+		, winout
+		, objin
+	);
+
+	if (isWindowAllowingBG == NO)
+	{
+		pGBA_display->gfx_bg[bgID][x][y] = ZERO;
+	}
+
+}
+
+MASQ_INLINE void GBA_t::HANDLE_WINDOW_FOR_OBJ(uint32_t x, uint32_t y)
+{
+
+	if ((x >= ((uint16_t)LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (y >= ((uint16_t)LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
+	{
+		RETURN;
+	}
+
+	FLAG isWindowAllowingObj = YES;
+
+	FLAG win0in = CLEAR;
+	FLAG win1in = CLEAR;
+	FLAG winout = CLEAR;
+	FLAG objin = CLEAR;
+
+	win0in = pGBA_peripherals->mWININHalfWord.mWININFields.WIN0_OBJ_EN == SET;
+	win1in = pGBA_peripherals->mWININHalfWord.mWININFields.WIN1_OBJ_EN == SET;
+	winout = pGBA_peripherals->mWINOUTHalfWord.mWINOUTFields.OUTSIDE_OBJ_EN == SET;
+	objin = pGBA_peripherals->mWINOUTHalfWord.mWINOUTFields.OBJ_WIN_OBJ_EN == SET;
+
+	isWindowAllowingObj = GET_WINDOW_OUTPUT(
+		x
+		, y
+		, win0in
+		, win1in
+		, winout
+		, objin
+	);
+
+	if (isWindowAllowingObj == NO)
+	{
+		pGBA_display->gfx_obj[x][y] = ZERO;
+	}
+
+}
+
+MASQ_INLINE FLAG GBA_t::DOES_WINDOW_ALLOW_BLENDING(uint32_t x, uint32_t y)
+{
+
+	FLAG isBlendingAllowed = NO;
+
+	if ((x >= ((uint16_t)LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (y >= ((uint16_t)LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
+	{
+		RETURN isBlendingAllowed;
+	}
+
+	FLAG win0in = pGBA_peripherals->mWININHalfWord.mWININFields.WIN0_COLOR_SPL_EFFECT == SET;
+	FLAG win1in = pGBA_peripherals->mWININHalfWord.mWININFields.WIN1_COLOR_SPL_EFFECT == SET;
+	FLAG winout = pGBA_peripherals->mWINOUTHalfWord.mWINOUTFields.OUTSIDE_COLOR_SPL_EFFECT == SET;
+	FLAG objin = pGBA_peripherals->mWINOUTHalfWord.mWINOUTFields.OBJ_WIN_COLOR_SPL_EFFECT == SET;
+
+	isBlendingAllowed = GET_WINDOW_OUTPUT(
+		x
+		, y
+		, win0in
+		, win1in
+		, winout
+		, objin
+	);
+
+	RETURN isBlendingAllowed;
+
+}
+
+MASQ_INLINE GBA_t::gbaColor_t GBA_t::BLEND(gbaColor_t layer1Pixel, gbaColor_t layer2Pixel, BYTE eva, BYTE evb)
+{
+
+	gbaColor_t finalPixel = layer1Pixel;
+
+	const int r_a = (layer1Pixel.raw >> 0) & 31;
+	const int g_a = ((layer1Pixel.raw >> 4) & 62) | (layer1Pixel.raw >> 15);
+	const int b_a = (layer1Pixel.raw >> 10) & 31;
+
+	const int r_b = (layer2Pixel.raw >> 0) & 31;
+	const int g_b = ((layer2Pixel.raw >> 4) & 62) | (layer2Pixel.raw >> 15);
+	const int b_b = (layer2Pixel.raw >> 10) & 31;
+
+	eva = std::min<int>(16, eva);
+	evb = std::min<int>(16, evb);
+
+	const int r = std::min<uint8_t>((r_a * eva + r_b * evb + 8) >> 4, 31);
+	const int g = std::min<uint8_t>((g_a * eva + g_b * evb + 8) >> 4, 63) >> 1;
+	const int b = std::min<uint8_t>((b_a * eva + b_b * evb + 8) >> 4, 31);
+
+	finalPixel.RED = r;
+	finalPixel.GREEN = g;
+	finalPixel.BLUE = b;
+
+	RETURN finalPixel;
+
+}
+
+MASQ_INLINE GBA_t::gbaColor_t GBA_t::BRIGHTEN(gbaColor_t color, BYTE evy)
+{
+
+	gbaColor_t finalPixel = color;
+
+	evy = std::min<int>(16, evy);
+
+	int r = (color.raw >> 0) & 31;
+	int g = ((color.raw >> 4) & 62) | (color.raw >> 15);
+	int b = (color.raw >> 10) & 31;
+
+	r += ((31 - r) * evy + 8) >> 4;
+	g += ((63 - g) * evy + 8) >> 4;
+	b += ((31 - b) * evy + 8) >> 4;
+
+	g >>= 1;
+
+	finalPixel.RED = r;
+	finalPixel.GREEN = g;
+	finalPixel.BLUE = b;
+
+	RETURN finalPixel;
+
+}
+
+MASQ_INLINE GBA_t::gbaColor_t GBA_t::DARKEN(gbaColor_t color, BYTE evy)
+{
+
+	gbaColor_t finalPixel = color;
+
+	evy = std::min<int>(16, evy);
+
+	int r = (color.raw >> 0) & 31;
+	int g = ((color.raw >> 4) & 62) | (color.raw >> 15);
+	int b = (color.raw >> 10) & 31;
+
+	r -= (r * evy + 7) >> 4;
+	g -= (g * evy + 7) >> 4;
+	b -= (b * evy + 7) >> 4;
+
+	g >>= 1;
+
+	finalPixel.RED = r;
+	finalPixel.GREEN = g;
+	finalPixel.BLUE = b;
+
+	RETURN finalPixel;
+
+}
+
+MASQ_INLINE void GBA_t::MERGE_AND_DISPLAY_PHASE1()
+{
+
+	// Refer https://nba-emu.github.io/hw-docs/ppu/composite.html
+
+	uint32_t x = pGBA_display->currentMergePixel;
+	uint32_t y = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
+
+	pGBA_display->mergeCache.xCoordinate = x;
+	pGBA_display->mergeCache.yCoordinate = y;
+
+	if ((x >= ((uint16_t)LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (y >= ((uint16_t)LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
+	{
+		; // Do nothing...
+	}
+	else
+	{
+		pGBA_display->layersForBlending[ZERO] = BD;
+		pGBA_display->layersForBlending[ONE] = BD;
+		pGBA_display->colorNumberForBlending[ZERO].colorNumber = ZERO;
+		pGBA_display->colorNumberForBlending[ONE].colorNumber = ZERO;
+		pGBA_display->colorNumberForBlending[ZERO].isObject = NO;
+		pGBA_display->colorNumberForBlending[ONE].isObject = NO;
+		pGBA_display->priorities[ZERO] = THREE; // Set to lowest priority by default
+		pGBA_display->priorities[ONE] = THREE; // Set to lowest priority by default
+
+		if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.FORCED_BLANK == SET)
+		{
+			pGBA_display->colorForBlending[ZERO] = GBA_WHITE;
+		}
+		else
+		{
+			auto getBGxCNT = [&](ID bgID)
+				{
+					if (bgID == BG0)
+					{
+						RETURN(&pGBA_peripherals->mBG0CNTHalfWord);
+					}
+					if (bgID == BG1)
+					{
+						RETURN(&pGBA_peripherals->mBG1CNTHalfWord);
+					}
+					if (bgID == BG2)
+					{
+						RETURN(&pGBA_peripherals->mBG2CNTHalfWord);
+					}
+					if (bgID == BG3)
+					{
+						RETURN(&pGBA_peripherals->mBG3CNTHalfWord);
+					}
+
+					RETURN(mBGnCNTHalfWord_t*)NULL;
+				};
+
+			ID minBG = MIN_MAX_BG_LAYERS[pGBA_display->currentPPUMode][ZERO];
+			ID maxBG = MIN_MAX_BG_LAYERS[pGBA_display->currentPPUMode][ONE];
+
+			// Check if window layer is allowing the bg, if not, marks the pixel as transparent
+			for (ID bgID = minBG; bgID <= maxBG; bgID++)
+			{
+				HANDLE_WINDOW_FOR_BG(x, y, bgID);
+			}
+			// Check if window layer is allowing the obj, if not, marks the pixel as transparent
+			HANDLE_WINDOW_FOR_OBJ(x, y);
+
+			INC8 numberOfBGs = ZERO;
+			for (INC8 priority = ZERO; priority < FOUR; priority++)
+			{
+				for (ID bgID = minBG; bgID <= maxBG; bgID++)
+				{
+					if (getBGxCNT(bgID) != NULL)
+					{
+						if (getBGxCNT(bgID)->mBGnCNTFields.BG_PRIORITY == priority
+							&& (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTHalfWord & (0x100 << bgID)))
+						{
+							pGBA_display->bgListAccToPriority[numberOfBGs++] = bgID;
+						}
+					}
+				}
+			}
+
+			INC8 bgListIndexer = ZERO; // This indexer had to be outside so that we get the second target layer
+			for (INC8 targetLayer = ZERO; targetLayer < TWO; targetLayer++)
+			{
+				// Tranversing from highest priority to lowest priority
+				while (bgListIndexer < numberOfBGs)
+				{
+					ID bgID = pGBA_display->bgListAccToPriority[bgListIndexer];
+
+					++bgListIndexer;
+
+					if (pGBA_display->gfx_bg[bgID][x][y] != ZERO)
+					{
+						pGBA_display->layersForBlending[targetLayer] = bgID;
+						pGBA_display->colorNumberForBlending[targetLayer].colorNumber = pGBA_display->gfx_bg[bgID][x][y];
+						pGBA_display->colorNumberForBlending[targetLayer].isObject = NO;
+						// Priority needs to be maintained so that we can check against OBJs
+						if (getBGxCNT(bgID) != NULL)
+						{
+							pGBA_display->priorities[targetLayer] = getBGxCNT(bgID)->mBGnCNTFields.BG_PRIORITY;
+						}
+						// Need to break, else we will never get the second target layer
+						BREAK;
+					}
+				}
+			}
+
+			if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.SCREEN_DISP_OBJ == SET
+				&& pGBA_display->gfx_obj[x][y] != RESET)
+			{
+				// If object pixel has higher or equal priority to current target layer 1
+				if (pGBA_display->objPriority[x][y] <= pGBA_display->priorities[ZERO])
+				{
+					// Set OBJ as target layer 1
+					// But before this, we need to set target layer 2 as the new target layer 1
+					pGBA_display->layersForBlending[ONE] = pGBA_display->layersForBlending[ZERO];
+					pGBA_display->colorNumberForBlending[ONE].colorNumber = pGBA_display->colorNumberForBlending[ZERO].colorNumber;
+					pGBA_display->colorNumberForBlending[ONE].isObject = pGBA_display->colorNumberForBlending[ZERO].isObject;
+					pGBA_display->layersForBlending[ZERO] = OBJ;
+					pGBA_display->colorNumberForBlending[ZERO].colorNumber = pGBA_display->gfx_obj[x][y];
+					pGBA_display->colorNumberForBlending[ZERO].isObject = YES;
+				}
+				// If object pixel has higher or equal priority to current target layer 2
+				else if (pGBA_display->objPriority[x][y] <= pGBA_display->priorities[ONE])
+				{
+					pGBA_display->layersForBlending[ONE] = OBJ;
+					pGBA_display->colorNumberForBlending[ONE].colorNumber = pGBA_display->gfx_obj[x][y];
+					pGBA_display->colorNumberForBlending[ONE].isObject = YES;
+				}
+			}
+
+			if ((pGBA_display->colorNumberForBlending[ZERO].colorNumber & IS_COLOR_NOT_PALETTE) == 0)
+			{
+				ID paletteIndex = pGBA_display->colorNumberForBlending[ZERO].colorNumber;
+				GBA_WORD addressInPaletteRAM = PALETTE_RAM_START_ADDRESS + paletteIndex;
+				if (pGBA_display->colorNumberForBlending[ZERO].isObject == YES)
+				{
+					addressInPaletteRAM += 0x200;
+				}
+				GBA_HALFWORD paletteData = readRawMemory<GBA_HALFWORD>(addressInPaletteRAM, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+				pGBA_display->colorForBlending[ZERO].raw = paletteData;
+			}
+			// Mode 3 or Mode 5
+			else
+			{
+				pGBA_display->colorForBlending[ZERO].raw = pGBA_display->colorNumberForBlending[ZERO].colorNumber;
+			}
+		}
+	}
+
+}
+
+MASQ_INLINE void GBA_t::MERGE_AND_DISPLAY_PHASE2()
+{
+
+	// Refer https://nba-emu.github.io/hw-docs/ppu/composite.html
+
+	uint32_t x = pGBA_display->mergeCache.xCoordinate;
+	uint32_t y = pGBA_display->mergeCache.yCoordinate;
+
+	if ((x >= ((uint16_t)LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (y >= ((uint16_t)LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
+	{
+		; // Do nothing...
+	}
+	else
+	{
+		gbaColor_t finalPixel = { ZERO };
+
+		if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.FORCED_BLANK == SET)
+		{
+			finalPixel = GBA_WHITE;
+		}
+		else
+		{
+			if (pGBA_display->gfx_obj_mode[x][y] == OBJECT_MODE::ALPHA_BLENDING
+				// No need to check BLDCNT for OBJ if alpha blending is set in OAM (Refer : http://problemkaputt.de/gbatek-lcd-i-o-color-special-effects.htm)
+				&& pGBA_display->layersForBlending[ZERO] == OBJ
+				// Check BLDCNT for target layer 2
+				&& (pGBA_peripherals->mBLDCNTHalfWord.mBLDCNTHalfWord & (0x0100 << pGBA_display->layersForBlending[ONE])))
+			{
+				if ((pGBA_display->colorNumberForBlending[ONE].colorNumber & IS_COLOR_NOT_PALETTE) == 0)
+				{
+					ID paletteIndex = pGBA_display->colorNumberForBlending[ONE].colorNumber;
+					GBA_WORD addressInPaletteRAM = PALETTE_RAM_START_ADDRESS + paletteIndex;
+					if (pGBA_display->colorNumberForBlending[ONE].isObject == YES)
+					{
+						addressInPaletteRAM += 0x200;
+					}
+					GBA_HALFWORD paletteData = readRawMemory<GBA_HALFWORD>(addressInPaletteRAM, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+					pGBA_display->colorForBlending[ONE].raw = paletteData;
+				}
+				// Mode 3
+				else
+				{
+					pGBA_display->colorForBlending[ONE].raw = pGBA_display->colorNumberForBlending[ONE].colorNumber;
+				}
+
+				finalPixel = BLEND(
+					pGBA_display->colorForBlending[ZERO]
+					, pGBA_display->colorForBlending[ONE]
+					, pGBA_peripherals->mBLDALPHAHalfWord.mBLDALPHAFields.EVA_COEFF
+					, pGBA_peripherals->mBLDALPHAHalfWord.mBLDALPHAFields.EVB_COEFF);
+			}
+			else if (DOES_WINDOW_ALLOW_BLENDING(x, y) == YES && pGBA_peripherals->mBLDCNTHalfWord.mBLDCNTFields.COLOR_SPL_EFFECTS != TO_UINT(COLOR_SPECIAL_EFFECTS::NORMAL))
+			{
+				switch ((COLOR_SPECIAL_EFFECTS)pGBA_peripherals->mBLDCNTHalfWord.mBLDCNTFields.COLOR_SPL_EFFECTS)
+				{
+				case COLOR_SPECIAL_EFFECTS::ALPHA_BLENDING:
+				{
+					if ((pGBA_peripherals->mBLDCNTHalfWord.mBLDCNTHalfWord & (0x0001 << pGBA_display->layersForBlending[ZERO]))
+						&& (pGBA_peripherals->mBLDCNTHalfWord.mBLDCNTHalfWord & (0x0100 << pGBA_display->layersForBlending[ONE])))
+					{
+						if ((pGBA_display->colorNumberForBlending[ONE].colorNumber & IS_COLOR_NOT_PALETTE) == 0)
+						{
+							ID paletteIndex = pGBA_display->colorNumberForBlending[ONE].colorNumber;
+							GBA_WORD addressInPaletteRAM = PALETTE_RAM_START_ADDRESS + paletteIndex;
+							if (pGBA_display->colorNumberForBlending[ONE].isObject == YES)
+							{
+								addressInPaletteRAM += 0x200;
+							}
+							GBA_HALFWORD paletteData = readRawMemory<GBA_HALFWORD>(addressInPaletteRAM, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+							pGBA_display->colorForBlending[ONE].raw = paletteData;
+						}
+						// Mode 3 or Mode 5
+						else
+						{
+							pGBA_display->colorForBlending[ONE].raw = pGBA_display->colorNumberForBlending[ONE].colorNumber;
+						}
+
+						finalPixel = BLEND(
+							pGBA_display->colorForBlending[ZERO]
+							, pGBA_display->colorForBlending[ONE]
+							, pGBA_peripherals->mBLDALPHAHalfWord.mBLDALPHAFields.EVA_COEFF
+							, pGBA_peripherals->mBLDALPHAHalfWord.mBLDALPHAFields.EVB_COEFF);
+					}
+					else
+					{
+						finalPixel = pGBA_display->colorForBlending[ZERO];
+					}
+
+					BREAK;
+				}
+				case COLOR_SPECIAL_EFFECTS::INCREASE_BRIGHTNESS:
+				{
+					if (pGBA_peripherals->mBLDCNTHalfWord.mBLDCNTHalfWord & (0x0001 << pGBA_display->layersForBlending[ZERO]))
+					{
+						finalPixel = BRIGHTEN(
+							pGBA_display->colorForBlending[ZERO]
+							, pGBA_peripherals->mBLDYHalfWord.mBLDYFields.EVY_COEFF);
+					}
+					else
+					{
+						finalPixel = pGBA_display->colorForBlending[ZERO];
+					}
+
+					BREAK;
+				}
+				case COLOR_SPECIAL_EFFECTS::DECREASE_BRIGHTNESS:
+				{
+					if (pGBA_peripherals->mBLDCNTHalfWord.mBLDCNTHalfWord & (0x0001 << pGBA_display->layersForBlending[ZERO]))
+					{
+						finalPixel = DARKEN(
+							pGBA_display->colorForBlending[ZERO]
+							, pGBA_peripherals->mBLDYHalfWord.mBLDYFields.EVY_COEFF);
+					}
+					else
+					{
+						finalPixel = pGBA_display->colorForBlending[ZERO];
+					}
+
+					BREAK;
+				}
+				default:
+				{
+					FATAL("Unknown Color Special Effect");
+				}
+				}
+			}
+			else
+			{
+				finalPixel = pGBA_display->colorForBlending[ZERO];
+			}
+		}
+
+		RESET_PIXEL(x, y);
+
+		if ((y < getScreenHeight()) && (x < getScreenWidth()))
+		{
+			pGBA_display->imGuiBuffer.imGuiBuffer2D[y][x].a = ALPHA;
+			pGBA_display->imGuiBuffer.imGuiBuffer2D[y][x].r = FIVEBIT_TO_EIGHTBIT_COLOR(finalPixel.RED);
+			pGBA_display->imGuiBuffer.imGuiBuffer2D[y][x].g = FIVEBIT_TO_EIGHTBIT_COLOR(finalPixel.GREEN);
+			pGBA_display->imGuiBuffer.imGuiBuffer2D[y][x].b = FIVEBIT_TO_EIGHTBIT_COLOR(finalPixel.BLUE);
+
+			// increment merge cycles
+			++pGBA_display->currentMergePixel;
+		}
+		else
+		{
+			FATAL("Display Buffer Out Of Bounds");
+		}
+	}
+
+}
+
+MASQ_INLINE void GBA_t::SET_INITIAL_OBJ_MODE()
+{
+
+	if (pGBA_memory->mGBAMemoryMap.mOamAttributes.mOamAttribute[ZERO].mOamAttr01Word.mOamAttr0HalfWord.mOamAttr0Fields.ROTATE_SCALE_FLAG == SET)
+	{
+		pGBA_display->currentObjectIsAffine = OBJECT_TYPE::OBJECT_IS_AFFINE;
+	}
+	else
+	{
+		pGBA_display->currentObjectIsAffine = OBJECT_TYPE::OBJECT_IS_NOT_AFFINE;
+	}
+
+}
+
+MASQ_INLINE FLAG GBA_t::OBJ_A01_OBJ_CYCLE(ID oamID)
+{
+
+	PPUDEBUG("MODE2_A01_OBJ_CYCLE for OAM%u", oamID);
+
+	FLAG oamIDNeedsToBeRendered = NO;
+
+	// Cache the object fetch stage to avoid repeated memory access
+	auto& objCache = pGBA_display->objCache[TO_UINT(OBJECT_STAGE::OBJECT_FETCH_STAGE)];
+
+	objCache.reset();
+
+	if (oamID >= ONETWENTYEIGHT)
+	{
+		RETURN oamIDNeedsToBeRendered;
+	}
+
+	GBA_WORD oamAddress = OAM_START_ADDRESS + (oamID << THREE);
+	mOamAttr01Word_t oamAttributes01 = { ZERO };
+	oamAttributes01.raw = readRawMemory<GBA_WORD>(oamAddress, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::PPU);
+
+	objCache.ObjAttribute.mOamAttr01Word.raw = oamAttributes01.raw;
+	objCache.spriteYScreenCoordinate = oamAttributes01.mOamAttr0HalfWord.mOamAttr0Fields.Y_COORDINATE;
+
+	if (oamAttributes01.mOamAttr0HalfWord.mOamAttr0Fields.ROTATE_SCALE_FLAG == SET)
+	{
+		pGBA_display->nextObjectIsAffine = OBJECT_TYPE::OBJECT_IS_AFFINE;
+		objCache.isAffine = YES;
+		objCache.spriteHeight = SPRITE_HEIGHTS[oamAttributes01.mOamAttr0HalfWord.mOamAttr0Fields.OBJ_SHAPE][oamAttributes01.mOamAttr1HalfWord.ROT_SCALE_EN.OBJ_SIZE];
+		objCache.spriteWidth = SPRITE_WIDTHS[oamAttributes01.mOamAttr0HalfWord.mOamAttr0Fields.OBJ_SHAPE][oamAttributes01.mOamAttr1HalfWord.ROT_SCALE_EN.OBJ_SIZE];
+
+		objCache.isDoubleAffine = (oamAttributes01.mOamAttr0HalfWord.mOamAttr0Fields.OBJ_DISABLE_OR_DOUBLE_SIZE_FLAG == SET);
+		objCache.isDisabled = NO;
+		objCache.spriteXScreenCoordinate = oamAttributes01.mOamAttr1HalfWord.ROT_SCALE_EN.X_COORDINATE;
+
+		// Perform the double affine adjustments if enabled
+		// https://gbadev.net/tonc/affobj.html
+		if (objCache.isDoubleAffine)
+		{
+			// We shift the sprite towards the center of the doubled area in the screen
+			PPUTODO("Find documentation for shifting sprite to middle when double affine is enabled!");
+			objCache.spriteXScreenCoordinate += (objCache.spriteWidth >> ONE);
+			objCache.spriteYScreenCoordinate += (objCache.spriteHeight >> ONE);
+		}
+
+		// Refer attribute 1 in https://gbadev.net/gbadoc/sprites.html
+		// Refer wrapping effect in	https://gbadev.net/tonc/affobj.html
+		if (objCache.spriteXScreenCoordinate > static_cast<SDIM32>(getScreenWidth()))
+		{
+			objCache.spriteXScreenCoordinate -= 512;
+		}
+	}
+	else
+	{
+		pGBA_display->nextObjectIsAffine = OBJECT_TYPE::OBJECT_IS_NOT_AFFINE;
+		objCache.isAffine = NO;
+		objCache.spriteHeight = SPRITE_HEIGHTS[oamAttributes01.mOamAttr0HalfWord.mOamAttr0Fields.OBJ_SHAPE][oamAttributes01.mOamAttr1HalfWord.ROT_SCALE_DIS.OBJ_SIZE];
+		objCache.spriteWidth = SPRITE_WIDTHS[oamAttributes01.mOamAttr0HalfWord.mOamAttr0Fields.OBJ_SHAPE][oamAttributes01.mOamAttr1HalfWord.ROT_SCALE_DIS.OBJ_SIZE];
+
+		objCache.isDoubleAffine = NO;
+		objCache.isDisabled = (oamAttributes01.mOamAttr0HalfWord.mOamAttr0Fields.OBJ_DISABLE_OR_DOUBLE_SIZE_FLAG == SET);
+		objCache.spriteXScreenCoordinate = oamAttributes01.mOamAttr1HalfWord.ROT_SCALE_DIS.X_COORDINATE;
+
+		// Refer attribute 1 in https://gbadev.net/gbadoc/sprites.html
+		// Refer wrapping effect in	https://gbadev.net/tonc/affobj.html
+		if (objCache.spriteXScreenCoordinate > static_cast<SDIM32>(getScreenWidth()))
+		{
+			objCache.spriteXScreenCoordinate -= 512;
+		}
+	}
+
+	// Refer attribute 0 in https://gbadev.net/gbadoc/sprites.html
+	// Refer wrapping effect in	https://gbadev.net/tonc/affobj.html
+	if (objCache.spriteYScreenCoordinate > static_cast<SDIM32>(getScreenHeight()))
+	{
+		objCache.spriteYScreenCoordinate -= 256; // 255 is max value possible
+	}
+
+	// Setup the min and max coordinates
+	objCache.spriteMaxXScreenCoordinate = objCache.spriteXScreenCoordinate + objCache.spriteWidth;
+	objCache.spriteMaxYScreenCoordinate = objCache.spriteYScreenCoordinate + objCache.spriteHeight;
+	objCache.spriteMinXScreenCoordinate = objCache.spriteXScreenCoordinate;
+	objCache.spriteMinYScreenCoordinate = objCache.spriteYScreenCoordinate;
+
+	if (objCache.isDoubleAffine)
+	{
+		// We need this separate handling because we went ahead with option 2 for double affine
+		objCache.spriteMinXScreenCoordinate -= objCache.spriteWidth / TWO;
+		objCache.spriteMaxXScreenCoordinate += objCache.spriteWidth / TWO;
+		objCache.spriteMinYScreenCoordinate -= objCache.spriteHeight / TWO;
+		objCache.spriteMaxYScreenCoordinate += objCache.spriteHeight / TWO;
+	}
+
+	if (
+		(objCache.isDisabled == NO)
+		&&
+		(objCache.vcount >= objCache.spriteMinYScreenCoordinate)
+		&&
+		(objCache.vcount < objCache.spriteMaxYScreenCoordinate)
+		)
+	{
+		oamIDNeedsToBeRendered = YES;
+	}
+
+	RETURN oamIDNeedsToBeRendered;
+
+}
+
+MASQ_INLINE void GBA_t::OBJ_A2_OBJ_CYCLE(ID oamID)
+{
+
+	PPUDEBUG("MODE2_A2_OBJ_CYCLE for OAM%u", oamID);
+
+	// Directly copy the FETCH stage to the RENDER stage (No need for intermediate reset)
+	auto& renderCache = pGBA_display->objCache[TO_UINT(OBJECT_STAGE::OBJECT_RENDER_STAGE)];
+	renderCache = pGBA_display->objCache[TO_UINT(OBJECT_STAGE::OBJECT_FETCH_STAGE)];
+
+	GBA_WORD oamAddress = OAM_START_ADDRESS + (oamID << THREE) + FOUR;
+	mOamAttr23Word_t oamAttributes23 = { ZERO };
+	oamAttributes23.mOamAttr2HalfWord.mOamAttr2HalfWord = readRawMemory<GBA_HALFWORD>(oamAddress, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+
+	renderCache.ObjAttribute.mOamAttr23Word.raw = oamAttributes23.raw;
+
+	if (ENABLED)
+	{
+		// If double affine, then we need to start rendering (sprite width / 2) pixels before the actual sprite pixel start and end (sprite width / 2) after actual sprite pixel end
+		if (renderCache.isDoubleAffine == YES)
+		{
+			auto& fetchCache = pGBA_display->objCache[TO_UINT(OBJECT_STAGE::OBJECT_FETCH_STAGE)];
+			renderCache.spriteXStart = -(fetchCache.spriteWidth >> ONE);
+			renderCache.spriteXEnd = fetchCache.spriteWidth + (fetchCache.spriteWidth >> ONE);
+			renderCache.spriteXPixelCoordinate = -(fetchCache.spriteWidth >> ONE); // currently... we havent traversed the sprite in x coordinates...
+		}
+		else
+		{
+			renderCache.spriteXStart = ZERO;
+			renderCache.spriteXEnd = renderCache.spriteWidth;
+			renderCache.spriteXPixelCoordinate = ZERO; // currently... we havent traversed the sprite in x coordinates...
+		}
+
+		renderCache.spriteYPixelCoordinate = renderCache.vcount - renderCache.spriteYScreenCoordinate;
+
+		// Store the base tile ID directly in the render stage
+		renderCache.baseTileID = renderCache.ObjAttribute.mOamAttr23Word.mOamAttr2HalfWord.mOamAttr2Fields.CHARACTER_NAME;
+	}
+
+}
+
+MASQ_INLINE void GBA_t::OBJ_PA_OBJ_CYCLE(ID oamID)
+{
+
+	PPUDEBUG("MODE2_PA_OBJ_CYCLE for OAM%u", oamID);
+
+	// How the rotation matrix is stored in memory is as follows:
+	// 0x07000000	->	Attr0
+	// 0x07000002	->	Attr1
+	// 0x07000004	->	Attr2
+	// 0x07000006	->	PA
+	// 0x07000008	->	Attr0
+	// 0x0700000A	->	Attr1
+	// 0x0700000C	->	Attr2
+	// 0x0700000E	->	PB
+	// 0x07000010	->	Attr0
+	// 0x07000012	->	Attr1
+	// 0x07000014	->	Attr2
+	// 0x07000016	->	PC
+	// 0x07000018	->	Attr0
+	// 0x0700001A	->	Attr1
+	// 0x0700001C	->	Attr2
+	// 0x0700001E	->	PD
+	// 0x07000020	->	Attr0
+	// 0x07000022	->	Attr1
+	// 0x07000024	->	Attr2
+	// 0x07000026	->	PA
+
+	// Gap b/w 1 PA to another is (for eg 0x07000026 - 0x07000006) = 0x20 (32)
+
+	auto& renderCache = pGBA_display->objCache[TO_UINT(OBJECT_STAGE::OBJECT_RENDER_STAGE)];
+	GBA_WORD oamAddress = OAM_START_ADDRESS + (renderCache.ObjAttribute.mOamAttr01Word.mOamAttr1HalfWord.ROT_SCALE_EN.ROT_SCALE_PARAM_SEL << FIVE) + SIX;
+	renderCache.affine.pa = readRawMemory<GBA_HALFWORD>(oamAddress, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+
+}
+
+MASQ_INLINE void GBA_t::OBJ_PB_OBJ_CYCLE(ID oamID)
+{
+
+	PPUDEBUG("MODE2_PB_OBJ_CYCLE for OAM%u", oamID);
+
+	// Refer to MODE2_PA_OBJ_CYCLE for info on the below equation
+	auto& renderCache = pGBA_display->objCache[TO_UINT(OBJECT_STAGE::OBJECT_RENDER_STAGE)];
+	GBA_WORD oamAddress = OAM_START_ADDRESS + (renderCache.ObjAttribute.mOamAttr01Word.mOamAttr1HalfWord.ROT_SCALE_EN.ROT_SCALE_PARAM_SEL << FIVE) + FOURTEEN;
+	renderCache.affine.pb = readRawMemory<GBA_HALFWORD>(oamAddress, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+
+}
+
+MASQ_INLINE void GBA_t::OBJ_PC_OBJ_CYCLE(ID oamID)
+{
+
+	PPUDEBUG("MODE2_PC_OBJ_CYCLE for OAM%u", oamID);
+
+	// Refer to MODE2_PA_OBJ_CYCLE for info on the below equation
+	auto& renderCache = pGBA_display->objCache[TO_UINT(OBJECT_STAGE::OBJECT_RENDER_STAGE)];
+	GBA_WORD oamAddress = OAM_START_ADDRESS + (renderCache.ObjAttribute.mOamAttr01Word.mOamAttr1HalfWord.ROT_SCALE_EN.ROT_SCALE_PARAM_SEL << FIVE) + TWENTYTWO;
+	renderCache.affine.pc = readRawMemory<GBA_HALFWORD>(oamAddress, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+
+}
+
+MASQ_INLINE void GBA_t::OBJ_PD_OBJ_CYCLE(ID oamID)
+{
+
+	PPUDEBUG("MODE2_PD_OBJ_CYCLE for OAM%u", oamID);
+
+	// Refer to MODE2_PA_OBJ_CYCLE for info on the below equation
+	auto& renderCache = pGBA_display->objCache[TO_UINT(OBJECT_STAGE::OBJECT_RENDER_STAGE)];
+	GBA_WORD oamAddress = OAM_START_ADDRESS + (renderCache.ObjAttribute.mOamAttr01Word.mOamAttr1HalfWord.ROT_SCALE_EN.ROT_SCALE_PARAM_SEL << FIVE) + THIRTY;
+	renderCache.affine.pd = readRawMemory<GBA_HALFWORD>(oamAddress, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+
+}
+
+MASQ_INLINE void GBA_t::OBJ_V_OBJ_CYCLE(ID oamID, OBJECT_TYPE isAffine, STATE8 state)
+{
+
+	PPUDEBUG("MODE2_V_OBJ_CYCLE[%u] for OAM%u", state, oamID);
+
+	auto& objCache = pGBA_display->objCache[TO_UINT(OBJECT_STAGE::OBJECT_RENDER_STAGE)];
+	INC16 spriteXStart = objCache.spriteXPixelCoordinate;
+	INC16 spriteXEnd = RESET;
+
+	if (isAffine == OBJECT_TYPE::OBJECT_IS_NOT_AFFINE)
+	{
+		// Identity matrix (terms which get multiplied will be set to 1 and terms which gets added will be set to 0)
+		objCache.affine.pa = 0xFF;
+		objCache.affine.pb = 0x00;
+		objCache.affine.pc = 0x00;
+		objCache.affine.pd = 0xFF;
+
+		spriteXEnd = spriteXStart + TWO;	// only 2 pixel per VRAM stage
+	}
+	else
+	{
+		spriteXEnd = spriteXStart + ONE;	// only 1 pixel per VRAM stage
+	}
+
+	INC32 transformedSpriteX = ZERO, transformedSpriteY = ZERO;
+	INC16 spriteY = objCache.spriteYPixelCoordinate;
+	SDIM32 Y = objCache.vcount;
+	// update the spriteX coordinates (needed for next VRAM stages)
+	objCache.spriteXPixelCoordinate = spriteXEnd;
+	// check if this needs to be the last vram cycle for this object
+	pGBA_display->lastVRAMCycleForObjFSM = (spriteXEnd == objCache.spriteXEnd) ? YES : NO;
+
+	auto pa = objCache.affine.pa;
+	auto pb = objCache.affine.pb;
+	auto pc = objCache.affine.pc;
+	auto pd = objCache.affine.pd;
+	auto x0 = objCache.spriteWidth >> ONE;
+	auto y0 = objCache.spriteHeight >> ONE;
+
+	for (INC16 spriteX = spriteXStart; spriteX < spriteXEnd; spriteX++)
+	{
+		// NOTE: We need to get the screen coordinates before it got modified because of flip or affine
+		// other wise tranformation from screen space to affine space will get cancelled
+		// even for rotation, this is basically like flipping the sprite coordinated and then again flipping the screen coordinates, flip gets cancelled!
+		int32_t screenX = spriteX + objCache.spriteXScreenCoordinate;
+
+		if (isAffine == OBJECT_TYPE::OBJECT_IS_AFFINE)
+		{
+			/*
+			*	according to formula mentioned in http://problemkaputt.de/gbatek-lcd-i-o-bg-rotation-scaling.htm
+			*	affine can be calculated as follows
+			*
+			*	Using the following expressions,
+			*	  x0,y0    Rotation Center
+			*	  x1,y1    Old Position of a pixel (before rotation/scaling)
+			*	  x2,y2    New position of above pixel (after rotation scaling)
+			*	  A,B,C,D  BG2PA-BG2PD Parameters (as calculated above)
+			*
+			*	the following formula can be used to calculate x2,y2:
+			*
+			*	  x2 = A(x1-x0) + B(y1-y0) + x0
+			*	  y2 = C(x1-x0) + D(y1-y0) + y0
+			*
+			*/
+
+			// for X
+			transformedSpriteX = (pa * (spriteX - x0)) + (pb * (spriteY - y0));
+			// get the integer part of transformedSpriteX
+			transformedSpriteX >>= EIGHT;
+			transformedSpriteX += x0;
+
+			// boundary check post transformation
+			if (transformedSpriteX < 0 || transformedSpriteX >= objCache.spriteWidth)
+				continue;
+
+			// for Y
+			transformedSpriteY = (pc * (spriteX - x0)) + (pd * (spriteY - y0));
+			// get the integer part of transformedSpriteX
+			transformedSpriteY >>= EIGHT;
+			transformedSpriteY += y0;
+
+			// boundary check post transformation
+			if (transformedSpriteY < ZERO || transformedSpriteY >= objCache.spriteHeight)
+				continue;
+		}
+		else
+		{
+			if (objCache.ObjAttribute.mOamAttr01Word.mOamAttr1HalfWord.ROT_SCALE_DIS.HOR_FLIP == SET)
+				transformedSpriteX = objCache.spriteWidth - spriteX - ONE;
+			else
+				transformedSpriteX = spriteX;
+
+			if (objCache.ObjAttribute.mOamAttr01Word.mOamAttr1HalfWord.ROT_SCALE_DIS.VER_FLIP == SET)
+				transformedSpriteY = objCache.spriteHeight - spriteY - ONE;
+			else
+				transformedSpriteY = spriteY;
+		}
+
+		SDIM32 X = screenX;
+
+		if (X >= ZERO && X < static_cast<SDIM32>(getScreenWidth()))
+		{
+			// Y Transformation:
+			if (ENABLED)
+			{
+				/*
+				*	Let's assume the object on the screen is as follows:
+				*
+				*	 ________________________________________________________
+				*	|														|
+				*	|														|
+				*	|														|
+				* 	|														|
+				* 	|				_________________						|
+				* 	|				|		|		|						|
+				*	|				|TY00	|TY01	|						|
+				* 	|				|_______| ______|						|
+				* 	|				|		|		|						|
+				* 	|				|TY10	|TY11	|						|
+				* 	|				|		|		|						|
+				* 	|				__________________						|
+				* 	|														|
+				* 	|														|
+				* 	|														|
+				*	_________________________________________________________
+				*
+				*/
+
+				// To get the row of the tile of interest
+				// we just need to get transformedSpriteY / 8
+				int32_t spriteYTile = transformedSpriteY >> THREE;
+				// Now, to get the column of the tile of interest
+				// we first get the witdth of the tile in terms of number of tiles
+				// i.e. totalwidth of object / 8 gives you how many tiles are there in a row for a given object
+				int32_t widthOfSpriteInTiles = objCache.spriteWidth >> THREE;
+
+				ID tileIDOffsetBecauseOfY = ZERO;
+
+				// Refer https://gbadev.net/gbadoc/sprites.html
+				// Refer http://problemkaputt.de/gbatek-lcd-obj-vram-character-tile-mapping.htm
+				// 2D mapping
+				if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.OBJ_CHAR_VRAM_MAP == RESET)
+				{
+					// Assume tiles are arranged as follows for 2D mapping in memory
+
+					/*
+					*	TILE0000	| TILE0001	| TILE0002	| TILE0003	| TILE0004  | TILE0005  | TILE0006  .... | TILE0031
+					*   TILE0032	| TILE0033	| TILE0034	| TILE0035	| TILE0036	| TILE0037	| TILE0038	.... | TILE0063
+					*	:
+					*   TILE0992	| TILE0993	| TILE0994	| TILE0995	| TILE0996	| TILE0997	| TILE0998	.... | TILE1023
+					*/
+
+					// pixels can be be arranged as a matrix of 32x32 or 16x32 tiles based on 16 or 256 color mode
+
+					// To handle 256 color mode, we need to consider twice as much tiles, we handle this as (<< attribute0.color/palettes)
+
+					// To get the tile offset, lets first process the y tile offset
+					// if 8x8, tileIDOffsetBecauseOfY = 0
+					// if 16x16, tileIDOffsetBecauseOfY = 32
+					// if 32x32, tileIDOffsetBecauseOfY = 64
+
+					// we can get above values of tileIDOffsetBecauseOfY using spriteYTile
+
+					tileIDOffsetBecauseOfY = spriteYTile << FIVE;
+
+					// Note: The reason we don't do anything special for 256 color mode is because "widthOfSpriteInTiles" will be confined to current row
+					// So, next row will never get affected, so tile immediatly below (or few more rows below) the 1st row tile needs to be considered...so we just add multiple of 32 
+				}
+				// 1D mapping
+				else
+				{
+					// Assume tiles are arranged as follows for 2D mapping in memory
+
+					// Refer http://problemkaputt.de/gbatek-lcd-obj-oam-attributes.htm
+					// In 256 color mode
+					/*
+					*	TILE0000	| TILE0002	| TILE0004	| TILE0006	| TILE0008  | TILE0010  | TILE0012  .... | TILE1022
+					*/
+
+					// Otherwise
+
+					/*
+					*	TILE0000	| TILE0001	| TILE0002	| TILE0003	| TILE0004  | TILE0005  | TILE0006  .... | TILE1023
+					*/
+
+					// To handle 256 color mode, we need to consider twice as much tiles, we handle this as (<< attribute0.color/palettes)
+
+					// To get the tile offset, lets first process the y tile offset
+					// if 8x8, tileIDOffsetBecauseOfY = 0
+					// if 16x16, tileIDOffsetBecauseOfY = 2
+					// if 32x32, tileIDOffsetBecauseOfY = 4
+
+					// we can get above values of tileIDOffsetBecauseOfY using spriteYTile and widthOfSpriteInTiles
+
+					tileIDOffsetBecauseOfY = widthOfSpriteInTiles * spriteYTile;
+					// handle 256 color mode if needed (Xly by 2 as widthOfSpriteInTiles becomes double)
+					tileIDOffsetBecauseOfY <<= objCache.ObjAttribute.mOamAttr01Word.mOamAttr0HalfWord.mOamAttr0Fields.COLOR_PALETTES;
+				}
+
+				// after shifting the base tile id in y direction, this is the new base for shifing in x direction
+				objCache.tileIDAfterAccountingForY = tileIDOffsetBecauseOfY;
+			}
+
+			// X Transformation:
+			if (ENABLED)
+			{
+				// now need to get the tile id offset because of X
+				// x offset would be the current sprite x coordinate / 8
+				// refer to diagrams in MODE2_A2_OBJ_CYCLE for more info
+
+				ID tileIDOffsetBecauseOfX = transformedSpriteX >> THREE;
+				// Xly by 2 if 256 color mode because we need to skip every alternative (odd) tiles
+				// refer OBJ Tile Number in http://problemkaputt.de/gbatek-lcd-obj-oam-attributes.htm
+				// so, if tile number is 0, then we remain at 0
+				// if tile number is 1, then we jump to 2
+				// if tile number is 3, then we jump to 6
+				// if tile number is 4, then we jump to 8
+				// and so on...
+				tileIDOffsetBecauseOfX <<= objCache.ObjAttribute.mOamAttr01Word.mOamAttr0HalfWord.mOamAttr0Fields.COLOR_PALETTES;
+
+				objCache.tileIDAfterAccountingForX = tileIDOffsetBecauseOfX;
+			}
+
+			int32_t actualTileID = objCache.baseTileID + objCache.tileIDAfterAccountingForY + objCache.tileIDAfterAccountingForX;
+
+			// using the tileID, we need to fetch the corresponding tile data
+			// for this, we need to first figure out addressInTileDataArea 
+
+			// also, even with addressInTileDataArea, we need to figure out the data pertaining to the pixel within the tile of interest
+			// NOTE: we still do %8 and not %width even for sprites bigger than 8x8 because
+			// 1) for bigger tiles, the tileID would change for every 8x8 which takes care of getting appropriate address... no need to account for it in modulo again
+			// 2) tile data is stored in terms of 8x8 
+
+			SDIM32 xTileCoordinate = transformedSpriteX & SEVEN;
+			SDIM32 yTileCoordinate = transformedSpriteY & SEVEN;
+			GBA_WORD withinTileOffset = xTileCoordinate + (yTileCoordinate << THREE);
+
+			// Refer : http://problemkaputt.de/gbatek-lcd-obj-overview.htm
+			// Refer : http://problemkaputt.de/gbatek-lcd-vram-character-data.htm
+			// NOTE: in tile data area, granularity within the tile data is decided based on 4bpp mode or 8bpp mode
+			// in 4bpp mode, each tile is 32 bytes, first 4 bytes for the topmost row of the tile
+			// each byte representing two dots, the lower 4 bits define the color for the left and upper 4 bits the color for the right dot
+			// in 8bpp mode, each tile is 64 bytes, first 8 bytes for the topmost row of the tile
+			// each byte selects palette entry for each dot
+			// 8bpp mode is the 256 color mode that is represented in attribute 0
+			// Refer : https://gbadev.net/gbadoc/sprites.html
+			// irrespective mode, each tile ID represents 32 bytes of data in sprite tile data area
+			// so the memory address of a tile is roughly 0x06010000 + T*32
+			const INC16 eachIndexReferences32BytesInShifts = FIVE; // Indicates 32 in power of 2 (to use it for optimized multiplication)
+			PPUTODO("Each byte is 64 byte in 8bpp mode, so each index should reference 64 bytes in 8bpp? (Source : NBA)");
+
+			INC32 paletteIndex = RESET;
+
+			// 16 color mode (4bpp mode)
+			if (objCache.ObjAttribute.mOamAttr01Word.mOamAttr0HalfWord.mOamAttr0Fields.COLOR_PALETTES == RESET)
+			{
+				GBA_WORD addressInTileDataArea =
+					VIDEO_RAM_START_ADDRESS
+					+ 0x10000
+					+ (actualTileID << eachIndexReferences32BytesInShifts)
+					// each byte represents 2 dots
+					// divide the withinTileOffset by 2 as single byte can represent 2 pixels
+					// so "withinTileOffset" is halved
+					+(withinTileOffset >> ONE);
+
+				BYTE pixelColorNumberFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);
+
+				// In 4bpp mode, only 4 bits out of pixelColorData represents actual color for pixel, other 4 bits are for the adjascent pixels
+				// As mentioned in http://problemkaputt.de/gbatek-lcd-vram-character-data.htm
+				// lower 4 bits for left dot (lower X) and upper 4 bits for right dot (higher X)
+				// take an example of dot 2 and dot 3
+				// dot 2 needs to use bit0-3 and dot 3 needs to use bit4-7
+				// withinTileOffset gives use dot number within tile
+				// basically, for even dot, we simply extract first 4 bits
+				// for odd dot, we want to shift bit4-7 right by 4 and then extract only first 4 bits
+				// also, using the naming convention of left and right dot given in http://problemkaputt.de/gbatek-lcd-vram-character-data.htm
+				// tile data will be as follows:
+				// row0 : LEFT(000), RIGHT(001), LEFT(002), RIGHT(003), LEFT(004), RIGHT(005), LEFT(006), RIGHT(007)
+				// row1 : LEFT(008), RIGHT(009), LEFT(010), RIGHT(011), LEFT(012), RIGHT(013), LEFT(014), RIGHT(015)
+				// so for odd "withinTileOffset" perform the shift and extract, else directly extract						
+
+				// Odd means we need to shift right by 4
+				if (withinTileOffset & ONE)
+				{
+					pixelColorNumberFromTileData >>= FOUR;
+				}
+				// Extract only the required 4 bits
+				pixelColorNumberFromTileData &= 0x0F;
+
+				// Note: Palette is of 16 bytes, so palette index is 0, when tile data is 0 and palette index is 1, when tile data is 1
+				paletteIndex = pixelColorNumberFromTileData << ONE;
+
+				PPUTODO("Why paletteIndex != ZERO check is needed before accounting for palette bank number in 4bpp mode? \n\
+							Will not having this check cause non-transparent pixel even when transparent is desired? (Source : NBA)");
+				if (paletteIndex != ZERO)
+				{
+					// palette bank number is provided as part of attribute 2 in 4bpp mode
+					// this palette number is the index into one of the 16 16-colored palettes (Refer : https://gbadev.net/gbadoc/sprites.html)
+					// palette ram for sprites goes from 0x05000200 to 0x050003FF which is 512 bytes
+					// Hence, each 16 16-colored palettes should take 32 bytes
+					// OR
+					// we can think that whole sprite palette area is divided into 16 palettes with each palette having 16 colors (Refer : http://problemkaputt.de/gbatek-lcd-color-palettes.htm)
+					// each color is 2 bytes, so each palette takes 16 * 2 bytes = 32 bytes (Refer : http://problemkaputt.de/gbatek-lcd-color-palettes.htm)
+					// Hence, each palette is 32 bytes
+					// palette number in attribute 2 * THIRTYTWO will give the address of desired palette number in sprite palette area
+
+					const DIM16 sizeOfEachPaletteInBytesInShifts = FIVE; // Indicates 32 in power of 2 (to use it for optimized multiplication) 
+					paletteIndex += (objCache.ObjAttribute.mOamAttr23Word.mOamAttr2HalfWord.mOamAttr2Fields.PALETTE_NUMBER << sizeOfEachPaletteInBytesInShifts);
+				}
+			}
+			else
+			{
+				GBA_WORD addressInTileDataArea =
+					VIDEO_RAM_START_ADDRESS
+					+ 0x10000
+					+ (actualTileID << eachIndexReferences32BytesInShifts)
+					+ withinTileOffset;
+
+				BYTE pixelColorNumberFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);
+
+				// Note: Palette is of 16 bytes, so palette index is 0, when tile data is 0 and palette index is 1, when tile data is 1
+				paletteIndex = pixelColorNumberFromTileData << ONE;
+			}
+
+			if ((OBJECT_MODE)objCache.ObjAttribute.mOamAttr01Word.mOamAttr0HalfWord.mOamAttr0Fields.OBJ_MODE == OBJECT_MODE::OBJ_WINDOW
+				&&
+				paletteIndex != ZERO)
+			{
+				pGBA_display->gfx_obj_window[X][Y] = ENABLED;
+			}
+			else if (objCache.ObjAttribute.mOamAttr23Word.mOamAttr2HalfWord.mOamAttr2Fields.PRIORITY < pGBA_display->objPriority[X][Y]
+				||
+				pGBA_display->gfx_obj[X][Y] == ZERO)
+			{
+				PPUTODO("Do we even need this paletteIndex != ZERO check, even if we populate paletteIndex of zero, wont merge take care of transparent sprites? (Source : NBA)");
+				if (paletteIndex != ZERO)
+				{
+					pGBA_display->gfx_obj[X][Y] = paletteIndex;
+					pGBA_display->gfx_obj_mode[X][Y] = (OBJECT_MODE)objCache.ObjAttribute.mOamAttr01Word.mOamAttr0HalfWord.mOamAttr0Fields.OBJ_MODE;
+				}
+				pGBA_display->objPriority[X][Y] = objCache.ObjAttribute.mOamAttr23Word.mOamAttr2HalfWord.mOamAttr2Fields.PRIORITY;
+			}
+		}
+	}
+
+}
+
+MASQ_INLINE int32_t GBA_t::INCREMENT_OAM_ID()
+{
+
+	// Check and increment objAccessOAMIDState only if it's within bounds
+	if (pGBA_display->objAccessOAMIDState < ONETWENTYEIGHT - ONE)
+	{
+		++pGBA_display->objAccessOAMIDState;
+		RETURN VALID;
+	}
+	RETURN INVALID;
+
+}
+
+MASQ_INLINE void GBA_t::WIN_CYCLE()
+{
+
+	uint32_t xPixelCoordinate = pGBA_display->currentWinPixel;
+	uint32_t yPixelCoordinate = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
+
+	if ((xPixelCoordinate >= ((uint16_t)LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (yPixelCoordinate >= ((uint16_t)LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
+	{
+		RETURN;
+	}
+
+	// Helper lambda to handle the window logic for both Win0 and Win1
+	auto handle_window = [&](uint32_t x1, uint32_t x2, uint32_t y1, uint32_t y2, FLAG& winH, FLAG& winV, int winIndex)
+		{
+			// Check and adjust the boundaries
+			if (x2 > getScreenWidth() || x1 > x2) x2 = getScreenWidth();
+			if (y2 > getScreenHeight() || y1 > y2) y2 = getScreenHeight();
+
+			// Horizontal and vertical range checks
+			winH = (xPixelCoordinate >= x1 && xPixelCoordinate <= x2) ? YES : NO;
+			winV = (yPixelCoordinate >= y1 && yPixelCoordinate <= y2) ? YES : NO;
+
+			// Update the window pixel array
+			pGBA_display->gfx_window[winIndex][xPixelCoordinate][yPixelCoordinate] = winH && winV;
+		};
+
+	// Handle Win0
+	FLAG win01H = NO, win01V = NO;
+	handle_window(pGBA_peripherals->mWIN0HHalfWord.mWINniFields.i1, pGBA_peripherals->mWIN0HHalfWord.mWINniFields.i2,
+		pGBA_peripherals->mWIN0VHalfWord.mWINniFields.i1, pGBA_peripherals->mWIN0VHalfWord.mWINniFields.i2,
+		win01H, win01V, WIN0);
+
+	// Handle Win1
+	FLAG win11H = NO, win11V = NO;
+	handle_window(pGBA_peripherals->mWIN1HHalfWord.mWINniFields.i1, pGBA_peripherals->mWIN1HHalfWord.mWINniFields.i2,
+		pGBA_peripherals->mWIN1VHalfWord.mWINniFields.i1, pGBA_peripherals->mWIN1VHalfWord.mWINniFields.i2,
+		win11H, win11V, WIN1);
+
+	// increment windows pixel counter
+	++pGBA_display->currentWinPixel;
+
+}
+
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+MASQ_INLINE void GBA_t::MODE0_M_BG_CYCLE(ID bgID)
+{
+
+	uint32_t xPixelCoordinate = pGBA_display->currentBgPixel;
+	uint32_t yPixelCoordinate = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
+
+	// Early bounds check on X and Y
+	if ((xPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (yPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
+	{
+		RETURN;
+	}
+
+	// Bounds check for bgID
+	if (bgID < BG0 || bgID > BG3)
+	{
+		FATAL("Unknown BG in mode 0");
+		RETURN;
+	}
+
+	pGBA_display->bgCache[bgID].xPixelCoordinate = xPixelCoordinate;
+	pGBA_display->bgCache[bgID].yPixelCoordinate = yPixelCoordinate;
+
+	GBA_WORD bgTileMapBaseAddr = ZERO;
+	mBGnCNTHalfWord_t BGxCNT = { ZERO };
+	DIM16 hofs = ZERO;
+	DIM16 vofs = ZERO;
+
+	// Cache BG configuration values for fast access
+	auto getBGConfig = [&](ID id) -> std::tuple<int, FLAG, uint16_t, uint16_t, uint16_t>
+		{
+			switch (id)
+			{
+			case BG0:
+				RETURN{
+					static_cast<int>(pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTFields.SCREEN_BASE_BLOCK * 0x0800),
+					pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET,
+					static_cast<uint16_t>(pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTHalfWord),
+					static_cast<uint16_t>(pGBA_peripherals->mBG0HOFSHalfWord.mBGniOFSFields.OFFSET),
+					static_cast<uint16_t>(pGBA_peripherals->mBG0VOFSHalfWord.mBGniOFSFields.OFFSET)
+				};
+			case BG1:
+				RETURN{
+					static_cast<int>(pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTFields.SCREEN_BASE_BLOCK * 0x0800),
+					pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET,
+					static_cast<uint16_t>(pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTHalfWord),
+					static_cast<uint16_t>(pGBA_peripherals->mBG1HOFSHalfWord.mBGniOFSFields.OFFSET),
+					static_cast<uint16_t>(pGBA_peripherals->mBG1VOFSHalfWord.mBGniOFSFields.OFFSET)
+				};
+			case BG2:
+				RETURN{
+					static_cast<int>(pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTFields.SCREEN_BASE_BLOCK * 0x0800),
+					pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET,
+					static_cast<uint16_t>(pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTHalfWord),
+					static_cast<uint16_t>(pGBA_peripherals->mBG2HOFSHalfWord.mBGniOFSFields.OFFSET),
+					static_cast<uint16_t>(pGBA_peripherals->mBG2VOFSHalfWord.mBGniOFSFields.OFFSET)
+				};
+			case BG3:
+				RETURN{
+					static_cast<int>(pGBA_peripherals->mBG3CNTHalfWord.mBGnCNTFields.SCREEN_BASE_BLOCK * 0x0800),
+					pGBA_peripherals->mBG3CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET,
+					static_cast<uint16_t>(pGBA_peripherals->mBG3CNTHalfWord.mBGnCNTHalfWord),
+					static_cast<uint16_t>(pGBA_peripherals->mBG3HOFSHalfWord.mBGniOFSFields.OFFSET),
+					static_cast<uint16_t>(pGBA_peripherals->mBG3VOFSHalfWord.mBGniOFSFields.OFFSET)
+				};
+			default:
+				// Safe fallback to avoid undefined behavior
+				RETURN{ 0, false, 0, 0, 0 };
+			}
+		};
+
+	auto [bgTileMapBaseAddr_, is8bppMode, BGxCNT_, hofs_, vofs_] = getBGConfig(bgID);
+	bgTileMapBaseAddr = bgTileMapBaseAddr_;
+	pGBA_display->bgCache[bgID].is8bppMode = is8bppMode;
+	BGxCNT.mBGnCNTHalfWord = BGxCNT_;
+	hofs = hofs_;
+	vofs = vofs_;
+
+	/*
+	* Refer http://problemkaputt.de/gbatek-lcd-i-o-bg-control.htm
+	* BGs always wraparound, so
+	* offsets = BGxHOFS and BGxHVOFS (BG offsets within static screen)
+	* Final offsets from screen (tileMap_x and tileMap_y) = (x + BGxHOFS) % 512 and (y + BGxHVOFS) % 512
+	* Offsets in tile coordinates (tile_x and tile_y) = Final offsets from screen / 8
+	* Offsets within tile coordinates (WithinTile_x and WithinTile_y) = Final offsets from screen % 8
+	*
+	* When BGxCNT->Size = 0
+	* SC0 -> 256x256
+	* When BGxCNT->Size = 1
+	* SC0 SC1 -> 512x256
+	* When BGxCNT->Size = 2
+	* SC0 -> 256x512
+	* SC1
+	* When BGxCNT->Size = 3
+	* SC0 SC1 -> 512x512
+	* SC2 SC3
+	* SC0 is defined by the normal BG Map base address (Bit 8-12 of BGxCNT),
+	* SC1 uses same address +2K, SC2 address +4K, SC3 address +6K
+	* So, for given x, y we need to figure out in which SCn it falls...
+	* Then each SCn is 256x256, so , number of tiles i.e. tilesPerRow = bitsPerRow / 8 = 32
+	* So, withinTileOffset = (tile_x + (tile_y * tilesPerRow))
+	* But, we do a 16bit read for tile map as mentioned under Mode 0 in https://nba-emu.github.io/hw-docs/ppu/background.html and http://problemkaputt.de/gbatek-lcd-vram-bg-screen-data-format-bg-map.htm unlike non text modes
+	* So, 16withinTileOffset = 2 * withinTileOffset
+	*
+	* Final Address for tile map = [VRAM_START_ADDRESS + bgTileMapBaseAddr + (SCn * 2K) + (16withinTileOffset)]
+	*/
+
+	// Cached sum of coordinates and offsets
+	DIM16 offsetSumX = xPixelCoordinate + hofs;
+	DIM16 offsetSumY = yPixelCoordinate + vofs;
+
+	ID SCn = ZERO;
+	switch (BGxCNT.mBGnCNTFields.SCREEN_SIZE)
+	{
+		// SC0
+	case ZERO: SCn = ZERO; BREAK;
+		// SC0 SC1
+	case ONE: SCn = ((offsetSumX & 511) > 255) ? ONE : ZERO; BREAK;
+		// SC0
+		// SC1
+	case TWO: SCn = ((offsetSumY & 511) > 255) ? ONE : ZERO; BREAK;
+		// SC0 SC1
+		// SC2 SC3
+	case THREE:
+		SCn = ((offsetSumX & 511) > 255) ? ONE : ZERO;
+		SCn += ((offsetSumY & 511) > 255) ? TWO : ZERO;
+		BREAK;
+	default:
+		FATAL("Unknown screen size in mode 0");
+		RETURN;
+	}
+
+	pGBA_display->bgCache[bgID].hofs = hofs;
+	pGBA_display->bgCache[bgID].vofs = vofs;
+
+	// Within SCn
+	DIM16 tileMapX = offsetSumX & 255; // % 256 because because if more than 255, it is SC1 or SC3, but we are already accounting for SCn, so we just get tileX within SCn
+	DIM16 tileMapY = offsetSumY & 255; // % 256 because because if more than 255, it is SC2 or SC3, but we are already accounting for SCn, so we just get tileX within SCn
+
+	pGBA_display->bgCache[bgID].tileMapX = tileMapX;
+	pGBA_display->bgCache[bgID].tileMapY = tileMapY;
+
+	const DIM16 tilesPerRowInShifts = FIVE; // 1 << 5 is same as * 32; Each SCn is of 256*256, so 256 / 8 = 32
+	DIM16 tileMapOffset = (tileMapX >> THREE) + ((tileMapY >> THREE) << tilesPerRowInShifts);
+
+	// Since we have 16 bits per tile instead of 8
+	// Refer http://problemkaputt.de/gbatek-lcd-vram-bg-screen-data-format-bg-map.htm
+	tileMapOffset <<= ONE;
+
+	GBA_WORD addressInTileMapArea = VIDEO_RAM_START_ADDRESS + bgTileMapBaseAddr + (SCn * 0x800) + tileMapOffset;
+
+	// NOTE: Needed for tonc's cbb_demo
+	// Refer: https://www.coranac.com/tonc/text/regbg.htm
+	if (addressInTileMapArea < (VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
+	{
+		pGBA_display->bgCache[bgID].tileDescriptor.raw = readRawMemory<GBA_HALFWORD>(addressInTileMapArea, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+	}
+	else
+	{
+		pGBA_display->bgCache[bgID].tileDescriptor.raw = RESET;
+		PPUTODO("As per NBA, this is set to some latched value");
+	}
+
+}
+
+MASQ_INLINE void GBA_t::MODE0_T_BG_CYCLE(ID bgID)
+{
+
+	auto X = pGBA_display->currentBgPixel;
+	auto Y = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
+
+	// Early bounds check on X and Y
+	if ((X >= TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (Y >= TO_UINT16(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
+	{
+		RETURN;
+	}
+
+	// Bounds check for bgID
+	if (bgID < BG0 || bgID > BG3)
+	{
+		FATAL("Unknown BG in mode 0");
+		RETURN;
+	}
+
+	GBA_WORD bgTileDataBaseAddr =
+		(bgID == BG0)
+		? (pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTFields.CHARACTER_BASE_BLOCK * 0x4000)
+		: (bgID == BG1)
+		? (pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTFields.CHARACTER_BASE_BLOCK * 0x4000)
+		: (bgID == BG2)
+		? (pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTFields.CHARACTER_BASE_BLOCK * 0x4000)
+		: (pGBA_peripherals->mBG3CNTHalfWord.mBGnCNTFields.CHARACTER_BASE_BLOCK * 0x4000);
+
+	auto xTileCoordinate = pGBA_display->bgCache[bgID].tileMapX & SEVEN; // % 8
+	auto yTileCoordinate = pGBA_display->bgCache[bgID].tileMapY & SEVEN; // % 8
+
+	xTileCoordinate = pGBA_display->bgCache[bgID].tileDescriptor.hflip == YES
+		? flipLUT[xTileCoordinate]
+		: xTileCoordinate;
+
+	yTileCoordinate = pGBA_display->bgCache[bgID].tileDescriptor.vflip == YES
+		? flipLUT[yTileCoordinate]
+		: yTileCoordinate;
+
+	GBA_WORD withinTileDataOffset = xTileCoordinate + (yTileCoordinate << THREE);
+	// Refer http://problemkaputt.de/gbatek-lcd-vram-character-data.htm
+	DIM16 sizeOfEachTileData = (pGBA_display->bgCache[bgID].is8bppMode == NO) ? 0x20 : 0x40;
+
+	// 4bpp mode
+	if (pGBA_display->bgCache[bgID].is8bppMode == NO)
+	{
+		// 4bpp mode
+		GBA_WORD addressInTileDataArea =
+			VIDEO_RAM_START_ADDRESS
+			+ bgTileDataBaseAddr
+			+ (sizeOfEachTileData * pGBA_display->bgCache[bgID].tileDescriptor.fetchedTileID)
+			+ (withinTileDataOffset >> ONE); // Divide by 2 because in 4bpp mode, A single halfword gives data for 4 pixels
+
+		BYTE pixelColorNumberFor2PixelsFromTileData = RESET;
+
+		// NOTE: Needed for tonc's cbb_demo
+		// Refer: https://www.coranac.com/tonc/text/regbg.htm
+		if (addressInTileDataArea < (VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
+		{
+			pixelColorNumberFor2PixelsFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);
+		}
+		else
+		{
+			PPUTODO("As per NBA, pixelColorNumberFor2PixelsFromTileData is set to some latched value");
+		}
+
+		// Note: Palette is of 16 bytes, so palette index is 0, when tile data is 0 and palette index is 1, when tile data is 1
+		// Odd means we need to shift right by 4
+		pixelColorNumberFor2PixelsFromTileData >>= ((withinTileDataOffset & ONE) ? FOUR : ZERO);
+		// extract only the required 4 bits
+		BYTE pixelColorNumberPerPixel = pixelColorNumberFor2PixelsFromTileData & 0x0F;
+		INC32 paletteIndex = pixelColorNumberPerPixel << ONE;
+
+		if (paletteIndex != ZERO)
+		{
+			// Refer mode 2 bg processing to see how we determine sizeOfEachPaletteInBytes
+			const DIM16 sizeOfEachPaletteInBytesInShifts = FIVE; // 1 << 5 is same as *32
+			paletteIndex += (pGBA_display->bgCache[bgID].tileDescriptor.pb << sizeOfEachPaletteInBytesInShifts);
+		}
+		pGBA_display->gfx_bg[bgID][X][Y] = paletteIndex;
+	}
+	else
+	{
+		// 8bpp mode
+		GBA_WORD addressInTileDataArea =
+			VIDEO_RAM_START_ADDRESS
+			+ bgTileDataBaseAddr
+			+ (sizeOfEachTileData * pGBA_display->bgCache[bgID].tileDescriptor.fetchedTileID)
+			+ withinTileDataOffset;
+
+		BYTE pixelColorNumberFor1PixelFromTileData = RESET;
+
+		// NOTE: Needed for tonc's cbb_demo
+		// Refer: https://www.coranac.com/tonc/text/regbg.htm
+		if (addressInTileDataArea < (VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
+		{
+			pixelColorNumberFor1PixelFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);
+		}
+		else
+		{
+			PPUTODO("As per NBA, pixelColorNumberFor1PixelFromTileData is set to some latched value");
+		}
+
+		// Note: Palette is of 16 bytes, so palette index is 0, when tile data is 0 and palette index is 1, when tile data is 1
+		INC32 paletteIndex = pixelColorNumberFor1PixelFromTileData << ONE;
+		pGBA_display->gfx_bg[bgID][X][Y] = paletteIndex;
+	}
+
+}
+
+MASQ_INLINE void GBA_t::MODE1_M_TEXT_BG_CYCLE(ID bgID)
+{
+
+	uint32_t xPixelCoordinate = pGBA_display->currentBgPixel;
+	uint32_t yPixelCoordinate = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
+
+	// Early bounds check on X and Y
+	if ((xPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (yPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
+	{
+		RETURN;
+	}
+
+	// Bounds check for bgID
+	if (bgID < BG0 || bgID > BG1)
+	{
+		FATAL("Unknown BG in mode 1");
+		RETURN;
+	}
+
+	pGBA_display->bgCache[bgID].xPixelCoordinate = xPixelCoordinate;
+	pGBA_display->bgCache[bgID].yPixelCoordinate = yPixelCoordinate;
+
+	GBA_WORD bgTileMapBaseAddr = ZERO;
+	mBGnCNTHalfWord_t BGxCNT = { ZERO };
+	DIM16 hofs = ZERO;
+	DIM16 vofs = ZERO;
+
+	if (bgID == BG0)
+	{
+		bgTileMapBaseAddr = (pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTFields.SCREEN_BASE_BLOCK * 0x0800);
+		pGBA_display->bgCache[BG0].is8bppMode = pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET;
+		BGxCNT.mBGnCNTHalfWord = pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTHalfWord;
+		hofs = pGBA_peripherals->mBG0HOFSHalfWord.mBGniOFSFields.OFFSET;
+		vofs = pGBA_peripherals->mBG0VOFSHalfWord.mBGniOFSFields.OFFSET;
+	}
+	else if (bgID == BG1)
+	{
+		bgTileMapBaseAddr = (pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTFields.SCREEN_BASE_BLOCK * 0x0800);
+		pGBA_display->bgCache[BG1].is8bppMode = pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET;
+		BGxCNT.mBGnCNTHalfWord = pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTHalfWord;
+		hofs = pGBA_peripherals->mBG1HOFSHalfWord.mBGniOFSFields.OFFSET;
+		vofs = pGBA_peripherals->mBG1VOFSHalfWord.mBGniOFSFields.OFFSET;
+	}
+	else
+	{
+		FATAL("Unknown BG in mode 1 text mode");
+		RETURN;
+	}
+
+	/*
+	* Refer http://problemkaputt.de/gbatek-lcd-i-o-bg-control.htm
+	* BGs always wraparound, so
+	* offsets = BGxHOFS and BGxHVOFS (BG offsets within static screen)
+	* Final offsets from screen (tileMap_x and tileMap_y) = (x + BGxHOFS) % 512 and (y + BGxHVOFS) % 512
+	* Offsets in tile coordinates (tile_x and tile_y) = Final offsets from screen / 8
+	* Offsets within tile coordinates (WithinTile_x and WithinTile_y) = Final offsets from screen % 8
+	*
+	* When BGxCNT->Size = 0
+	* SC0 -> 256x256
+	* When BGxCNT->Size = 1
+	* SC0 SC1 -> 512x256
+	* When BGxCNT->Size = 2
+	* SC0 -> 256x512
+	* SC1
+	* When BGxCNT->Size = 3
+	* SC0 SC1 -> 512x512
+	* SC2 SC3
+	* SC0 is defined by the normal BG Map base address (Bit 8-12 of BGxCNT),
+	* SC1 uses same address +2K, SC2 address +4K, SC3 address +6K
+	* So, for given x, y we need to figure out in which SCn it falls...
+	* Then each SCn is 256x256, so , number of tiles i.e. tilesPerRow = bitsPerRow / 8 = 32
+	* So, withinTileOffset = (tile_x + (tile_y * tilesPerRow))
+	* But, we do a 16bit read for tile map as mentioned under Mode 0 in https://nba-emu.github.io/hw-docs/ppu/background.html and http://problemkaputt.de/gbatek-lcd-vram-bg-screen-data-format-bg-map.htm unlike non text modes
+	* So, 16withinTileOffset = 2 * withinTileOffset
+	*
+	* Final Address for tile map = [VRAM_START_ADDRESS + bgTileMapBaseAddr + (SCn * 2K) + (16withinTileOffset)]
+	*
+	*/
+
+	// Cached sum of coordinates and offsets
+	DIM16 offsetSumX = xPixelCoordinate + hofs;
+	DIM16 offsetSumY = yPixelCoordinate + vofs;
+
+	ID SCn = ZERO;
+	switch (BGxCNT.mBGnCNTFields.SCREEN_SIZE)
+	{
+		// SC0
+	case ZERO: SCn = ZERO; BREAK;
+		// SC0 SC1
+	case ONE: SCn = ((offsetSumX & 511) > 255) ? ONE : ZERO; BREAK;
+		// SC0
+		// SC1
+	case TWO: SCn = ((offsetSumY & 511) > 255) ? ONE : ZERO; BREAK;
+		// SC0 SC1
+		// SC2 SC3
+	case THREE:
+		SCn = ((offsetSumX & 511) > 255) ? ONE : ZERO;
+		SCn += ((offsetSumY & 511) > 255) ? TWO : ZERO;
+		BREAK;
+	default:
+		FATAL("Unknown screen size in mode 0");
+		RETURN;
+	}
+
+	pGBA_display->bgCache[bgID].hofs = hofs;
+	pGBA_display->bgCache[bgID].vofs = vofs;
+
+	// Within SCn
+	DIM16 tileMapX = offsetSumX & 255; // % 256 because because if more than 255, it is SC1 or SC3, but we are already accounting for SCn, so we just get tileX within SCn
+	DIM16 tileMapY = offsetSumY & 255; // % 256 because because if more than 255, it is SC2 or SC3, but we are already accounting for SCn, so we just get tileX within SCn
+
+	pGBA_display->bgCache[bgID].tileMapX = tileMapX;
+	pGBA_display->bgCache[bgID].tileMapY = tileMapY;
+
+	const DIM16 tilesPerRowInShifts = FIVE; // 1 << 5 is same as * 32; Each SCn is of 256*256, so 256 / 8 = 32
+	DIM16 tileMapOffset = (tileMapX >> THREE) + ((tileMapY >> THREE) << tilesPerRowInShifts);
+
+	// Since we have 16 bits per tile instead of 8
+	// Refer http://problemkaputt.de/gbatek-lcd-vram-bg-screen-data-format-bg-map.htm
+	tileMapOffset <<= ONE;
+
+	GBA_WORD addressInTileMapArea = VIDEO_RAM_START_ADDRESS + bgTileMapBaseAddr + (SCn * 0x800) + tileMapOffset;
+
+	// NOTE: Needed for tonc's cbb_demo
+	// Refer: https://www.coranac.com/tonc/text/regbg.htm
+	if (addressInTileMapArea < (VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
+	{
+		pGBA_display->bgCache[bgID].tileDescriptor.raw = readRawMemory<GBA_HALFWORD>(addressInTileMapArea, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+	}
+	else
+	{
+		pGBA_display->bgCache[bgID].tileDescriptor.raw = RESET;
+		PPUTODO("As per NBA, this is set to some latched value");
+	}
+
+}
+
+MASQ_INLINE void GBA_t::MODE1_T_TEXT_BG_CYCLE(ID bgID)
+{
+
+	auto X = pGBA_display->currentBgPixel;
+	auto Y = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
+
+	// Early bounds check on X and Y
+	if ((X >= TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (Y >= TO_UINT16(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
+	{
+		RETURN;
+	}
+
+	// Bounds check for bgID
+	if (bgID < BG0 || bgID > BG1)
+	{
+		FATAL("Unknown BG in mode 1");
+		RETURN;
+	}
+
+	GBA_WORD bgTileDataBaseAddr = (bgID == BG0)
+		? (pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTFields.CHARACTER_BASE_BLOCK * 0x4000)
+		: (pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTFields.CHARACTER_BASE_BLOCK * 0x4000);
+
+	auto xTileCoordinate = pGBA_display->bgCache[bgID].tileMapX & SEVEN; // % 8
+	auto yTileCoordinate = pGBA_display->bgCache[bgID].tileMapY & SEVEN; // % 8
+
+	xTileCoordinate = pGBA_display->bgCache[bgID].tileDescriptor.hflip == YES
+		? flipLUT[xTileCoordinate]
+		: xTileCoordinate;
+
+	yTileCoordinate = pGBA_display->bgCache[bgID].tileDescriptor.vflip == YES
+		? flipLUT[yTileCoordinate]
+		: yTileCoordinate;
+
+	GBA_WORD withinTileDataOffset = xTileCoordinate + (yTileCoordinate << THREE);
+	// Refer http://problemkaputt.de/gbatek-lcd-vram-character-data.htm
+	DIM16 sizeOfEachTileData = (pGBA_display->bgCache[bgID].is8bppMode == NO) ? 0x20 : 0x40;
+
+	// 4bpp mode
+	if (pGBA_display->bgCache[bgID].is8bppMode == NO)
+	{
+		GBA_WORD addressInTileDataArea =
+			VIDEO_RAM_START_ADDRESS
+			+ bgTileDataBaseAddr
+			+ (sizeOfEachTileData * pGBA_display->bgCache[bgID].tileDescriptor.fetchedTileID)
+			+ (withinTileDataOffset >> ONE); // Divide by 2 because in 4bpp mode, A single halfword gives data for 4 pixels
+
+		BYTE pixelColorNumberFor2PixelsFromTileData = RESET;
+
+		// NOTE: Needed for tonc's cbb_demo
+		// Refer: https://www.coranac.com/tonc/text/regbg.htm
+		if (addressInTileDataArea < (VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
+		{
+			pixelColorNumberFor2PixelsFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);
+		}
+		else
+		{
+			PPUTODO("As per NBA, pixelColorNumberFor2PixelsFromTileData is set to some latched value");
+		}
+
+		// Note: Palette is of 16 bytes, so palette index is 0, when tile data is 0 and palette index is 1, when tile data is 1
+		// Odd means we need to shift right by 4
+		pixelColorNumberFor2PixelsFromTileData >>= ((withinTileDataOffset & ONE) ? FOUR : ZERO);
+		// extract only the required 4 bits
+		BYTE pixelColorNumberPerPixel = pixelColorNumberFor2PixelsFromTileData & 0x0F;
+		INC32 paletteIndex = pixelColorNumberPerPixel << ONE;
+
+		if (paletteIndex != ZERO)
+		{
+			// Refer mode 2 bg processing to see how we determine sizeOfEachPaletteInBytes
+			const DIM16 sizeOfEachPaletteInBytesInShifts = FIVE; // 1 << 5 is same as *32
+			paletteIndex += (pGBA_display->bgCache[bgID].tileDescriptor.pb << sizeOfEachPaletteInBytesInShifts);
+		}
+		pGBA_display->gfx_bg[bgID][X][Y] = paletteIndex;
+	}
+	// 8bpp mode
+	else
+	{
+		// 8bpp mode
+		GBA_WORD addressInTileDataArea =
+			VIDEO_RAM_START_ADDRESS
+			+ bgTileDataBaseAddr
+			+ (sizeOfEachTileData * pGBA_display->bgCache[bgID].tileDescriptor.fetchedTileID)
+			+ withinTileDataOffset;
+
+		BYTE pixelColorNumberFor1PixelFromTileData = RESET;
+
+		// NOTE: Needed for tonc's cbb_demo
+		// Refer: https://www.coranac.com/tonc/text/regbg.htm
+		if (addressInTileDataArea < (VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
+		{
+			pixelColorNumberFor1PixelFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);
+		}
+		else
+		{
+			PPUTODO("As per NBA, pixelColorNumberFor1PixelFromTileData is set to some latched value");
+		}
+
+		// Note: Palette is of 16 bytes, so palette index is 0, when tile data is 0 and palette index is 1, when tile data is 1
+		INC32 paletteIndex = pixelColorNumberFor1PixelFromTileData << ONE;
+		pGBA_display->gfx_bg[bgID][X][Y] = paletteIndex;
+	}
+
+}
+
+#else
+MASQ_INLINE void GBA_t::RENDER_MODE0_MODE1_PIXEL_X(ID bgID, GBA_HALFWORD pixelData, STATE8 state)
+{
+
+	auto Y = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
+
+	if (pGBA_display->currentBgPixelInTextMode[bgID] >= (TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)))
+	{
+		RETURN;
+	}
+
+	if (pGBA_display->bgCache[bgID].is8bppMode == NO)
+	{
+		// 4bpp mode
+
+		GBA_HALFWORD pixelColorNumberFor4PixelsFromTileData = pixelData;
+
+		if (pGBA_display->bgCache[bgID].tileDescriptor.hflip == YES)
+		{
+			// First we take care of flipping 8 bits
+			pixelColorNumberFor4PixelsFromTileData =
+				((pixelColorNumberFor4PixelsFromTileData >> EIGHT) | (pixelColorNumberFor4PixelsFromTileData << EIGHT));
+
+			// Next we flip the 4 bits within the already flipped 8 bits
+
+			pixelColorNumberFor4PixelsFromTileData =
+				(((pixelColorNumberFor4PixelsFromTileData & 0xF0F0) >> FOUR)
+					| ((pixelColorNumberFor4PixelsFromTileData & 0x0F0F) << FOUR));
+		}
+
+		BYTE pixelColorNumberPerPixel = ZERO;
+		// Note: Palette is of 16 bytes, so palette index is 0, when tile data is 0 and paletee index is 1, when tile data is 1
+		INC32 paletteIndex = ZERO;
+
+		// pixel
+		if (pGBA_display->currentBgPixelInTextMode[bgID] < (TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)))
+		{
+			pixelColorNumberPerPixel = ((pixelColorNumberFor4PixelsFromTileData >> (state * FOUR)) & 0x000F);
+			paletteIndex = pixelColorNumberPerPixel << ONE;
+			if (pGBA_display->bgCache[bgID].subTileScrollingPixelDrops <= ZERO)
+			{
+				if (paletteIndex != ZERO)
+				{
+					// Refer mode 2 bg processing to see how we determine sizeOfEachPaletteInBytes
+					const DIM16 sizeOfEachPaletteInBytesInShifts = FIVE; // 1 << 5 is same as *32
+					paletteIndex += (pGBA_display->bgCache[bgID].tileDescriptor.pb << sizeOfEachPaletteInBytesInShifts);
+				}
+				pGBA_display->gfx_bg[bgID][pGBA_display->currentBgPixelInTextMode[bgID]++][Y] = paletteIndex;
+				++pGBA_display->bgCache[bgID].subTileIndexer;
+			}
+		}
+
+		if (pGBA_display->bgCache[bgID].subTileScrollingPixelDrops > ZERO)
+		{
+			--pGBA_display->bgCache[bgID].subTileScrollingPixelDrops;
+		}
+	}
+	else
+	{
+		// 8bpp mode
+
+		GBA_HALFWORD pixelColorNumberFor2PixelsFromTileData = pixelData;;
+
+		if (pGBA_display->bgCache[bgID].tileDescriptor.hflip == YES)
+		{
+			// We only take care of flipping 8 bits
+			pixelColorNumberFor2PixelsFromTileData =
+				((pixelColorNumberFor2PixelsFromTileData >> EIGHT) | (pixelColorNumberFor2PixelsFromTileData << EIGHT));
+		}
+
+		BYTE pixelColorNumberPerPixel = ZERO;
+		// Note: Palette is of 16 bytes, so palette index is 0, when tile data is 0 and paletee index is 1, when tile data is 1
+		INC32 paletteIndex = ZERO;
+
+		// pixel
+		if (pGBA_display->currentBgPixelInTextMode[bgID] < (TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)))
+		{
+			pixelColorNumberPerPixel = ((pixelColorNumberFor2PixelsFromTileData >> (state * EIGHT)) & 0x00FF);
+			paletteIndex = pixelColorNumberPerPixel << ONE;
+			if (pGBA_display->bgCache[bgID].subTileScrollingPixelDrops <= ZERO)
+			{
+				pGBA_display->gfx_bg[bgID][pGBA_display->currentBgPixelInTextMode[bgID]++][Y] = paletteIndex;
+				++pGBA_display->bgCache[bgID].subTileIndexer;
+			}
+		}
+
+		if (pGBA_display->bgCache[bgID].subTileScrollingPixelDrops > ZERO)
+		{
+			--pGBA_display->bgCache[bgID].subTileScrollingPixelDrops;
+		}
+	}
+
+}
+
+MASQ_INLINE void GBA_t::MODE0_M_BG_CYCLE(ID bgID)
+{
+
+	uint32_t xPixelCoordinate = pGBA_display->currentBgPixelInTextMode[bgID];
+	uint32_t yPixelCoordinate = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
+
+	// Early bounds check on X and Y
+	if ((xPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (yPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
+	{
+		RETURN;
+	}
+
+	pGBA_display->bgCache[bgID].xPixelCoordinate = xPixelCoordinate;
+	pGBA_display->bgCache[bgID].yPixelCoordinate = yPixelCoordinate;
+
+	GBA_WORD bgTileMapBaseAddr = ZERO;
+	mBGnCNTHalfWord_t BGxCNT = { ZERO };
+
+	// Cache BG configuration values for fast access
+	auto getBGConfig = [&](ID id) -> std::tuple<int, FLAG, uint16_t, uint16_t, uint16_t>
+		{
+			switch (id)
+			{
+			case BG0:
+				RETURN{
+					static_cast<int>(pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTFields.SCREEN_BASE_BLOCK * 0x0800),
+					pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET,
+					static_cast<uint16_t>(pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTHalfWord),
+					static_cast<uint16_t>(pGBA_peripherals->mBG0HOFSHalfWord.mBGniOFSFields.OFFSET),
+					static_cast<uint16_t>(pGBA_peripherals->mBG0VOFSHalfWord.mBGniOFSFields.OFFSET)
+				};
+			case BG1:
+				RETURN{
+					static_cast<int>(pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTFields.SCREEN_BASE_BLOCK * 0x0800),
+					pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET,
+					static_cast<uint16_t>(pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTHalfWord),
+					static_cast<uint16_t>(pGBA_peripherals->mBG1HOFSHalfWord.mBGniOFSFields.OFFSET),
+					static_cast<uint16_t>(pGBA_peripherals->mBG1VOFSHalfWord.mBGniOFSFields.OFFSET)
+				};
+			case BG2:
+				RETURN{
+					static_cast<int>(pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTFields.SCREEN_BASE_BLOCK * 0x0800),
+					pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET,
+					static_cast<uint16_t>(pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTHalfWord),
+					static_cast<uint16_t>(pGBA_peripherals->mBG2HOFSHalfWord.mBGniOFSFields.OFFSET),
+					static_cast<uint16_t>(pGBA_peripherals->mBG2VOFSHalfWord.mBGniOFSFields.OFFSET)
+				};
+			case BG3:
+				RETURN{
+					static_cast<int>(pGBA_peripherals->mBG3CNTHalfWord.mBGnCNTFields.SCREEN_BASE_BLOCK * 0x0800),
+					pGBA_peripherals->mBG3CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET,
+					static_cast<uint16_t>(pGBA_peripherals->mBG3CNTHalfWord.mBGnCNTHalfWord),
+					static_cast<uint16_t>(pGBA_peripherals->mBG3HOFSHalfWord.mBGniOFSFields.OFFSET),
+					static_cast<uint16_t>(pGBA_peripherals->mBG3VOFSHalfWord.mBGniOFSFields.OFFSET)
+				};
+			default:
+				// Safe fallback to avoid undefined behavior
+				RETURN{ 0, false, 0, 0, 0 };
+			}
+		};
+
+	auto [bgTileMapBaseAddr_, is8bppMode, BGxCNT_, hofs_, vofs_] = getBGConfig(bgID);
+	bgTileMapBaseAddr = bgTileMapBaseAddr_;
+	pGBA_display->bgCache[bgID].is8bppMode = is8bppMode;
+	BGxCNT.mBGnCNTHalfWord = BGxCNT_;
+	pGBA_display->bgCache[bgID].hofs = hofs_;
+	pGBA_display->bgCache[bgID].vofs = vofs_;
+
+	/*
+	* Refer http://problemkaputt.de/gbatek-lcd-i-o-bg-control.htm
+	* BGs always wraparound, so
+	* offsets = BGxHOFS and BGxHVOFS (BG offsets within static screen)
+	* Final offsets from screen (tileMap_x and tileMap_y) = (x + BGxHOFS) % 512 and (y + BGxHVOFS) % 512
+	* Offsets in tile coordinates (tile_x and tile_y) = Final offsets from screen / 8
+	* Offsets within tile coordinates (WithinTile_x and WithinTile_y) = Final offsets from screen % 8
+	*
+	* When BGxCNT->Size = 0
+	* SC0 -> 256x256
+	* When BGxCNT->Size = 1
+	* SC0 SC1 -> 512x256
+	* When BGxCNT->Size = 2
+	* SC0 -> 256x512
+	* SC1
+	* When BGxCNT->Size = 3
+	* SC0 SC1 -> 512x512
+	* SC2 SC3
+	* SC0 is defined by the normal BG Map base address (Bit 8-12 of BGxCNT),
+	* SC1 uses same address +2K, SC2 address +4K, SC3 address +6K
+	* So, for given x, y we need to figure out in which SCn it falls...
+	* Then each SCn is 256x256, so , number of tiles i.e. tilesPerRow = bitsPerRow / 8 = 32
+	* So, withinTileOffset = (tile_x + (tile_y * tilesPerRow))
+	* But, we do a 16bit read for tile map as mentioned under Mode 0 in https://nba-emu.github.io/hw-docs/ppu/background.html and http://problemkaputt.de/gbatek-lcd-vram-bg-screen-data-format-bg-map.htm unlike non text modes
+	* So, 16withinTileOffset = 2 * withinTileOffset
+	*
+	* Final Address for tile map = [VRAM_START_ADDRESS + bgTileMapBaseAddr + (SCn * 2K) + (16withinTileOffset)]
+	*/
+
+	// Cached sum of coordinates and offsets
+	DIM16 offsetSumX = xPixelCoordinate + pGBA_display->bgCache[bgID].hofs;
+	DIM16 offsetSumY = yPixelCoordinate + pGBA_display->bgCache[bgID].vofs;
+
+	ID SCn = ZERO;
+	switch (BGxCNT.mBGnCNTFields.SCREEN_SIZE)
+	{
+		// SC0
+	case ZERO: SCn = ZERO; BREAK;
+		// SC0 SC1
+	case ONE: SCn = ((offsetSumX & 511) > 255) ? ONE : ZERO; BREAK;
+		// SC0
+		// SC1
+	case TWO: SCn = ((offsetSumY & 511) > 255) ? ONE : ZERO; BREAK;
+		// SC0 SC1
+		// SC2 SC3
+	case THREE:
+		SCn = ((offsetSumX & 511) > 255) ? ONE : ZERO;
+		SCn += ((offsetSumY & 511) > 255) ? TWO : ZERO;
+		BREAK;
+	default:
+		FATAL("Unknown screen size in mode 0");
+		RETURN;
+	}
+
+	// Within SCn
+	DIM16 tileMapX = offsetSumX & 255; // % 256 because because if more than 255, it is SC1 or SC3, but we are already accounting for SCn, so we just get tileX within SCn
+	DIM16 tileMapY = offsetSumY & 255; // % 256 because because if more than 255, it is SC2 or SC3, but we are already accounting for SCn, so we just get tileX within SCn
+
+	pGBA_display->bgCache[bgID].tileMapX = tileMapX;
+	pGBA_display->bgCache[bgID].tileMapY = tileMapY;
+
+	const DIM16 tilesPerRowInShifts = FIVE; // 1 << 5 is same as * 32; Each SCn is of 256*256, so 256 / 8 = 32
+	DIM16 tileMapOffset = (tileMapX >> THREE) + ((tileMapY >> THREE) << tilesPerRowInShifts);
+
+	// Since we have 16 bits per tile instead of 8
+	// Refer http://problemkaputt.de/gbatek-lcd-vram-bg-screen-data-format-bg-map.htm
+	tileMapOffset <<= ONE;
+
+	GBA_WORD addressInTileMapArea = VIDEO_RAM_START_ADDRESS + bgTileMapBaseAddr + (SCn * 0x800) + tileMapOffset;
+
+	// NOTE: Needed for tonc's cbb_demo
+	// Refer: https://www.coranac.com/tonc/text/regbg.htm
+	if (addressInTileMapArea < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
+	{
+		pGBA_display->bgCache[bgID].tileDescriptor.raw = readRawMemory<GBA_HALFWORD>(addressInTileMapArea, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+	}
+	else
+	{
+		pGBA_display->bgCache[bgID].tileDescriptor.raw = RESET;
+		PPUTODO("As per NBA, this is set to some latched value");
+	}
+
+	pGBA_display->bgCache[bgID].subTileIndexer = ZERO;
+
+	if ((tileMapX & SEVEN) != ZERO)
+	{
+		PPUEVENT("Sub-tile scrolling in mode 0 bg%d!", bgID);
+
+		// This indicates sub-tile scrolling as mentioned in https://nba-emu.github.io/hw-docs/ppu/background.html
+		// Assume that tileMapX % 8 is 5, this indicates that only 8-5=3 pixels from the end of previous tile needs to be rendered
+		// As mentioned above, only few pixels of the 1st and last tile would be visible in this case...
+		// but still, ppu fetches all 8 pixels
+		// So, during the previous MODE0_M_BG_CYCLE, we would have fetched the complete tile descriptor for the whole tile (all 8 pixels)
+		// Using the example that we were just discussing, 3 pixels from the end needs to be rendered in X=0, X=1 and X=2
+		// i.e. first 5 pixels eventhough fetched from VRAM needs to be dropped
+
+		if (xPixelCoordinate == ZERO)
+		{
+			pGBA_display->bgCache[bgID].subTileScrollingPixelDrops = tileMapX & SEVEN;
+		}
+		else
+		{
+			pGBA_display->bgCache[bgID].subTileScrollingPixelDrops = RESET;
+		}
+	}
+	else
+	{
+		pGBA_display->bgCache[bgID].subTileScrollingPixelDrops = RESET;
+	}
+
+}
+
+MASQ_INLINE void GBA_t::MODE0_T_BG_CYCLE(ID bgID)
+{
+
+	auto X = pGBA_display->currentBgPixelInTextMode[bgID];
+	auto Y = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
+
+	// Early bounds check on X and Y
+	if ((X >= TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (Y >= TO_UINT16(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
+	{
+		RETURN;
+	}
+
+	// Bounds check for bgID
+	if (bgID < BG0 || bgID > BG3)
+	{
+		FATAL("Unknown BG in mode 0");
+		RETURN;
+	}
+
+	if (ENABLED)
+	{
+		// Cache BG configuration values for fast access
+		auto getBGConfig = [&](ID id) -> std::tuple<FLAG, uint16_t, uint16_t>
+			{
+				switch (id)
+				{
+				case BG0:
+					RETURN{
+						pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET,
+						static_cast<uint16_t>(pGBA_peripherals->mBG0HOFSHalfWord.mBGniOFSFields.OFFSET),
+						static_cast<uint16_t>(pGBA_peripherals->mBG0VOFSHalfWord.mBGniOFSFields.OFFSET)
+					};
+				case BG1:
+					RETURN{
+						pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET,
+						static_cast<uint16_t>(pGBA_peripherals->mBG1HOFSHalfWord.mBGniOFSFields.OFFSET),
+						static_cast<uint16_t>(pGBA_peripherals->mBG1VOFSHalfWord.mBGniOFSFields.OFFSET)
+					};
+				case BG2:
+					RETURN{
+						pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET,
+						static_cast<uint16_t>(pGBA_peripherals->mBG2HOFSHalfWord.mBGniOFSFields.OFFSET),
+						static_cast<uint16_t>(pGBA_peripherals->mBG2VOFSHalfWord.mBGniOFSFields.OFFSET)
+					};
+				case BG3:
+					RETURN{
+						pGBA_peripherals->mBG3CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET,
+						static_cast<uint16_t>(pGBA_peripherals->mBG3HOFSHalfWord.mBGniOFSFields.OFFSET),
+						static_cast<uint16_t>(pGBA_peripherals->mBG3VOFSHalfWord.mBGniOFSFields.OFFSET)
+					};
+				default:
+					RETURN{ false, 0, 0 };
+				}
+			};
+
+		auto [is8bppMode, hofs_, vofs_] = getBGConfig(bgID);
+		pGBA_display->bgCache[bgID].is8bppMode = is8bppMode;
+		pGBA_display->bgCache[bgID].hofs = hofs_;
+		pGBA_display->bgCache[bgID].vofs = vofs_;
+	}
+
+	GBA_WORD bgTileDataBaseAddr =
+		(bgID == BG0)
+		? (pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTFields.CHARACTER_BASE_BLOCK * 0x4000)
+		: (bgID == BG1)
+		? (pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTFields.CHARACTER_BASE_BLOCK * 0x4000)
+		: (bgID == BG2)
+		? (pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTFields.CHARACTER_BASE_BLOCK * 0x4000)
+		: (pGBA_peripherals->mBG3CNTHalfWord.mBGnCNTFields.CHARACTER_BASE_BLOCK * 0x4000);
+
+	auto xTileCoordinate = ((X + pGBA_display->bgCache[bgID].hofs) & 255) & SEVEN; // % 8
+	auto yTileCoordinate = ((Y + pGBA_display->bgCache[bgID].vofs) & 255) & SEVEN; // % 8
+
+	xTileCoordinate = pGBA_display->bgCache[bgID].tileDescriptor.hflip == YES
+		? flipLUT[xTileCoordinate]
+		: xTileCoordinate;
+
+	yTileCoordinate = pGBA_display->bgCache[bgID].tileDescriptor.vflip == YES
+		? flipLUT[yTileCoordinate]
+		: yTileCoordinate;
+
+	GBA_WORD withinTileDataOffset = xTileCoordinate + (yTileCoordinate << THREE);
+	// Refer http://problemkaputt.de/gbatek-lcd-vram-character-data.htm
+	DIM16 sizeOfEachTileData = (pGBA_display->bgCache[bgID].is8bppMode == NO) ? 0x20 : 0x40;
+
+	if (pGBA_display->bgCache[bgID].is8bppMode == NO)
+	{
+		// 4bpp mode
+		GBA_WORD addressInTileDataArea =
+			VIDEO_RAM_START_ADDRESS
+			+ bgTileDataBaseAddr
+			+ (sizeOfEachTileData * pGBA_display->bgCache[bgID].tileDescriptor.fetchedTileID)
+			+ (withinTileDataOffset >> ONE); // Divide by 2 because in 4bpp mode, A single halfword gives data for 4 pixels
+
+		// NOTE: Needed for tonc's cbb_demo
+		// Refer: https://www.coranac.com/tonc/text/regbg.htm
+		if (addressInTileDataArea < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
+		{
+			pGBA_display->bgCache[bgID].pixelColorNumberFor4PixelsFromTileData = readRawMemory<GBA_HALFWORD>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+		}
+		else
+		{
+			pGBA_display->bgCache[bgID].pixelColorNumberFor4PixelsFromTileData = RESET;
+			PPUTODO("As per NBA, this is set to some latched value");
+		}
+
+		RENDER_MODE0_MODE1_PIXEL_X(bgID, pGBA_display->bgCache[bgID].pixelColorNumberFor4PixelsFromTileData, ZERO);
+		RENDER_MODE0_MODE1_PIXEL_X(bgID, pGBA_display->bgCache[bgID].pixelColorNumberFor4PixelsFromTileData, ONE);
+		RENDER_MODE0_MODE1_PIXEL_X(bgID, pGBA_display->bgCache[bgID].pixelColorNumberFor4PixelsFromTileData, TWO);
+		RENDER_MODE0_MODE1_PIXEL_X(bgID, pGBA_display->bgCache[bgID].pixelColorNumberFor4PixelsFromTileData, THREE);
+	}
+	else
+	{
+		// 8bpp mode
+		GBA_WORD addressInTileDataArea =
+			VIDEO_RAM_START_ADDRESS
+			+ bgTileDataBaseAddr
+			+ (sizeOfEachTileData * pGBA_display->bgCache[bgID].tileDescriptor.fetchedTileID)
+			+ withinTileDataOffset;
+
+		// NOTE: Needed for tonc's cbb_demo
+		// Refer: https://www.coranac.com/tonc/text/regbg.htm
+		if (addressInTileDataArea < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
+		{
+			pGBA_display->bgCache[bgID].pixelColorNumberFor2PixelsFromTileData = readRawMemory<GBA_HALFWORD>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+		}
+		else
+		{
+			pGBA_display->bgCache[bgID].pixelColorNumberFor2PixelsFromTileData = RESET;
+			PPUTODO("As per NBA, this is set to some latched value");
+		}
+
+		RENDER_MODE0_MODE1_PIXEL_X(bgID, pGBA_display->bgCache[bgID].pixelColorNumberFor2PixelsFromTileData, ZERO);
+		RENDER_MODE0_MODE1_PIXEL_X(bgID, pGBA_display->bgCache[bgID].pixelColorNumberFor2PixelsFromTileData, ONE);
+	}
+
+}
+
+MASQ_INLINE void GBA_t::MODE1_M_TEXT_BG_CYCLE(ID bgID)
+{
+
+	uint32_t xPixelCoordinate = pGBA_display->currentBgPixelInTextMode[bgID];
+	uint32_t yPixelCoordinate = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
+
+	// Early bounds check on X and Y
+	if ((xPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (yPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
+	{
+		RETURN;
+	}
+
+	// Bounds check for bgID
+	if (bgID < BG0 || bgID > BG1)
+	{
+		FATAL("Unknown BG in mode 1");
+		RETURN;
+	}
+
+	pGBA_display->bgCache[bgID].xPixelCoordinate = xPixelCoordinate;
+	pGBA_display->bgCache[bgID].yPixelCoordinate = yPixelCoordinate;
+
+	GBA_WORD bgTileMapBaseAddr = ZERO;
+	mBGnCNTHalfWord_t BGxCNT = { ZERO };
+
+	if (bgID == BG0)
+	{
+		bgTileMapBaseAddr = (pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTFields.SCREEN_BASE_BLOCK * 0x0800);
+		pGBA_display->bgCache[BG0].is8bppMode = pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET;
+		BGxCNT.mBGnCNTHalfWord = pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTHalfWord;
+		pGBA_display->bgCache[BG0].hofs = pGBA_peripherals->mBG0HOFSHalfWord.mBGniOFSFields.OFFSET;
+		pGBA_display->bgCache[BG0].vofs = pGBA_peripherals->mBG0VOFSHalfWord.mBGniOFSFields.OFFSET;
+	}
+	else if (bgID == BG1)
+	{
+		bgTileMapBaseAddr = (pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTFields.SCREEN_BASE_BLOCK * 0x0800);
+		pGBA_display->bgCache[BG1].is8bppMode = pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET;
+		BGxCNT.mBGnCNTHalfWord = pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTHalfWord;
+		pGBA_display->bgCache[BG1].hofs = pGBA_peripherals->mBG1HOFSHalfWord.mBGniOFSFields.OFFSET;
+		pGBA_display->bgCache[BG1].vofs = pGBA_peripherals->mBG1VOFSHalfWord.mBGniOFSFields.OFFSET;
+	}
+
+	/*
+	* Refer http://problemkaputt.de/gbatek-lcd-i-o-bg-control.htm
+	* BGs always wraparound, so
+	* offsets = BGxHOFS and BGxHVOFS (BG offsets within static screen)
+	* Final offsets from screen (tileMap_x and tileMap_y) = (x + BGxHOFS) % 512 and (y + BGxHVOFS) % 512
+	* Offsets in tile coordinates (tile_x and tile_y) = Final offsets from screen / 8
+	* Offsets within tile coordinates (WithinTile_x and WithinTile_y) = Final offsets from screen % 8
+	*
+	* When BGxCNT->Size = 0
+	* SC0 -> 256x256
+	* When BGxCNT->Size = 1
+	* SC0 SC1 -> 512x256
+	* When BGxCNT->Size = 2
+	* SC0 -> 256x512
+	* SC1
+	* When BGxCNT->Size = 3
+	* SC0 SC1 -> 512x512
+	* SC2 SC3
+	* SC0 is defined by the normal BG Map base address (Bit 8-12 of BGxCNT),
+	* SC1 uses same address +2K, SC2 address +4K, SC3 address +6K
+	* So, for given x, y we need to figure out in which SCn it falls...
+	* Then each SCn is 256x256, so , number of tiles i.e. tilesPerRow = bitsPerRow / 8 = 32
+	* So, withinTileOffset = (tile_x + (tile_y * tilesPerRow))
+	* But, we do a 16bit read for tile map as mentioned under Mode 0 in https://nba-emu.github.io/hw-docs/ppu/background.html and http://problemkaputt.de/gbatek-lcd-vram-bg-screen-data-format-bg-map.htm unlike non text modes
+	* So, 16withinTileOffset = 2 * withinTileOffset
+	*
+	* Final Address for tile map = [VRAM_START_ADDRESS + bgTileMapBaseAddr + (SCn * 2K) + (16withinTileOffset)]
+	*
+	*/
+
+	// Cached sum of coordinates and offsets
+	DIM16 offsetSumX = xPixelCoordinate + pGBA_display->bgCache[bgID].hofs;
+	DIM16 offsetSumY = yPixelCoordinate + pGBA_display->bgCache[bgID].vofs;
+
+	ID SCn = ZERO;
+	switch (BGxCNT.mBGnCNTFields.SCREEN_SIZE)
+	{
+		// SC0
+	case ZERO: SCn = ZERO; BREAK;
+		// SC0 SC1
+	case ONE: SCn = ((offsetSumX & 511) > 255) ? ONE : ZERO; BREAK;
+		// SC0
+		// SC1
+	case TWO: SCn = ((offsetSumY & 511) > 255) ? ONE : ZERO; BREAK;
+		// SC0 SC1
+		// SC2 SC3
+	case THREE:
+		SCn = ((offsetSumX & 511) > 255) ? ONE : ZERO;
+		SCn += ((offsetSumY & 511) > 255) ? TWO : ZERO;
+		BREAK;
+	default:
+		FATAL("Unknown screen size in mode 0");
+		RETURN;
+	}
+
+	// Within SCn
+	DIM16 tileMapX = offsetSumX & 255; // % 256 because because if more than 255, it is SC1 or SC3, but we are already accounting for SCn, so we just get tileX within SCn
+	DIM16 tileMapY = offsetSumY & 255; // % 256 because because if more than 255, it is SC2 or SC3, but we are already accounting for SCn, so we just get tileX within SCn
+
+	pGBA_display->bgCache[bgID].tileMapX = tileMapX;
+	pGBA_display->bgCache[bgID].tileMapY = tileMapY;
+
+	const DIM16 tilesPerRowInShifts = FIVE; // 1 << 5 is same as * 32; Each SCn is of 256*256, so 256 / 8 = 32
+	DIM16 tileMapOffset = (tileMapX >> THREE) + ((tileMapY >> THREE) << tilesPerRowInShifts);
+
+	// Since we have 16 bits per tile instead of 8
+	// Refer http://problemkaputt.de/gbatek-lcd-vram-bg-screen-data-format-bg-map.htm
+	tileMapOffset <<= ONE;
+
+	GBA_WORD addressInTileMapArea = VIDEO_RAM_START_ADDRESS + bgTileMapBaseAddr + (SCn * 0x800) + tileMapOffset;
+
+	// NOTE: Needed for tonc's cbb_demo
+	// Refer: https://www.coranac.com/tonc/text/regbg.htm
+	if (addressInTileMapArea < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
+	{
+		pGBA_display->bgCache[bgID].tileDescriptor.raw = readRawMemory<GBA_HALFWORD>(addressInTileMapArea, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+	}
+	else
+	{
+		pGBA_display->bgCache[bgID].tileDescriptor.raw = RESET;
+		PPUTODO("As per NBA, this is set to some latched value");
+	}
+
+	pGBA_display->bgCache[bgID].subTileIndexer = ZERO;
+
+	if ((tileMapX & SEVEN) != ZERO)
+	{
+		PPUEVENT("Sub-tile scrolling in mode 1 bg%d!", bgID);
+
+		// This indicates sub-tile scrolling as mentioned in https://nba-emu.github.io/hw-docs/ppu/background.html
+		// Assume that tileMapX % 8 is 5, this indicates that only 8-5=3 pixels from the end of previous tile needs to be rendered
+		// As mentioned above, only few pixels of the 1st and last tile would be visible in this case...
+		// but still, ppu fetches all 8 pixels
+		// So, during the previous MODE0_M_BG_CYCLE, we would have fetched the complete tile descriptor for the whole tile (all 8 pixels)
+		// Using the example that we were just discussing, 3 pixels from the end needs to be rendered in X=0, X=1 and X=2
+		// i.e. first 5 pixels eventhough fetched from VRAM needs to be dropped
+
+		if (xPixelCoordinate == ZERO)
+		{
+			pGBA_display->bgCache[bgID].subTileScrollingPixelDrops = tileMapX & SEVEN;
+		}
+		else
+		{
+			pGBA_display->bgCache[bgID].subTileScrollingPixelDrops = RESET;
+		}
+	}
+	else
+	{
+		pGBA_display->bgCache[bgID].subTileScrollingPixelDrops = RESET;
+	}
+
+}
+
+MASQ_INLINE void GBA_t::MODE1_T_TEXT_BG_CYCLE(ID bgID)
+{
+
+	auto X = pGBA_display->currentBgPixelInTextMode[bgID];
+	auto Y = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
+
+	// Early bounds check on X and Y
+	if ((X >= TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (Y >= TO_UINT16(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
+	{
+		RETURN;
+	}
+
+	// Bounds check for bgID
+	if (bgID < BG0 || bgID > BG1)
+	{
+		FATAL("Unknown BG in mode 1");
+		RETURN;
+	}
+
+	if (ENABLED)
+	{
+		// Cache BG configuration values for fast access
+		if (bgID == BG0)
+		{
+			pGBA_display->bgCache[BG0].is8bppMode = pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET;
+			pGBA_display->bgCache[BG0].hofs = pGBA_peripherals->mBG0HOFSHalfWord.mBGniOFSFields.OFFSET;
+			pGBA_display->bgCache[BG0].vofs = pGBA_peripherals->mBG0VOFSHalfWord.mBGniOFSFields.OFFSET;
+		}
+		else if (bgID == BG1)
+		{
+			pGBA_display->bgCache[BG1].is8bppMode = pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET;
+			pGBA_display->bgCache[BG1].hofs = pGBA_peripherals->mBG1HOFSHalfWord.mBGniOFSFields.OFFSET;
+			pGBA_display->bgCache[BG1].vofs = pGBA_peripherals->mBG1VOFSHalfWord.mBGniOFSFields.OFFSET;
+		}
+	}
+
+	GBA_WORD bgTileDataBaseAddr = (bgID == BG0)
+		? (pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTFields.CHARACTER_BASE_BLOCK * 0x4000)
+		: (pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTFields.CHARACTER_BASE_BLOCK * 0x4000);
+
+	auto xTileCoordinate = ((X + pGBA_display->bgCache[bgID].hofs) & 255) & SEVEN; // % 8
+	auto yTileCoordinate = ((Y + pGBA_display->bgCache[bgID].vofs) & 255) & SEVEN; // % 8
+
+	xTileCoordinate = pGBA_display->bgCache[bgID].tileDescriptor.hflip == YES
+		? flipLUT[xTileCoordinate]
+		: xTileCoordinate;
+
+	yTileCoordinate = pGBA_display->bgCache[bgID].tileDescriptor.vflip == YES
+		? flipLUT[yTileCoordinate]
+		: yTileCoordinate;
+
+	GBA_WORD withinTileDataOffset = xTileCoordinate + (yTileCoordinate << THREE);
+	// Refer http://problemkaputt.de/gbatek-lcd-vram-character-data.htm
+	DIM16 sizeOfEachTileData = (pGBA_display->bgCache[bgID].is8bppMode == NO) ? 0x20 : 0x40;
+
+	if (pGBA_display->bgCache[bgID].is8bppMode == NO)
+	{
+		// 4bpp mode
+		GBA_WORD addressInTileDataArea =
+			VIDEO_RAM_START_ADDRESS
+			+ bgTileDataBaseAddr
+			+ (sizeOfEachTileData * pGBA_display->bgCache[bgID].tileDescriptor.fetchedTileID)
+			+ (withinTileDataOffset >> ONE); // Divide by 2 because in 4bpp mode, A single halfword gives data for 4 pixels
+
+		// NOTE: Needed for tonc's cbb_demo
+		// Refer: https://www.coranac.com/tonc/text/regbg.htm
+		if (addressInTileDataArea < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
+		{
+			pGBA_display->bgCache[bgID].pixelColorNumberFor4PixelsFromTileData = readRawMemory<GBA_HALFWORD>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+		}
+		else
+		{
+			pGBA_display->bgCache[bgID].pixelColorNumberFor4PixelsFromTileData = RESET;
+			PPUTODO("As per NBA, this is set to some latched value");
+		}
+
+		RENDER_MODE0_MODE1_PIXEL_X(bgID, pGBA_display->bgCache[bgID].pixelColorNumberFor4PixelsFromTileData, ZERO);
+		RENDER_MODE0_MODE1_PIXEL_X(bgID, pGBA_display->bgCache[bgID].pixelColorNumberFor4PixelsFromTileData, ONE);
+		RENDER_MODE0_MODE1_PIXEL_X(bgID, pGBA_display->bgCache[bgID].pixelColorNumberFor4PixelsFromTileData, TWO);
+		RENDER_MODE0_MODE1_PIXEL_X(bgID, pGBA_display->bgCache[bgID].pixelColorNumberFor4PixelsFromTileData, THREE);
+	}
+	else
+	{
+		// 8bpp mode
+		GBA_WORD addressInTileDataArea =
+			VIDEO_RAM_START_ADDRESS
+			+ bgTileDataBaseAddr
+			+ (sizeOfEachTileData * pGBA_display->bgCache[bgID].tileDescriptor.fetchedTileID)
+			+ withinTileDataOffset;
+
+		// NOTE: Needed for tonc's cbb_demo
+		// Refer: https://www.coranac.com/tonc/text/regbg.htm
+		if (addressInTileDataArea < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
+		{
+			pGBA_display->bgCache[bgID].pixelColorNumberFor2PixelsFromTileData = readRawMemory<GBA_HALFWORD>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+		}
+		else
+		{
+			pGBA_display->bgCache[bgID].pixelColorNumberFor2PixelsFromTileData = RESET;
+			PPUTODO("As per NBA, this is set to some latched value");
+		}
+
+		RENDER_MODE0_MODE1_PIXEL_X(bgID, pGBA_display->bgCache[bgID].pixelColorNumberFor2PixelsFromTileData, ZERO);
+		RENDER_MODE0_MODE1_PIXEL_X(bgID, pGBA_display->bgCache[bgID].pixelColorNumberFor2PixelsFromTileData, ONE);
+	}
+
+}
+#endif
+
+MASQ_INLINE void GBA_t::MODE1_M_AFFINE_BG_CYCLE()
+{
+
+	uint32_t xPixelCoordinate = pGBA_display->currentBgPixel;
+	uint32_t yPixelCoordinate = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
+
+	// Early bounds check on X and Y
+	if ((xPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (yPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
+	{
+		RETURN;
+	}
+
+	GBA_WORD bgTileMapBaseAddr = (pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTFields.SCREEN_BASE_BLOCK * 0x0800);
+	DIM16 bgWidth = (0x80 << pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTFields.SCREEN_SIZE);
+	DIM16 bgHeight = (0x80 << pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTFields.SCREEN_SIZE);
+	FLAG isWrapAroundEnabled = (pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTFields.BG2_BG3_DISP_AREA_OVERFLOW_OR_NDS_BG0_BG1_EXT_PALETTE_SLOT == ONE);
+
+	uint32_t xPixelCoordinateAffine = (GBA_WORD)(pGBA_display->bgCache[BG2].affine.affineX >> EIGHT);	// To get the integer part
+	uint32_t yPixelCoordinateAffine = (GBA_WORD)(pGBA_display->bgCache[BG2].affine.affineY >> EIGHT);	// To get the integer part
+
+	// For points (2) and (4) of PPU:03 AND point (6) of PPU:03
+	// NOTE: In other modes, adding of PA and PC is done at the end of the pixel processing, but as per NBA, in mode 2, this is done at this point!
+	pGBA_display->bgCache[BG2].affine.affineX += (int16_t)(pGBA_peripherals->mBG2PAHalfWord.mBGnPxHalfWord_Signed);
+	pGBA_display->bgCache[BG2].affine.affineY += (int16_t)(pGBA_peripherals->mBG2PCHalfWord.mBGnPxHalfWord_Signed);
+
+	// Used for repetition of particular block of tiles 
+	if (isWrapAroundEnabled == YES)
+	{
+		xPixelCoordinateAffine %= bgWidth;
+		yPixelCoordinateAffine %= bgHeight;
+	}
+
+	pGBA_display->bgCache[BG2].xPixelCoordinateAffine = xPixelCoordinateAffine;
+	pGBA_display->bgCache[BG2].yPixelCoordinateAffine = yPixelCoordinateAffine;
+
+	uint32_t xTileCoordinateAffine = xPixelCoordinateAffine >> THREE;
+	uint32_t yTileCoordinateAffine = yPixelCoordinateAffine >> THREE;
+
+	auto bitsPerRow = bgWidth;
+	auto tilesPerRow = bitsPerRow >> THREE;
+
+	GBA_WORD addressInTileMapArea = VIDEO_RAM_START_ADDRESS + bgTileMapBaseAddr + xTileCoordinateAffine + (yTileCoordinateAffine * tilesPerRow);
+
+	// NOTE: Needed for tonc's cbb_demo
+	// Refer: https://www.coranac.com/tonc/text/regbg.htm
+	if (addressInTileMapArea < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
+	{
+		pGBA_display->bgCache[BG2].fetchedTileID = readRawMemory<BYTE>(addressInTileMapArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);
+	}
+	else
+	{
+		pGBA_display->bgCache[BG2].fetchedTileID = readRawMemory<BYTE>(addressInTileMapArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);
+		PPUTODO("As per NBA, this is set to some latched value");
+	}
+
+}
+
+MASQ_INLINE void GBA_t::MODE1_T_AFFINE_BG_CYCLE()
+{
+
+	uint32_t xPixelCoordinate = pGBA_display->currentBgPixel;
+	uint32_t yPixelCoordinate = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
+
+	// Early bounds check on X and Y
+	if ((xPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (yPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
+	{
+		RETURN;
+	}
+
+	GBA_WORD bgTileDataBaseAddr = ZERO;
+	DIM16 bgWidth = ZERO;
+	DIM16 bgHeight = ZERO;
+	FLAG isWrapAroundEnabled = NO;
+
+	bgTileDataBaseAddr = (pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTFields.CHARACTER_BASE_BLOCK * 0x4000);
+	bgWidth = (0x80 << pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTFields.SCREEN_SIZE);
+	bgHeight = (0x80 << pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTFields.SCREEN_SIZE);
+
+	uint32_t xPixelCoordinateAffine = pGBA_display->bgCache[BG2].xPixelCoordinateAffine;
+	uint32_t yPixelCoordinateAffine = pGBA_display->bgCache[BG2].yPixelCoordinateAffine;
+
+	// As per http://problemkaputt.de/gbatek-lcd-vram-bg-screen-data-format-bg-map.htm
+	// For Rotation/Scaling BG Screen -> In this mode, only 256 tiles can be used. There are no x/y-flip attributes, the color depth is always 256 colors/1 palette.
+	// And as per http://problemkaputt.de/gbatek-lcd-vram-character-data.htm
+	// For 8bit depth (256 colors, 1 palette) -> Each tile occupies 64 bytes of memory, the first 8 bytes for the topmost row of the tile, and so on. Each byte selects the palette entry for each dot.
+
+	uint32_t sizeOfEachTileData = 0x40;
+
+	// As mentioned above, within 64 byte tile data, first 8 byte represents the colors for the 8 pixels within the top most row...and so on
+	// so to find the offset with the 64 byte data...
+	// withinTileOffset = 0 -> color for xTileCoordinate = 0, yTileCoordinate = 0
+	// withinTileOffset = 1 -> color for xTileCoordinate = 1, yTileCoordinate = 0 
+	//		:						 
+	// withinTileOffset = 7 -> color for xTileCoordinate = 7, yTileCoordinate = 0 
+	// withinTileOffset = 8 -> color for xTileCoordinate = 0, yTileCoordinate = 1 
+
+	auto xTileCoordinateAffine = xPixelCoordinateAffine & SEVEN;
+	auto yTileCoordinateAffine = yPixelCoordinateAffine & SEVEN;
+
+	GBA_WORD withinTileDataOffsetAffine = xTileCoordinateAffine + (yTileCoordinateAffine << THREE);
+
+	GBA_WORD addressInTileDataArea = VIDEO_RAM_START_ADDRESS + bgTileDataBaseAddr + (sizeOfEachTileData * pGBA_display->bgCache[BG2].fetchedTileID) + withinTileDataOffsetAffine;
+	BYTE pixelColorNumberFromTileData = RESET;
+
+	// NOTE: Needed for tonc's cbb_demo
+	// Refer: https://www.coranac.com/tonc/text/regbg.htm
+	if (addressInTileDataArea < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
+	{
+		pixelColorNumberFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);
+	}
+	else
+	{
+		PPUTODO("As per NBA, pixelColorNumberFromTileData is set to some latched value");
+	}
+
+	ID paletteIndex = pixelColorNumberFromTileData << ONE; // Palette is 16bit data, (ex: tile id 1 should access 2nd and 3rd byte of palette ram) 
+
+	// If out of bounds, needs to be tranparent, so palette index to 0
+	if (xPixelCoordinateAffine >= bgWidth || yPixelCoordinateAffine >= bgHeight)
+	{
+		// Condition will be true only if wrap around was disabled!
+		paletteIndex = ZERO;
+	}
+
+	// Now use the screen coordinates and fill the gfx buffer with data obtained from texture coordinates (Affine)
+	pGBA_display->gfx_bg[BG2][xPixelCoordinate][yPixelCoordinate] = paletteIndex;
+
+}
+
+MASQ_INLINE void GBA_t::MODE2_M_BG_CYCLE(ID bgID)
+{
+
+	uint32_t xPixelCoordinate = pGBA_display->currentBgPixel;
+	uint32_t yPixelCoordinate = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
+
+	// Early bounds check on X and Y
+	if ((xPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (yPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
+	{
+		RETURN;
+	}
+
+	auto& bgCntHalfWord = (bgID == BG2)
+		? pGBA_peripherals->mBG2CNTHalfWord
+		: pGBA_peripherals->mBG3CNTHalfWord;
+
+	GBA_WORD bgTileMapBaseAddr = bgCntHalfWord.mBGnCNTFields.SCREEN_BASE_BLOCK * 0x0800;
+	DIM16 bgWidth = 0x80 << bgCntHalfWord.mBGnCNTFields.SCREEN_SIZE;
+	DIM16 bgHeight = 0x80 << bgCntHalfWord.mBGnCNTFields.SCREEN_SIZE;
+	FLAG isWrapAroundEnabled = bgCntHalfWord.mBGnCNTFields.BG2_BG3_DISP_AREA_OVERFLOW_OR_NDS_BG0_BG1_EXT_PALETTE_SLOT == ONE;
+
+	uint32_t xPixelCoordinateAffine, yPixelCoordinateAffine;
+
+	// Precompute affine coordinates and update them
+	auto& bgCache = pGBA_display->bgCache[bgID];
+	auto& affineX = bgCache.affine.affineX;
+	auto& affineY = bgCache.affine.affineY;
+
+	xPixelCoordinateAffine = affineX >> EIGHT;	// To get the integer part
+	yPixelCoordinateAffine = affineY >> EIGHT;	// To get the integer part
+
+	auto affineXIncrement =
+		(bgID == BG2) ? pGBA_peripherals->mBG2PAHalfWord.mBGnPxHalfWord_Signed
+		: pGBA_peripherals->mBG3PAHalfWord.mBGnPxHalfWord_Signed;
+	auto affineYIncrement =
+		(bgID == BG2) ? pGBA_peripherals->mBG2PCHalfWord.mBGnPxHalfWord_Signed
+		: pGBA_peripherals->mBG3PCHalfWord.mBGnPxHalfWord_Signed;
+
+	// For points (2) and (4) of PPU:03 AND point (6) of PPU:03
+	// NOTE: In other modes, adding of PA and PC is done at the end of the pixel processing, but as per NBA, in mode 2, this is done at this point!
+	affineX += affineXIncrement;
+	affineY += affineYIncrement;
+
+	// Used for repetition of particular block of tiles 
+	if (isWrapAroundEnabled == YES)
+	{
+		xPixelCoordinateAffine %= bgWidth;
+		yPixelCoordinateAffine %= bgHeight;
+	}
+
+	bgCache.xPixelCoordinateAffine = xPixelCoordinateAffine;
+	bgCache.yPixelCoordinateAffine = yPixelCoordinateAffine;
+
+	uint32_t xTileCoordinateAffine = xPixelCoordinateAffine >> THREE;
+	uint32_t yTileCoordinateAffine = yPixelCoordinateAffine >> THREE;
+
+	auto bitsPerRow = bgWidth;
+	auto tilesPerRow = bitsPerRow >> THREE;
+
+	GBA_WORD addressInTileMapArea = VIDEO_RAM_START_ADDRESS + bgTileMapBaseAddr + xTileCoordinateAffine + (yTileCoordinateAffine * tilesPerRow);
+
+	// NOTE: Needed for tonc's cbb_demo
+	// Refer: https://www.coranac.com/tonc/text/regbg.htm
+	if (addressInTileMapArea < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
+	{
+		pGBA_display->bgCache[bgID].fetchedTileID = readRawMemory<BYTE>(addressInTileMapArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);;
+	}
+	else
+	{
+		pGBA_display->bgCache[bgID].fetchedTileID = RESET;
+		PPUTODO("As per NBA, this is set to some latched value");
+	}
+
+}
+
+MASQ_INLINE void GBA_t::MODE2_T_BG_CYCLE(ID bgID)
+{
+
+	uint32_t xPixelCoordinate = pGBA_display->currentBgPixel;
+	uint32_t yPixelCoordinate = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
+
+	// Early bounds check on X and Y
+	if ((xPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (yPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
+	{
+		RETURN;
+	}
+
+	// Use ternary operator for efficient branching
+	auto& bgCntHalfWord = (bgID == BG2)
+		? pGBA_peripherals->mBG2CNTHalfWord
+		: pGBA_peripherals->mBG3CNTHalfWord;
+
+	GBA_WORD bgTileDataBaseAddr = bgCntHalfWord.mBGnCNTFields.CHARACTER_BASE_BLOCK * 0x4000;
+	DIM16 bgWidth = 0x80 << bgCntHalfWord.mBGnCNTFields.SCREEN_SIZE;
+	DIM16 bgHeight = 0x80 << bgCntHalfWord.mBGnCNTFields.SCREEN_SIZE;
+
+	uint32_t xPixelCoordinateAffine = pGBA_display->bgCache[bgID].xPixelCoordinateAffine;
+	uint32_t yPixelCoordinateAffine = pGBA_display->bgCache[bgID].yPixelCoordinateAffine;
+
+	// As per http://problemkaputt.de/gbatek-lcd-vram-bg-screen-data-format-bg-map.htm
+	// For Rotation/Scaling BG Screen -> In this mode, only 256 tiles can be used. There are no x/y-flip attributes, the color depth is always 256 colors/1 palette.
+	// And as per http://problemkaputt.de/gbatek-lcd-vram-character-data.htm
+	// For 8bit depth (256 colors, 1 palette) -> Each tile occupies 64 bytes of memory, the first 8 bytes for the topmost row of the tile, and so on. Each byte selects the palette entry for each dot.
+
+	const uint32_t sizeOfEachTileData = 0x40;
+
+	// As mentioned above, within 64 byte tile data, first 8 byte represents the colors for the 8 pixels within the top most row...and so on
+	// so to find the offset with the 64 byte data...
+	// withinTileOffset = 0 -> color for xTileCoordinate = 0, yTileCoordinate = 0
+	// withinTileOffset = 1 -> color for xTileCoordinate = 1, yTileCoordinate = 0 
+	//		:						 
+	// withinTileOffset = 7 -> color for xTileCoordinate = 7, yTileCoordinate = 0 
+	// withinTileOffset = 8 -> color for xTileCoordinate = 0, yTileCoordinate = 1 
+
+	auto xTileCoordinateAffine = xPixelCoordinateAffine & SEVEN;
+	auto yTileCoordinateAffine = yPixelCoordinateAffine & SEVEN;
+
+	GBA_WORD withinTileDataOffsetAffine = xTileCoordinateAffine + (yTileCoordinateAffine << THREE);
+
+	GBA_WORD addressInTileDataArea = VIDEO_RAM_START_ADDRESS + bgTileDataBaseAddr + (sizeOfEachTileData * pGBA_display->bgCache[bgID].fetchedTileID) + withinTileDataOffsetAffine;
+
+	BYTE pixelColorNumberFromTileData = RESET;
+
+	// NOTE: Needed for tonc's cbb_demo
+	// Refer: https://www.coranac.com/tonc/text/regbg.htm
+	if (addressInTileDataArea < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
+	{
+		pixelColorNumberFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);
+	}
+	else
+	{
+		PPUTODO("As per NBA, pixelColorNumberFromTileData is set to some latched value");
+	}
+
+	ID paletteIndex = pixelColorNumberFromTileData << ONE; // Palette is 16bit data, (ex: tile id 1 should access 2nd and 3rd byte of palette ram) 
+
+	// If out of bounds, needs to be tranparent, so palette index to 0
+	if (xPixelCoordinateAffine >= bgWidth || yPixelCoordinateAffine >= bgHeight)
+	{
+		// Condition will be true only if wrap around was disabled!
+		paletteIndex = ZERO;
+	}
+
+	// Now use the screen coordinates and fill the gfx buffer with data obtained from texture coordinates (Affine)
+	pGBA_display->gfx_bg[bgID][xPixelCoordinate][yPixelCoordinate] = paletteIndex;
+
+}
+
+MASQ_INLINE void GBA_t::MODE3_B_BG_CYCLE()
+{
+
+	uint32_t xPixelCoordinate = pGBA_display->currentBgPixel;
+	uint32_t yPixelCoordinate = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
+
+	// Early bounds check on X and Y
+	if ((xPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (yPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
+	{
+		RETURN;
+	}
+
+	// Only BG2 is valid for Mode2
+
+	// Refer to http://problemkaputt.de/gbatek-lcd-vram-bitmap-bg-modes.htm
+	uint32_t xPixelCoordinateAffine = (GBA_WORD)((pGBA_display->bgCache[BG2].affine.affineX) >> EIGHT); // To get the integer part
+	uint32_t yPixelCoordinateAffine = (GBA_WORD)((pGBA_display->bgCache[BG2].affine.affineY) >> EIGHT); // To get the integer part
+
+	if (xPixelCoordinateAffine >= getScreenWidth() || yPixelCoordinateAffine >= getScreenHeight())
+	{
+		pGBA_display->gfx_bg[BG2][xPixelCoordinate][yPixelCoordinate] = ZERO;
+	}
+	else
+	{
+		ID vramIndex = xPixelCoordinateAffine + (yPixelCoordinateAffine * getScreenWidth());
+
+		// Since we are accessing 16 bit data instead of 8 bit
+		vramIndex <<= ONE;
+
+		GBA_WORD vramAddress = VIDEO_RAM_START_ADDRESS + vramIndex;
+
+		GBA_HALFWORD colorFor1Pixel = RESET;
+		// NOTE: Needed for tonc's cbb_demo
+		// Refer: https://www.coranac.com/tonc/text/regbg.htm
+		if (vramAddress < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
+		{
+			colorFor1Pixel = readRawMemory<GBA_HALFWORD>(vramAddress, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+
+		}
+		else
+		{
+			PPUTODO("As per NBA, colorFor1Pixel is set to some latched value");
+		}
+
+		pGBA_display->gfx_bg[BG2][xPixelCoordinate][yPixelCoordinate] = (colorFor1Pixel | IS_COLOR_NOT_PALETTE);
+	}
+
+	// For points (2) and (4) of PPU:03 AND point (6) of PPU:03
+	pGBA_display->bgCache[BG2].affine.affineX += (int16_t)(pGBA_peripherals->mBG2PAHalfWord.mBGnPxHalfWord_Signed);
+	pGBA_display->bgCache[BG2].affine.affineY += (int16_t)(pGBA_peripherals->mBG2PCHalfWord.mBGnPxHalfWord_Signed);
+
+}
+
+MASQ_INLINE void GBA_t::MODE4_B_BG_CYCLE()
+{
+
+	uint32_t xPixelCoordinate = pGBA_display->currentBgPixel;
+	uint32_t yPixelCoordinate = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
+
+	// Early bounds check on X and Y
+	if ((xPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (yPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
+	{
+		RETURN;
+	}
+
+	// Only BG2 is valid for Mode2
+
+	// Refer to http://problemkaputt.de/gbatek-lcd-vram-bitmap-bg-modes.htm
+	uint32_t xPixelCoordinateAffine = (GBA_WORD)((pGBA_display->bgCache[BG2].affine.affineX) >> EIGHT); // To get the integer part
+	uint32_t yPixelCoordinateAffine = (GBA_WORD)((pGBA_display->bgCache[BG2].affine.affineY) >> EIGHT); // To get the integer part
+
+	if (xPixelCoordinateAffine >= getScreenWidth() || yPixelCoordinateAffine >= getScreenHeight())
+	{
+		pGBA_display->gfx_bg[BG2][xPixelCoordinate][yPixelCoordinate] = ZERO;
+	}
+	else
+	{
+		ID vramIndex = xPixelCoordinateAffine + (yPixelCoordinateAffine * getScreenWidth());
+
+		GBA_WORD vramAddress = VIDEO_RAM_START_ADDRESS + (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.FRAME_SELECT * 0xA000) + vramIndex;
+
+		GBA_HALFWORD pixelColorNumberFromTileData = RESET;
+		// NOTE: Needed for tonc's cbb_demo
+		// Refer: https://www.coranac.com/tonc/text/regbg.htm
+		if (vramAddress < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
+		{
+			pixelColorNumberFromTileData = readRawMemory<BYTE>(vramAddress, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);
+
+		}
+		else
+		{
+			PPUTODO("As per NBA, pixelColorNumberFromTileData is set to some latched value");
+		}
+
+		// NOTE: Palette index multiplied by 2 as each palette index represents 16 bit offset in palette ram instead of 8 bit offset, so basically there is 2 byte difference b/w palette index n to index n+1
+		ID paletteIndex = pixelColorNumberFromTileData << ONE;
+
+		pGBA_display->gfx_bg[BG2][xPixelCoordinate][yPixelCoordinate] = paletteIndex;
+	}
+
+	// For points (2) and (4) of PPU:03 AND point (6) of PPU:03
+	pGBA_display->bgCache[BG2].affine.affineX += (int16_t)(pGBA_peripherals->mBG2PAHalfWord.mBGnPxHalfWord_Signed);
+	pGBA_display->bgCache[BG2].affine.affineY += (int16_t)(pGBA_peripherals->mBG2PCHalfWord.mBGnPxHalfWord_Signed);
+
+}
+
+MASQ_INLINE void GBA_t::MODE5_B_BG_CYCLE()
+{
+
+	uint32_t xPixelCoordinate = pGBA_display->currentBgPixel;
+	uint32_t yPixelCoordinate = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
+
+	// Early bounds check on X and Y
+	if ((xPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (yPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
+	{
+		RETURN;
+	}
+
+	// Only BG2 is valid for Mode2
+
+	// Refer to http://problemkaputt.de/gbatek-lcd-vram-bitmap-bg-modes.htm
+	uint32_t xPixelCoordinateAffine = (GBA_WORD)((pGBA_display->bgCache[BG2].affine.affineX) >> EIGHT); // To get the integer part
+	uint32_t yPixelCoordinateAffine = (GBA_WORD)((pGBA_display->bgCache[BG2].affine.affineY) >> EIGHT); // To get the integer part
+
+	if (xPixelCoordinateAffine >= ONEHUNDREDSIXTY || yPixelCoordinateAffine >= ONETWENTYEIGHT)
+	{
+		pGBA_display->gfx_bg[BG2][xPixelCoordinate][yPixelCoordinate] = ZERO;
+	}
+	else
+	{
+		ID vramIndex = xPixelCoordinateAffine + (yPixelCoordinateAffine * ONEHUNDREDSIXTY);
+
+		// Since we are accessing 16 bit data instead of 8 bit
+		vramIndex <<= ONE;
+
+		GBA_WORD vramAddress = VIDEO_RAM_START_ADDRESS + (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.FRAME_SELECT * 0xA000) + vramIndex;
+
+		GBA_HALFWORD colorFor1Pixel = RESET;
+		// NOTE: Needed for tonc's cbb_demo
+		// Refer: https://www.coranac.com/tonc/text/regbg.htm
+		if (vramAddress < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
+		{
+			colorFor1Pixel = readRawMemory<GBA_HALFWORD>(vramAddress, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+
+		}
+		else
+		{
+			PPUTODO("As per NBA, colorFor1Pixel is set to some latched value");
+		}
+
+		pGBA_display->gfx_bg[BG2][xPixelCoordinate][yPixelCoordinate] = (colorFor1Pixel | IS_COLOR_NOT_PALETTE);
+	}
+
+	// For points (2) and (4) of PPU:03 AND point (6) of PPU:03
+	pGBA_display->bgCache[BG2].affine.affineX += (int16_t)(pGBA_peripherals->mBG2PAHalfWord.mBGnPxHalfWord_Signed);
+	pGBA_display->bgCache[BG2].affine.affineY += (int16_t)(pGBA_peripherals->mBG2PCHalfWord.mBGnPxHalfWord_Signed);
+
+}
+
+MASQ_INLINE void GBA_t::MODE0_BG_SEQUENCE(SSTATE32 state)
+{
+
+	switch (state)
+	{
+	case ZERO:
+	{
+		MODE0_M_BG_CYCLE(BG0);
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE0_T_BG_CYCLE(BG0);
+#endif
+		BREAK;
+	}
+	case ONE:
+	{
+		MODE0_M_BG_CYCLE(BG1);
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE0_T_BG_CYCLE(BG1);
+#endif
+		BREAK;
+	}
+	case TWO:
+	{
+		MODE0_M_BG_CYCLE(BG2);
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE0_T_BG_CYCLE(BG2);
+#endif
+		BREAK;
+	}
+	case THREE:
+	{
+		MODE0_M_BG_CYCLE(BG3);
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE0_T_BG_CYCLE(BG3);
+#endif
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case FOUR:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE0_M_BG_CYCLE(BG0);
+#endif
+		MODE0_T_BG_CYCLE(BG0);
+		BREAK;
+	}
+	case FIVE:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE0_M_BG_CYCLE(BG1);
+#endif
+		MODE0_T_BG_CYCLE(BG1);
+		BREAK;
+	}
+	case SIX:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE0_M_BG_CYCLE(BG2);
+#endif
+		MODE0_T_BG_CYCLE(BG2);
+		BREAK;
+	}
+	case SEVEN:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE0_M_BG_CYCLE(BG3);
+#endif
+		MODE0_T_BG_CYCLE(BG3);
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case EIGHT:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE0_M_BG_CYCLE(BG0);
+		MODE0_T_BG_CYCLE(BG0);
+#endif
+		BREAK;
+	}
+	case NINE:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE0_M_BG_CYCLE(BG1);
+		MODE0_T_BG_CYCLE(BG1);
+#endif
+		BREAK;
+	}
+	case TEN:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE0_M_BG_CYCLE(BG2);
+		MODE0_T_BG_CYCLE(BG2);
+#endif
+		BREAK;
+	}
+	case ELEVEN:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE0_M_BG_CYCLE(BG3);
+		MODE0_T_BG_CYCLE(BG3);
+#endif
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case TWELVE:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE0_M_BG_CYCLE(BG0);
+		MODE0_T_BG_CYCLE(BG0);
+#else
+		if (pGBA_display->bgCache[BG0].is8bppMode == YES)
+		{
+			MODE0_T_BG_CYCLE(BG0);
+		}
+#endif
+		BREAK;
+	}
+	case THIRTEEN:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE0_M_BG_CYCLE(BG1);
+		MODE0_T_BG_CYCLE(BG1);
+#else
+		if (pGBA_display->bgCache[BG1].is8bppMode == YES)
+		{
+			MODE0_T_BG_CYCLE(BG1);
+		}
+#endif
+		BREAK;
+	}
+	case FOURTEEN:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE0_M_BG_CYCLE(BG2);
+		MODE0_T_BG_CYCLE(BG2);
+#else
+		if (pGBA_display->bgCache[BG2].is8bppMode == YES)
+		{
+			MODE0_T_BG_CYCLE(BG2);
+		}
+#endif
+		BREAK;
+	}
+	case FIFTEEN:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE0_M_BG_CYCLE(BG3);
+		MODE0_T_BG_CYCLE(BG3);
+#else
+		if (pGBA_display->bgCache[BG3].is8bppMode == YES)
+		{
+			MODE0_T_BG_CYCLE(BG3);
+		}
+#endif
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case SIXTEEN:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE0_M_BG_CYCLE(BG0);
+		MODE0_T_BG_CYCLE(BG0);
+#endif
+		BREAK;
+	}
+	case SEVENTEEN:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE0_M_BG_CYCLE(BG1);
+		MODE0_T_BG_CYCLE(BG1);
+#endif
+		BREAK;
+	}
+	case EIGHTEEN:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE0_M_BG_CYCLE(BG2);
+		MODE0_T_BG_CYCLE(BG2);
+#endif
+		BREAK;
+	}
+	case NINETEEN:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE0_M_BG_CYCLE(BG3);
+		MODE0_T_BG_CYCLE(BG3);
+#endif
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case TWENTY:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE0_M_BG_CYCLE(BG0);
+#endif
+		MODE0_T_BG_CYCLE(BG0);
+		BREAK;
+	}
+	case TWENTYONE:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE0_M_BG_CYCLE(BG1);
+#endif
+		MODE0_T_BG_CYCLE(BG1);
+		BREAK;
+	}
+	case TWENTYTWO:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE0_M_BG_CYCLE(BG2);
+#endif
+		MODE0_T_BG_CYCLE(BG2);
+		BREAK;
+	}
+	case TWENTYTHREE:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE0_M_BG_CYCLE(BG3);
+#endif
+		MODE0_T_BG_CYCLE(BG3);
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case TWENTYFOUR:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE0_M_BG_CYCLE(BG0);
+		MODE0_T_BG_CYCLE(BG0);
+#endif
+		BREAK;
+	}
+	case TWENTYFIVE:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE0_M_BG_CYCLE(BG1);
+		MODE0_T_BG_CYCLE(BG1);
+#endif
+		BREAK;
+	}
+	case TWENTYSIX:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE0_M_BG_CYCLE(BG2);
+		MODE0_T_BG_CYCLE(BG2);
+#endif
+		BREAK;
+	}
+	case TWENTYSEVEN:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE0_M_BG_CYCLE(BG3);
+		MODE0_T_BG_CYCLE(BG3);
+#endif
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case TWENTYEIGHT:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE0_M_BG_CYCLE(BG0);
+		MODE0_T_BG_CYCLE(BG0);
+#else
+		if (pGBA_display->bgCache[BG0].is8bppMode == YES)
+		{
+			MODE0_T_BG_CYCLE(BG0);
+		}
+#endif
+		BREAK;
+	}
+	case TWENTYNINE:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE0_M_BG_CYCLE(BG1);
+		MODE0_T_BG_CYCLE(BG1);
+#else
+		if (pGBA_display->bgCache[BG1].is8bppMode == YES)
+		{
+			MODE0_T_BG_CYCLE(BG1);
+		}
+#endif
+		BREAK;
+	}
+	case THIRTY:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE0_M_BG_CYCLE(BG2);
+		MODE0_T_BG_CYCLE(BG2);
+#else
+		if (pGBA_display->bgCache[BG2].is8bppMode == YES)
+		{
+			MODE0_T_BG_CYCLE(BG2);
+		}
+#endif
+		BREAK;
+	}
+	case THIRTYONE:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE0_M_BG_CYCLE(BG3);
+		MODE0_T_BG_CYCLE(BG3);
+#else
+		if (pGBA_display->bgCache[BG3].is8bppMode == YES)
+		{
+			MODE0_T_BG_CYCLE(BG3);
+		}
+#endif
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	default:
+	{
+		FATAL("PPU mode 0 (BG) out of sync");
+	}
+	}
+
+}
+
+MASQ_INLINE void GBA_t::MODE1_BG_SEQUENCE(SSTATE32 state)
+{
+
+	switch (state)
+	{
+	case ZERO:
+	{
+		MODE1_M_TEXT_BG_CYCLE(BG0);
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE1_T_TEXT_BG_CYCLE(BG0);
+#endif
+		BREAK;
+	}
+	case ONE:
+	{
+		MODE1_M_TEXT_BG_CYCLE(BG1);
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE1_T_TEXT_BG_CYCLE(BG1);
+#endif
+		BREAK;
+	}
+	case TWO:
+	{
+		MODE1_M_AFFINE_BG_CYCLE();
+		BREAK;
+	}
+	case THREE:
+	{
+		MODE1_T_AFFINE_BG_CYCLE();
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case FOUR:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE1_M_TEXT_BG_CYCLE(BG0);
+#endif
+		MODE1_T_TEXT_BG_CYCLE(BG0);
+		BREAK;
+	}
+	case FIVE:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE1_M_TEXT_BG_CYCLE(BG1);
+#endif
+		MODE1_T_TEXT_BG_CYCLE(BG1);
+		BREAK;
+	}
+	case SIX:
+	{
+		MODE1_M_AFFINE_BG_CYCLE();
+		BREAK;
+	}
+	case SEVEN:
+	{
+		MODE1_T_AFFINE_BG_CYCLE();
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case EIGHT:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE1_M_TEXT_BG_CYCLE(BG0);
+		MODE1_T_TEXT_BG_CYCLE(BG0);
+#endif
+		BREAK;
+	}
+	case NINE:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE1_M_TEXT_BG_CYCLE(BG1);
+		MODE1_T_TEXT_BG_CYCLE(BG1);
+#endif
+		BREAK;
+	}
+	case TEN:
+	{
+		MODE1_M_AFFINE_BG_CYCLE();
+		BREAK;
+	}
+	case ELEVEN:
+	{
+		MODE1_T_AFFINE_BG_CYCLE();
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case TWELVE:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE1_M_TEXT_BG_CYCLE(BG0);
+		MODE1_T_TEXT_BG_CYCLE(BG0);
+#else
+		if (pGBA_display->bgCache[BG0].is8bppMode == YES)
+		{
+			MODE1_T_TEXT_BG_CYCLE(BG0);
+		}
+#endif
+		BREAK;
+	}
+	case THIRTEEN:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE1_M_TEXT_BG_CYCLE(BG1);
+		MODE1_T_TEXT_BG_CYCLE(BG1);
+#else
+		if (pGBA_display->bgCache[BG1].is8bppMode == YES)
+		{
+			MODE1_T_TEXT_BG_CYCLE(BG1);
+		}
+#endif
+		BREAK;
+	}
+	case FOURTEEN:
+	{
+		MODE1_M_AFFINE_BG_CYCLE();
+		BREAK;
+	}
+	case FIFTEEN:
+	{
+		MODE1_T_AFFINE_BG_CYCLE();
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case SIXTEEN:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE1_M_TEXT_BG_CYCLE(BG0);
+		MODE1_T_TEXT_BG_CYCLE(BG0);
+#endif
+		BREAK;
+	}
+	case SEVENTEEN:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE1_M_TEXT_BG_CYCLE(BG1);
+		MODE1_T_TEXT_BG_CYCLE(BG1);
+#endif
+		BREAK;
+	}
+	case EIGHTEEN:
+	{
+		MODE1_M_AFFINE_BG_CYCLE();
+		BREAK;
+	}
+	case NINETEEN:
+	{
+		MODE1_T_AFFINE_BG_CYCLE();
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case TWENTY:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE1_M_TEXT_BG_CYCLE(BG0);
+#endif
+		MODE1_T_TEXT_BG_CYCLE(BG0);
+		BREAK;
+	}
+	case TWENTYONE:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE1_M_TEXT_BG_CYCLE(BG1);
+#endif
+		MODE1_T_TEXT_BG_CYCLE(BG1);
+		BREAK;
+	}
+	case TWENTYTWO:
+	{
+		MODE1_M_AFFINE_BG_CYCLE();
+		BREAK;
+	}
+	case TWENTYTHREE:
+	{
+		MODE1_T_AFFINE_BG_CYCLE();
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case TWENTYFOUR:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE1_M_TEXT_BG_CYCLE(BG0);
+		MODE1_T_TEXT_BG_CYCLE(BG0);
+#endif
+		BREAK;
+	}
+	case TWENTYFIVE:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE1_M_TEXT_BG_CYCLE(BG1);
+		MODE1_T_TEXT_BG_CYCLE(BG1);
+#endif
+		BREAK;
+	}
+	case TWENTYSIX:
+	{
+		MODE1_M_AFFINE_BG_CYCLE();
+		BREAK;
+	}
+	case TWENTYSEVEN:
+	{
+		MODE1_T_AFFINE_BG_CYCLE();
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case TWENTYEIGHT:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE1_M_TEXT_BG_CYCLE(BG0);
+		MODE1_T_TEXT_BG_CYCLE(BG0);
+#else
+		if (pGBA_display->bgCache[BG0].is8bppMode == YES)
+		{
+			MODE1_T_TEXT_BG_CYCLE(BG0);
+
+		}
+#endif
+		BREAK;
+	}
+	case TWENTYNINE:
+	{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+		MODE1_M_TEXT_BG_CYCLE(BG1);
+		MODE1_T_TEXT_BG_CYCLE(BG1);
+#else
+		if (pGBA_display->bgCache[BG1].is8bppMode == YES)
+		{
+			MODE1_T_TEXT_BG_CYCLE(BG1);
+
+		}
+#endif
+		BREAK;
+	}
+	case THIRTY:
+	{
+		MODE1_M_AFFINE_BG_CYCLE();
+		BREAK;
+	}
+	case THIRTYONE:
+	{
+		MODE1_T_AFFINE_BG_CYCLE();
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	default:
+	{
+		FATAL("PPU mode 1 out of sync");
+	}
+	}
+
+}
+
+MASQ_INLINE void GBA_t::MODE2_BG_SEQUENCE(SSTATE32 state)
+{
+
+	switch (state)
+	{
+	case ZERO:
+	{
+		MODE2_M_BG_CYCLE(BG3);
+		BREAK;
+	}
+	case ONE:
+	{
+		MODE2_T_BG_CYCLE(BG3);
+		BREAK;
+	}
+	case TWO:
+	{
+		MODE2_M_BG_CYCLE(BG2);
+		BREAK;
+	}
+	case THREE:
+	{
+		MODE2_T_BG_CYCLE(BG2);
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case FOUR:
+	{
+		MODE2_M_BG_CYCLE(BG3);
+		BREAK;
+	}
+	case FIVE:
+	{
+		MODE2_T_BG_CYCLE(BG3);
+		BREAK;
+	}
+	case SIX:
+	{
+		MODE2_M_BG_CYCLE(BG2);
+		BREAK;
+	}
+	case SEVEN:
+	{
+		MODE2_T_BG_CYCLE(BG2);
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case EIGHT:
+	{
+		MODE2_M_BG_CYCLE(BG3);
+		BREAK;
+	}
+	case NINE:
+	{
+		MODE2_T_BG_CYCLE(BG3);
+		BREAK;
+	}
+	case TEN:
+	{
+		MODE2_M_BG_CYCLE(BG2);
+		BREAK;
+	}
+	case ELEVEN:
+	{
+		MODE2_T_BG_CYCLE(BG2);
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case TWELVE:
+	{
+		MODE2_M_BG_CYCLE(BG3);
+		BREAK;
+	}
+	case THIRTEEN:
+	{
+		MODE2_T_BG_CYCLE(BG3);
+		BREAK;
+	}
+	case FOURTEEN:
+	{
+		MODE2_M_BG_CYCLE(BG2);
+		BREAK;
+	}
+	case FIFTEEN:
+	{
+		MODE2_T_BG_CYCLE(BG2);
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case SIXTEEN:
+	{
+		MODE2_M_BG_CYCLE(BG3);
+		BREAK;
+	}
+	case SEVENTEEN:
+	{
+		MODE2_T_BG_CYCLE(BG3);
+		BREAK;
+	}
+	case EIGHTEEN:
+	{
+		MODE2_M_BG_CYCLE(BG2);
+		BREAK;
+	}
+	case NINETEEN:
+	{
+		MODE2_T_BG_CYCLE(BG2);
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case TWENTY:
+	{
+		MODE2_M_BG_CYCLE(BG3);
+		BREAK;
+	}
+	case TWENTYONE:
+	{
+		MODE2_T_BG_CYCLE(BG3);
+		BREAK;
+	}
+	case TWENTYTWO:
+	{
+		MODE2_M_BG_CYCLE(BG2);
+		BREAK;
+	}
+	case TWENTYTHREE:
+	{
+		MODE2_T_BG_CYCLE(BG2);
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case TWENTYFOUR:
+	{
+		MODE2_M_BG_CYCLE(BG3);
+		BREAK;
+	}
+	case TWENTYFIVE:
+	{
+		MODE2_T_BG_CYCLE(BG3);
+		BREAK;
+	}
+	case TWENTYSIX:
+	{
+		MODE2_M_BG_CYCLE(BG2);
+		BREAK;
+	}
+	case TWENTYSEVEN:
+	{
+		MODE2_T_BG_CYCLE(BG2);
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case TWENTYEIGHT:
+	{
+		MODE2_M_BG_CYCLE(BG3);
+		BREAK;
+	}
+	case TWENTYNINE:
+	{
+		MODE2_T_BG_CYCLE(BG3);
+		BREAK;
+	}
+	case THIRTY:
+	{
+		MODE2_M_BG_CYCLE(BG2);
+		BREAK;
+	}
+	case THIRTYONE:
+	{
+		MODE2_T_BG_CYCLE(BG2);
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	default:
+	{
+		FATAL("PPU mode 2) out of sync");
+	}
+	}
+
+}
+
+MASQ_INLINE void GBA_t::MODE3_BG_SEQUENCE(SSTATE32 state)
+{
+
+	switch (state)
+	{
+	case THREE:
+	{
+		MODE3_B_BG_CYCLE();
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case SEVEN:
+	{
+		MODE3_B_BG_CYCLE();
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case ELEVEN:
+	{
+		MODE3_B_BG_CYCLE();
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case FIFTEEN:
+	{
+		MODE3_B_BG_CYCLE();
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case NINETEEN:
+	{
+		MODE3_B_BG_CYCLE();
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case TWENTYTHREE:
+	{
+		MODE3_B_BG_CYCLE();
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case TWENTYSEVEN:
+	{
+		MODE3_B_BG_CYCLE();
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case THIRTYONE:
+	{
+		MODE3_B_BG_CYCLE();
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	}
+
+}
+
+MASQ_INLINE void GBA_t::MODE4_BG_SEQUENCE(SSTATE32 state)
+{
+
+	switch (state)
+	{
+	case THREE:
+	{
+		MODE4_B_BG_CYCLE();
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case SEVEN:
+	{
+		MODE4_B_BG_CYCLE();
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case ELEVEN:
+	{
+		MODE4_B_BG_CYCLE();
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case FIFTEEN:
+	{
+		MODE4_B_BG_CYCLE();
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case NINETEEN:
+	{
+		MODE4_B_BG_CYCLE();
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case TWENTYTHREE:
+	{
+		MODE4_B_BG_CYCLE();
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case TWENTYSEVEN:
+	{
+		MODE4_B_BG_CYCLE();
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case THIRTYONE:
+	{
+		MODE4_B_BG_CYCLE();
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	}
+
+}
+
+MASQ_INLINE void GBA_t::MODE5_BG_SEQUENCE(SSTATE32 state)
+{
+
+	switch (state)
+	{
+	case THREE:
+	{
+		MODE5_B_BG_CYCLE();
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case SEVEN:
+	{
+		MODE5_B_BG_CYCLE();
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case ELEVEN:
+	{
+		MODE5_B_BG_CYCLE();
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case FIFTEEN:
+	{
+		MODE5_B_BG_CYCLE();
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case NINETEEN:
+	{
+		MODE5_B_BG_CYCLE();
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case TWENTYTHREE:
+	{
+		MODE5_B_BG_CYCLE();
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case TWENTYSEVEN:
+	{
+		MODE5_B_BG_CYCLE();
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	case THIRTYONE:
+	{
+		MODE5_B_BG_CYCLE();
+		++pGBA_display->currentBgPixel;
+		BREAK;
+	}
+	}
+
+}
+
+MASQ_INLINE void GBA_t::PROCESS_PPU_MODES(INC64 ppuCycles, FLAG renderBG, FLAG renderWindow, FLAG renderObj, FLAG renderMerge)
+{
+
+	pGBA_display->currentPPUMode = pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE;
+
+	// Handle mode specific processing
+	if (ENABLED)
+	{
+		switch (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE)
+		{
+		case MODE0:
+		{
+			BREAK;
+		}
+		case MODE1:
+		{
+			BREAK;
+		}
+		case MODE2:
+		{
+			BREAK;
+		}
+		case MODE3:
+		{
+			BREAK;
+		}
+		case MODE4:
+		{
+			BREAK;
+		}
+		case MODE5:
+		{
+			BREAK;
+		}
+		default:
+		{
+			PPUWARN("Unknown PPU Mode");
+			RETURN;
+		}
+		}
+	}
+
+	// Handle common processing
+	if (ENABLED)
+	{
+		FLAG performWinRenderring = YES;
+		FLAG performObjectRenderring = YES;
+		FLAG performBgRenderring = YES;
+		FLAG performMerging = YES;
+
+		INC64 winCycles = ppuCycles;
+		INC64 objCycles = ppuCycles;
+		INC64 bgCycles = ppuCycles;
+		INC64 mergeCycles = ppuCycles;
+
+		const auto& currentScanline = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
+		auto& ppuCounter = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.ppuCounter;
+		auto& currentMode = pGBA_display->currentPPUMode;
+
+		ppuCounter += ppuCycles;
+
+		if (pGBA_display->winWaitCyclesDone == NO && renderWindow == YES)
+		{
+			if (ppuCounter < WIN_WAIT_CYCLES)
+			{
+				performWinRenderring = NO;
+			}
+			else
+			{
+				winCycles = ppuCounter - WIN_WAIT_CYCLES;
+				pGBA_display->winWaitCyclesDone = YES;
+				performWinRenderring = YES;
+			}
+		}
+
+		if (pGBA_display->objWaitCyclesDone == NO && renderObj == YES)
+		{
+			if (pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.ppuCounter < OBJECT_WAIT_CYCLES)
+			{
+				performObjectRenderring = (pGBA_display->allObjectsRenderedForScanline == NO) ? YES : NO;
+			}
+			else
+			{
+				if (
+					pGBA_display->cyclesPerScanline > ZERO
+					&&
+					pGBA_display->allObjectsRenderedForScanline == NO
+					&&
+					pGBA_display->objAccessPatternState != OBJECT_ACCESS_PATTERN::OBJECT_A01
+					)
+				{
+					if ((0x80 - pGBA_display->objAccessOAMIDState - ONE) > ZERO)
+					{
+						PPUMOREINFO("Missed %u objects in mode: %u; scanline %u", 0x80 - pGBA_display->objAccessOAMIDState - ONE, currentMode, pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY);
+					}
+					else
+					{
+						PPUMOREINFO("VRAM fsm still in mode: %u; scanline %u", currentMode, pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY);
+					}
+				}
+
+				pGBA_display->allObjectsRenderedForScanline = NO;
+
+				objCycles = ppuCounter - OBJECT_WAIT_CYCLES;
+				pGBA_display->objWaitCyclesDone = YES;
+				pGBA_display->objAccessOAMIDState = RESET;
+				pGBA_display->objCache[TO_UINT(OBJECT_STAGE::OBJECT_FETCH_STAGE)].reset();
+				pGBA_display->objCache[TO_UINT(OBJECT_STAGE::OBJECT_RENDER_STAGE)].reset();
+				pGBA_display->objCache[TO_UINT(OBJECT_STAGE::OBJECT_FETCH_STAGE)].vcount = (SCOUNTER32)((currentScanline + ONE) % 228);
+				pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_A01;
+				pGBA_display->objAccessPattern = RESET;
+				pGBA_display->cyclesPerSprite = RESET;
+				pGBA_display->cyclesPerScanline = RESET;
+				pGBA_display->vramCyclesStageForObjFSM = RESET;
+				SET_INITIAL_OBJ_MODE();
+				performObjectRenderring = YES;
+			}
+		}
+
+		if (pGBA_display->bgWaitCyclesDone == NO && renderBG == YES)
+		{
+			COUNTER32 offsetForTextMode = ZERO;
+			if (currentMode == MODE0 || currentMode == MODE1)
+			{
+				/*
+				* Refer https://nba-emu.github.io/hw-docs/ppu/background.html
+				* According to https://nba-emu.github.io/hw-docs/ppu/background.html#2, every BG waits 31 - 4 * (BG[x]HOFS mod 8) cycles in Mode 0 \n\
+				* To simply the implementation, we are just going to assume the minimum amount of time, i.e. 31 - 4 * (max(BG[x]HOFS mod 8))
+				* so, 32 - 4 * (7%8) = 32 - 4 * (7) = 35 - 28 = 4
+				* Therefore offsetForTextMode = 28
+				*/
+				PPUTODO("Simplified version of bg wait cycles is implemented for text modes");
+				offsetForTextMode = TWENTYEIGHT;
+			}
+
+			if (ppuCounter < (BG_WAIT_CYCLES - offsetForTextMode))
+			{
+				performBgRenderring = NO;
+			}
+			else
+			{
+				bgCycles = ppuCounter - (BG_WAIT_CYCLES - offsetForTextMode);
+				pGBA_display->bgWaitCyclesDone = YES;
+				performBgRenderring = YES;
+			}
+		}
+
+		if (pGBA_display->mergeWaitCyclesDone == NO && renderMerge == YES)
+		{
+			if (ppuCounter < MERGE_WAIT_CYCLES)
+			{
+				performMerging = NO;
+			}
+			else
+			{
+				mergeCycles = ppuCounter - MERGE_WAIT_CYCLES;
+				pGBA_display->mergeWaitCyclesDone = YES;
+				performMerging = YES;
+			}
+		}
+
+		INC64 currentCycles = ZERO;
+		INC64 targetCycles = winCycles;
+
+		if (performWinRenderring == YES && renderWindow == YES)
+		{
+			// Store the current mode and winAccessPatternState in local variables for efficiency
+			auto& winState = pGBA_display->winAccessPatternState[currentMode];
+
+			while (currentCycles < targetCycles)
+			{
+				if (winState == ZERO)
+				{
+					WIN_CYCLE();
+				}
+
+				// Advance the state (modulo 4)
+				winState = (winState + ONE) & THREE;
+
+				// next cycle...
+				++currentCycles;
+			}
+		}
+
+		PPUTODO("Optimize below code! We need to use a single while loop at line %d in %s", __LINE__, __FILE__);
+
+		currentCycles = ZERO;
+		targetCycles = objCycles;
+
+		if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.SCREEN_DISP_OBJ == SET && performObjectRenderring == YES && renderObj == YES)
+		{
+			while ((currentCycles < targetCycles) && pGBA_display->allObjectsRenderedForScanline == NO)
+			{
+				++pGBA_display->cyclesPerSprite;
+				++pGBA_display->cyclesPerScanline;
+
+				if (pGBA_display->currentObjectIsAffine == OBJECT_TYPE::OBJECT_IS_AFFINE)
+				{
+					// FSM runs only on even cycles
+					if ((pGBA_display->objAccessPattern & ONE) == RESET)
+					{
+						switch (pGBA_display->objAccessPatternState)
+						{
+						case OBJECT_ACCESS_PATTERN::OBJECT_A01:
+						{
+							pGBA_display->oamFoundValidObject = OBJ_A01_OBJ_CYCLE(pGBA_display->objAccessOAMIDState);
+							if (pGBA_display->oamFoundValidObject == NO)
+							{
+								if (INCREMENT_OAM_ID() == INVALID)
+								{
+									pGBA_display->allObjectsRenderedForScanline = YES;
+									pGBA_display->objAccessOAMIDState = RESET;
+									pGBA_display->objAccessPattern = RESET;
+									pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_A01;
+								}
+								pGBA_display->cyclesPerSprite = RESET;
+							}
+							else
+							{
+								pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_A2;
+								pGBA_display->currentObjectIsAffine = pGBA_display->nextObjectIsAffine;
+							}
+							BREAK;
+						}
+						case OBJECT_ACCESS_PATTERN::OBJECT_A2:
+						{
+							OBJ_A2_OBJ_CYCLE(pGBA_display->objAccessOAMIDState);
+							pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_PA;
+							BREAK;
+						}
+						case OBJECT_ACCESS_PATTERN::OBJECT_PA:
+						{
+							OBJ_PA_OBJ_CYCLE(pGBA_display->objAccessOAMIDState);
+							pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_PB;
+							BREAK;
+						}
+						case OBJECT_ACCESS_PATTERN::OBJECT_PB:
+						{
+							OBJ_PB_OBJ_CYCLE(pGBA_display->objAccessOAMIDState);
+							pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_PC;
+							BREAK;
+						}
+						case OBJECT_ACCESS_PATTERN::OBJECT_PC:
+						{
+							OBJ_PC_OBJ_CYCLE(pGBA_display->objAccessOAMIDState);
+							pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_PD;
+							BREAK;
+						}
+						case OBJECT_ACCESS_PATTERN::OBJECT_PD:
+						{
+							OBJ_PD_OBJ_CYCLE(pGBA_display->objAccessOAMIDState);
+							pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_BLANK_A01;
+							BREAK;
+						}
+						case OBJECT_ACCESS_PATTERN::OBJECT_BLANK_A01:
+						{
+							pGBA_display->oamFoundValidObject = OBJ_A01_OBJ_CYCLE(pGBA_display->objAccessOAMIDState + ONE);
+							pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_V;
+							pGBA_display->firstVRAMCycleForObjFSM = YES;
+							BREAK;
+						}
+						case OBJECT_ACCESS_PATTERN::OBJECT_V:
+						{
+							OBJ_V_OBJ_CYCLE(pGBA_display->objAccessOAMIDState, pGBA_display->currentObjectIsAffine, pGBA_display->vramCyclesStageForObjFSM);
+							++pGBA_display->vramCyclesStageForObjFSM;
+							if (pGBA_display->lastVRAMCycleForObjFSM == YES)
+							{
+								pGBA_display->lastVRAMCycleForObjFSM = NO;
+								pGBA_display->vramCyclesStageForObjFSM = RESET;
+								pGBA_display->cyclesPerSprite = RESET;
+								if (INCREMENT_OAM_ID() == INVALID)
+								{
+									pGBA_display->allObjectsRenderedForScanline = YES;
+									pGBA_display->objAccessOAMIDState = RESET;
+									pGBA_display->objAccessPattern = RESET;
+									pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_A01;
+								}
+								else
+								{
+									// valid if object is not disabled or we are in correct y coordinate for the object
+									if (pGBA_display->oamFoundValidObject == NO)
+									{
+										if (INCREMENT_OAM_ID() == INVALID)
+										{
+											pGBA_display->allObjectsRenderedForScanline = YES;
+											pGBA_display->objAccessOAMIDState = RESET;
+											pGBA_display->objAccessPattern = RESET;
+										}
+										else
+										{
+											pGBA_display->oamFoundValidObject = OBJ_A01_OBJ_CYCLE(pGBA_display->objAccessOAMIDState);
+											if (pGBA_display->oamFoundValidObject == NO)
+											{
+												if (INCREMENT_OAM_ID() == INVALID)
+												{
+													pGBA_display->allObjectsRenderedForScanline = YES;
+													pGBA_display->objAccessOAMIDState = RESET;
+													pGBA_display->objAccessPattern = RESET;
+												}
+												pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_A01;
+											}
+											else
+											{
+												pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_A2;
+												pGBA_display->currentObjectIsAffine = pGBA_display->nextObjectIsAffine;
+											}
+										}
+									}
+									else
+									{
+										pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_A2;
+										pGBA_display->currentObjectIsAffine = pGBA_display->nextObjectIsAffine;
+									}
+								}
+							}
+							BREAK;
+						}
+						default:
+						{
+							FATAL("Unknown Object Access Pattern State (Affine) in PPU Mode %d", currentMode);
+						}
+						}
+					}
+
+					++pGBA_display->objAccessPattern;
+				}
+				else if (pGBA_display->currentObjectIsAffine == OBJECT_TYPE::OBJECT_IS_NOT_AFFINE)
+				{
+					// FSM runs only on even cycles
+					if ((pGBA_display->objAccessPattern & ONE) == RESET)
+					{
+						switch (pGBA_display->objAccessPatternState)
+						{
+						case OBJECT_ACCESS_PATTERN::OBJECT_A01:
+						{
+							pGBA_display->oamFoundValidObject = OBJ_A01_OBJ_CYCLE(pGBA_display->objAccessOAMIDState);
+							if (pGBA_display->oamFoundValidObject == NO)
+							{
+								if (INCREMENT_OAM_ID() == INVALID)
+								{
+									pGBA_display->allObjectsRenderedForScanline = YES;
+									pGBA_display->objAccessOAMIDState = RESET;
+									pGBA_display->objAccessPattern = RESET;
+									pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_A01;
+								}
+								pGBA_display->cyclesPerSprite = RESET;
+							}
+							else
+							{
+								pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_A2;
+								pGBA_display->currentObjectIsAffine = pGBA_display->nextObjectIsAffine;
+							}
+							BREAK;
+						}
+						case OBJECT_ACCESS_PATTERN::OBJECT_A2:
+						{
+							OBJ_A2_OBJ_CYCLE(pGBA_display->objAccessOAMIDState);
+							pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_V;
+							pGBA_display->firstVRAMCycleForObjFSM = YES;
+							BREAK;
+						}
+						case OBJECT_ACCESS_PATTERN::OBJECT_V:
+						{
+							OBJ_V_OBJ_CYCLE(pGBA_display->objAccessOAMIDState, pGBA_display->currentObjectIsAffine, pGBA_display->vramCyclesStageForObjFSM);
+							++pGBA_display->vramCyclesStageForObjFSM;
+							if (pGBA_display->firstVRAMCycleForObjFSM == YES)
+							{
+								pGBA_display->firstVRAMCycleForObjFSM = NO;
+								pGBA_display->oamFoundValidObject = OBJ_A01_OBJ_CYCLE(pGBA_display->objAccessOAMIDState + ONE);
+							}
+							else if (pGBA_display->lastVRAMCycleForObjFSM == YES)
+							{
+								pGBA_display->lastVRAMCycleForObjFSM = NO;
+								pGBA_display->vramCyclesStageForObjFSM = RESET;
+								pGBA_display->cyclesPerSprite = RESET;
+								if (INCREMENT_OAM_ID() == INVALID)
+								{
+									pGBA_display->allObjectsRenderedForScanline = YES;
+									pGBA_display->objAccessOAMIDState = RESET;
+									pGBA_display->objAccessPattern = RESET;
+									pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_A01;
+								}
+								else
+								{
+									// valid if object is not disabled or we are in correct y coordinate for the object
+									if (pGBA_display->oamFoundValidObject == NO)
+									{
+										if (INCREMENT_OAM_ID() == INVALID)
+										{
+											pGBA_display->allObjectsRenderedForScanline = YES;
+											pGBA_display->objAccessOAMIDState = RESET;
+											pGBA_display->objAccessPattern = RESET;
+											pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_A01;
+										}
+										else
+										{
+											pGBA_display->oamFoundValidObject = OBJ_A01_OBJ_CYCLE(pGBA_display->objAccessOAMIDState);
+											if (pGBA_display->oamFoundValidObject == NO)
+											{
+												if (INCREMENT_OAM_ID() == INVALID)
+												{
+													pGBA_display->allObjectsRenderedForScanline = YES;
+													pGBA_display->objAccessOAMIDState = RESET;
+													pGBA_display->objAccessPattern = RESET;
+												}
+												pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_A01;
+											}
+											else
+											{
+												pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_A2;
+												pGBA_display->currentObjectIsAffine = pGBA_display->nextObjectIsAffine;
+											}
+										}
+									}
+									else
+									{
+										pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_A2;
+										pGBA_display->currentObjectIsAffine = pGBA_display->nextObjectIsAffine;
+									}
+								}
+							}
+							BREAK;
+						}
+						default:
+						{
+							FATAL("Unknown Object Access Pattern State (Not Affine) in PPU Mode %d", currentMode);
+						}
+						}
+					}
+
+					++pGBA_display->objAccessPattern;
+				}
+
+				// next cycle...
+				++currentCycles;
+			}
+		}
+
+		currentCycles = ZERO;
+		targetCycles = bgCycles;
+
+		if (performBgRenderring == YES && renderBG == YES)
+		{
+#if (ENABLED)
+			// Cache the state once before the loop to avoid repeated array access
+			auto& bgState = pGBA_display->bgAccessPatternState[currentMode];
+
+			switch (currentMode)
+			{
+			case MODE0:
+			{
+				while (currentCycles < targetCycles)
+				{
+					MODE0_BG_SEQUENCE(bgState);
+
+					bgState = (bgState + ONE) & THIRTYONE;
+
+					// next cycle...
+					++currentCycles;
+				}
+				BREAK;
+			}
+			case MODE1:
+			{
+				while (currentCycles < targetCycles)
+				{
+					MODE1_BG_SEQUENCE(bgState);
+
+					bgState = (bgState + ONE) & THIRTYONE;
+
+					// next cycle...
+					++currentCycles;
+				}
+				BREAK;
+			}
+			case MODE2:
+			{
+				while (currentCycles < targetCycles)
+				{
+					MODE2_BG_SEQUENCE(bgState);
+
+					bgState = (bgState + ONE) & THIRTYONE;
+
+					// next cycle...
+					++currentCycles;
+				}
+				BREAK;
+			}
+			case MODE3:
+			{
+				while (currentCycles < targetCycles)
+				{
+					MODE3_BG_SEQUENCE(bgState);
+
+					bgState = (bgState + ONE) & THIRTYONE;
+
+					// next cycle...
+					++currentCycles;
+				}
+				BREAK;
+			}
+			case MODE4:
+			{
+				while (currentCycles < targetCycles)
+				{
+					MODE4_BG_SEQUENCE(bgState);
+
+					bgState = (bgState + ONE) & THIRTYONE;
+
+					// next cycle...
+					++currentCycles;
+				}
+				BREAK;
+			}
+			case MODE5:
+			{
+				while (currentCycles < targetCycles)
+				{
+					MODE5_BG_SEQUENCE(bgState);
+
+					bgState = (bgState + ONE) & THIRTYONE;
+
+					// next cycle...
+					++currentCycles;
+				}
+				BREAK;
+			}
+			default:
+			{
+				FATAL("Unknown BG mode");
+			}
+			}
+#else
+			while (currentCycles < targetCycles)
+			{
+				switch (pGBA_display->bgAccessPatternState[currentMode])
+				{
+				case ZERO:
+				{
+					CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG0));
+					CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG0));
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+					CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG0));
+					CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG0));
+#endif
+					CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG3));
+					BREAK;
+				}
+				case ONE:
+				{
+					CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG1));
+					CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG1));
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+					CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG1));
+					CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG1));
+#endif
+					CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG3));
+					BREAK;
+				}
+				case TWO:
+				{
+					CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG2));
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+					CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG2));
+#endif
+					CONDITIONAL(currentMode == MODE1, MODE1_M_AFFINE_BG_CYCLE());
+					CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG2));
+					BREAK;
+				}
+				case THREE:
+				{
+					CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG3));
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+					CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG3));
+#endif
+					CONDITIONAL(currentMode == MODE1, MODE1_T_AFFINE_BG_CYCLE());
+					CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG2));
+					CONDITIONAL(currentMode == MODE3, MODE3_B_BG_CYCLE());
+					CONDITIONAL(currentMode == MODE4, MODE4_B_BG_CYCLE());
+					CONDITIONAL(currentMode == MODE5, MODE5_B_BG_CYCLE());
+					++pGBA_display->currentBgPixel;
+					BREAK;
+				}
+				case FOUR:
+				{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+					CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG0));
+					CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG0));
+#endif
+					CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG0));
+					CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG0));
+					CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG3));
+					BREAK;
+				}
+				case FIVE:
+				{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+					CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG1));
+					CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG1));
+#endif
+					CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG1));
+					CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG1));
+					CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG3));
+					BREAK;
+				}
+				case SIX:
+				{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+					CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG2));
+#endif
+					CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG2));
+					CONDITIONAL(currentMode == MODE1, MODE1_M_AFFINE_BG_CYCLE());
+					CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG2));
+					BREAK;
+				}
+				case SEVEN:
+				{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+					CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG3));
+#endif
+					CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG3));
+					CONDITIONAL(currentMode == MODE1, MODE1_T_AFFINE_BG_CYCLE());
+					CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG2));
+					CONDITIONAL(currentMode == MODE3, MODE3_B_BG_CYCLE());
+					CONDITIONAL(currentMode == MODE4, MODE4_B_BG_CYCLE());
+					CONDITIONAL(currentMode == MODE5, MODE5_B_BG_CYCLE());
+					++pGBA_display->currentBgPixel;
+					BREAK;
+				}
+				case EIGHT:
+				{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+					CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG0));
+					CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG0));
+					CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG0));
+					CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG0));
+#endif
+					CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG3));
+					BREAK;
+				}
+				case NINE:
+				{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+					CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG1));
+					CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG1));
+					CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG1));
+					CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG1));
+#endif
+					CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG3));
+					BREAK;
+				}
+				case TEN:
+				{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+					CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG2));
+					CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG2));
+#endif
+					CONDITIONAL(currentMode == MODE1, MODE1_M_AFFINE_BG_CYCLE());
+					CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG2));
+					BREAK;
+				}
+				case ELEVEN:
+				{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+					CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG3));
+					CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG3));
+#endif
+					CONDITIONAL(currentMode == MODE1, MODE1_T_AFFINE_BG_CYCLE());
+					CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG2));
+					CONDITIONAL(currentMode == MODE3, MODE3_B_BG_CYCLE());
+					CONDITIONAL(currentMode == MODE4, MODE4_B_BG_CYCLE());
+					CONDITIONAL(currentMode == MODE5, MODE5_B_BG_CYCLE());
+					++pGBA_display->currentBgPixel;
+					BREAK;
+				}
+				case TWELVE:
+				{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+					CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG0));
+					CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG0));
+#endif
+					CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG0));
+					CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG0));
+					CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG3));
+					BREAK;
+				}
+				case THIRTEEN:
+				{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+					CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG1));
+					CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG1));
+#endif
+					CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG1));
+					CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG1));
+					CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG3));
+					BREAK;
+				}
+				case FOURTEEN:
+				{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+					CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG2));
+#endif
+					CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG2));
+					CONDITIONAL(currentMode == MODE1, MODE1_M_AFFINE_BG_CYCLE());
+					CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG2));
+					BREAK;
+				}
+				case FIFTEEN:
+				{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+					CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG3));
+#endif
+					CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG3));
+					CONDITIONAL(currentMode == MODE1, MODE1_T_AFFINE_BG_CYCLE());
+					CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG2));
+					CONDITIONAL(currentMode == MODE3, MODE3_B_BG_CYCLE());
+					CONDITIONAL(currentMode == MODE4, MODE4_B_BG_CYCLE());
+					CONDITIONAL(currentMode == MODE5, MODE5_B_BG_CYCLE());
+					++pGBA_display->currentBgPixel;
+					BREAK;
+				}
+				case SIXTEEN:
+				{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+					CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG0));
+					CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG0));
+					CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG0));
+					CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG0));
+#endif
+					CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG3));
+					BREAK;
+				}
+				case SEVENTEEN:
+				{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+					CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG1));
+					CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG1));
+					CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG1));
+					CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG1));
+#endif
+					CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG3));
+					BREAK;
+				}
+				case EIGHTEEN:
+				{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+					CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG2));
+					CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG2));
+#endif
+					CONDITIONAL(currentMode == MODE1, MODE1_M_AFFINE_BG_CYCLE());
+					CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG2));
+					BREAK;
+				}
+				case NINETEEN:
+				{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+					CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG3));
+					CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG3));
+#endif
+					CONDITIONAL(currentMode == MODE1, MODE1_T_AFFINE_BG_CYCLE());
+					CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG2));
+					CONDITIONAL(currentMode == MODE3, MODE3_B_BG_CYCLE());
+					CONDITIONAL(currentMode == MODE4, MODE4_B_BG_CYCLE());
+					CONDITIONAL(currentMode == MODE5, MODE5_B_BG_CYCLE());
+					++pGBA_display->currentBgPixel;
+					BREAK;
+				}
+				case TWENTY:
+				{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+					CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG0));
+					CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG0));
+#endif
+					CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG0));
+					CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG0));
+					CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG3));
+					BREAK;
+				}
+				case TWENTYONE:
+				{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+					CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG1));
+					CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG1));
+#endif
+					CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG1));
+					CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG1));
+					CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG3));
+					BREAK;
+				}
+				case TWENTYTWO:
+				{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+					CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG2));
+#endif
+					CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG2));
+					CONDITIONAL(currentMode == MODE1, MODE1_M_AFFINE_BG_CYCLE());
+					CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG2));
+					BREAK;
+				}
+				case TWENTYTHREE:
+				{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+					CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG3));
+#endif
+					CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG3));
+					CONDITIONAL(currentMode == MODE1, MODE1_T_AFFINE_BG_CYCLE());
+					CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG2));
+					CONDITIONAL(currentMode == MODE3, MODE3_B_BG_CYCLE());
+					CONDITIONAL(currentMode == MODE4, MODE4_B_BG_CYCLE());
+					CONDITIONAL(currentMode == MODE5, MODE5_B_BG_CYCLE());
+					++pGBA_display->currentBgPixel;
+					BREAK;
+				}
+				case TWENTYFOUR:
+				{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+					CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG0));
+					CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG0));
+					CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG0));
+					CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG0));
+#endif
+					CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG3));
+					BREAK;
+				}
+				case TWENTYFIVE:
+				{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+					CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG1));
+					CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG1));
+					CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG1));
+					CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG1));
+#endif
+					CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG3));
+					BREAK;
+				}
+				case TWENTYSIX:
+				{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+					CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG2));
+					CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG2));
+#endif
+					CONDITIONAL(currentMode == MODE1, MODE1_M_AFFINE_BG_CYCLE());
+					CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG2));
+					BREAK;
+				}
+				case TWENTYSEVEN:
+				{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+					CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG3));
+					CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG3));
+#endif
+					CONDITIONAL(currentMode == MODE1, MODE1_T_AFFINE_BG_CYCLE());
+					CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG2));
+					CONDITIONAL(currentMode == MODE3, MODE3_B_BG_CYCLE());
+					CONDITIONAL(currentMode == MODE4, MODE4_B_BG_CYCLE());
+					CONDITIONAL(currentMode == MODE5, MODE5_B_BG_CYCLE());
+					++pGBA_display->currentBgPixel;
+					BREAK;
+				}
+				case TWENTYEIGHT:
+				{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+					CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG0));
+					CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG0));
+#endif
+					CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG0));
+					CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG0));
+					CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG3));
+					BREAK;
+				}
+				case TWENTYNINE:
+				{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+					CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG1));
+					CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG1));
+#endif
+					CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG1));
+					CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG1));
+					CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG3));
+					BREAK;
+				}
+				case THIRTY:
+				{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+					CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG2));
+#endif
+					CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG2));
+					CONDITIONAL(currentMode == MODE1, MODE1_M_AFFINE_BG_CYCLE());
+					CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG2));
+					BREAK;
+				}
+				case THIRTYONE:
+				{
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
+					CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG3));
+#endif
+					CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG3));
+					CONDITIONAL(currentMode == MODE1, MODE1_T_AFFINE_BG_CYCLE());
+					CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG2));
+					CONDITIONAL(currentMode == MODE3, MODE3_B_BG_CYCLE());
+					CONDITIONAL(currentMode == MODE4, MODE4_B_BG_CYCLE());
+					CONDITIONAL(currentMode == MODE5, MODE5_B_BG_CYCLE());
+					++pGBA_display->currentBgPixel;
+					BREAK;
+				}
+				default:
+				{
+					FATAL("PPU mode %d (BG) out of sync", currentMode);
+				}
+				}
+
+				++pGBA_display->bgAccessPatternState[currentMode];
+				if (pGBA_display->bgAccessPatternState[currentMode] >= THIRTYTWO)
+				{
+					pGBA_display->bgAccessPatternState[currentMode] = ZERO;
+				}
+
+				// next cycle...
+				++currentCycles;
+			}
+#endif
+		}
+
+		currentCycles = ZERO;
+		targetCycles = mergeCycles;
+
+		if (performMerging == YES && renderMerge == YES)
+		{
+			// Cache the state once before the loop to avoid repeated array access
+			auto& mergeState = pGBA_display->mergeAccessPatternState[currentMode];
+
+			while (currentCycles < targetCycles)
+			{
+				if (mergeState == ZERO)
+				{
+					MERGE_AND_DISPLAY_PHASE1();
+				}
+				else if (mergeState == TWO)
+				{
+					MERGE_AND_DISPLAY_PHASE2();
+				}
+
+				// Move to the next state and wrap it at 4
+				mergeState = (mergeState + ONE) & THREE;
+
+				// next cycle...
+				++currentCycles;
+			}
+		}
+
+	}
+
+}
+
+MASQ_INLINE void GBA_t::HANDLE_VCOUNT()
+{
+
+	if (pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.VCOUNT_SETTING_LYC == pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY)
+	{
+		if (
+			pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.VCOUNTER_IRQ_ENABLE
+			&&
+			pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.VCOUNT_FLAG == RESET
+			)
+		{
+			requestInterrupts(GBA_INTERRUPT::IRQ_VCOUNT);
+		}
+
+		pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.VCOUNT_FLAG = SET;
+	}
+	else
+	{
+		pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.VCOUNT_FLAG = RESET;
+	}
+
+}
+
 void GBA_t::processPPU(INC64 ppuCycles)
 {
+	if (ppuCycles == RESET) MASQ_UNLIKELY
+	{
+		RETURN;
+	}
+
 	// NOTE: (PPU:01) Refer to "Internal Reference Point Registers" section in http://problemkaputt.de/gbatek-lcd-i-o-bg-rotation-scaling.htm 
 	// Reference points getting copied to internal registers can happen in 2 cases
 	// 1) We are jumping to scanline zero
@@ -5757,4700 +10562,6 @@ void GBA_t::processPPU(INC64 ppuCycles)
 	// On every new scanline, we just add the PD/PB to "Internal Reference Point" registers and load it to the "Affine Buffer"
 	// On every new frame, we just add BGX/BGY to "Internal Reference Point" registers and load it to the "Affine Buffer"
 
-	auto RESET_PIXEL = [&](uint32_t x, uint32_t y)
-		{
-			pGBA_display->gfx_obj[x][y] = ZERO;
-			pGBA_display->objPriority[x][y] = DEFAULT_OBJ_PRIORITY;
-			pGBA_display->gfx_obj_window[x][y] = DISABLED;
-			pGBA_display->gfx_obj_mode[x][y] = OBJECT_MODE::NORMAL;
-			for (ID bgID = BG0; bgID < BG3; bgID++)
-			{
-				pGBA_display->gfx_bg[bgID][x][y] = ZERO;
-			}
-		};
-
-	auto GET_WINDOW_OUTPUT = [&](uint32_t x, uint32_t y, FLAG win0in, FLAG win1in, FLAG winout, FLAG objin)
-		{
-
-#if (DEACTIVATED)
-			auto isWin = [&](uint32_t x, uint32_t y, uint32_t x1, uint32_t x2, uint32_t y1, uint32_t y2)
-				{
-					if (x2 > getScreenWidth() || x1 > x2)
-					{
-						x2 = getScreenWidth();
-					}
-					if (y2 > getScreenHeight() || y1 > y2)
-					{
-						y2 = getScreenHeight();
-					}
-
-					RETURN(x >= x1 && x <= x2) && (y >= y1 && y <= y2);
-				};
-
-			auto isWin0 = [&](uint32_t x, uint32_t y)
-				{
-					RETURN isWin(
-						x
-						, y
-						, pGBA_peripherals->mWIN0HHalfWord.mWINniFields.i1
-						, pGBA_peripherals->mWIN0HHalfWord.mWINniFields.i2
-						, pGBA_peripherals->mWIN0VHalfWord.mWINniFields.i1
-						, pGBA_peripherals->mWIN0VHalfWord.mWINniFields.i2
-					);
-				};
-
-			auto isWin1 = [&](uint32_t x, uint32_t y)
-				{
-					RETURN isWin(
-						x
-						, y
-						, pGBA_peripherals->mWIN1HHalfWord.mWINniFields.i1
-						, pGBA_peripherals->mWIN1HHalfWord.mWINniFields.i2
-						, pGBA_peripherals->mWIN1VHalfWord.mWINniFields.i1
-						, pGBA_peripherals->mWIN1VHalfWord.mWINniFields.i2
-					);
-				};
-#endif
-
-			FLAG is_win0in = pGBA_display->gfx_window[WIN0][x][y];
-			FLAG is_win1in = pGBA_display->gfx_window[WIN1][x][y];
-			FLAG is_winobj = pGBA_display->gfx_obj_window[x][y];
-
-			FLAG win0_display = pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.WIN0_DISP_FLAG == SET;
-			FLAG win1_display = pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.WIN1_DISP_FLAG == SET;
-			FLAG winobj_display = (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.OBJ_DISP_FLAG == SET && pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.SCREEN_DISP_OBJ == SET);
-
-			// Atleast one window should be enabled for winout to be enabled
-			// Now, if any of the win0, win1 or objwin condition fails (provided one of those windows were enabled), then we enter winout condition
-			FLAG winout_display = win0_display || win1_display || winobj_display;
-
-			if (win0_display && is_win0in)
-			{
-				RETURN win0in;
-			}
-			else if (win1_display && is_win1in)
-			{
-				RETURN win1in;
-			}
-			else if (winobj_display && is_winobj)
-			{
-				RETURN objin;
-			}
-			else if (winout_display)
-			{
-				RETURN winout;
-			}
-
-			RETURN ENABLED;
-		};
-
-	auto HANDLE_WINDOW_FOR_BG = [&](uint32_t x, uint32_t y, ID bgID)
-		{
-			if ((x >= ((uint16_t)LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (y >= ((uint16_t)LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
-			{
-				RETURN;
-			}
-
-			FLAG isWindowAllowingBG = YES;
-
-			FLAG win0in = CLEAR;
-			FLAG win1in = CLEAR;
-			FLAG winout = CLEAR;
-			FLAG objin = CLEAR;
-
-			switch (bgID)
-			{
-			case BG0:
-			{
-				win0in = pGBA_peripherals->mWININHalfWord.mWININFields.WIN0_BG_0_EN == SET;
-				win1in = pGBA_peripherals->mWININHalfWord.mWININFields.WIN1_BG_0_EN == SET;
-				winout = pGBA_peripherals->mWINOUTHalfWord.mWINOUTFields.OUTSIDE_BG_0_EN == SET;
-				objin = pGBA_peripherals->mWINOUTHalfWord.mWINOUTFields.OBJ_WIN_BG_0_EN == SET;
-				BREAK;
-			}
-			case BG1:
-			{
-				win0in = pGBA_peripherals->mWININHalfWord.mWININFields.WIN0_BG_1_EN == SET;
-				win1in = pGBA_peripherals->mWININHalfWord.mWININFields.WIN1_BG_1_EN == SET;
-				winout = pGBA_peripherals->mWINOUTHalfWord.mWINOUTFields.OUTSIDE_BG_1_EN == SET;
-				objin = pGBA_peripherals->mWINOUTHalfWord.mWINOUTFields.OBJ_WIN_BG_1_EN == SET;
-				BREAK;
-			}
-			case BG2:
-			{
-				win0in = pGBA_peripherals->mWININHalfWord.mWININFields.WIN0_BG_2_EN == SET;
-				win1in = pGBA_peripherals->mWININHalfWord.mWININFields.WIN1_BG_2_EN == SET;
-				winout = pGBA_peripherals->mWINOUTHalfWord.mWINOUTFields.OUTSIDE_BG_2_EN == SET;
-				objin = pGBA_peripherals->mWINOUTHalfWord.mWINOUTFields.OBJ_WIN_BG_2_EN == SET;
-				BREAK;
-			}
-			case BG3:
-			{
-				win0in = pGBA_peripherals->mWININHalfWord.mWININFields.WIN0_BG_3_EN == SET;
-				win1in = pGBA_peripherals->mWININHalfWord.mWININFields.WIN1_BG_3_EN == SET;
-				winout = pGBA_peripherals->mWINOUTHalfWord.mWINOUTFields.OUTSIDE_BG_3_EN == SET;
-				objin = pGBA_peripherals->mWINOUTHalfWord.mWINOUTFields.OBJ_WIN_BG_3_EN == SET;
-				BREAK;
-			}
-			default:
-			{
-				FATAL("Unknown BG Layer");
-				RETURN;
-			}
-			}
-
-			isWindowAllowingBG = GET_WINDOW_OUTPUT(
-				x
-				, y
-				, win0in
-				, win1in
-				, winout
-				, objin
-			);
-
-			if (isWindowAllowingBG == NO)
-			{
-				pGBA_display->gfx_bg[bgID][x][y] = ZERO;
-			}
-		};
-
-	auto HANDLE_WINDOW_FOR_OBJ = [&](uint32_t x, uint32_t y)
-		{
-			if ((x >= ((uint16_t)LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (y >= ((uint16_t)LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
-			{
-				RETURN;
-			}
-
-			FLAG isWindowAllowingObj = YES;
-
-			FLAG win0in = CLEAR;
-			FLAG win1in = CLEAR;
-			FLAG winout = CLEAR;
-			FLAG objin = CLEAR;
-
-			win0in = pGBA_peripherals->mWININHalfWord.mWININFields.WIN0_OBJ_EN == SET;
-			win1in = pGBA_peripherals->mWININHalfWord.mWININFields.WIN1_OBJ_EN == SET;
-			winout = pGBA_peripherals->mWINOUTHalfWord.mWINOUTFields.OUTSIDE_OBJ_EN == SET;
-			objin = pGBA_peripherals->mWINOUTHalfWord.mWINOUTFields.OBJ_WIN_OBJ_EN == SET;
-
-			isWindowAllowingObj = GET_WINDOW_OUTPUT(
-				x
-				, y
-				, win0in
-				, win1in
-				, winout
-				, objin
-			);
-
-			if (isWindowAllowingObj == NO)
-			{
-				pGBA_display->gfx_obj[x][y] = ZERO;
-			}
-		};
-
-	auto DOES_WINDOW_ALLOW_BLENDING = [&](uint32_t x, uint32_t y)
-		{
-			FLAG isBlendingAllowed = NO;
-
-			if ((x >= ((uint16_t)LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (y >= ((uint16_t)LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
-			{
-				RETURN isBlendingAllowed;
-			}
-
-			FLAG win0in = pGBA_peripherals->mWININHalfWord.mWININFields.WIN0_COLOR_SPL_EFFECT == SET;
-			FLAG win1in = pGBA_peripherals->mWININHalfWord.mWININFields.WIN1_COLOR_SPL_EFFECT == SET;
-			FLAG winout = pGBA_peripherals->mWINOUTHalfWord.mWINOUTFields.OUTSIDE_COLOR_SPL_EFFECT == SET;
-			FLAG objin = pGBA_peripherals->mWINOUTHalfWord.mWINOUTFields.OBJ_WIN_COLOR_SPL_EFFECT == SET;
-
-			isBlendingAllowed = GET_WINDOW_OUTPUT(
-				x
-				, y
-				, win0in
-				, win1in
-				, winout
-				, objin
-			);
-
-			RETURN isBlendingAllowed;
-		};
-
-	auto BLEND = [&](gbaColor_t layer1Pixel, gbaColor_t layer2Pixel, BYTE eva, BYTE evb)
-		{
-			gbaColor_t finalPixel = layer1Pixel;
-
-			const int r_a = (layer1Pixel.raw >> 0) & 31;
-			const int g_a = ((layer1Pixel.raw >> 4) & 62) | (layer1Pixel.raw >> 15);
-			const int b_a = (layer1Pixel.raw >> 10) & 31;
-
-			const int r_b = (layer2Pixel.raw >> 0) & 31;
-			const int g_b = ((layer2Pixel.raw >> 4) & 62) | (layer2Pixel.raw >> 15);
-			const int b_b = (layer2Pixel.raw >> 10) & 31;
-
-			eva = std::min<int>(16, eva);
-			evb = std::min<int>(16, evb);
-
-			const int r = std::min<uint8_t>((r_a * eva + r_b * evb + 8) >> 4, 31);
-			const int g = std::min<uint8_t>((g_a * eva + g_b * evb + 8) >> 4, 63) >> 1;
-			const int b = std::min<uint8_t>((b_a * eva + b_b * evb + 8) >> 4, 31);
-
-			finalPixel.RED = r;
-			finalPixel.GREEN = g;
-			finalPixel.BLUE = b;
-
-			RETURN finalPixel;
-		};
-
-	auto BRIGHTEN = [&](gbaColor_t color, BYTE evy)
-		{
-			gbaColor_t finalPixel = color;
-
-			evy = std::min<int>(16, evy);
-
-			int r = (color.raw >> 0) & 31;
-			int g = ((color.raw >> 4) & 62) | (color.raw >> 15);
-			int b = (color.raw >> 10) & 31;
-
-			r += ((31 - r) * evy + 8) >> 4;
-			g += ((63 - g) * evy + 8) >> 4;
-			b += ((31 - b) * evy + 8) >> 4;
-
-			g >>= 1;
-
-			finalPixel.RED = r;
-			finalPixel.GREEN = g;
-			finalPixel.BLUE = b;
-
-			RETURN finalPixel;
-		};
-
-	auto DARKEN = [&](gbaColor_t color, BYTE evy)
-		{
-			gbaColor_t finalPixel = color;
-
-			evy = std::min<int>(16, evy);
-
-			int r = (color.raw >> 0) & 31;
-			int g = ((color.raw >> 4) & 62) | (color.raw >> 15);
-			int b = (color.raw >> 10) & 31;
-
-			r -= (r * evy + 7) >> 4;
-			g -= (g * evy + 7) >> 4;
-			b -= (b * evy + 7) >> 4;
-
-			g >>= 1;
-
-			finalPixel.RED = r;
-			finalPixel.GREEN = g;
-			finalPixel.BLUE = b;
-
-			RETURN finalPixel;
-		};
-
-	auto MERGE_AND_DISPLAY_PHASE1 = [&]()
-		{
-			// Refer https://nba-emu.github.io/hw-docs/ppu/composite.html
-
-			uint32_t x = pGBA_display->currentMergePixel;
-			uint32_t y = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
-
-			pGBA_display->mergeCache.xCoordinate = x;
-			pGBA_display->mergeCache.yCoordinate = y;
-
-			if ((x >= ((uint16_t)LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (y >= ((uint16_t)LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
-			{
-				; // Do nothing...
-			}
-			else
-			{
-				pGBA_display->layersForBlending[ZERO] = BD;
-				pGBA_display->layersForBlending[ONE] = BD;
-				pGBA_display->colorNumberForBlending[ZERO].colorNumber = ZERO;
-				pGBA_display->colorNumberForBlending[ONE].colorNumber = ZERO;
-				pGBA_display->colorNumberForBlending[ZERO].isObject = NO;
-				pGBA_display->colorNumberForBlending[ONE].isObject = NO;
-				pGBA_display->priorities[ZERO] = THREE; // Set to lowest priority by default
-				pGBA_display->priorities[ONE] = THREE; // Set to lowest priority by default
-
-				if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.FORCED_BLANK == SET)
-				{
-					pGBA_display->colorForBlending[ZERO] = GBA_WHITE;
-				}
-				else
-				{
-					auto getBGxCNT = [&](ID bgID)
-						{
-							if (bgID == BG0)
-							{
-								RETURN (&pGBA_peripherals->mBG0CNTHalfWord);
-							}
-							if (bgID == BG1)
-							{
-								RETURN (&pGBA_peripherals->mBG1CNTHalfWord);
-							}
-							if (bgID == BG2)
-							{
-								RETURN (&pGBA_peripherals->mBG2CNTHalfWord);
-							}
-							if (bgID == BG3)
-							{
-								RETURN (&pGBA_peripherals->mBG3CNTHalfWord);
-							}
-
-							RETURN (mBGnCNTHalfWord_t*)NULL;
-						};
-
-					ID minBG = MIN_MAX_BG_LAYERS[pGBA_display->currentPPUMode][ZERO];
-					ID maxBG = MIN_MAX_BG_LAYERS[pGBA_display->currentPPUMode][ONE];
-
-					// Check if window layer is allowing the bg, if not, marks the pixel as transparent
-					for (ID bgID = minBG; bgID <= maxBG; bgID++)
-					{
-						HANDLE_WINDOW_FOR_BG(x, y, bgID);
-					}
-					// Check if window layer is allowing the obj, if not, marks the pixel as transparent
-					HANDLE_WINDOW_FOR_OBJ(x, y);
-
-					INC8 numberOfBGs = ZERO;
-					for (INC8 priority = ZERO; priority < FOUR; priority++)
-					{
-						for (ID bgID = minBG; bgID <= maxBG; bgID++)
-						{
-							if (getBGxCNT(bgID) != NULL)
-							{
-								if (getBGxCNT(bgID)->mBGnCNTFields.BG_PRIORITY == priority
-									&& (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTHalfWord & (0x100 << bgID)))
-								{
-									pGBA_display->bgListAccToPriority[numberOfBGs++] = bgID;
-								}
-							}
-						}
-					}
-
-					INC8 bgListIndexer = ZERO; // This indexer had to be outside so that we get the second target layer
-					for (INC8 targetLayer = ZERO; targetLayer < TWO; targetLayer++)
-					{
-						// Tranversing from highest priority to lowest priority
-						while (bgListIndexer < numberOfBGs)
-						{
-							ID bgID = pGBA_display->bgListAccToPriority[bgListIndexer];
-
-							++bgListIndexer;
-
-							if (pGBA_display->gfx_bg[bgID][x][y] != ZERO)
-							{
-								pGBA_display->layersForBlending[targetLayer] = bgID;
-								pGBA_display->colorNumberForBlending[targetLayer].colorNumber = pGBA_display->gfx_bg[bgID][x][y];
-								pGBA_display->colorNumberForBlending[targetLayer].isObject = NO;
-								// Priority needs to be maintained so that we can check against OBJs
-								if (getBGxCNT(bgID) != NULL)
-								{
-									pGBA_display->priorities[targetLayer] = getBGxCNT(bgID)->mBGnCNTFields.BG_PRIORITY;
-								}
-								// Need to break, else we will never get the second target layer
-								BREAK;
-							}
-						}
-					}
-
-					if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.SCREEN_DISP_OBJ == SET
-						&& pGBA_display->gfx_obj[x][y] != RESET)
-					{
-						// If object pixel has higher or equal priority to current target layer 1
-						if (pGBA_display->objPriority[x][y] <= pGBA_display->priorities[ZERO])
-						{
-							// Set OBJ as target layer 1
-							// But before this, we need to set target layer 2 as the new target layer 1
-							pGBA_display->layersForBlending[ONE] = pGBA_display->layersForBlending[ZERO];
-							pGBA_display->colorNumberForBlending[ONE].colorNumber = pGBA_display->colorNumberForBlending[ZERO].colorNumber;
-							pGBA_display->colorNumberForBlending[ONE].isObject = pGBA_display->colorNumberForBlending[ZERO].isObject;
-							pGBA_display->layersForBlending[ZERO] = OBJ;
-							pGBA_display->colorNumberForBlending[ZERO].colorNumber = pGBA_display->gfx_obj[x][y];
-							pGBA_display->colorNumberForBlending[ZERO].isObject = YES;
-						}
-						// If object pixel has higher or equal priority to current target layer 2
-						else if (pGBA_display->objPriority[x][y] <= pGBA_display->priorities[ONE])
-						{
-							pGBA_display->layersForBlending[ONE] = OBJ;
-							pGBA_display->colorNumberForBlending[ONE].colorNumber = pGBA_display->gfx_obj[x][y];
-							pGBA_display->colorNumberForBlending[ONE].isObject = YES;
-						}
-					}
-
-					if ((pGBA_display->colorNumberForBlending[ZERO].colorNumber & IS_COLOR_NOT_PALETTE) == 0)
-					{
-						ID paletteIndex = pGBA_display->colorNumberForBlending[ZERO].colorNumber;
-						GBA_WORD addressInPaletteRAM = PALETTE_RAM_START_ADDRESS + paletteIndex;
-						if (pGBA_display->colorNumberForBlending[ZERO].isObject == YES)
-						{
-							addressInPaletteRAM += 0x200;
-						}
-						GBA_HALFWORD paletteData = readRawMemory<GBA_HALFWORD>(addressInPaletteRAM, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
-						pGBA_display->colorForBlending[ZERO].raw = paletteData;
-					}
-					// Mode 3 or Mode 5
-					else
-					{
-						pGBA_display->colorForBlending[ZERO].raw = pGBA_display->colorNumberForBlending[ZERO].colorNumber;
-					}
-				}
-			}
-		};
-
-	auto MERGE_AND_DISPLAY_PHASE2 = [&]()
-		{
-			// Refer https://nba-emu.github.io/hw-docs/ppu/composite.html
-
-			uint32_t x = pGBA_display->mergeCache.xCoordinate;
-			uint32_t y = pGBA_display->mergeCache.yCoordinate;
-
-			if ((x >= ((uint16_t)LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (y >= ((uint16_t)LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
-			{
-				; // Do nothing...
-			}
-			else
-			{
-				gbaColor_t finalPixel = { ZERO };
-
-				if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.FORCED_BLANK == SET)
-				{
-					finalPixel = GBA_WHITE;
-				}
-				else
-				{
-					if (pGBA_display->gfx_obj_mode[x][y] == OBJECT_MODE::ALPHA_BLENDING
-						// No need to check BLDCNT for OBJ if alpha blending is set in OAM (Refer : http://problemkaputt.de/gbatek-lcd-i-o-color-special-effects.htm)
-						&& pGBA_display->layersForBlending[ZERO] == OBJ
-						// Check BLDCNT for target layer 2
-						&& (pGBA_peripherals->mBLDCNTHalfWord.mBLDCNTHalfWord & (0x0100 << pGBA_display->layersForBlending[ONE])))
-					{
-						if ((pGBA_display->colorNumberForBlending[ONE].colorNumber & IS_COLOR_NOT_PALETTE) == 0)
-						{
-							ID paletteIndex = pGBA_display->colorNumberForBlending[ONE].colorNumber;
-							GBA_WORD addressInPaletteRAM = PALETTE_RAM_START_ADDRESS + paletteIndex;
-							if (pGBA_display->colorNumberForBlending[ONE].isObject == YES)
-							{
-								addressInPaletteRAM += 0x200;
-							}
-							GBA_HALFWORD paletteData = readRawMemory<GBA_HALFWORD>(addressInPaletteRAM, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
-							pGBA_display->colorForBlending[ONE].raw = paletteData;
-						}
-						// Mode 3
-						else
-						{
-							pGBA_display->colorForBlending[ONE].raw = pGBA_display->colorNumberForBlending[ONE].colorNumber;
-						}
-
-						finalPixel = BLEND(
-							pGBA_display->colorForBlending[ZERO]
-							, pGBA_display->colorForBlending[ONE]
-							, pGBA_peripherals->mBLDALPHAHalfWord.mBLDALPHAFields.EVA_COEFF
-							, pGBA_peripherals->mBLDALPHAHalfWord.mBLDALPHAFields.EVB_COEFF);
-					}
-					else if (DOES_WINDOW_ALLOW_BLENDING(x, y) == YES && pGBA_peripherals->mBLDCNTHalfWord.mBLDCNTFields.COLOR_SPL_EFFECTS != TO_UINT(COLOR_SPECIAL_EFFECTS::NORMAL))
-					{
-						switch ((COLOR_SPECIAL_EFFECTS)pGBA_peripherals->mBLDCNTHalfWord.mBLDCNTFields.COLOR_SPL_EFFECTS)
-						{
-						case COLOR_SPECIAL_EFFECTS::ALPHA_BLENDING:
-						{
-							if ((pGBA_peripherals->mBLDCNTHalfWord.mBLDCNTHalfWord & (0x0001 << pGBA_display->layersForBlending[ZERO]))
-								&& (pGBA_peripherals->mBLDCNTHalfWord.mBLDCNTHalfWord & (0x0100 << pGBA_display->layersForBlending[ONE])))
-							{
-								if ((pGBA_display->colorNumberForBlending[ONE].colorNumber & IS_COLOR_NOT_PALETTE) == 0)
-								{
-									ID paletteIndex = pGBA_display->colorNumberForBlending[ONE].colorNumber;
-									GBA_WORD addressInPaletteRAM = PALETTE_RAM_START_ADDRESS + paletteIndex;
-									if (pGBA_display->colorNumberForBlending[ONE].isObject == YES)
-									{
-										addressInPaletteRAM += 0x200;
-									}
-									GBA_HALFWORD paletteData = readRawMemory<GBA_HALFWORD>(addressInPaletteRAM, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
-									pGBA_display->colorForBlending[ONE].raw = paletteData;
-								}
-								// Mode 3 or Mode 5
-								else
-								{
-									pGBA_display->colorForBlending[ONE].raw = pGBA_display->colorNumberForBlending[ONE].colorNumber;
-								}
-
-								finalPixel = BLEND(
-									pGBA_display->colorForBlending[ZERO]
-									, pGBA_display->colorForBlending[ONE]
-									, pGBA_peripherals->mBLDALPHAHalfWord.mBLDALPHAFields.EVA_COEFF
-									, pGBA_peripherals->mBLDALPHAHalfWord.mBLDALPHAFields.EVB_COEFF);
-							}
-							else
-							{
-								finalPixel = pGBA_display->colorForBlending[ZERO];
-							}
-
-							BREAK;
-						}
-						case COLOR_SPECIAL_EFFECTS::INCREASE_BRIGHTNESS:
-						{
-							if (pGBA_peripherals->mBLDCNTHalfWord.mBLDCNTHalfWord & (0x0001 << pGBA_display->layersForBlending[ZERO]))
-							{
-								finalPixel = BRIGHTEN(
-									pGBA_display->colorForBlending[ZERO]
-									, pGBA_peripherals->mBLDYHalfWord.mBLDYFields.EVY_COEFF);
-							}
-							else
-							{
-								finalPixel = pGBA_display->colorForBlending[ZERO];
-							}
-
-							BREAK;
-						}
-						case COLOR_SPECIAL_EFFECTS::DECREASE_BRIGHTNESS:
-						{
-							if (pGBA_peripherals->mBLDCNTHalfWord.mBLDCNTHalfWord & (0x0001 << pGBA_display->layersForBlending[ZERO]))
-							{
-								finalPixel = DARKEN(
-									pGBA_display->colorForBlending[ZERO]
-									, pGBA_peripherals->mBLDYHalfWord.mBLDYFields.EVY_COEFF);
-							}
-							else
-							{
-								finalPixel = pGBA_display->colorForBlending[ZERO];
-							}
-
-							BREAK;
-						}
-						default:
-						{
-							FATAL("Unknown Color Special Effect");
-						}
-						}
-					}
-					else
-					{
-						finalPixel = pGBA_display->colorForBlending[ZERO];
-					}
-				}
-
-				RESET_PIXEL(x, y);
-
-				if ((y < getScreenHeight()) && (x < getScreenWidth()))
-				{
-					pGBA_display->imGuiBuffer.imGuiBuffer2D[y][x].a = ALPHA;
-					pGBA_display->imGuiBuffer.imGuiBuffer2D[y][x].r = FIVEBIT_TO_EIGHTBIT_COLOR(finalPixel.RED);
-					pGBA_display->imGuiBuffer.imGuiBuffer2D[y][x].g = FIVEBIT_TO_EIGHTBIT_COLOR(finalPixel.GREEN);
-					pGBA_display->imGuiBuffer.imGuiBuffer2D[y][x].b = FIVEBIT_TO_EIGHTBIT_COLOR(finalPixel.BLUE);
-
-					// increment merge cycles
-					++pGBA_display->currentMergePixel;
-				}
-				else
-				{
-					FATAL("Display Buffer Out Of Bounds");
-				}
-			}
-		};
-
-	auto SET_INITIAL_OBJ_MODE = [&]()
-		{
-			if (pGBA_memory->mGBAMemoryMap.mOamAttributes.mOamAttribute[ZERO].mOamAttr01Word.mOamAttr0HalfWord.mOamAttr0Fields.ROTATE_SCALE_FLAG == SET)
-			{
-				pGBA_display->currentObjectIsAffine = OBJECT_TYPE::OBJECT_IS_AFFINE;
-			}
-			else
-			{
-				pGBA_display->currentObjectIsAffine = OBJECT_TYPE::OBJECT_IS_NOT_AFFINE;
-			}
-		};
-
-	auto OBJ_A01_OBJ_CYCLE = [&](ID oamID)
-		{
-			PPUDEBUG("MODE2_A01_OBJ_CYCLE for OAM%u", oamID);
-
-			FLAG oamIDNeedsToBeRendered = NO;
-
-			// Cache the object fetch stage to avoid repeated memory access
-			auto& objCache = pGBA_display->objCache[TO_UINT(OBJECT_STAGE::OBJECT_FETCH_STAGE)];
-
-			objCache.reset();
-
-			if (oamID >= ONETWENTYEIGHT)
-			{
-				RETURN oamIDNeedsToBeRendered;
-			}
-
-			GBA_WORD oamAddress = OAM_START_ADDRESS + (oamID << THREE);
-			mOamAttr01Word_t oamAttributes01 = { ZERO };
-			oamAttributes01.raw = readRawMemory<GBA_WORD>(oamAddress, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::PPU);
-
-			objCache.ObjAttribute.mOamAttr01Word.raw = oamAttributes01.raw;
-			objCache.spriteYScreenCoordinate = oamAttributes01.mOamAttr0HalfWord.mOamAttr0Fields.Y_COORDINATE;
-
-			if (oamAttributes01.mOamAttr0HalfWord.mOamAttr0Fields.ROTATE_SCALE_FLAG == SET)
-			{
-				pGBA_display->nextObjectIsAffine = OBJECT_TYPE::OBJECT_IS_AFFINE;
-				objCache.isAffine = YES;
-				objCache.spriteHeight = SPRITE_HEIGHTS[oamAttributes01.mOamAttr0HalfWord.mOamAttr0Fields.OBJ_SHAPE][oamAttributes01.mOamAttr1HalfWord.ROT_SCALE_EN.OBJ_SIZE];
-				objCache.spriteWidth = SPRITE_WIDTHS[oamAttributes01.mOamAttr0HalfWord.mOamAttr0Fields.OBJ_SHAPE][oamAttributes01.mOamAttr1HalfWord.ROT_SCALE_EN.OBJ_SIZE];
-
-				objCache.isDoubleAffine = (oamAttributes01.mOamAttr0HalfWord.mOamAttr0Fields.OBJ_DISABLE_OR_DOUBLE_SIZE_FLAG == SET);
-				objCache.isDisabled = NO;
-				objCache.spriteXScreenCoordinate = oamAttributes01.mOamAttr1HalfWord.ROT_SCALE_EN.X_COORDINATE;
-
-				// Perform the double affine adjustments if enabled
-				// https://gbadev.net/tonc/affobj.html
-				if (objCache.isDoubleAffine)
-				{
-					// We shift the sprite towards the center of the doubled area in the screen
-					PPUTODO("Find documentation for shifting sprite to middle when double affine is enabled!");
-					objCache.spriteXScreenCoordinate += (objCache.spriteWidth >> ONE);
-					objCache.spriteYScreenCoordinate += (objCache.spriteHeight >> ONE);
-				}
-
-				// Refer attribute 1 in https://gbadev.net/gbadoc/sprites.html
-				// Refer wrapping effect in	https://gbadev.net/tonc/affobj.html
-				if (objCache.spriteXScreenCoordinate > static_cast<SDIM32>(getScreenWidth()))
-				{
-					objCache.spriteXScreenCoordinate -= 512;
-				}
-			}
-			else
-			{
-				pGBA_display->nextObjectIsAffine = OBJECT_TYPE::OBJECT_IS_NOT_AFFINE;
-				objCache.isAffine = NO;
-				objCache.spriteHeight = SPRITE_HEIGHTS[oamAttributes01.mOamAttr0HalfWord.mOamAttr0Fields.OBJ_SHAPE][oamAttributes01.mOamAttr1HalfWord.ROT_SCALE_DIS.OBJ_SIZE];
-				objCache.spriteWidth = SPRITE_WIDTHS[oamAttributes01.mOamAttr0HalfWord.mOamAttr0Fields.OBJ_SHAPE][oamAttributes01.mOamAttr1HalfWord.ROT_SCALE_DIS.OBJ_SIZE];
-
-				objCache.isDoubleAffine = NO;
-				objCache.isDisabled = (oamAttributes01.mOamAttr0HalfWord.mOamAttr0Fields.OBJ_DISABLE_OR_DOUBLE_SIZE_FLAG == SET);
-				objCache.spriteXScreenCoordinate = oamAttributes01.mOamAttr1HalfWord.ROT_SCALE_DIS.X_COORDINATE;
-
-				// Refer attribute 1 in https://gbadev.net/gbadoc/sprites.html
-				// Refer wrapping effect in	https://gbadev.net/tonc/affobj.html
-				if (objCache.spriteXScreenCoordinate > static_cast<SDIM32>(getScreenWidth()))
-				{
-					objCache.spriteXScreenCoordinate -= 512;
-				}
-			}
-
-			// Refer attribute 0 in https://gbadev.net/gbadoc/sprites.html
-			// Refer wrapping effect in	https://gbadev.net/tonc/affobj.html
-			if (objCache.spriteYScreenCoordinate > static_cast<SDIM32>(getScreenHeight()))
-			{
-				objCache.spriteYScreenCoordinate -= 256; // 255 is max value possible
-			}
-
-			// Setup the min and max coordinates
-			objCache.spriteMaxXScreenCoordinate = objCache.spriteXScreenCoordinate + objCache.spriteWidth;
-			objCache.spriteMaxYScreenCoordinate = objCache.spriteYScreenCoordinate + objCache.spriteHeight;
-			objCache.spriteMinXScreenCoordinate = objCache.spriteXScreenCoordinate;
-			objCache.spriteMinYScreenCoordinate = objCache.spriteYScreenCoordinate;
-
-			if (objCache.isDoubleAffine)
-			{
-				// We need this separate handling because we went ahead with option 2 for double affine
-				objCache.spriteMinXScreenCoordinate -= objCache.spriteWidth / TWO;
-				objCache.spriteMaxXScreenCoordinate += objCache.spriteWidth / TWO;
-				objCache.spriteMinYScreenCoordinate -= objCache.spriteHeight / TWO;
-				objCache.spriteMaxYScreenCoordinate += objCache.spriteHeight / TWO;
-			}
-
-			if (
-				(objCache.isDisabled == NO)
-				&&
-				(objCache.vcount >= objCache.spriteMinYScreenCoordinate)
-				&&
-				(objCache.vcount < objCache.spriteMaxYScreenCoordinate)
-				)
-			{
-				oamIDNeedsToBeRendered = YES;
-			}
-
-			RETURN oamIDNeedsToBeRendered;
-		};
-
-	auto OBJ_A2_OBJ_CYCLE = [&](ID oamID)
-		{
-			PPUDEBUG("MODE2_A2_OBJ_CYCLE for OAM%u", oamID);
-
-			// Directly copy the FETCH stage to the RENDER stage (No need for intermediate reset)
-			auto& renderCache = pGBA_display->objCache[TO_UINT(OBJECT_STAGE::OBJECT_RENDER_STAGE)];
-			renderCache = pGBA_display->objCache[TO_UINT(OBJECT_STAGE::OBJECT_FETCH_STAGE)];
-
-			GBA_WORD oamAddress = OAM_START_ADDRESS + (oamID << THREE) + FOUR;
-			mOamAttr23Word_t oamAttributes23 = { ZERO };
-			oamAttributes23.mOamAttr2HalfWord.mOamAttr2HalfWord = readRawMemory<GBA_HALFWORD>(oamAddress, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
-
-			renderCache.ObjAttribute.mOamAttr23Word.raw = oamAttributes23.raw;
-
-			if (ENABLED)
-			{
-				// If double affine, then we need to start rendering (sprite width / 2) pixels before the actual sprite pixel start and end (sprite width / 2) after actual sprite pixel end
-				if (renderCache.isDoubleAffine == YES)
-				{
-					auto& fetchCache = pGBA_display->objCache[TO_UINT(OBJECT_STAGE::OBJECT_FETCH_STAGE)];
-					renderCache.spriteXStart = -(fetchCache.spriteWidth >> ONE);
-					renderCache.spriteXEnd = fetchCache.spriteWidth + (fetchCache.spriteWidth >> ONE);
-					renderCache.spriteXPixelCoordinate = -(fetchCache.spriteWidth >> ONE); // currently... we havent traversed the sprite in x coordinates...
-				}
-				else
-				{
-					renderCache.spriteXStart = ZERO;
-					renderCache.spriteXEnd = renderCache.spriteWidth;
-					renderCache.spriteXPixelCoordinate = ZERO; // currently... we havent traversed the sprite in x coordinates...
-				}
-
-				renderCache.spriteYPixelCoordinate = renderCache.vcount - renderCache.spriteYScreenCoordinate;
-
-				// Store the base tile ID directly in the render stage
-				renderCache.baseTileID = renderCache.ObjAttribute.mOamAttr23Word.mOamAttr2HalfWord.mOamAttr2Fields.CHARACTER_NAME;
-			}
-		};
-
-	auto OBJ_PA_OBJ_CYCLE = [&](ID oamID)
-		{
-			PPUDEBUG("MODE2_PA_OBJ_CYCLE for OAM%u", oamID);
-
-			// How the rotation matrix is stored in memory is as follows:
-			// 0x07000000	->	Attr0
-			// 0x07000002	->	Attr1
-			// 0x07000004	->	Attr2
-			// 0x07000006	->	PA
-			// 0x07000008	->	Attr0
-			// 0x0700000A	->	Attr1
-			// 0x0700000C	->	Attr2
-			// 0x0700000E	->	PB
-			// 0x07000010	->	Attr0
-			// 0x07000012	->	Attr1
-			// 0x07000014	->	Attr2
-			// 0x07000016	->	PC
-			// 0x07000018	->	Attr0
-			// 0x0700001A	->	Attr1
-			// 0x0700001C	->	Attr2
-			// 0x0700001E	->	PD
-			// 0x07000020	->	Attr0
-			// 0x07000022	->	Attr1
-			// 0x07000024	->	Attr2
-			// 0x07000026	->	PA
-
-			// Gap b/w 1 PA to another is (for eg 0x07000026 - 0x07000006) = 0x20 (32)
-
-			auto& renderCache = pGBA_display->objCache[TO_UINT(OBJECT_STAGE::OBJECT_RENDER_STAGE)];
-			GBA_WORD oamAddress = OAM_START_ADDRESS + (renderCache.ObjAttribute.mOamAttr01Word.mOamAttr1HalfWord.ROT_SCALE_EN.ROT_SCALE_PARAM_SEL << FIVE) + SIX;
-			renderCache.affine.pa = readRawMemory<GBA_HALFWORD>(oamAddress, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
-		};
-
-	auto OBJ_PB_OBJ_CYCLE = [&](ID oamID)
-		{
-			PPUDEBUG("MODE2_PB_OBJ_CYCLE for OAM%u", oamID);
-
-			// Refer to MODE2_PA_OBJ_CYCLE for info on the below equation
-			auto& renderCache = pGBA_display->objCache[TO_UINT(OBJECT_STAGE::OBJECT_RENDER_STAGE)];
-			GBA_WORD oamAddress = OAM_START_ADDRESS + (renderCache.ObjAttribute.mOamAttr01Word.mOamAttr1HalfWord.ROT_SCALE_EN.ROT_SCALE_PARAM_SEL << FIVE) + FOURTEEN;
-			renderCache.affine.pb = readRawMemory<GBA_HALFWORD>(oamAddress, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
-		};
-
-	auto OBJ_PC_OBJ_CYCLE = [&](ID oamID)
-		{
-			PPUDEBUG("MODE2_PC_OBJ_CYCLE for OAM%u", oamID);
-
-			// Refer to MODE2_PA_OBJ_CYCLE for info on the below equation
-			auto& renderCache = pGBA_display->objCache[TO_UINT(OBJECT_STAGE::OBJECT_RENDER_STAGE)];
-			GBA_WORD oamAddress = OAM_START_ADDRESS + (renderCache.ObjAttribute.mOamAttr01Word.mOamAttr1HalfWord.ROT_SCALE_EN.ROT_SCALE_PARAM_SEL << FIVE) + TWENTYTWO;
-			renderCache.affine.pc = readRawMemory<GBA_HALFWORD>(oamAddress, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
-		};
-
-	auto OBJ_PD_OBJ_CYCLE = [&](ID oamID)
-		{
-			PPUDEBUG("MODE2_PD_OBJ_CYCLE for OAM%u", oamID);
-
-			// Refer to MODE2_PA_OBJ_CYCLE for info on the below equation
-			auto& renderCache = pGBA_display->objCache[TO_UINT(OBJECT_STAGE::OBJECT_RENDER_STAGE)];
-			GBA_WORD oamAddress = OAM_START_ADDRESS + (renderCache.ObjAttribute.mOamAttr01Word.mOamAttr1HalfWord.ROT_SCALE_EN.ROT_SCALE_PARAM_SEL << FIVE) + THIRTY;
-			renderCache.affine.pd = readRawMemory<GBA_HALFWORD>(oamAddress, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
-		};
-
-	auto OBJ_V_OBJ_CYCLE = [&](ID oamID, OBJECT_TYPE isAffine, STATE8 state)
-		{
-			PPUDEBUG("MODE2_V_OBJ_CYCLE[%u] for OAM%u", state, oamID);
-
-			auto& objCache = pGBA_display->objCache[TO_UINT(OBJECT_STAGE::OBJECT_RENDER_STAGE)];
-			INC16 spriteXStart = objCache.spriteXPixelCoordinate;
-			INC16 spriteXEnd = RESET;
-
-			if (isAffine == OBJECT_TYPE::OBJECT_IS_NOT_AFFINE)
-			{
-				// Identity matrix (terms which get multiplied will be set to 1 and terms which gets added will be set to 0)
-				objCache.affine.pa = 0xFF;
-				objCache.affine.pb = 0x00;
-				objCache.affine.pc = 0x00;
-				objCache.affine.pd = 0xFF;
-
-				spriteXEnd = spriteXStart + TWO;	// only 2 pixel per VRAM stage
-			}
-			else
-			{
-				spriteXEnd = spriteXStart + ONE;	// only 1 pixel per VRAM stage
-			}
-
-			INC32 transformedSpriteX = ZERO, transformedSpriteY = ZERO;
-			INC16 spriteY = objCache.spriteYPixelCoordinate;
-			SDIM32 Y = objCache.vcount;
-			// update the spriteX coordinates (needed for next VRAM stages)
-			objCache.spriteXPixelCoordinate = spriteXEnd;
-			// check if this needs to be the last vram cycle for this object
-			pGBA_display->lastVRAMCycleForObjFSM = (spriteXEnd == objCache.spriteXEnd) ? YES : NO;
-
-			auto pa = objCache.affine.pa;
-			auto pb = objCache.affine.pb;
-			auto pc = objCache.affine.pc;
-			auto pd = objCache.affine.pd;
-			auto x0 = objCache.spriteWidth >> ONE;
-			auto y0 = objCache.spriteHeight >> ONE;
-
-			for (INC16 spriteX = spriteXStart; spriteX < spriteXEnd; spriteX++)
-			{
-				// NOTE: We need to get the screen coordinates before it got modified because of flip or affine
-				// other wise tranformation from screen space to affine space will get cancelled
-				// even for rotation, this is basically like flipping the sprite coordinated and then again flipping the screen coordinates, flip gets cancelled!
-				int32_t screenX = spriteX + objCache.spriteXScreenCoordinate;
-
-				if (isAffine == OBJECT_TYPE::OBJECT_IS_AFFINE)
-				{
-					/*
-					*	according to formula mentioned in http://problemkaputt.de/gbatek-lcd-i-o-bg-rotation-scaling.htm
-					*	affine can be calculated as follows
-					*
-					*	Using the following expressions,
-					*	  x0,y0    Rotation Center
-					*	  x1,y1    Old Position of a pixel (before rotation/scaling)
-					*	  x2,y2    New position of above pixel (after rotation scaling)
-					*	  A,B,C,D  BG2PA-BG2PD Parameters (as calculated above)
-					*
-					*	the following formula can be used to calculate x2,y2:
-					*
-					*	  x2 = A(x1-x0) + B(y1-y0) + x0
-					*	  y2 = C(x1-x0) + D(y1-y0) + y0
-					*
-					*/
-
-					// for X
-					transformedSpriteX = (pa * (spriteX - x0)) + (pb * (spriteY - y0));
-					// get the integer part of transformedSpriteX
-					transformedSpriteX >>= EIGHT;
-					transformedSpriteX += x0;
-
-					// boundary check post transformation
-					if (transformedSpriteX < 0 || transformedSpriteX >= objCache.spriteWidth)
-						continue;
-
-					// for Y
-					transformedSpriteY = (pc * (spriteX - x0)) + (pd * (spriteY - y0));
-					// get the integer part of transformedSpriteX
-					transformedSpriteY >>= EIGHT;
-					transformedSpriteY += y0;
-
-					// boundary check post transformation
-					if (transformedSpriteY < ZERO || transformedSpriteY >= objCache.spriteHeight)
-						continue;
-				}
-				else
-				{
-					if (objCache.ObjAttribute.mOamAttr01Word.mOamAttr1HalfWord.ROT_SCALE_DIS.HOR_FLIP == SET)
-						transformedSpriteX = objCache.spriteWidth - spriteX - ONE;
-					else
-						transformedSpriteX = spriteX;
-
-					if (objCache.ObjAttribute.mOamAttr01Word.mOamAttr1HalfWord.ROT_SCALE_DIS.VER_FLIP == SET)
-						transformedSpriteY = objCache.spriteHeight - spriteY - ONE;
-					else
-						transformedSpriteY = spriteY;
-				}
-
-				SDIM32 X = screenX;
-
-				if (X >= ZERO && X < static_cast<SDIM32>(getScreenWidth()))
-				{
-					// Y Transformation:
-					if (ENABLED)
-					{
-						/*
-						*	Let's assume the object on the screen is as follows:
-						*
-						*	 ________________________________________________________
-						*	|														|
-						*	|														|
-						*	|														|
-						* 	|														|
-						* 	|				_________________						|
-						* 	|				|		|		|						|
-						*	|				|TY00	|TY01	|						|
-						* 	|				|_______| ______|						|
-						* 	|				|		|		|						|
-						* 	|				|TY10	|TY11	|						|
-						* 	|				|		|		|						|
-						* 	|				__________________						|
-						* 	|														|
-						* 	|														|
-						* 	|														|
-						*	_________________________________________________________
-						*
-						*/
-
-						// To get the row of the tile of interest
-						// we just need to get transformedSpriteY / 8
-						int32_t spriteYTile = transformedSpriteY >> THREE;
-						// Now, to get the column of the tile of interest
-						// we first get the witdth of the tile in terms of number of tiles
-						// i.e. totalwidth of object / 8 gives you how many tiles are there in a row for a given object
-						int32_t widthOfSpriteInTiles = objCache.spriteWidth >> THREE;
-
-						ID tileIDOffsetBecauseOfY = ZERO;
-
-						// Refer https://gbadev.net/gbadoc/sprites.html
-						// Refer http://problemkaputt.de/gbatek-lcd-obj-vram-character-tile-mapping.htm
-						// 2D mapping
-						if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.OBJ_CHAR_VRAM_MAP == RESET)
-						{
-							// Assume tiles are arranged as follows for 2D mapping in memory
-
-							/*
-							*	TILE0000	| TILE0001	| TILE0002	| TILE0003	| TILE0004  | TILE0005  | TILE0006  .... | TILE0031
-							*   TILE0032	| TILE0033	| TILE0034	| TILE0035	| TILE0036	| TILE0037	| TILE0038	.... | TILE0063
-							*	:
-							*   TILE0992	| TILE0993	| TILE0994	| TILE0995	| TILE0996	| TILE0997	| TILE0998	.... | TILE1023
-							*/
-
-							// pixels can be be arranged as a matrix of 32x32 or 16x32 tiles based on 16 or 256 color mode
-
-							// To handle 256 color mode, we need to consider twice as much tiles, we handle this as (<< attribute0.color/palettes)
-
-							// To get the tile offset, lets first process the y tile offset
-							// if 8x8, tileIDOffsetBecauseOfY = 0
-							// if 16x16, tileIDOffsetBecauseOfY = 32
-							// if 32x32, tileIDOffsetBecauseOfY = 64
-
-							// we can get above values of tileIDOffsetBecauseOfY using spriteYTile
-
-							tileIDOffsetBecauseOfY = spriteYTile << FIVE;
-
-							// Note: The reason we don't do anything special for 256 color mode is because "widthOfSpriteInTiles" will be confined to current row
-							// So, next row will never get affected, so tile immediatly below (or few more rows below) the 1st row tile needs to be considered...so we just add multiple of 32 
-						}
-						// 1D mapping
-						else
-						{
-							// Assume tiles are arranged as follows for 2D mapping in memory
-
-							// Refer http://problemkaputt.de/gbatek-lcd-obj-oam-attributes.htm
-							// In 256 color mode
-							/*
-							*	TILE0000	| TILE0002	| TILE0004	| TILE0006	| TILE0008  | TILE0010  | TILE0012  .... | TILE1022
-							*/
-
-							// Otherwise
-
-							/*
-							*	TILE0000	| TILE0001	| TILE0002	| TILE0003	| TILE0004  | TILE0005  | TILE0006  .... | TILE1023
-							*/
-
-							// To handle 256 color mode, we need to consider twice as much tiles, we handle this as (<< attribute0.color/palettes)
-
-							// To get the tile offset, lets first process the y tile offset
-							// if 8x8, tileIDOffsetBecauseOfY = 0
-							// if 16x16, tileIDOffsetBecauseOfY = 2
-							// if 32x32, tileIDOffsetBecauseOfY = 4
-
-							// we can get above values of tileIDOffsetBecauseOfY using spriteYTile and widthOfSpriteInTiles
-
-							tileIDOffsetBecauseOfY = widthOfSpriteInTiles * spriteYTile;
-							// handle 256 color mode if needed (Xly by 2 as widthOfSpriteInTiles becomes double)
-							tileIDOffsetBecauseOfY <<= objCache.ObjAttribute.mOamAttr01Word.mOamAttr0HalfWord.mOamAttr0Fields.COLOR_PALETTES;
-						}
-
-						// after shifting the base tile id in y direction, this is the new base for shifing in x direction
-						objCache.tileIDAfterAccountingForY = tileIDOffsetBecauseOfY;
-					}
-
-					// X Transformation:
-					if (ENABLED)
-					{
-						// now need to get the tile id offset because of X
-						// x offset would be the current sprite x coordinate / 8
-						// refer to diagrams in MODE2_A2_OBJ_CYCLE for more info
-
-						ID tileIDOffsetBecauseOfX = transformedSpriteX >> THREE;
-						// Xly by 2 if 256 color mode because we need to skip every alternative (odd) tiles
-						// refer OBJ Tile Number in http://problemkaputt.de/gbatek-lcd-obj-oam-attributes.htm
-						// so, if tile number is 0, then we remain at 0
-						// if tile number is 1, then we jump to 2
-						// if tile number is 3, then we jump to 6
-						// if tile number is 4, then we jump to 8
-						// and so on...
-						tileIDOffsetBecauseOfX <<= objCache.ObjAttribute.mOamAttr01Word.mOamAttr0HalfWord.mOamAttr0Fields.COLOR_PALETTES;
-
-						objCache.tileIDAfterAccountingForX = tileIDOffsetBecauseOfX;
-					}
-
-					int32_t actualTileID = objCache.baseTileID + objCache.tileIDAfterAccountingForY + objCache.tileIDAfterAccountingForX;
-
-					// using the tileID, we need to fetch the corresponding tile data
-					// for this, we need to first figure out addressInTileDataArea 
-
-					// also, even with addressInTileDataArea, we need to figure out the data pertaining to the pixel within the tile of interest
-					// NOTE: we still do %8 and not %width even for sprites bigger than 8x8 because
-					// 1) for bigger tiles, the tileID would change for every 8x8 which takes care of getting appropriate address... no need to account for it in modulo again
-					// 2) tile data is stored in terms of 8x8 
-
-					SDIM32 xTileCoordinate = transformedSpriteX & SEVEN;
-					SDIM32 yTileCoordinate = transformedSpriteY & SEVEN;
-					GBA_WORD withinTileOffset = xTileCoordinate + (yTileCoordinate << THREE);
-
-					// Refer : http://problemkaputt.de/gbatek-lcd-obj-overview.htm
-					// Refer : http://problemkaputt.de/gbatek-lcd-vram-character-data.htm
-					// NOTE: in tile data area, granularity within the tile data is decided based on 4bpp mode or 8bpp mode
-					// in 4bpp mode, each tile is 32 bytes, first 4 bytes for the topmost row of the tile
-					// each byte representing two dots, the lower 4 bits define the color for the left and upper 4 bits the color for the right dot
-					// in 8bpp mode, each tile is 64 bytes, first 8 bytes for the topmost row of the tile
-					// each byte selects palette entry for each dot
-					// 8bpp mode is the 256 color mode that is represented in attribute 0
-					// Refer : https://gbadev.net/gbadoc/sprites.html
-					// irrespective mode, each tile ID represents 32 bytes of data in sprite tile data area
-					// so the memory address of a tile is roughly 0x06010000 + T*32
-					const INC16 eachIndexReferences32BytesInShifts = FIVE; // Indicates 32 in power of 2 (to use it for optimized multiplication)
-					PPUTODO("Each byte is 64 byte in 8bpp mode, so each index should reference 64 bytes in 8bpp? (Source : NBA)");
-
-					INC32 paletteIndex = RESET;
-
-					// 16 color mode (4bpp mode)
-					if (objCache.ObjAttribute.mOamAttr01Word.mOamAttr0HalfWord.mOamAttr0Fields.COLOR_PALETTES == RESET)
-					{
-						GBA_WORD addressInTileDataArea =
-							VIDEO_RAM_START_ADDRESS
-							+ 0x10000
-							+ (actualTileID << eachIndexReferences32BytesInShifts)
-							// each byte represents 2 dots
-							// divide the withinTileOffset by 2 as single byte can represent 2 pixels
-							// so "withinTileOffset" is halved
-							+(withinTileOffset >> ONE);
-
-						BYTE pixelColorNumberFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);
-
-						// In 4bpp mode, only 4 bits out of pixelColorData represents actual color for pixel, other 4 bits are for the adjascent pixels
-						// As mentioned in http://problemkaputt.de/gbatek-lcd-vram-character-data.htm
-						// lower 4 bits for left dot (lower X) and upper 4 bits for right dot (higher X)
-						// take an example of dot 2 and dot 3
-						// dot 2 needs to use bit0-3 and dot 3 needs to use bit4-7
-						// withinTileOffset gives use dot number within tile
-						// basically, for even dot, we simply extract first 4 bits
-						// for odd dot, we want to shift bit4-7 right by 4 and then extract only first 4 bits
-						// also, using the naming convention of left and right dot given in http://problemkaputt.de/gbatek-lcd-vram-character-data.htm
-						// tile data will be as follows:
-						// row0 : LEFT(000), RIGHT(001), LEFT(002), RIGHT(003), LEFT(004), RIGHT(005), LEFT(006), RIGHT(007)
-						// row1 : LEFT(008), RIGHT(009), LEFT(010), RIGHT(011), LEFT(012), RIGHT(013), LEFT(014), RIGHT(015)
-						// so for odd "withinTileOffset" perform the shift and extract, else directly extract						
-
-						// Odd means we need to shift right by 4
-						if (withinTileOffset & ONE)
-						{
-							pixelColorNumberFromTileData >>= FOUR;
-						}
-						// Extract only the required 4 bits
-						pixelColorNumberFromTileData &= 0x0F;
-
-						// Note: Palette is of 16 bytes, so palette index is 0, when tile data is 0 and palette index is 1, when tile data is 1
-						paletteIndex = pixelColorNumberFromTileData << ONE;
-
-						PPUTODO("Why paletteIndex != ZERO check is needed before accounting for palette bank number in 4bpp mode? \n\
-							Will not having this check cause non-transparent pixel even when transparent is desired? (Source : NBA)");
-						if (paletteIndex != ZERO)
-						{
-							// palette bank number is provided as part of attribute 2 in 4bpp mode
-							// this palette number is the index into one of the 16 16-colored palettes (Refer : https://gbadev.net/gbadoc/sprites.html)
-							// palette ram for sprites goes from 0x05000200 to 0x050003FF which is 512 bytes
-							// Hence, each 16 16-colored palettes should take 32 bytes
-							// OR
-							// we can think that whole sprite palette area is divided into 16 palettes with each palette having 16 colors (Refer : http://problemkaputt.de/gbatek-lcd-color-palettes.htm)
-							// each color is 2 bytes, so each palette takes 16 * 2 bytes = 32 bytes (Refer : http://problemkaputt.de/gbatek-lcd-color-palettes.htm)
-							// Hence, each palette is 32 bytes
-							// palette number in attribute 2 * THIRTYTWO will give the address of desired palette number in sprite palette area
-
-							const DIM16 sizeOfEachPaletteInBytesInShifts = FIVE; // Indicates 32 in power of 2 (to use it for optimized multiplication) 
-							paletteIndex += (objCache.ObjAttribute.mOamAttr23Word.mOamAttr2HalfWord.mOamAttr2Fields.PALETTE_NUMBER << sizeOfEachPaletteInBytesInShifts);
-						}
-					}
-					else
-					{
-						GBA_WORD addressInTileDataArea =
-							VIDEO_RAM_START_ADDRESS
-							+ 0x10000
-							+ (actualTileID << eachIndexReferences32BytesInShifts)
-							+ withinTileOffset;
-
-						BYTE pixelColorNumberFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);
-
-						// Note: Palette is of 16 bytes, so palette index is 0, when tile data is 0 and palette index is 1, when tile data is 1
-						paletteIndex = pixelColorNumberFromTileData << ONE;
-					}
-
-					if ((OBJECT_MODE)objCache.ObjAttribute.mOamAttr01Word.mOamAttr0HalfWord.mOamAttr0Fields.OBJ_MODE == OBJECT_MODE::OBJ_WINDOW
-						&&
-						paletteIndex != ZERO)
-					{
-						pGBA_display->gfx_obj_window[X][Y] = ENABLED;
-					}
-					else if (objCache.ObjAttribute.mOamAttr23Word.mOamAttr2HalfWord.mOamAttr2Fields.PRIORITY < pGBA_display->objPriority[X][Y]
-						||
-						pGBA_display->gfx_obj[X][Y] == ZERO)
-					{
-						PPUTODO("Do we even need this paletteIndex != ZERO check, even if we populate paletteIndex of zero, wont merge take care of transparent sprites? (Source : NBA)");
-						if (paletteIndex != ZERO)
-						{
-							pGBA_display->gfx_obj[X][Y] = paletteIndex;
-							pGBA_display->gfx_obj_mode[X][Y] = (OBJECT_MODE)objCache.ObjAttribute.mOamAttr01Word.mOamAttr0HalfWord.mOamAttr0Fields.OBJ_MODE;
-						}
-						pGBA_display->objPriority[X][Y] = objCache.ObjAttribute.mOamAttr23Word.mOamAttr2HalfWord.mOamAttr2Fields.PRIORITY;
-					}
-				}
-			}
-		};
-
-	auto INCREMENT_OAM_ID = [&]()
-		{
-			// Check and increment objAccessOAMIDState only if it's within bounds
-			if (pGBA_display->objAccessOAMIDState < ONETWENTYEIGHT - ONE)
-			{
-				++pGBA_display->objAccessOAMIDState;
-				RETURN VALID;
-			}
-			RETURN INVALID;
-		};
-
-	auto WIN_CYCLE = [&]()
-		{
-			uint32_t xPixelCoordinate = pGBA_display->currentWinPixel;
-			uint32_t yPixelCoordinate = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
-
-			if ((xPixelCoordinate >= ((uint16_t)LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (yPixelCoordinate >= ((uint16_t)LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
-			{
-				RETURN;
-			}
-
-			// Helper lambda to handle the window logic for both Win0 and Win1
-			auto handle_window = [&](uint32_t x1, uint32_t x2, uint32_t y1, uint32_t y2, FLAG& winH, FLAG& winV, int winIndex)
-				{
-					// Check and adjust the boundaries
-					if (x2 > getScreenWidth() || x1 > x2) x2 = getScreenWidth();
-					if (y2 > getScreenHeight() || y1 > y2) y2 = getScreenHeight();
-
-					// Horizontal and vertical range checks
-					winH = (xPixelCoordinate >= x1 && xPixelCoordinate <= x2) ? YES : NO;
-					winV = (yPixelCoordinate >= y1 && yPixelCoordinate <= y2) ? YES : NO;
-
-					// Update the window pixel array
-					pGBA_display->gfx_window[winIndex][xPixelCoordinate][yPixelCoordinate] = winH && winV;
-				};
-
-			// Handle Win0
-			FLAG win01H = NO, win01V = NO;
-			handle_window(pGBA_peripherals->mWIN0HHalfWord.mWINniFields.i1, pGBA_peripherals->mWIN0HHalfWord.mWINniFields.i2,
-				pGBA_peripherals->mWIN0VHalfWord.mWINniFields.i1, pGBA_peripherals->mWIN0VHalfWord.mWINniFields.i2,
-				win01H, win01V, WIN0);
-
-			// Handle Win1
-			FLAG win11H = NO, win11V = NO;
-			handle_window(pGBA_peripherals->mWIN1HHalfWord.mWINniFields.i1, pGBA_peripherals->mWIN1HHalfWord.mWINniFields.i2,
-				pGBA_peripherals->mWIN1VHalfWord.mWINniFields.i1, pGBA_peripherals->mWIN1VHalfWord.mWINniFields.i2,
-				win11H, win11V, WIN1);
-
-			// increment windows pixel counter
-			++pGBA_display->currentWinPixel;
-		};
-
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-	auto MODE0_M_BG_CYCLE = [&](ID bgID)
-		{
-			uint32_t xPixelCoordinate = pGBA_display->currentBgPixel;
-			uint32_t yPixelCoordinate = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
-
-			// Early bounds check on X and Y
-			if ((xPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (yPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
-			{
-				RETURN;
-			}
-
-			// Bounds check for bgID
-			if (bgID < BG0 || bgID > BG3)
-			{
-				FATAL("Unknown BG in mode 0");
-				RETURN;
-			}
-
-			pGBA_display->bgCache[bgID].xPixelCoordinate = xPixelCoordinate;
-			pGBA_display->bgCache[bgID].yPixelCoordinate = yPixelCoordinate;
-
-			GBA_WORD bgTileMapBaseAddr = ZERO;
-			mBGnCNTHalfWord_t BGxCNT = { ZERO };
-			DIM16 hofs = ZERO;
-			DIM16 vofs = ZERO;
-
-			// Cache BG configuration values for fast access
-			auto getBGConfig = [&](ID id) -> std::tuple<int, FLAG, uint16_t, uint16_t, uint16_t>
-				{
-					switch (id)
-					{
-					case BG0:
-						RETURN {
-							static_cast<int>(pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTFields.SCREEN_BASE_BLOCK * 0x0800),
-							pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET,
-							static_cast<uint16_t>(pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTHalfWord),
-							static_cast<uint16_t>(pGBA_peripherals->mBG0HOFSHalfWord.mBGniOFSFields.OFFSET),
-							static_cast<uint16_t>(pGBA_peripherals->mBG0VOFSHalfWord.mBGniOFSFields.OFFSET)
-						};
-					case BG1:
-						RETURN {
-							static_cast<int>(pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTFields.SCREEN_BASE_BLOCK * 0x0800),
-							pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET,
-							static_cast<uint16_t>(pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTHalfWord),
-							static_cast<uint16_t>(pGBA_peripherals->mBG1HOFSHalfWord.mBGniOFSFields.OFFSET),
-							static_cast<uint16_t>(pGBA_peripherals->mBG1VOFSHalfWord.mBGniOFSFields.OFFSET)
-						};
-					case BG2:
-						RETURN {
-							static_cast<int>(pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTFields.SCREEN_BASE_BLOCK * 0x0800),
-							pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET,
-							static_cast<uint16_t>(pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTHalfWord),
-							static_cast<uint16_t>(pGBA_peripherals->mBG2HOFSHalfWord.mBGniOFSFields.OFFSET),
-							static_cast<uint16_t>(pGBA_peripherals->mBG2VOFSHalfWord.mBGniOFSFields.OFFSET)
-						};
-					case BG3:
-						RETURN {
-							static_cast<int>(pGBA_peripherals->mBG3CNTHalfWord.mBGnCNTFields.SCREEN_BASE_BLOCK * 0x0800),
-							pGBA_peripherals->mBG3CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET,
-							static_cast<uint16_t>(pGBA_peripherals->mBG3CNTHalfWord.mBGnCNTHalfWord),
-							static_cast<uint16_t>(pGBA_peripherals->mBG3HOFSHalfWord.mBGniOFSFields.OFFSET),
-							static_cast<uint16_t>(pGBA_peripherals->mBG3VOFSHalfWord.mBGniOFSFields.OFFSET)
-						};
-					default:
-						// Safe fallback to avoid undefined behavior
-						RETURN { 0, false, 0, 0, 0 };
-					}
-				};
-
-			auto [bgTileMapBaseAddr_, is8bppMode, BGxCNT_, hofs_, vofs_] = getBGConfig(bgID);
-			bgTileMapBaseAddr = bgTileMapBaseAddr_;
-			pGBA_display->bgCache[bgID].is8bppMode = is8bppMode;
-			BGxCNT.mBGnCNTHalfWord = BGxCNT_;
-			hofs = hofs_;
-			vofs = vofs_;
-
-			/*
-			* Refer http://problemkaputt.de/gbatek-lcd-i-o-bg-control.htm
-			* BGs always wraparound, so
-			* offsets = BGxHOFS and BGxHVOFS (BG offsets within static screen)
-			* Final offsets from screen (tileMap_x and tileMap_y) = (x + BGxHOFS) % 512 and (y + BGxHVOFS) % 512
-			* Offsets in tile coordinates (tile_x and tile_y) = Final offsets from screen / 8
-			* Offsets within tile coordinates (WithinTile_x and WithinTile_y) = Final offsets from screen % 8
-			*
-			* When BGxCNT->Size = 0
-			* SC0 -> 256x256
-			* When BGxCNT->Size = 1
-			* SC0 SC1 -> 512x256
-			* When BGxCNT->Size = 2
-			* SC0 -> 256x512
-			* SC1
-			* When BGxCNT->Size = 3
-			* SC0 SC1 -> 512x512
-			* SC2 SC3
-			* SC0 is defined by the normal BG Map base address (Bit 8-12 of BGxCNT),
-			* SC1 uses same address +2K, SC2 address +4K, SC3 address +6K
-			* So, for given x, y we need to figure out in which SCn it falls...
-			* Then each SCn is 256x256, so , number of tiles i.e. tilesPerRow = bitsPerRow / 8 = 32
-			* So, withinTileOffset = (tile_x + (tile_y * tilesPerRow))
-			* But, we do a 16bit read for tile map as mentioned under Mode 0 in https://nba-emu.github.io/hw-docs/ppu/background.html and http://problemkaputt.de/gbatek-lcd-vram-bg-screen-data-format-bg-map.htm unlike non text modes
-			* So, 16withinTileOffset = 2 * withinTileOffset
-			*
-			* Final Address for tile map = [VRAM_START_ADDRESS + bgTileMapBaseAddr + (SCn * 2K) + (16withinTileOffset)]
-			*/
-
-			// Cached sum of coordinates and offsets
-			DIM16 offsetSumX = xPixelCoordinate + hofs;
-			DIM16 offsetSumY = yPixelCoordinate + vofs;
-
-			ID SCn = ZERO;
-			switch (BGxCNT.mBGnCNTFields.SCREEN_SIZE)
-			{
-				// SC0
-			case ZERO: SCn = ZERO; BREAK;
-				// SC0 SC1
-			case ONE: SCn = ((offsetSumX & 511) > 255) ? ONE : ZERO; BREAK;
-				// SC0
-				// SC1
-			case TWO: SCn = ((offsetSumY & 511) > 255) ? ONE : ZERO; BREAK;
-				// SC0 SC1
-				// SC2 SC3
-			case THREE:
-				SCn = ((offsetSumX & 511) > 255) ? ONE : ZERO;
-				SCn += ((offsetSumY & 511) > 255) ? TWO : ZERO;
-				BREAK;
-			default:
-				FATAL("Unknown screen size in mode 0");
-				RETURN;
-			}
-
-			pGBA_display->bgCache[bgID].hofs = hofs;
-			pGBA_display->bgCache[bgID].vofs = vofs;
-
-			// Within SCn
-			DIM16 tileMapX = offsetSumX & 255; // % 256 because because if more than 255, it is SC1 or SC3, but we are already accounting for SCn, so we just get tileX within SCn
-			DIM16 tileMapY = offsetSumY & 255; // % 256 because because if more than 255, it is SC2 or SC3, but we are already accounting for SCn, so we just get tileX within SCn
-
-			pGBA_display->bgCache[bgID].tileMapX = tileMapX;
-			pGBA_display->bgCache[bgID].tileMapY = tileMapY;
-
-			const DIM16 tilesPerRowInShifts = FIVE; // 1 << 5 is same as * 32; Each SCn is of 256*256, so 256 / 8 = 32
-			DIM16 tileMapOffset = (tileMapX >> THREE) + ((tileMapY >> THREE) << tilesPerRowInShifts);
-
-			// Since we have 16 bits per tile instead of 8
-			// Refer http://problemkaputt.de/gbatek-lcd-vram-bg-screen-data-format-bg-map.htm
-			tileMapOffset <<= ONE;
-
-			GBA_WORD addressInTileMapArea = VIDEO_RAM_START_ADDRESS + bgTileMapBaseAddr + (SCn * 0x800) + tileMapOffset;
-
-			// NOTE: Needed for tonc's cbb_demo
-			// Refer: https://www.coranac.com/tonc/text/regbg.htm
-			if (addressInTileMapArea < (VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
-			{
-				pGBA_display->bgCache[bgID].tileDescriptor.raw = readRawMemory<GBA_HALFWORD>(addressInTileMapArea, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
-			}
-			else
-			{
-				pGBA_display->bgCache[bgID].tileDescriptor.raw = RESET;
-				PPUTODO("As per NBA, this is set to some latched value");
-			}
-		};
-
-	auto MODE0_T_BG_CYCLE = [&](ID bgID)
-		{
-			auto X = pGBA_display->currentBgPixel;
-			auto Y = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
-
-			// Early bounds check on X and Y
-			if ((X >= TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (Y >= TO_UINT16(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
-			{
-				RETURN;
-			}
-
-			// Bounds check for bgID
-			if (bgID < BG0 || bgID > BG3)
-			{
-				FATAL("Unknown BG in mode 0");
-				RETURN;
-			}
-
-			GBA_WORD bgTileDataBaseAddr =
-				(bgID == BG0)
-				? (pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTFields.CHARACTER_BASE_BLOCK * 0x4000)
-				: (bgID == BG1)
-				? (pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTFields.CHARACTER_BASE_BLOCK * 0x4000)
-				: (bgID == BG2)
-				? (pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTFields.CHARACTER_BASE_BLOCK * 0x4000)
-				: (pGBA_peripherals->mBG3CNTHalfWord.mBGnCNTFields.CHARACTER_BASE_BLOCK * 0x4000);
-
-			auto xTileCoordinate = pGBA_display->bgCache[bgID].tileMapX & SEVEN; // % 8
-			auto yTileCoordinate = pGBA_display->bgCache[bgID].tileMapY & SEVEN; // % 8
-
-			xTileCoordinate = pGBA_display->bgCache[bgID].tileDescriptor.hflip == YES
-				? flipLUT[xTileCoordinate]
-				: xTileCoordinate;
-
-			yTileCoordinate = pGBA_display->bgCache[bgID].tileDescriptor.vflip == YES
-				? flipLUT[yTileCoordinate]
-				: yTileCoordinate;
-
-			GBA_WORD withinTileDataOffset = xTileCoordinate + (yTileCoordinate << THREE);
-			// Refer http://problemkaputt.de/gbatek-lcd-vram-character-data.htm
-			DIM16 sizeOfEachTileData = (pGBA_display->bgCache[bgID].is8bppMode == NO) ? 0x20 : 0x40;
-
-			// 4bpp mode
-			if (pGBA_display->bgCache[bgID].is8bppMode == NO)
-			{
-				// 4bpp mode
-				GBA_WORD addressInTileDataArea =
-					VIDEO_RAM_START_ADDRESS
-					+ bgTileDataBaseAddr
-					+ (sizeOfEachTileData * pGBA_display->bgCache[bgID].tileDescriptor.fetchedTileID)
-					+ (withinTileDataOffset >> ONE); // Divide by 2 because in 4bpp mode, A single halfword gives data for 4 pixels
-
-				BYTE pixelColorNumberFor2PixelsFromTileData = RESET;
-
-				// NOTE: Needed for tonc's cbb_demo
-				// Refer: https://www.coranac.com/tonc/text/regbg.htm
-				if (addressInTileDataArea < (VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
-				{
-					pixelColorNumberFor2PixelsFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);
-				}
-				else
-				{
-					PPUTODO("As per NBA, pixelColorNumberFor2PixelsFromTileData is set to some latched value");
-				}
-
-				// Note: Palette is of 16 bytes, so palette index is 0, when tile data is 0 and palette index is 1, when tile data is 1
-				// Odd means we need to shift right by 4
-				pixelColorNumberFor2PixelsFromTileData >>= ((withinTileDataOffset & ONE) ? FOUR : ZERO);
-				// extract only the required 4 bits
-				BYTE pixelColorNumberPerPixel = pixelColorNumberFor2PixelsFromTileData & 0x0F;
-				INC32 paletteIndex = pixelColorNumberPerPixel << ONE;
-
-				if (paletteIndex != ZERO)
-				{
-					// Refer mode 2 bg processing to see how we determine sizeOfEachPaletteInBytes
-					const DIM16 sizeOfEachPaletteInBytesInShifts = FIVE; // 1 << 5 is same as *32
-					paletteIndex += (pGBA_display->bgCache[bgID].tileDescriptor.pb << sizeOfEachPaletteInBytesInShifts);
-				}
-				pGBA_display->gfx_bg[bgID][X][Y] = paletteIndex;
-			}
-			else
-			{
-				// 8bpp mode
-				GBA_WORD addressInTileDataArea =
-					VIDEO_RAM_START_ADDRESS
-					+ bgTileDataBaseAddr
-					+ (sizeOfEachTileData * pGBA_display->bgCache[bgID].tileDescriptor.fetchedTileID)
-					+ withinTileDataOffset;
-
-				BYTE pixelColorNumberFor1PixelFromTileData = RESET;
-
-				// NOTE: Needed for tonc's cbb_demo
-				// Refer: https://www.coranac.com/tonc/text/regbg.htm
-				if (addressInTileDataArea < (VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
-				{
-					pixelColorNumberFor1PixelFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);
-				}
-				else
-				{
-					PPUTODO("As per NBA, pixelColorNumberFor1PixelFromTileData is set to some latched value");
-				}
-				
-				// Note: Palette is of 16 bytes, so palette index is 0, when tile data is 0 and palette index is 1, when tile data is 1
-				INC32 paletteIndex = pixelColorNumberFor1PixelFromTileData << ONE;
-				pGBA_display->gfx_bg[bgID][X][Y] = paletteIndex;
-			}
-		};
-
-	auto MODE1_M_TEXT_BG_CYCLE = [&](ID bgID)
-		{
-			uint32_t xPixelCoordinate = pGBA_display->currentBgPixel;
-			uint32_t yPixelCoordinate = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
-
-			// Early bounds check on X and Y
-			if ((xPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (yPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
-			{
-				RETURN;
-			}
-
-			// Bounds check for bgID
-			if (bgID < BG0 || bgID > BG1)
-			{
-				FATAL("Unknown BG in mode 1");
-				RETURN;
-			}
-
-			pGBA_display->bgCache[bgID].xPixelCoordinate = xPixelCoordinate;
-			pGBA_display->bgCache[bgID].yPixelCoordinate = yPixelCoordinate;
-
-			GBA_WORD bgTileMapBaseAddr = ZERO;
-			mBGnCNTHalfWord_t BGxCNT = { ZERO };
-			DIM16 hofs = ZERO;
-			DIM16 vofs = ZERO;
-
-			if (bgID == BG0)
-			{
-				bgTileMapBaseAddr = (pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTFields.SCREEN_BASE_BLOCK * 0x0800);
-				pGBA_display->bgCache[BG0].is8bppMode = pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET;
-				BGxCNT.mBGnCNTHalfWord = pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTHalfWord;
-				hofs = pGBA_peripherals->mBG0HOFSHalfWord.mBGniOFSFields.OFFSET;
-				vofs = pGBA_peripherals->mBG0VOFSHalfWord.mBGniOFSFields.OFFSET;
-			}
-			else if (bgID == BG1)
-			{
-				bgTileMapBaseAddr = (pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTFields.SCREEN_BASE_BLOCK * 0x0800);
-				pGBA_display->bgCache[BG1].is8bppMode = pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET;
-				BGxCNT.mBGnCNTHalfWord = pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTHalfWord;
-				hofs = pGBA_peripherals->mBG1HOFSHalfWord.mBGniOFSFields.OFFSET;
-				vofs = pGBA_peripherals->mBG1VOFSHalfWord.mBGniOFSFields.OFFSET;
-			}
-			else
-			{
-				FATAL("Unknown BG in mode 1 text mode");
-				RETURN;
-			}
-
-			/*
-			* Refer http://problemkaputt.de/gbatek-lcd-i-o-bg-control.htm
-			* BGs always wraparound, so
-			* offsets = BGxHOFS and BGxHVOFS (BG offsets within static screen)
-			* Final offsets from screen (tileMap_x and tileMap_y) = (x + BGxHOFS) % 512 and (y + BGxHVOFS) % 512
-			* Offsets in tile coordinates (tile_x and tile_y) = Final offsets from screen / 8
-			* Offsets within tile coordinates (WithinTile_x and WithinTile_y) = Final offsets from screen % 8
-			*
-			* When BGxCNT->Size = 0
-			* SC0 -> 256x256
-			* When BGxCNT->Size = 1
-			* SC0 SC1 -> 512x256
-			* When BGxCNT->Size = 2
-			* SC0 -> 256x512
-			* SC1
-			* When BGxCNT->Size = 3
-			* SC0 SC1 -> 512x512
-			* SC2 SC3
-			* SC0 is defined by the normal BG Map base address (Bit 8-12 of BGxCNT),
-			* SC1 uses same address +2K, SC2 address +4K, SC3 address +6K
-			* So, for given x, y we need to figure out in which SCn it falls...
-			* Then each SCn is 256x256, so , number of tiles i.e. tilesPerRow = bitsPerRow / 8 = 32
-			* So, withinTileOffset = (tile_x + (tile_y * tilesPerRow))
-			* But, we do a 16bit read for tile map as mentioned under Mode 0 in https://nba-emu.github.io/hw-docs/ppu/background.html and http://problemkaputt.de/gbatek-lcd-vram-bg-screen-data-format-bg-map.htm unlike non text modes
-			* So, 16withinTileOffset = 2 * withinTileOffset
-			*
-			* Final Address for tile map = [VRAM_START_ADDRESS + bgTileMapBaseAddr + (SCn * 2K) + (16withinTileOffset)]
-			*
-			*/
-
-			// Cached sum of coordinates and offsets
-			DIM16 offsetSumX = xPixelCoordinate + hofs;
-			DIM16 offsetSumY = yPixelCoordinate + vofs;
-
-			ID SCn = ZERO;
-			switch (BGxCNT.mBGnCNTFields.SCREEN_SIZE)
-			{
-				// SC0
-			case ZERO: SCn = ZERO; BREAK;
-				// SC0 SC1
-			case ONE: SCn = ((offsetSumX & 511) > 255) ? ONE : ZERO; BREAK;
-				// SC0
-				// SC1
-			case TWO: SCn = ((offsetSumY & 511) > 255) ? ONE : ZERO; BREAK;
-				// SC0 SC1
-				// SC2 SC3
-			case THREE:
-				SCn = ((offsetSumX & 511) > 255) ? ONE : ZERO;
-				SCn += ((offsetSumY & 511) > 255) ? TWO : ZERO;
-				BREAK;
-			default:
-				FATAL("Unknown screen size in mode 0");
-				RETURN;
-			}
-
-			pGBA_display->bgCache[bgID].hofs = hofs;
-			pGBA_display->bgCache[bgID].vofs = vofs;
-
-			// Within SCn
-			DIM16 tileMapX = offsetSumX & 255; // % 256 because because if more than 255, it is SC1 or SC3, but we are already accounting for SCn, so we just get tileX within SCn
-			DIM16 tileMapY = offsetSumY & 255; // % 256 because because if more than 255, it is SC2 or SC3, but we are already accounting for SCn, so we just get tileX within SCn
-
-			pGBA_display->bgCache[bgID].tileMapX = tileMapX;
-			pGBA_display->bgCache[bgID].tileMapY = tileMapY;
-
-			const DIM16 tilesPerRowInShifts = FIVE; // 1 << 5 is same as * 32; Each SCn is of 256*256, so 256 / 8 = 32
-			DIM16 tileMapOffset = (tileMapX >> THREE) + ((tileMapY >> THREE) << tilesPerRowInShifts);
-
-			// Since we have 16 bits per tile instead of 8
-			// Refer http://problemkaputt.de/gbatek-lcd-vram-bg-screen-data-format-bg-map.htm
-			tileMapOffset <<= ONE;
-
-			GBA_WORD addressInTileMapArea = VIDEO_RAM_START_ADDRESS + bgTileMapBaseAddr + (SCn * 0x800) + tileMapOffset;
-
-			// NOTE: Needed for tonc's cbb_demo
-			// Refer: https://www.coranac.com/tonc/text/regbg.htm
-			if (addressInTileMapArea < (VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
-			{
-				pGBA_display->bgCache[bgID].tileDescriptor.raw = readRawMemory<GBA_HALFWORD>(addressInTileMapArea, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
-			}
-			else
-			{
-				pGBA_display->bgCache[bgID].tileDescriptor.raw = RESET
-				PPUTODO("As per NBA, this is set to some latched value");
-			}		
-		};
-
-	auto MODE1_T_TEXT_BG_CYCLE = [&](ID bgID)
-		{
-			auto X = pGBA_display->currentBgPixel;
-			auto Y = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
-
-			// Early bounds check on X and Y
-			if ((X >= TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (Y >= TO_UINT16(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
-			{
-				RETURN;
-			}
-
-			// Bounds check for bgID
-			if (bgID < BG0 || bgID > BG1)
-			{
-				FATAL("Unknown BG in mode 1");
-				RETURN;
-			}
-
-			GBA_WORD bgTileDataBaseAddr = (bgID == BG0)
-				? (pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTFields.CHARACTER_BASE_BLOCK * 0x4000)
-				: (pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTFields.CHARACTER_BASE_BLOCK * 0x4000);
-
-			auto xTileCoordinate = pGBA_display->bgCache[bgID].tileMapX & SEVEN; // % 8
-			auto yTileCoordinate = pGBA_display->bgCache[bgID].tileMapY & SEVEN; // % 8
-
-			xTileCoordinate = pGBA_display->bgCache[bgID].tileDescriptor.hflip == YES
-				? flipLUT[xTileCoordinate]
-				: xTileCoordinate;
-
-			yTileCoordinate = pGBA_display->bgCache[bgID].tileDescriptor.vflip == YES
-				? flipLUT[yTileCoordinate]
-				: yTileCoordinate;
-
-			GBA_WORD withinTileDataOffset = xTileCoordinate + (yTileCoordinate << THREE);
-			// Refer http://problemkaputt.de/gbatek-lcd-vram-character-data.htm
-			DIM16 sizeOfEachTileData = (pGBA_display->bgCache[bgID].is8bppMode == NO) ? 0x20 : 0x40;
-
-			// 4bpp mode
-			if (pGBA_display->bgCache[bgID].is8bppMode == NO)
-			{
-				GBA_WORD addressInTileDataArea =
-					VIDEO_RAM_START_ADDRESS
-					+ bgTileDataBaseAddr
-					+ (sizeOfEachTileData * pGBA_display->bgCache[bgID].tileDescriptor.fetchedTileID)
-					+ (withinTileDataOffset >> ONE); // Divide by 2 because in 4bpp mode, A single halfword gives data for 4 pixels
-
-				BYTE pixelColorNumberFor2PixelsFromTileData = RESET;
-
-				// NOTE: Needed for tonc's cbb_demo
-				// Refer: https://www.coranac.com/tonc/text/regbg.htm
-				if (addressInTileDataArea < (VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
-				{
-					pixelColorNumberFor2PixelsFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);
-				}
-				else
-				{
-					PPUTODO("As per NBA, pixelColorNumberFor2PixelsFromTileData is set to some latched value");
-				}
-
-				// Note: Palette is of 16 bytes, so palette index is 0, when tile data is 0 and palette index is 1, when tile data is 1
-				// Odd means we need to shift right by 4
-				pixelColorNumberFor2PixelsFromTileData >>= ((withinTileDataOffset & ONE) ? FOUR : ZERO);
-				// extract only the required 4 bits
-				BYTE pixelColorNumberPerPixel = pixelColorNumberFor2PixelsFromTileData & 0x0F;
-				INC32 paletteIndex = pixelColorNumberPerPixel << ONE;
-
-				if (paletteIndex != ZERO)
-				{
-					// Refer mode 2 bg processing to see how we determine sizeOfEachPaletteInBytes
-					const DIM16 sizeOfEachPaletteInBytesInShifts = FIVE; // 1 << 5 is same as *32
-					paletteIndex += (pGBA_display->bgCache[bgID].tileDescriptor.pb << sizeOfEachPaletteInBytesInShifts);
-				}
-				pGBA_display->gfx_bg[bgID][X][Y] = paletteIndex;
-			}
-			// 8bpp mode
-			else
-			{
-				// 8bpp mode
-				GBA_WORD addressInTileDataArea =
-					VIDEO_RAM_START_ADDRESS
-					+ bgTileDataBaseAddr
-					+ (sizeOfEachTileData * pGBA_display->bgCache[bgID].tileDescriptor.fetchedTileID)
-					+ withinTileDataOffset;
-
-				BYTE pixelColorNumberFor1PixelFromTileData = RESET;
-
-				// NOTE: Needed for tonc's cbb_demo
-				// Refer: https://www.coranac.com/tonc/text/regbg.htm
-				if (addressInTileDataArea < (VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
-				{
-					pixelColorNumberFor1PixelFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);
-				}
-				else
-				{
-					PPUTODO("As per NBA, pixelColorNumberFor1PixelFromTileData is set to some latched value");
-				}
-
-				// Note: Palette is of 16 bytes, so palette index is 0, when tile data is 0 and palette index is 1, when tile data is 1
-				INC32 paletteIndex = pixelColorNumberFor1PixelFromTileData << ONE;
-				pGBA_display->gfx_bg[bgID][X][Y] = paletteIndex;
-			}
-		};
-#else
-	auto RENDER_MODE0_MODE1_PIXEL_X = [&](ID bgID, GBA_HALFWORD pixelData, STATE8 state)
-		{
-			auto Y = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
-
-			if (pGBA_display->currentBgPixelInTextMode[bgID] >= (TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)))
-			{
-				RETURN;
-			}
-
-			if (pGBA_display->bgCache[bgID].is8bppMode == NO)
-			{
-				// 4bpp mode
-
-				GBA_HALFWORD pixelColorNumberFor4PixelsFromTileData = pixelData;
-
-				if (pGBA_display->bgCache[bgID].tileDescriptor.hflip == YES)
-				{
-					// First we take care of flipping 8 bits
-					pixelColorNumberFor4PixelsFromTileData =
-						((pixelColorNumberFor4PixelsFromTileData >> EIGHT) | (pixelColorNumberFor4PixelsFromTileData << EIGHT));
-
-					// Next we flip the 4 bits within the already flipped 8 bits
-
-					pixelColorNumberFor4PixelsFromTileData =
-						(((pixelColorNumberFor4PixelsFromTileData & 0xF0F0) >> FOUR)
-							| ((pixelColorNumberFor4PixelsFromTileData & 0x0F0F) << FOUR));
-				}
-
-				BYTE pixelColorNumberPerPixel = ZERO;
-				// Note: Palette is of 16 bytes, so palette index is 0, when tile data is 0 and paletee index is 1, when tile data is 1
-				INC32 paletteIndex = ZERO;
-
-				// pixel
-				if (pGBA_display->currentBgPixelInTextMode[bgID] < (TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)))
-				{
-					pixelColorNumberPerPixel = ((pixelColorNumberFor4PixelsFromTileData >> (state * FOUR)) & 0x000F);
-					paletteIndex = pixelColorNumberPerPixel << ONE;
-					if (pGBA_display->bgCache[bgID].subTileScrollingPixelDrops <= ZERO)
-					{
-						if (paletteIndex != ZERO)
-						{
-							// Refer mode 2 bg processing to see how we determine sizeOfEachPaletteInBytes
-							const DIM16 sizeOfEachPaletteInBytesInShifts = FIVE; // 1 << 5 is same as *32
-							paletteIndex += (pGBA_display->bgCache[bgID].tileDescriptor.pb << sizeOfEachPaletteInBytesInShifts);
-						}
-						pGBA_display->gfx_bg[bgID][pGBA_display->currentBgPixelInTextMode[bgID]++][Y] = paletteIndex;
-						++pGBA_display->bgCache[bgID].subTileIndexer;
-					}
-				}
-
-				if (pGBA_display->bgCache[bgID].subTileScrollingPixelDrops > ZERO)
-				{
-					--pGBA_display->bgCache[bgID].subTileScrollingPixelDrops;
-				}
-			}
-			else
-			{
-				// 8bpp mode
-
-				GBA_HALFWORD pixelColorNumberFor2PixelsFromTileData = pixelData;;
-
-				if (pGBA_display->bgCache[bgID].tileDescriptor.hflip == YES)
-				{
-					// We only take care of flipping 8 bits
-					pixelColorNumberFor2PixelsFromTileData =
-						((pixelColorNumberFor2PixelsFromTileData >> EIGHT) | (pixelColorNumberFor2PixelsFromTileData << EIGHT));
-				}
-
-				BYTE pixelColorNumberPerPixel = ZERO;
-				// Note: Palette is of 16 bytes, so palette index is 0, when tile data is 0 and paletee index is 1, when tile data is 1
-				INC32 paletteIndex = ZERO;
-
-				// pixel
-				if (pGBA_display->currentBgPixelInTextMode[bgID] < (TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)))
-				{
-					pixelColorNumberPerPixel = ((pixelColorNumberFor2PixelsFromTileData >> (state * EIGHT)) & 0x00FF);
-					paletteIndex = pixelColorNumberPerPixel << ONE;
-					if (pGBA_display->bgCache[bgID].subTileScrollingPixelDrops <= ZERO)
-					{
-						pGBA_display->gfx_bg[bgID][pGBA_display->currentBgPixelInTextMode[bgID]++][Y] = paletteIndex;
-						++pGBA_display->bgCache[bgID].subTileIndexer;
-					}
-				}
-
-				if (pGBA_display->bgCache[bgID].subTileScrollingPixelDrops > ZERO)
-				{
-					--pGBA_display->bgCache[bgID].subTileScrollingPixelDrops;
-				}
-			}
-		};
-
-	auto MODE0_M_BG_CYCLE = [&](ID bgID)
-		{
-			uint32_t xPixelCoordinate = pGBA_display->currentBgPixelInTextMode[bgID];
-			uint32_t yPixelCoordinate = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
-
-			// Early bounds check on X and Y
-			if ((xPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (yPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
-			{
-				RETURN;
-			}
-
-			pGBA_display->bgCache[bgID].xPixelCoordinate = xPixelCoordinate;
-			pGBA_display->bgCache[bgID].yPixelCoordinate = yPixelCoordinate;
-
-			GBA_WORD bgTileMapBaseAddr = ZERO;
-			mBGnCNTHalfWord_t BGxCNT = { ZERO };
-
-			// Cache BG configuration values for fast access
-			auto getBGConfig = [&](ID id) -> std::tuple<int, FLAG, uint16_t, uint16_t, uint16_t>
-				{
-					switch (id)
-					{
-					case BG0:
-						RETURN {
-							static_cast<int>(pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTFields.SCREEN_BASE_BLOCK * 0x0800),
-							pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET,
-							static_cast<uint16_t>(pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTHalfWord),
-							static_cast<uint16_t>(pGBA_peripherals->mBG0HOFSHalfWord.mBGniOFSFields.OFFSET),
-							static_cast<uint16_t>(pGBA_peripherals->mBG0VOFSHalfWord.mBGniOFSFields.OFFSET)
-						};
-					case BG1:
-						RETURN {
-							static_cast<int>(pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTFields.SCREEN_BASE_BLOCK * 0x0800),
-							pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET,
-							static_cast<uint16_t>(pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTHalfWord),
-							static_cast<uint16_t>(pGBA_peripherals->mBG1HOFSHalfWord.mBGniOFSFields.OFFSET),
-							static_cast<uint16_t>(pGBA_peripherals->mBG1VOFSHalfWord.mBGniOFSFields.OFFSET)
-						};
-					case BG2:
-						RETURN {
-							static_cast<int>(pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTFields.SCREEN_BASE_BLOCK * 0x0800),
-							pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET,
-							static_cast<uint16_t>(pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTHalfWord),
-							static_cast<uint16_t>(pGBA_peripherals->mBG2HOFSHalfWord.mBGniOFSFields.OFFSET),
-							static_cast<uint16_t>(pGBA_peripherals->mBG2VOFSHalfWord.mBGniOFSFields.OFFSET)
-						};
-					case BG3:
-						RETURN {
-							static_cast<int>(pGBA_peripherals->mBG3CNTHalfWord.mBGnCNTFields.SCREEN_BASE_BLOCK * 0x0800),
-							pGBA_peripherals->mBG3CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET,
-							static_cast<uint16_t>(pGBA_peripherals->mBG3CNTHalfWord.mBGnCNTHalfWord),
-							static_cast<uint16_t>(pGBA_peripherals->mBG3HOFSHalfWord.mBGniOFSFields.OFFSET),
-							static_cast<uint16_t>(pGBA_peripherals->mBG3VOFSHalfWord.mBGniOFSFields.OFFSET)
-						};
-					default:
-						// Safe fallback to avoid undefined behavior
-						RETURN { 0, false, 0, 0, 0 };
-					}
-				};
-
-			auto [bgTileMapBaseAddr_, is8bppMode, BGxCNT_, hofs_, vofs_] = getBGConfig(bgID);
-			bgTileMapBaseAddr = bgTileMapBaseAddr_;
-			pGBA_display->bgCache[bgID].is8bppMode = is8bppMode;
-			BGxCNT.mBGnCNTHalfWord = BGxCNT_;
-			pGBA_display->bgCache[bgID].hofs = hofs_;
-			pGBA_display->bgCache[bgID].vofs = vofs_;
-
-			/*
-			* Refer http://problemkaputt.de/gbatek-lcd-i-o-bg-control.htm
-			* BGs always wraparound, so
-			* offsets = BGxHOFS and BGxHVOFS (BG offsets within static screen)
-			* Final offsets from screen (tileMap_x and tileMap_y) = (x + BGxHOFS) % 512 and (y + BGxHVOFS) % 512
-			* Offsets in tile coordinates (tile_x and tile_y) = Final offsets from screen / 8
-			* Offsets within tile coordinates (WithinTile_x and WithinTile_y) = Final offsets from screen % 8
-			*
-			* When BGxCNT->Size = 0
-			* SC0 -> 256x256
-			* When BGxCNT->Size = 1
-			* SC0 SC1 -> 512x256
-			* When BGxCNT->Size = 2
-			* SC0 -> 256x512
-			* SC1
-			* When BGxCNT->Size = 3
-			* SC0 SC1 -> 512x512
-			* SC2 SC3
-			* SC0 is defined by the normal BG Map base address (Bit 8-12 of BGxCNT),
-			* SC1 uses same address +2K, SC2 address +4K, SC3 address +6K
-			* So, for given x, y we need to figure out in which SCn it falls...
-			* Then each SCn is 256x256, so , number of tiles i.e. tilesPerRow = bitsPerRow / 8 = 32
-			* So, withinTileOffset = (tile_x + (tile_y * tilesPerRow))
-			* But, we do a 16bit read for tile map as mentioned under Mode 0 in https://nba-emu.github.io/hw-docs/ppu/background.html and http://problemkaputt.de/gbatek-lcd-vram-bg-screen-data-format-bg-map.htm unlike non text modes
-			* So, 16withinTileOffset = 2 * withinTileOffset
-			*
-			* Final Address for tile map = [VRAM_START_ADDRESS + bgTileMapBaseAddr + (SCn * 2K) + (16withinTileOffset)]
-			*/
-
-			// Cached sum of coordinates and offsets
-			DIM16 offsetSumX = xPixelCoordinate + pGBA_display->bgCache[bgID].hofs;
-			DIM16 offsetSumY = yPixelCoordinate + pGBA_display->bgCache[bgID].vofs;
-
-			ID SCn = ZERO;
-			switch (BGxCNT.mBGnCNTFields.SCREEN_SIZE)
-			{
-				// SC0
-			case ZERO: SCn = ZERO; BREAK;
-				// SC0 SC1
-			case ONE: SCn = ((offsetSumX & 511) > 255) ? ONE : ZERO; BREAK;
-				// SC0
-				// SC1
-			case TWO: SCn = ((offsetSumY & 511) > 255) ? ONE : ZERO; BREAK;
-				// SC0 SC1
-				// SC2 SC3
-			case THREE:
-				SCn = ((offsetSumX & 511) > 255) ? ONE : ZERO;
-				SCn += ((offsetSumY & 511) > 255) ? TWO : ZERO;
-				BREAK;
-			default:
-				FATAL("Unknown screen size in mode 0");
-				RETURN;
-			}
-
-			// Within SCn
-			DIM16 tileMapX = offsetSumX & 255; // % 256 because because if more than 255, it is SC1 or SC3, but we are already accounting for SCn, so we just get tileX within SCn
-			DIM16 tileMapY = offsetSumY & 255; // % 256 because because if more than 255, it is SC2 or SC3, but we are already accounting for SCn, so we just get tileX within SCn
-
-			pGBA_display->bgCache[bgID].tileMapX = tileMapX;
-			pGBA_display->bgCache[bgID].tileMapY = tileMapY;
-
-			const DIM16 tilesPerRowInShifts = FIVE; // 1 << 5 is same as * 32; Each SCn is of 256*256, so 256 / 8 = 32
-			DIM16 tileMapOffset = (tileMapX >> THREE) + ((tileMapY >> THREE) << tilesPerRowInShifts);
-
-			// Since we have 16 bits per tile instead of 8
-			// Refer http://problemkaputt.de/gbatek-lcd-vram-bg-screen-data-format-bg-map.htm
-			tileMapOffset <<= ONE;
-
-			GBA_WORD addressInTileMapArea = VIDEO_RAM_START_ADDRESS + bgTileMapBaseAddr + (SCn * 0x800) + tileMapOffset;
-
-			// NOTE: Needed for tonc's cbb_demo
-			// Refer: https://www.coranac.com/tonc/text/regbg.htm
-			if (addressInTileMapArea < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
-			{
-				pGBA_display->bgCache[bgID].tileDescriptor.raw = readRawMemory<GBA_HALFWORD>(addressInTileMapArea, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
-			}
-			else
-			{
-				pGBA_display->bgCache[bgID].tileDescriptor.raw = RESET;
-				PPUTODO("As per NBA, this is set to some latched value");
-			}
-
-			pGBA_display->bgCache[bgID].subTileIndexer = ZERO;
-
-			if ((tileMapX & SEVEN) != ZERO)
-			{
-				PPUEVENT("Sub-tile scrolling in mode 0 bg%d!", bgID);
-
-				// This indicates sub-tile scrolling as mentioned in https://nba-emu.github.io/hw-docs/ppu/background.html
-				// Assume that tileMapX % 8 is 5, this indicates that only 8-5=3 pixels from the end of previous tile needs to be rendered
-				// As mentioned above, only few pixels of the 1st and last tile would be visible in this case...
-				// but still, ppu fetches all 8 pixels
-				// So, during the previous MODE0_M_BG_CYCLE, we would have fetched the complete tile descriptor for the whole tile (all 8 pixels)
-				// Using the example that we were just discussing, 3 pixels from the end needs to be rendered in X=0, X=1 and X=2
-				// i.e. first 5 pixels eventhough fetched from VRAM needs to be dropped
-
-				if (xPixelCoordinate == ZERO)
-				{
-					pGBA_display->bgCache[bgID].subTileScrollingPixelDrops = tileMapX & SEVEN;
-				}
-				else
-				{
-					pGBA_display->bgCache[bgID].subTileScrollingPixelDrops = RESET;
-				}
-			}
-			else
-			{
-				pGBA_display->bgCache[bgID].subTileScrollingPixelDrops = RESET;
-			}
-		};
-
-	auto MODE0_T_BG_CYCLE = [&](ID bgID)
-		{
-			auto X = pGBA_display->currentBgPixelInTextMode[bgID];
-			auto Y = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
-
-			// Early bounds check on X and Y
-			if ((X >= TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (Y >= TO_UINT16(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
-			{
-				RETURN;
-			}
-
-			// Bounds check for bgID
-			if (bgID < BG0 || bgID > BG3)
-			{
-				FATAL("Unknown BG in mode 0");
-				RETURN;
-			}
-
-			if (ENABLED)
-			{
-				// Cache BG configuration values for fast access
-				auto getBGConfig = [&](ID id) -> std::tuple<FLAG, uint16_t, uint16_t>
-					{
-						switch (id)
-						{
-						case BG0:
-							RETURN {
-								pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET,
-								static_cast<uint16_t>(pGBA_peripherals->mBG0HOFSHalfWord.mBGniOFSFields.OFFSET),
-								static_cast<uint16_t>(pGBA_peripherals->mBG0VOFSHalfWord.mBGniOFSFields.OFFSET)
-							};
-						case BG1:
-							RETURN {
-								pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET,
-								static_cast<uint16_t>(pGBA_peripherals->mBG1HOFSHalfWord.mBGniOFSFields.OFFSET),
-								static_cast<uint16_t>(pGBA_peripherals->mBG1VOFSHalfWord.mBGniOFSFields.OFFSET)
-							};
-						case BG2:
-							RETURN {
-								pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET,
-								static_cast<uint16_t>(pGBA_peripherals->mBG2HOFSHalfWord.mBGniOFSFields.OFFSET),
-								static_cast<uint16_t>(pGBA_peripherals->mBG2VOFSHalfWord.mBGniOFSFields.OFFSET)
-							};
-						case BG3:
-							RETURN {
-								pGBA_peripherals->mBG3CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET,
-								static_cast<uint16_t>(pGBA_peripherals->mBG3HOFSHalfWord.mBGniOFSFields.OFFSET),
-								static_cast<uint16_t>(pGBA_peripherals->mBG3VOFSHalfWord.mBGniOFSFields.OFFSET)
-							};
-						default:
-							RETURN { false, 0, 0 };
-						}
-					};
-
-				auto [is8bppMode, hofs_, vofs_] = getBGConfig(bgID);
-				pGBA_display->bgCache[bgID].is8bppMode = is8bppMode;
-				pGBA_display->bgCache[bgID].hofs = hofs_;
-				pGBA_display->bgCache[bgID].vofs = vofs_;
-			}
-
-			GBA_WORD bgTileDataBaseAddr =
-				(bgID == BG0)
-				? (pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTFields.CHARACTER_BASE_BLOCK * 0x4000)
-				: (bgID == BG1)
-				? (pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTFields.CHARACTER_BASE_BLOCK * 0x4000)
-				: (bgID == BG2)
-				? (pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTFields.CHARACTER_BASE_BLOCK * 0x4000)
-				: (pGBA_peripherals->mBG3CNTHalfWord.mBGnCNTFields.CHARACTER_BASE_BLOCK * 0x4000);
-
-			auto xTileCoordinate = ((X + pGBA_display->bgCache[bgID].hofs) & 255) & SEVEN; // % 8
-			auto yTileCoordinate = ((Y + pGBA_display->bgCache[bgID].vofs) & 255) & SEVEN; // % 8
-
-			xTileCoordinate = pGBA_display->bgCache[bgID].tileDescriptor.hflip == YES
-				? flipLUT[xTileCoordinate]
-				: xTileCoordinate;
-
-			yTileCoordinate = pGBA_display->bgCache[bgID].tileDescriptor.vflip == YES
-				? flipLUT[yTileCoordinate]
-				: yTileCoordinate;
-
-			GBA_WORD withinTileDataOffset = xTileCoordinate + (yTileCoordinate << THREE);
-			// Refer http://problemkaputt.de/gbatek-lcd-vram-character-data.htm
-			DIM16 sizeOfEachTileData = (pGBA_display->bgCache[bgID].is8bppMode == NO) ? 0x20 : 0x40;
-
-			if (pGBA_display->bgCache[bgID].is8bppMode == NO)
-			{
-				// 4bpp mode
-				GBA_WORD addressInTileDataArea =
-					VIDEO_RAM_START_ADDRESS
-					+ bgTileDataBaseAddr
-					+ (sizeOfEachTileData * pGBA_display->bgCache[bgID].tileDescriptor.fetchedTileID)
-					+ (withinTileDataOffset >> ONE); // Divide by 2 because in 4bpp mode, A single halfword gives data for 4 pixels
-
-				// NOTE: Needed for tonc's cbb_demo
-				// Refer: https://www.coranac.com/tonc/text/regbg.htm
-				if (addressInTileDataArea < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
-				{
-					pGBA_display->bgCache[bgID].pixelColorNumberFor4PixelsFromTileData = readRawMemory<GBA_HALFWORD>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
-				}
-				else
-				{
-					pGBA_display->bgCache[bgID].pixelColorNumberFor4PixelsFromTileData = RESET;
-					PPUTODO("As per NBA, this is set to some latched value");
-				}
-
-				RENDER_MODE0_MODE1_PIXEL_X(bgID, pGBA_display->bgCache[bgID].pixelColorNumberFor4PixelsFromTileData, ZERO);
-				RENDER_MODE0_MODE1_PIXEL_X(bgID, pGBA_display->bgCache[bgID].pixelColorNumberFor4PixelsFromTileData, ONE);
-				RENDER_MODE0_MODE1_PIXEL_X(bgID, pGBA_display->bgCache[bgID].pixelColorNumberFor4PixelsFromTileData, TWO);
-				RENDER_MODE0_MODE1_PIXEL_X(bgID, pGBA_display->bgCache[bgID].pixelColorNumberFor4PixelsFromTileData, THREE);
-			}
-			else
-			{
-				// 8bpp mode
-				GBA_WORD addressInTileDataArea =
-					VIDEO_RAM_START_ADDRESS
-					+ bgTileDataBaseAddr
-					+ (sizeOfEachTileData * pGBA_display->bgCache[bgID].tileDescriptor.fetchedTileID)
-					+ withinTileDataOffset;
-
-				// NOTE: Needed for tonc's cbb_demo
-				// Refer: https://www.coranac.com/tonc/text/regbg.htm
-				if (addressInTileDataArea < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
-				{
-					pGBA_display->bgCache[bgID].pixelColorNumberFor2PixelsFromTileData = readRawMemory<GBA_HALFWORD>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
-				}
-				else
-				{
-					pGBA_display->bgCache[bgID].pixelColorNumberFor2PixelsFromTileData = RESET;
-					PPUTODO("As per NBA, this is set to some latched value");
-				}
-
-				RENDER_MODE0_MODE1_PIXEL_X(bgID, pGBA_display->bgCache[bgID].pixelColorNumberFor2PixelsFromTileData, ZERO);
-				RENDER_MODE0_MODE1_PIXEL_X(bgID, pGBA_display->bgCache[bgID].pixelColorNumberFor2PixelsFromTileData, ONE);
-			}
-		};
-
-	auto MODE1_M_TEXT_BG_CYCLE = [&](ID bgID)
-		{
-			uint32_t xPixelCoordinate = pGBA_display->currentBgPixelInTextMode[bgID];
-			uint32_t yPixelCoordinate = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
-
-			// Early bounds check on X and Y
-			if ((xPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (yPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
-			{
-				RETURN;
-			}
-
-			// Bounds check for bgID
-			if (bgID < BG0 || bgID > BG1)
-			{
-				FATAL("Unknown BG in mode 1");
-				RETURN;
-			}
-
-			pGBA_display->bgCache[bgID].xPixelCoordinate = xPixelCoordinate;
-			pGBA_display->bgCache[bgID].yPixelCoordinate = yPixelCoordinate;
-
-			GBA_WORD bgTileMapBaseAddr = ZERO;
-			mBGnCNTHalfWord_t BGxCNT = { ZERO };
-
-			if (bgID == BG0)
-			{
-				bgTileMapBaseAddr = (pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTFields.SCREEN_BASE_BLOCK * 0x0800);
-				pGBA_display->bgCache[BG0].is8bppMode = pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET;
-				BGxCNT.mBGnCNTHalfWord = pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTHalfWord;
-				pGBA_display->bgCache[BG0].hofs = pGBA_peripherals->mBG0HOFSHalfWord.mBGniOFSFields.OFFSET;
-				pGBA_display->bgCache[BG0].vofs = pGBA_peripherals->mBG0VOFSHalfWord.mBGniOFSFields.OFFSET;
-			}
-			else if (bgID == BG1)
-			{
-				bgTileMapBaseAddr = (pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTFields.SCREEN_BASE_BLOCK * 0x0800);
-				pGBA_display->bgCache[BG1].is8bppMode = pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET;
-				BGxCNT.mBGnCNTHalfWord = pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTHalfWord;
-				pGBA_display->bgCache[BG1].hofs = pGBA_peripherals->mBG1HOFSHalfWord.mBGniOFSFields.OFFSET;
-				pGBA_display->bgCache[BG1].vofs = pGBA_peripherals->mBG1VOFSHalfWord.mBGniOFSFields.OFFSET;
-			}
-
-			/*
-			* Refer http://problemkaputt.de/gbatek-lcd-i-o-bg-control.htm
-			* BGs always wraparound, so
-			* offsets = BGxHOFS and BGxHVOFS (BG offsets within static screen)
-			* Final offsets from screen (tileMap_x and tileMap_y) = (x + BGxHOFS) % 512 and (y + BGxHVOFS) % 512
-			* Offsets in tile coordinates (tile_x and tile_y) = Final offsets from screen / 8
-			* Offsets within tile coordinates (WithinTile_x and WithinTile_y) = Final offsets from screen % 8
-			*
-			* When BGxCNT->Size = 0
-			* SC0 -> 256x256
-			* When BGxCNT->Size = 1
-			* SC0 SC1 -> 512x256
-			* When BGxCNT->Size = 2
-			* SC0 -> 256x512
-			* SC1
-			* When BGxCNT->Size = 3
-			* SC0 SC1 -> 512x512
-			* SC2 SC3
-			* SC0 is defined by the normal BG Map base address (Bit 8-12 of BGxCNT),
-			* SC1 uses same address +2K, SC2 address +4K, SC3 address +6K
-			* So, for given x, y we need to figure out in which SCn it falls...
-			* Then each SCn is 256x256, so , number of tiles i.e. tilesPerRow = bitsPerRow / 8 = 32
-			* So, withinTileOffset = (tile_x + (tile_y * tilesPerRow))
-			* But, we do a 16bit read for tile map as mentioned under Mode 0 in https://nba-emu.github.io/hw-docs/ppu/background.html and http://problemkaputt.de/gbatek-lcd-vram-bg-screen-data-format-bg-map.htm unlike non text modes
-			* So, 16withinTileOffset = 2 * withinTileOffset
-			*
-			* Final Address for tile map = [VRAM_START_ADDRESS + bgTileMapBaseAddr + (SCn * 2K) + (16withinTileOffset)]
-			*
-			*/
-
-			// Cached sum of coordinates and offsets
-			DIM16 offsetSumX = xPixelCoordinate + pGBA_display->bgCache[bgID].hofs;
-			DIM16 offsetSumY = yPixelCoordinate + pGBA_display->bgCache[bgID].vofs;
-
-			ID SCn = ZERO;
-			switch (BGxCNT.mBGnCNTFields.SCREEN_SIZE)
-			{
-				// SC0
-			case ZERO: SCn = ZERO; BREAK;
-				// SC0 SC1
-			case ONE: SCn = ((offsetSumX & 511) > 255) ? ONE : ZERO; BREAK;
-				// SC0
-				// SC1
-			case TWO: SCn = ((offsetSumY & 511) > 255) ? ONE : ZERO; BREAK;
-				// SC0 SC1
-				// SC2 SC3
-			case THREE:
-				SCn = ((offsetSumX & 511) > 255) ? ONE : ZERO;
-				SCn += ((offsetSumY & 511) > 255) ? TWO : ZERO;
-				BREAK;
-			default:
-				FATAL("Unknown screen size in mode 0");
-				RETURN;
-			}
-
-			// Within SCn
-			DIM16 tileMapX = offsetSumX & 255; // % 256 because because if more than 255, it is SC1 or SC3, but we are already accounting for SCn, so we just get tileX within SCn
-			DIM16 tileMapY = offsetSumY & 255; // % 256 because because if more than 255, it is SC2 or SC3, but we are already accounting for SCn, so we just get tileX within SCn
-
-			pGBA_display->bgCache[bgID].tileMapX = tileMapX;
-			pGBA_display->bgCache[bgID].tileMapY = tileMapY;
-
-			const DIM16 tilesPerRowInShifts = FIVE; // 1 << 5 is same as * 32; Each SCn is of 256*256, so 256 / 8 = 32
-			DIM16 tileMapOffset = (tileMapX >> THREE) + ((tileMapY >> THREE) << tilesPerRowInShifts);
-
-			// Since we have 16 bits per tile instead of 8
-			// Refer http://problemkaputt.de/gbatek-lcd-vram-bg-screen-data-format-bg-map.htm
-			tileMapOffset <<= ONE;
-
-			GBA_WORD addressInTileMapArea = VIDEO_RAM_START_ADDRESS + bgTileMapBaseAddr + (SCn * 0x800) + tileMapOffset;
-
-			// NOTE: Needed for tonc's cbb_demo
-			// Refer: https://www.coranac.com/tonc/text/regbg.htm
-			if (addressInTileMapArea < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
-			{
-				pGBA_display->bgCache[bgID].tileDescriptor.raw = readRawMemory<GBA_HALFWORD>(addressInTileMapArea, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
-			}
-			else
-			{
-				pGBA_display->bgCache[bgID].tileDescriptor.raw = RESET;
-				PPUTODO("As per NBA, this is set to some latched value");
-			}
-
-			pGBA_display->bgCache[bgID].subTileIndexer = ZERO;
-
-			if ((tileMapX & SEVEN) != ZERO)
-			{
-				PPUEVENT("Sub-tile scrolling in mode 1 bg%d!", bgID);
-
-				// This indicates sub-tile scrolling as mentioned in https://nba-emu.github.io/hw-docs/ppu/background.html
-				// Assume that tileMapX % 8 is 5, this indicates that only 8-5=3 pixels from the end of previous tile needs to be rendered
-				// As mentioned above, only few pixels of the 1st and last tile would be visible in this case...
-				// but still, ppu fetches all 8 pixels
-				// So, during the previous MODE0_M_BG_CYCLE, we would have fetched the complete tile descriptor for the whole tile (all 8 pixels)
-				// Using the example that we were just discussing, 3 pixels from the end needs to be rendered in X=0, X=1 and X=2
-				// i.e. first 5 pixels eventhough fetched from VRAM needs to be dropped
-
-				if (xPixelCoordinate == ZERO)
-				{
-					pGBA_display->bgCache[bgID].subTileScrollingPixelDrops = tileMapX & SEVEN;
-				}
-				else
-				{
-					pGBA_display->bgCache[bgID].subTileScrollingPixelDrops = RESET;
-				}
-			}
-			else
-			{
-				pGBA_display->bgCache[bgID].subTileScrollingPixelDrops = RESET;
-			}
-		};
-
-	auto MODE1_T_TEXT_BG_CYCLE = [&](ID bgID)
-		{
-			auto X = pGBA_display->currentBgPixelInTextMode[bgID];
-			auto Y = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
-
-			// Early bounds check on X and Y
-			if ((X >= TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (Y >= TO_UINT16(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
-			{
-				RETURN;
-			}
-
-			// Bounds check for bgID
-			if (bgID < BG0 || bgID > BG1)
-			{
-				FATAL("Unknown BG in mode 1");
-				RETURN;
-			}
-
-			if (ENABLED)
-			{
-				// Cache BG configuration values for fast access
-				if (bgID == BG0)
-				{
-					pGBA_display->bgCache[BG0].is8bppMode = pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET;
-					pGBA_display->bgCache[BG0].hofs = pGBA_peripherals->mBG0HOFSHalfWord.mBGniOFSFields.OFFSET;
-					pGBA_display->bgCache[BG0].vofs = pGBA_peripherals->mBG0VOFSHalfWord.mBGniOFSFields.OFFSET;
-				}
-				else if (bgID == BG1)
-				{
-					pGBA_display->bgCache[BG1].is8bppMode = pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET;
-					pGBA_display->bgCache[BG1].hofs = pGBA_peripherals->mBG1HOFSHalfWord.mBGniOFSFields.OFFSET;
-					pGBA_display->bgCache[BG1].vofs = pGBA_peripherals->mBG1VOFSHalfWord.mBGniOFSFields.OFFSET;
-				}
-			}
-
-			GBA_WORD bgTileDataBaseAddr = (bgID == BG0)
-				? (pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTFields.CHARACTER_BASE_BLOCK * 0x4000)
-				: (pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTFields.CHARACTER_BASE_BLOCK * 0x4000);
-
-			auto xTileCoordinate = ((X + pGBA_display->bgCache[bgID].hofs) & 255) & SEVEN; // % 8
-			auto yTileCoordinate = ((Y + pGBA_display->bgCache[bgID].vofs) & 255) & SEVEN; // % 8
-
-			xTileCoordinate = pGBA_display->bgCache[bgID].tileDescriptor.hflip == YES
-				? flipLUT[xTileCoordinate]
-				: xTileCoordinate;
-
-			yTileCoordinate = pGBA_display->bgCache[bgID].tileDescriptor.vflip == YES
-				? flipLUT[yTileCoordinate]
-				: yTileCoordinate;
-
-			GBA_WORD withinTileDataOffset = xTileCoordinate + (yTileCoordinate << THREE);
-			// Refer http://problemkaputt.de/gbatek-lcd-vram-character-data.htm
-			DIM16 sizeOfEachTileData = (pGBA_display->bgCache[bgID].is8bppMode == NO) ? 0x20 : 0x40;
-
-			if (pGBA_display->bgCache[bgID].is8bppMode == NO)
-			{
-				// 4bpp mode
-				GBA_WORD addressInTileDataArea =
-					VIDEO_RAM_START_ADDRESS
-					+ bgTileDataBaseAddr
-					+ (sizeOfEachTileData * pGBA_display->bgCache[bgID].tileDescriptor.fetchedTileID)
-					+ (withinTileDataOffset >> ONE); // Divide by 2 because in 4bpp mode, A single halfword gives data for 4 pixels
-
-				// NOTE: Needed for tonc's cbb_demo
-				// Refer: https://www.coranac.com/tonc/text/regbg.htm
-				if (addressInTileDataArea < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
-				{
-					pGBA_display->bgCache[bgID].pixelColorNumberFor4PixelsFromTileData = readRawMemory<GBA_HALFWORD>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
-				}
-				else
-				{
-					pGBA_display->bgCache[bgID].pixelColorNumberFor4PixelsFromTileData = RESET;
-					PPUTODO("As per NBA, this is set to some latched value");
-				}
-
-				RENDER_MODE0_MODE1_PIXEL_X(bgID, pGBA_display->bgCache[bgID].pixelColorNumberFor4PixelsFromTileData, ZERO);
-				RENDER_MODE0_MODE1_PIXEL_X(bgID, pGBA_display->bgCache[bgID].pixelColorNumberFor4PixelsFromTileData, ONE);
-				RENDER_MODE0_MODE1_PIXEL_X(bgID, pGBA_display->bgCache[bgID].pixelColorNumberFor4PixelsFromTileData, TWO);
-				RENDER_MODE0_MODE1_PIXEL_X(bgID, pGBA_display->bgCache[bgID].pixelColorNumberFor4PixelsFromTileData, THREE);
-			}
-			else
-			{
-				// 8bpp mode
-				GBA_WORD addressInTileDataArea =
-					VIDEO_RAM_START_ADDRESS
-					+ bgTileDataBaseAddr
-					+ (sizeOfEachTileData * pGBA_display->bgCache[bgID].tileDescriptor.fetchedTileID)
-					+ withinTileDataOffset;
-
-				// NOTE: Needed for tonc's cbb_demo
-				// Refer: https://www.coranac.com/tonc/text/regbg.htm
-				if (addressInTileDataArea < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
-				{
-					pGBA_display->bgCache[bgID].pixelColorNumberFor2PixelsFromTileData = readRawMemory<GBA_HALFWORD>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
-				}
-				else
-				{
-					pGBA_display->bgCache[bgID].pixelColorNumberFor2PixelsFromTileData = RESET;
-					PPUTODO("As per NBA, this is set to some latched value");
-				}
-
-				RENDER_MODE0_MODE1_PIXEL_X(bgID, pGBA_display->bgCache[bgID].pixelColorNumberFor2PixelsFromTileData, ZERO);
-				RENDER_MODE0_MODE1_PIXEL_X(bgID, pGBA_display->bgCache[bgID].pixelColorNumberFor2PixelsFromTileData, ONE);
-			}
-		};
-#endif
-
-	auto MODE1_M_AFFINE_BG_CYCLE = [&]()
-		{
-			uint32_t xPixelCoordinate = pGBA_display->currentBgPixel;
-			uint32_t yPixelCoordinate = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
-
-			// Early bounds check on X and Y
-			if ((xPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (yPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
-			{
-				RETURN;
-			}
-
-			GBA_WORD bgTileMapBaseAddr = (pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTFields.SCREEN_BASE_BLOCK * 0x0800);
-			DIM16 bgWidth = (0x80 << pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTFields.SCREEN_SIZE);
-			DIM16 bgHeight = (0x80 << pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTFields.SCREEN_SIZE);
-			FLAG isWrapAroundEnabled = (pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTFields.BG2_BG3_DISP_AREA_OVERFLOW_OR_NDS_BG0_BG1_EXT_PALETTE_SLOT == ONE);
-
-			uint32_t xPixelCoordinateAffine = (GBA_WORD)(pGBA_display->bgCache[BG2].affine.affineX >> EIGHT);	// To get the integer part
-			uint32_t yPixelCoordinateAffine = (GBA_WORD)(pGBA_display->bgCache[BG2].affine.affineY >> EIGHT);	// To get the integer part
-
-			// For points (2) and (4) of PPU:03 AND point (6) of PPU:03
-			// NOTE: In other modes, adding of PA and PC is done at the end of the pixel processing, but as per NBA, in mode 2, this is done at this point!
-			pGBA_display->bgCache[BG2].affine.affineX += (int16_t)(pGBA_peripherals->mBG2PAHalfWord.mBGnPxHalfWord_Signed);
-			pGBA_display->bgCache[BG2].affine.affineY += (int16_t)(pGBA_peripherals->mBG2PCHalfWord.mBGnPxHalfWord_Signed);
-
-			// Used for repetition of particular block of tiles 
-			if (isWrapAroundEnabled == YES)
-			{
-				xPixelCoordinateAffine %= bgWidth;
-				yPixelCoordinateAffine %= bgHeight;
-			}
-
-			pGBA_display->bgCache[BG2].xPixelCoordinateAffine = xPixelCoordinateAffine;
-			pGBA_display->bgCache[BG2].yPixelCoordinateAffine = yPixelCoordinateAffine;
-
-			uint32_t xTileCoordinateAffine = xPixelCoordinateAffine >> THREE;
-			uint32_t yTileCoordinateAffine = yPixelCoordinateAffine >> THREE;
-
-			auto bitsPerRow = bgWidth;
-			auto tilesPerRow = bitsPerRow >> THREE;
-
-			GBA_WORD addressInTileMapArea = VIDEO_RAM_START_ADDRESS + bgTileMapBaseAddr + xTileCoordinateAffine + (yTileCoordinateAffine * tilesPerRow);
-
-			// NOTE: Needed for tonc's cbb_demo
-			// Refer: https://www.coranac.com/tonc/text/regbg.htm
-			if (addressInTileMapArea < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
-			{
-				pGBA_display->bgCache[BG2].fetchedTileID = readRawMemory<BYTE>(addressInTileMapArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);
-			}
-			else
-			{
-				pGBA_display->bgCache[BG2].fetchedTileID = readRawMemory<BYTE>(addressInTileMapArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);
-				PPUTODO("As per NBA, this is set to some latched value");
-			}
-		};
-
-	auto MODE1_T_AFFINE_BG_CYCLE = [&]()
-		{
-			uint32_t xPixelCoordinate = pGBA_display->currentBgPixel;
-			uint32_t yPixelCoordinate = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
-
-			// Early bounds check on X and Y
-			if ((xPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (yPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
-			{
-				RETURN;
-			}
-
-			GBA_WORD bgTileDataBaseAddr = ZERO;
-			DIM16 bgWidth = ZERO;
-			DIM16 bgHeight = ZERO;
-			FLAG isWrapAroundEnabled = NO;
-
-			bgTileDataBaseAddr = (pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTFields.CHARACTER_BASE_BLOCK * 0x4000);
-			bgWidth = (0x80 << pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTFields.SCREEN_SIZE);
-			bgHeight = (0x80 << pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTFields.SCREEN_SIZE);
-
-			uint32_t xPixelCoordinateAffine = pGBA_display->bgCache[BG2].xPixelCoordinateAffine;
-			uint32_t yPixelCoordinateAffine = pGBA_display->bgCache[BG2].yPixelCoordinateAffine;
-
-			// As per http://problemkaputt.de/gbatek-lcd-vram-bg-screen-data-format-bg-map.htm
-			// For Rotation/Scaling BG Screen -> In this mode, only 256 tiles can be used. There are no x/y-flip attributes, the color depth is always 256 colors/1 palette.
-			// And as per http://problemkaputt.de/gbatek-lcd-vram-character-data.htm
-			// For 8bit depth (256 colors, 1 palette) -> Each tile occupies 64 bytes of memory, the first 8 bytes for the topmost row of the tile, and so on. Each byte selects the palette entry for each dot.
-
-			uint32_t sizeOfEachTileData = 0x40;
-
-			// As mentioned above, within 64 byte tile data, first 8 byte represents the colors for the 8 pixels within the top most row...and so on
-			// so to find the offset with the 64 byte data...
-			// withinTileOffset = 0 -> color for xTileCoordinate = 0, yTileCoordinate = 0
-			// withinTileOffset = 1 -> color for xTileCoordinate = 1, yTileCoordinate = 0 
-			//		:						 
-			// withinTileOffset = 7 -> color for xTileCoordinate = 7, yTileCoordinate = 0 
-			// withinTileOffset = 8 -> color for xTileCoordinate = 0, yTileCoordinate = 1 
-
-			auto xTileCoordinateAffine = xPixelCoordinateAffine & SEVEN;
-			auto yTileCoordinateAffine = yPixelCoordinateAffine & SEVEN;
-
-			GBA_WORD withinTileDataOffsetAffine = xTileCoordinateAffine + (yTileCoordinateAffine << THREE);
-
-			GBA_WORD addressInTileDataArea = VIDEO_RAM_START_ADDRESS + bgTileDataBaseAddr + (sizeOfEachTileData * pGBA_display->bgCache[BG2].fetchedTileID) + withinTileDataOffsetAffine;
-			BYTE pixelColorNumberFromTileData = RESET;
-
-			// NOTE: Needed for tonc's cbb_demo
-			// Refer: https://www.coranac.com/tonc/text/regbg.htm
-			if (addressInTileDataArea < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
-			{
-				pixelColorNumberFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);
-			}
-			else
-			{
-				PPUTODO("As per NBA, pixelColorNumberFromTileData is set to some latched value");
-			}
-
-			ID paletteIndex = pixelColorNumberFromTileData << ONE; // Palette is 16bit data, (ex: tile id 1 should access 2nd and 3rd byte of palette ram) 
-
-			// If out of bounds, needs to be tranparent, so palette index to 0
-			if (xPixelCoordinateAffine >= bgWidth || yPixelCoordinateAffine >= bgHeight)
-			{
-				// Condition will be true only if wrap around was disabled!
-				paletteIndex = ZERO;
-			}
-
-			// Now use the screen coordinates and fill the gfx buffer with data obtained from texture coordinates (Affine)
-			pGBA_display->gfx_bg[BG2][xPixelCoordinate][yPixelCoordinate] = paletteIndex;
-		};
-
-	auto MODE2_M_BG_CYCLE = [&](ID bgID)
-		{
-			uint32_t xPixelCoordinate = pGBA_display->currentBgPixel;
-			uint32_t yPixelCoordinate = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
-
-			// Early bounds check on X and Y
-			if ((xPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (yPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
-			{
-				RETURN;
-			}
-
-			auto& bgCntHalfWord = (bgID == BG2)
-				? pGBA_peripherals->mBG2CNTHalfWord
-				: pGBA_peripherals->mBG3CNTHalfWord;
-
-			GBA_WORD bgTileMapBaseAddr = bgCntHalfWord.mBGnCNTFields.SCREEN_BASE_BLOCK * 0x0800;
-			DIM16 bgWidth = 0x80 << bgCntHalfWord.mBGnCNTFields.SCREEN_SIZE;
-			DIM16 bgHeight = 0x80 << bgCntHalfWord.mBGnCNTFields.SCREEN_SIZE;
-			FLAG isWrapAroundEnabled = bgCntHalfWord.mBGnCNTFields.BG2_BG3_DISP_AREA_OVERFLOW_OR_NDS_BG0_BG1_EXT_PALETTE_SLOT == ONE;
-
-			uint32_t xPixelCoordinateAffine, yPixelCoordinateAffine;
-
-			// Precompute affine coordinates and update them
-			auto& bgCache = pGBA_display->bgCache[bgID];
-			auto& affineX = bgCache.affine.affineX;
-			auto& affineY = bgCache.affine.affineY;
-
-			xPixelCoordinateAffine = affineX >> EIGHT;	// To get the integer part
-			yPixelCoordinateAffine = affineY >> EIGHT;	// To get the integer part
-
-			auto affineXIncrement =
-				(bgID == BG2) ? pGBA_peripherals->mBG2PAHalfWord.mBGnPxHalfWord_Signed
-				: pGBA_peripherals->mBG3PAHalfWord.mBGnPxHalfWord_Signed;
-			auto affineYIncrement =
-				(bgID == BG2) ? pGBA_peripherals->mBG2PCHalfWord.mBGnPxHalfWord_Signed
-				: pGBA_peripherals->mBG3PCHalfWord.mBGnPxHalfWord_Signed;
-
-			// For points (2) and (4) of PPU:03 AND point (6) of PPU:03
-			// NOTE: In other modes, adding of PA and PC is done at the end of the pixel processing, but as per NBA, in mode 2, this is done at this point!
-			affineX += affineXIncrement;
-			affineY += affineYIncrement;
-
-			// Used for repetition of particular block of tiles 
-			if (isWrapAroundEnabled == YES)
-			{
-				xPixelCoordinateAffine %= bgWidth;
-				yPixelCoordinateAffine %= bgHeight;
-			}
-
-			bgCache.xPixelCoordinateAffine = xPixelCoordinateAffine;
-			bgCache.yPixelCoordinateAffine = yPixelCoordinateAffine;
-
-			uint32_t xTileCoordinateAffine = xPixelCoordinateAffine >> THREE;
-			uint32_t yTileCoordinateAffine = yPixelCoordinateAffine >> THREE;
-
-			auto bitsPerRow = bgWidth;
-			auto tilesPerRow = bitsPerRow >> THREE;
-
-			GBA_WORD addressInTileMapArea = VIDEO_RAM_START_ADDRESS + bgTileMapBaseAddr + xTileCoordinateAffine + (yTileCoordinateAffine * tilesPerRow);
-
-			// NOTE: Needed for tonc's cbb_demo
-			// Refer: https://www.coranac.com/tonc/text/regbg.htm
-			if (addressInTileMapArea < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
-			{
-				pGBA_display->bgCache[bgID].fetchedTileID = readRawMemory<BYTE>(addressInTileMapArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);;
-			}
-			else
-			{
-				pGBA_display->bgCache[bgID].fetchedTileID = RESET;
-				PPUTODO("As per NBA, this is set to some latched value");
-			}
-		};
-
-	auto MODE2_T_BG_CYCLE = [&](ID bgID)
-		{
-			uint32_t xPixelCoordinate = pGBA_display->currentBgPixel;
-			uint32_t yPixelCoordinate = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
-
-			// Early bounds check on X and Y
-			if ((xPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (yPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
-			{
-				RETURN;
-			}
-
-			// Use ternary operator for efficient branching
-			auto& bgCntHalfWord = (bgID == BG2)
-				? pGBA_peripherals->mBG2CNTHalfWord
-				: pGBA_peripherals->mBG3CNTHalfWord;
-
-			GBA_WORD bgTileDataBaseAddr = bgCntHalfWord.mBGnCNTFields.CHARACTER_BASE_BLOCK * 0x4000;
-			DIM16 bgWidth = 0x80 << bgCntHalfWord.mBGnCNTFields.SCREEN_SIZE;
-			DIM16 bgHeight = 0x80 << bgCntHalfWord.mBGnCNTFields.SCREEN_SIZE;
-
-			uint32_t xPixelCoordinateAffine = pGBA_display->bgCache[bgID].xPixelCoordinateAffine;
-			uint32_t yPixelCoordinateAffine = pGBA_display->bgCache[bgID].yPixelCoordinateAffine;
-
-			// As per http://problemkaputt.de/gbatek-lcd-vram-bg-screen-data-format-bg-map.htm
-			// For Rotation/Scaling BG Screen -> In this mode, only 256 tiles can be used. There are no x/y-flip attributes, the color depth is always 256 colors/1 palette.
-			// And as per http://problemkaputt.de/gbatek-lcd-vram-character-data.htm
-			// For 8bit depth (256 colors, 1 palette) -> Each tile occupies 64 bytes of memory, the first 8 bytes for the topmost row of the tile, and so on. Each byte selects the palette entry for each dot.
-
-			const uint32_t sizeOfEachTileData = 0x40;
-
-			// As mentioned above, within 64 byte tile data, first 8 byte represents the colors for the 8 pixels within the top most row...and so on
-			// so to find the offset with the 64 byte data...
-			// withinTileOffset = 0 -> color for xTileCoordinate = 0, yTileCoordinate = 0
-			// withinTileOffset = 1 -> color for xTileCoordinate = 1, yTileCoordinate = 0 
-			//		:						 
-			// withinTileOffset = 7 -> color for xTileCoordinate = 7, yTileCoordinate = 0 
-			// withinTileOffset = 8 -> color for xTileCoordinate = 0, yTileCoordinate = 1 
-
-			auto xTileCoordinateAffine = xPixelCoordinateAffine & SEVEN;
-			auto yTileCoordinateAffine = yPixelCoordinateAffine & SEVEN;
-
-			GBA_WORD withinTileDataOffsetAffine = xTileCoordinateAffine + (yTileCoordinateAffine << THREE);
-
-			GBA_WORD addressInTileDataArea = VIDEO_RAM_START_ADDRESS + bgTileDataBaseAddr + (sizeOfEachTileData * pGBA_display->bgCache[bgID].fetchedTileID) + withinTileDataOffsetAffine;
-
-			BYTE pixelColorNumberFromTileData = RESET;
-
-			// NOTE: Needed for tonc's cbb_demo
-			// Refer: https://www.coranac.com/tonc/text/regbg.htm
-			if (addressInTileDataArea < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
-			{
-				pixelColorNumberFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);
-			}
-			else
-			{
-				PPUTODO("As per NBA, pixelColorNumberFromTileData is set to some latched value");
-			}
-
-			ID paletteIndex = pixelColorNumberFromTileData << ONE; // Palette is 16bit data, (ex: tile id 1 should access 2nd and 3rd byte of palette ram) 
-
-			// If out of bounds, needs to be tranparent, so palette index to 0
-			if (xPixelCoordinateAffine >= bgWidth || yPixelCoordinateAffine >= bgHeight)
-			{
-				// Condition will be true only if wrap around was disabled!
-				paletteIndex = ZERO;
-			}
-
-			// Now use the screen coordinates and fill the gfx buffer with data obtained from texture coordinates (Affine)
-			pGBA_display->gfx_bg[bgID][xPixelCoordinate][yPixelCoordinate] = paletteIndex;
-		};
-
-	auto MODE3_B_BG_CYCLE = [&]()
-		{
-			uint32_t xPixelCoordinate = pGBA_display->currentBgPixel;
-			uint32_t yPixelCoordinate = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
-
-			// Early bounds check on X and Y
-			if ((xPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (yPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
-			{
-				RETURN;
-			}
-
-			// Only BG2 is valid for Mode2
-
-			// Refer to http://problemkaputt.de/gbatek-lcd-vram-bitmap-bg-modes.htm
-			uint32_t xPixelCoordinateAffine = (GBA_WORD)((pGBA_display->bgCache[BG2].affine.affineX) >> EIGHT); // To get the integer part
-			uint32_t yPixelCoordinateAffine = (GBA_WORD)((pGBA_display->bgCache[BG2].affine.affineY) >> EIGHT); // To get the integer part
-
-			if (xPixelCoordinateAffine >= getScreenWidth() || yPixelCoordinateAffine >= getScreenHeight())
-			{
-				pGBA_display->gfx_bg[BG2][xPixelCoordinate][yPixelCoordinate] = ZERO;
-			}
-			else
-			{
-				ID vramIndex = xPixelCoordinateAffine + (yPixelCoordinateAffine * getScreenWidth());
-
-				// Since we are accessing 16 bit data instead of 8 bit
-				vramIndex <<= ONE;
-
-				GBA_WORD vramAddress = VIDEO_RAM_START_ADDRESS + vramIndex;
-
-				GBA_HALFWORD colorFor1Pixel = RESET;
-				// NOTE: Needed for tonc's cbb_demo
-				// Refer: https://www.coranac.com/tonc/text/regbg.htm
-				if (vramAddress < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
-				{
-					colorFor1Pixel = readRawMemory<GBA_HALFWORD>(vramAddress, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
-
-				}
-				else
-				{
-					PPUTODO("As per NBA, colorFor1Pixel is set to some latched value");
-				}
-
-				pGBA_display->gfx_bg[BG2][xPixelCoordinate][yPixelCoordinate] = (colorFor1Pixel | IS_COLOR_NOT_PALETTE);
-			}
-
-			// For points (2) and (4) of PPU:03 AND point (6) of PPU:03
-			pGBA_display->bgCache[BG2].affine.affineX += (int16_t)(pGBA_peripherals->mBG2PAHalfWord.mBGnPxHalfWord_Signed);
-			pGBA_display->bgCache[BG2].affine.affineY += (int16_t)(pGBA_peripherals->mBG2PCHalfWord.mBGnPxHalfWord_Signed);
-		};
-
-	auto MODE4_B_BG_CYCLE = [&]()
-		{
-			uint32_t xPixelCoordinate = pGBA_display->currentBgPixel;
-			uint32_t yPixelCoordinate = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
-
-			// Early bounds check on X and Y
-			if ((xPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (yPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
-			{
-				RETURN;
-			}
-
-			// Only BG2 is valid for Mode2
-
-			// Refer to http://problemkaputt.de/gbatek-lcd-vram-bitmap-bg-modes.htm
-			uint32_t xPixelCoordinateAffine = (GBA_WORD)((pGBA_display->bgCache[BG2].affine.affineX) >> EIGHT); // To get the integer part
-			uint32_t yPixelCoordinateAffine = (GBA_WORD)((pGBA_display->bgCache[BG2].affine.affineY) >> EIGHT); // To get the integer part
-
-			if (xPixelCoordinateAffine >= getScreenWidth() || yPixelCoordinateAffine >= getScreenHeight())
-			{
-				pGBA_display->gfx_bg[BG2][xPixelCoordinate][yPixelCoordinate] = ZERO;
-			}
-			else
-			{
-				ID vramIndex = xPixelCoordinateAffine + (yPixelCoordinateAffine * getScreenWidth());
-
-				GBA_WORD vramAddress = VIDEO_RAM_START_ADDRESS + (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.FRAME_SELECT * 0xA000) + vramIndex;
-
-				GBA_HALFWORD pixelColorNumberFromTileData = RESET;
-				// NOTE: Needed for tonc's cbb_demo
-				// Refer: https://www.coranac.com/tonc/text/regbg.htm
-				if (vramAddress < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
-				{
-					pixelColorNumberFromTileData = readRawMemory<BYTE>(vramAddress, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);
-
-				}
-				else
-				{
-					PPUTODO("As per NBA, pixelColorNumberFromTileData is set to some latched value");
-				}
-
-				// NOTE: Palette index multiplied by 2 as each palette index represents 16 bit offset in palette ram instead of 8 bit offset, so basically there is 2 byte difference b/w palette index n to index n+1
-				ID paletteIndex = pixelColorNumberFromTileData << ONE;
-
-				pGBA_display->gfx_bg[BG2][xPixelCoordinate][yPixelCoordinate] = paletteIndex;
-			}
-
-			// For points (2) and (4) of PPU:03 AND point (6) of PPU:03
-			pGBA_display->bgCache[BG2].affine.affineX += (int16_t)(pGBA_peripherals->mBG2PAHalfWord.mBGnPxHalfWord_Signed);
-			pGBA_display->bgCache[BG2].affine.affineY += (int16_t)(pGBA_peripherals->mBG2PCHalfWord.mBGnPxHalfWord_Signed);
-		};
-
-	auto MODE5_B_BG_CYCLE = [&]()
-		{
-			uint32_t xPixelCoordinate = pGBA_display->currentBgPixel;
-			uint32_t yPixelCoordinate = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
-
-			// Early bounds check on X and Y
-			if ((xPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (yPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
-			{
-				RETURN;
-			}
-
-			// Only BG2 is valid for Mode2
-
-			// Refer to http://problemkaputt.de/gbatek-lcd-vram-bitmap-bg-modes.htm
-			uint32_t xPixelCoordinateAffine = (GBA_WORD)((pGBA_display->bgCache[BG2].affine.affineX) >> EIGHT); // To get the integer part
-			uint32_t yPixelCoordinateAffine = (GBA_WORD)((pGBA_display->bgCache[BG2].affine.affineY) >> EIGHT); // To get the integer part
-
-			if (xPixelCoordinateAffine >= ONEHUNDREDSIXTY || yPixelCoordinateAffine >= ONETWENTYEIGHT)
-			{
-				pGBA_display->gfx_bg[BG2][xPixelCoordinate][yPixelCoordinate] = ZERO;
-			}
-			else
-			{
-				ID vramIndex = xPixelCoordinateAffine + (yPixelCoordinateAffine * ONEHUNDREDSIXTY);
-
-				// Since we are accessing 16 bit data instead of 8 bit
-				vramIndex <<= ONE;
-
-				GBA_WORD vramAddress = VIDEO_RAM_START_ADDRESS + (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.FRAME_SELECT * 0xA000) + vramIndex;
-
-				GBA_HALFWORD colorFor1Pixel = RESET;
-				// NOTE: Needed for tonc's cbb_demo
-				// Refer: https://www.coranac.com/tonc/text/regbg.htm
-				if (vramAddress < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
-				{
-					colorFor1Pixel = readRawMemory<GBA_HALFWORD>(vramAddress, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
-
-				}
-				else
-				{
-					PPUTODO("As per NBA, colorFor1Pixel is set to some latched value");
-				}
-
-				pGBA_display->gfx_bg[BG2][xPixelCoordinate][yPixelCoordinate] = (colorFor1Pixel | IS_COLOR_NOT_PALETTE);
-			}
-
-			// For points (2) and (4) of PPU:03 AND point (6) of PPU:03
-			pGBA_display->bgCache[BG2].affine.affineX += (int16_t)(pGBA_peripherals->mBG2PAHalfWord.mBGnPxHalfWord_Signed);
-			pGBA_display->bgCache[BG2].affine.affineY += (int16_t)(pGBA_peripherals->mBG2PCHalfWord.mBGnPxHalfWord_Signed);
-		};
-
-	auto MODE0_BG_SEQUENCE = [&](SSTATE32 state)
-		{
-			switch (state)
-			{
-			case ZERO:
-			{
-				MODE0_M_BG_CYCLE(BG0);
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE0_T_BG_CYCLE(BG0);
-#endif
-				BREAK;
-			}
-			case ONE:
-			{
-				MODE0_M_BG_CYCLE(BG1);
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE0_T_BG_CYCLE(BG1);
-#endif
-				BREAK;
-			}
-			case TWO:
-			{
-				MODE0_M_BG_CYCLE(BG2);
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE0_T_BG_CYCLE(BG2);
-#endif
-				BREAK;
-			}
-			case THREE:
-			{
-				MODE0_M_BG_CYCLE(BG3);
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE0_T_BG_CYCLE(BG3);
-#endif
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case FOUR:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE0_M_BG_CYCLE(BG0);
-#endif
-				MODE0_T_BG_CYCLE(BG0);
-				BREAK;
-			}
-			case FIVE:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE0_M_BG_CYCLE(BG1);
-#endif
-				MODE0_T_BG_CYCLE(BG1);
-				BREAK;
-			}
-			case SIX:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE0_M_BG_CYCLE(BG2);
-#endif
-				MODE0_T_BG_CYCLE(BG2);
-				BREAK;
-			}
-			case SEVEN:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE0_M_BG_CYCLE(BG3);
-#endif
-				MODE0_T_BG_CYCLE(BG3);
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case EIGHT:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE0_M_BG_CYCLE(BG0);
-				MODE0_T_BG_CYCLE(BG0);
-#endif
-				BREAK;
-			}
-			case NINE:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE0_M_BG_CYCLE(BG1);
-				MODE0_T_BG_CYCLE(BG1);
-#endif
-				BREAK;
-			}
-			case TEN:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE0_M_BG_CYCLE(BG2);
-				MODE0_T_BG_CYCLE(BG2);
-#endif
-				BREAK;
-			}
-			case ELEVEN:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE0_M_BG_CYCLE(BG3);
-				MODE0_T_BG_CYCLE(BG3);
-#endif
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case TWELVE:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE0_M_BG_CYCLE(BG0);
-				MODE0_T_BG_CYCLE(BG0);
-#else
-				if (pGBA_display->bgCache[BG0].is8bppMode == YES)
-				{
-					MODE0_T_BG_CYCLE(BG0);
-				}
-#endif
-				BREAK;
-			}
-			case THIRTEEN:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE0_M_BG_CYCLE(BG1);
-				MODE0_T_BG_CYCLE(BG1);
-#else
-				if (pGBA_display->bgCache[BG1].is8bppMode == YES)
-				{
-					MODE0_T_BG_CYCLE(BG1);
-				}
-#endif
-				BREAK;
-			}
-			case FOURTEEN:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE0_M_BG_CYCLE(BG2);
-				MODE0_T_BG_CYCLE(BG2);
-#else
-				if (pGBA_display->bgCache[BG2].is8bppMode == YES)
-				{
-					MODE0_T_BG_CYCLE(BG2);
-				}
-#endif
-				BREAK;
-			}
-			case FIFTEEN:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE0_M_BG_CYCLE(BG3);
-				MODE0_T_BG_CYCLE(BG3);
-#else
-				if (pGBA_display->bgCache[BG3].is8bppMode == YES)
-				{
-					MODE0_T_BG_CYCLE(BG3);
-				}
-#endif
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case SIXTEEN:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE0_M_BG_CYCLE(BG0);
-				MODE0_T_BG_CYCLE(BG0);
-#endif
-				BREAK;
-			}
-			case SEVENTEEN:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE0_M_BG_CYCLE(BG1);
-				MODE0_T_BG_CYCLE(BG1);
-#endif
-				BREAK;
-			}
-			case EIGHTEEN:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE0_M_BG_CYCLE(BG2);
-				MODE0_T_BG_CYCLE(BG2);
-#endif
-				BREAK;
-			}
-			case NINETEEN:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE0_M_BG_CYCLE(BG3);
-				MODE0_T_BG_CYCLE(BG3);
-#endif
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case TWENTY:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE0_M_BG_CYCLE(BG0);
-#endif
-				MODE0_T_BG_CYCLE(BG0);
-				BREAK;
-			}
-			case TWENTYONE:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE0_M_BG_CYCLE(BG1);
-#endif
-				MODE0_T_BG_CYCLE(BG1);
-				BREAK;
-			}
-			case TWENTYTWO:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE0_M_BG_CYCLE(BG2);
-#endif
-				MODE0_T_BG_CYCLE(BG2);
-				BREAK;
-			}
-			case TWENTYTHREE:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE0_M_BG_CYCLE(BG3);
-#endif
-				MODE0_T_BG_CYCLE(BG3);
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case TWENTYFOUR:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE0_M_BG_CYCLE(BG0);
-				MODE0_T_BG_CYCLE(BG0);
-#endif
-				BREAK;
-			}
-			case TWENTYFIVE:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE0_M_BG_CYCLE(BG1);
-				MODE0_T_BG_CYCLE(BG1);
-#endif
-				BREAK;
-			}
-			case TWENTYSIX:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE0_M_BG_CYCLE(BG2);
-				MODE0_T_BG_CYCLE(BG2);
-#endif
-				BREAK;
-			}
-			case TWENTYSEVEN:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE0_M_BG_CYCLE(BG3);
-				MODE0_T_BG_CYCLE(BG3);
-#endif
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case TWENTYEIGHT:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE0_M_BG_CYCLE(BG0);
-				MODE0_T_BG_CYCLE(BG0);
-#else
-				if (pGBA_display->bgCache[BG0].is8bppMode == YES)
-				{
-					MODE0_T_BG_CYCLE(BG0);
-				}
-#endif
-				BREAK;
-			}
-			case TWENTYNINE:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE0_M_BG_CYCLE(BG1);
-				MODE0_T_BG_CYCLE(BG1);
-#else
-				if (pGBA_display->bgCache[BG1].is8bppMode == YES)
-				{
-					MODE0_T_BG_CYCLE(BG1);
-				}
-#endif
-				BREAK;
-			}
-			case THIRTY:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE0_M_BG_CYCLE(BG2);
-				MODE0_T_BG_CYCLE(BG2);
-#else
-				if (pGBA_display->bgCache[BG2].is8bppMode == YES)
-				{
-					MODE0_T_BG_CYCLE(BG2);
-				}
-#endif
-				BREAK;
-			}
-			case THIRTYONE:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE0_M_BG_CYCLE(BG3);
-				MODE0_T_BG_CYCLE(BG3);
-#else
-				if (pGBA_display->bgCache[BG3].is8bppMode == YES)
-				{
-					MODE0_T_BG_CYCLE(BG3);
-				}
-#endif
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			default:
-			{
-				FATAL("PPU mode 0 (BG) out of sync");
-			}
-			}
-		};
-
-	auto MODE1_BG_SEQUENCE = [&](SSTATE32 state)
-		{
-			switch (state)
-			{
-			case ZERO:
-			{
-				MODE1_M_TEXT_BG_CYCLE(BG0);
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE1_T_TEXT_BG_CYCLE(BG0);
-#endif
-				BREAK;
-			}
-			case ONE:
-			{
-				MODE1_M_TEXT_BG_CYCLE(BG1);
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE1_T_TEXT_BG_CYCLE(BG1);
-#endif
-				BREAK;
-			}
-			case TWO:
-			{
-				MODE1_M_AFFINE_BG_CYCLE();
-				BREAK;
-			}
-			case THREE:
-			{
-				MODE1_T_AFFINE_BG_CYCLE();
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case FOUR:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE1_M_TEXT_BG_CYCLE(BG0);
-#endif
-				MODE1_T_TEXT_BG_CYCLE(BG0);
-				BREAK;
-			}
-			case FIVE:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE1_M_TEXT_BG_CYCLE(BG1);
-#endif
-				MODE1_T_TEXT_BG_CYCLE(BG1);
-				BREAK;
-			}
-			case SIX:
-			{
-				MODE1_M_AFFINE_BG_CYCLE();
-				BREAK;
-			}
-			case SEVEN:
-			{
-				MODE1_T_AFFINE_BG_CYCLE();
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case EIGHT:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE1_M_TEXT_BG_CYCLE(BG0);
-				MODE1_T_TEXT_BG_CYCLE(BG0);
-#endif
-				BREAK;
-			}
-			case NINE:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE1_M_TEXT_BG_CYCLE(BG1);
-				MODE1_T_TEXT_BG_CYCLE(BG1);
-#endif
-				BREAK;
-			}
-			case TEN:
-			{
-				MODE1_M_AFFINE_BG_CYCLE();
-				BREAK;
-			}
-			case ELEVEN:
-			{
-				MODE1_T_AFFINE_BG_CYCLE();
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case TWELVE:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE1_M_TEXT_BG_CYCLE(BG0);
-				MODE1_T_TEXT_BG_CYCLE(BG0);
-#else
-				if (pGBA_display->bgCache[BG0].is8bppMode == YES)
-				{
-					MODE1_T_TEXT_BG_CYCLE(BG0);
-				}
-#endif
-				BREAK;
-			}
-			case THIRTEEN:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE1_M_TEXT_BG_CYCLE(BG1);
-				MODE1_T_TEXT_BG_CYCLE(BG1);
-#else
-				if (pGBA_display->bgCache[BG1].is8bppMode == YES)
-				{
-					MODE1_T_TEXT_BG_CYCLE(BG1);
-				}
-#endif
-				BREAK;
-			}
-			case FOURTEEN:
-			{
-				MODE1_M_AFFINE_BG_CYCLE();
-				BREAK;
-			}
-			case FIFTEEN:
-			{
-				MODE1_T_AFFINE_BG_CYCLE();
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case SIXTEEN:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE1_M_TEXT_BG_CYCLE(BG0);
-				MODE1_T_TEXT_BG_CYCLE(BG0);
-#endif
-				BREAK;
-			}
-			case SEVENTEEN:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE1_M_TEXT_BG_CYCLE(BG1);
-				MODE1_T_TEXT_BG_CYCLE(BG1);
-#endif
-				BREAK;
-			}
-			case EIGHTEEN:
-			{
-				MODE1_M_AFFINE_BG_CYCLE();
-				BREAK;
-			}
-			case NINETEEN:
-			{
-				MODE1_T_AFFINE_BG_CYCLE();
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case TWENTY:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE1_M_TEXT_BG_CYCLE(BG0);
-#endif
-				MODE1_T_TEXT_BG_CYCLE(BG0);
-				BREAK;
-			}
-			case TWENTYONE:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE1_M_TEXT_BG_CYCLE(BG1);
-#endif
-				MODE1_T_TEXT_BG_CYCLE(BG1);
-				BREAK;
-			}
-			case TWENTYTWO:
-			{
-				MODE1_M_AFFINE_BG_CYCLE();
-				BREAK;
-			}
-			case TWENTYTHREE:
-			{
-				MODE1_T_AFFINE_BG_CYCLE();
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case TWENTYFOUR:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE1_M_TEXT_BG_CYCLE(BG0);
-				MODE1_T_TEXT_BG_CYCLE(BG0);
-#endif
-				BREAK;
-			}
-			case TWENTYFIVE:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE1_M_TEXT_BG_CYCLE(BG1);
-				MODE1_T_TEXT_BG_CYCLE(BG1);
-#endif
-				BREAK;
-			}
-			case TWENTYSIX:
-			{
-				MODE1_M_AFFINE_BG_CYCLE();
-				BREAK;
-			}
-			case TWENTYSEVEN:
-			{
-				MODE1_T_AFFINE_BG_CYCLE();
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case TWENTYEIGHT:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE1_M_TEXT_BG_CYCLE(BG0);
-				MODE1_T_TEXT_BG_CYCLE(BG0);
-#else
-				if (pGBA_display->bgCache[BG0].is8bppMode == YES)
-				{
-					MODE1_T_TEXT_BG_CYCLE(BG0);
-
-				}
-#endif
-				BREAK;
-			}
-			case TWENTYNINE:
-			{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-				MODE1_M_TEXT_BG_CYCLE(BG1);
-				MODE1_T_TEXT_BG_CYCLE(BG1);
-#else
-				if (pGBA_display->bgCache[BG1].is8bppMode == YES)
-				{
-					MODE1_T_TEXT_BG_CYCLE(BG1);
-
-				}
-#endif
-				BREAK;
-			}
-			case THIRTY:
-			{
-				MODE1_M_AFFINE_BG_CYCLE();
-				BREAK;
-			}
-			case THIRTYONE:
-			{
-				MODE1_T_AFFINE_BG_CYCLE();
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			default:
-			{
-				FATAL("PPU mode 1 out of sync");
-			}
-			}
-		};
-
-	auto MODE2_BG_SEQUENCE = [&](SSTATE32 state)
-		{
-			switch (state)
-			{
-			case ZERO:
-			{
-				MODE2_M_BG_CYCLE(BG3);
-				BREAK;
-			}
-			case ONE:
-			{
-				MODE2_T_BG_CYCLE(BG3);
-				BREAK;
-			}
-			case TWO:
-			{
-				MODE2_M_BG_CYCLE(BG2);
-				BREAK;
-			}
-			case THREE:
-			{
-				MODE2_T_BG_CYCLE(BG2);
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case FOUR:
-			{
-				MODE2_M_BG_CYCLE(BG3);
-				BREAK;
-			}
-			case FIVE:
-			{
-				MODE2_T_BG_CYCLE(BG3);
-				BREAK;
-			}
-			case SIX:
-			{
-				MODE2_M_BG_CYCLE(BG2);
-				BREAK;
-			}
-			case SEVEN:
-			{
-				MODE2_T_BG_CYCLE(BG2);
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case EIGHT:
-			{
-				MODE2_M_BG_CYCLE(BG3);
-				BREAK;
-			}
-			case NINE:
-			{
-				MODE2_T_BG_CYCLE(BG3);
-				BREAK;
-			}
-			case TEN:
-			{
-				MODE2_M_BG_CYCLE(BG2);
-				BREAK;
-			}
-			case ELEVEN:
-			{
-				MODE2_T_BG_CYCLE(BG2);
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case TWELVE:
-			{
-				MODE2_M_BG_CYCLE(BG3);
-				BREAK;
-			}
-			case THIRTEEN:
-			{
-				MODE2_T_BG_CYCLE(BG3);
-				BREAK;
-			}
-			case FOURTEEN:
-			{
-				MODE2_M_BG_CYCLE(BG2);
-				BREAK;
-			}
-			case FIFTEEN:
-			{
-				MODE2_T_BG_CYCLE(BG2);
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case SIXTEEN:
-			{
-				MODE2_M_BG_CYCLE(BG3);
-				BREAK;
-			}
-			case SEVENTEEN:
-			{
-				MODE2_T_BG_CYCLE(BG3);
-				BREAK;
-			}
-			case EIGHTEEN:
-			{
-				MODE2_M_BG_CYCLE(BG2);
-				BREAK;
-			}
-			case NINETEEN:
-			{
-				MODE2_T_BG_CYCLE(BG2);
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case TWENTY:
-			{
-				MODE2_M_BG_CYCLE(BG3);
-				BREAK;
-			}
-			case TWENTYONE:
-			{
-				MODE2_T_BG_CYCLE(BG3);
-				BREAK;
-			}
-			case TWENTYTWO:
-			{
-				MODE2_M_BG_CYCLE(BG2);
-				BREAK;
-			}
-			case TWENTYTHREE:
-			{
-				MODE2_T_BG_CYCLE(BG2);
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case TWENTYFOUR:
-			{
-				MODE2_M_BG_CYCLE(BG3);
-				BREAK;
-			}
-			case TWENTYFIVE:
-			{
-				MODE2_T_BG_CYCLE(BG3);
-				BREAK;
-			}
-			case TWENTYSIX:
-			{
-				MODE2_M_BG_CYCLE(BG2);
-				BREAK;
-			}
-			case TWENTYSEVEN:
-			{
-				MODE2_T_BG_CYCLE(BG2);
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case TWENTYEIGHT:
-			{
-				MODE2_M_BG_CYCLE(BG3);
-				BREAK;
-			}
-			case TWENTYNINE:
-			{
-				MODE2_T_BG_CYCLE(BG3);
-				BREAK;
-			}
-			case THIRTY:
-			{
-				MODE2_M_BG_CYCLE(BG2);
-				BREAK;
-			}
-			case THIRTYONE:
-			{
-				MODE2_T_BG_CYCLE(BG2);
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			default:
-			{
-				FATAL("PPU mode 2) out of sync");
-			}
-			}
-		};
-
-	auto MODE3_BG_SEQUENCE = [&](SSTATE32 state)
-		{
-			switch (state)
-			{
-			case THREE:
-			{
-				MODE3_B_BG_CYCLE();
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case SEVEN:
-			{
-				MODE3_B_BG_CYCLE();
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case ELEVEN:
-			{
-				MODE3_B_BG_CYCLE();
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case FIFTEEN:
-			{
-				MODE3_B_BG_CYCLE();
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case NINETEEN:
-			{
-				MODE3_B_BG_CYCLE();
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case TWENTYTHREE:
-			{
-				MODE3_B_BG_CYCLE();
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case TWENTYSEVEN:
-			{
-				MODE3_B_BG_CYCLE();
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case THIRTYONE:
-			{
-				MODE3_B_BG_CYCLE();
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			}
-		};
-
-	auto MODE4_BG_SEQUENCE = [&](SSTATE32 state)
-		{
-			switch (state)
-			{
-			case THREE:
-			{
-				MODE4_B_BG_CYCLE();
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case SEVEN:
-			{
-				MODE4_B_BG_CYCLE();
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case ELEVEN:
-			{
-				MODE4_B_BG_CYCLE();
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case FIFTEEN:
-			{
-				MODE4_B_BG_CYCLE();
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case NINETEEN:
-			{
-				MODE4_B_BG_CYCLE();
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case TWENTYTHREE:
-			{
-				MODE4_B_BG_CYCLE();
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case TWENTYSEVEN:
-			{
-				MODE4_B_BG_CYCLE();
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case THIRTYONE:
-			{
-				MODE4_B_BG_CYCLE();
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			}
-		};
-
-	auto MODE5_BG_SEQUENCE = [&](SSTATE32 state)
-		{
-			switch (state)
-			{
-			case THREE:
-			{
-				MODE5_B_BG_CYCLE();
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case SEVEN:
-			{
-				MODE5_B_BG_CYCLE();
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case ELEVEN:
-			{
-				MODE5_B_BG_CYCLE();
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case FIFTEEN:
-			{
-				MODE5_B_BG_CYCLE();
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case NINETEEN:
-			{
-				MODE5_B_BG_CYCLE();
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case TWENTYTHREE:
-			{
-				MODE5_B_BG_CYCLE();
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case TWENTYSEVEN:
-			{
-				MODE5_B_BG_CYCLE();
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			case THIRTYONE:
-			{
-				MODE5_B_BG_CYCLE();
-				++pGBA_display->currentBgPixel;
-				BREAK;
-			}
-			}
-		};
-
-	auto PROCESS_PPU_MODES = [&](INC64 ppuCycles, FLAG renderBG, FLAG renderWindow, FLAG renderObj, FLAG renderMerge)
-		{
-			if (pGBA_display->currentPPUMode != pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE)
-			{
-				pGBA_display->ppuModeTransition = YES;
-				pGBA_display->currentPPUMode = pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE;
-			}
-			else
-			{
-				pGBA_display->ppuModeTransition = NO;
-			}
-
-			// Handle mode specific processing
-			if (ENABLED)
-			{
-				switch (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE)
-				{
-				case MODE0:
-				{
-					BREAK;
-				}
-				case MODE1:
-				{
-					BREAK;
-				}
-				case MODE2:
-				{
-					BREAK;
-				}
-				case MODE3:
-				{
-					BREAK;
-				}
-				case MODE4:
-				{
-					BREAK;
-				}
-				case MODE5:
-				{
-					BREAK;
-				}
-				default:
-				{
-					PPUWARN("Unknown PPU Mode");
-					RETURN;
-				}
-				}
-			}
-
-			// Handle common processing
-			if (ENABLED)
-			{
-				FLAG performWinRenderring = YES;
-				FLAG performObjectRenderring = YES;
-				FLAG performBgRenderring = YES;
-				FLAG performMerging = YES;
-
-				INC64 winCycles = ppuCycles;
-				INC64 objCycles = ppuCycles;
-				INC64 bgCycles = ppuCycles;
-				INC64 mergeCycles = ppuCycles;
-
-				const auto& currentScanline = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
-				auto& ppuCounter = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.ppuCounter;
-				auto& currentMode = pGBA_display->currentPPUMode;
-
-				ppuCounter += ppuCycles;
-
-				if (pGBA_display->winWaitCyclesDone == NO && renderWindow == YES)
-				{
-					if (ppuCounter < WIN_WAIT_CYCLES)
-					{
-						performWinRenderring = NO;
-					}
-					else
-					{
-						winCycles = ppuCounter - WIN_WAIT_CYCLES;
-						pGBA_display->winWaitCyclesDone = YES;
-						performWinRenderring = YES;
-					}
-				}
-
-				if (pGBA_display->objWaitCyclesDone == NO && renderObj == YES)
-				{
-					if (pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.ppuCounter < OBJECT_WAIT_CYCLES)
-					{
-						performObjectRenderring = (pGBA_display->allObjectsRenderedForScanline == NO) ? YES : NO;
-					}
-					else
-					{
-						if (
-							pGBA_display->cyclesPerScanline > ZERO
-							&&
-							pGBA_display->allObjectsRenderedForScanline == NO
-							&&
-							pGBA_display->objAccessPatternState != OBJECT_ACCESS_PATTERN::OBJECT_A01
-							)
-						{
-							if ((0x80 - pGBA_display->objAccessOAMIDState - ONE) > ZERO)
-							{
-								PPUMOREINFO("Missed %u objects in mode: %u; scanline %u", 0x80 - pGBA_display->objAccessOAMIDState - ONE, currentMode, pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY);
-							}
-							else
-							{
-								PPUMOREINFO("VRAM fsm still in mode: %u; scanline %u", currentMode, pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY);
-							}
-						}
-
-						pGBA_display->allObjectsRenderedForScanline = NO;
-
-						objCycles = ppuCounter - OBJECT_WAIT_CYCLES;
-						pGBA_display->objWaitCyclesDone = YES;
-						pGBA_display->objAccessOAMIDState = RESET;
-						pGBA_display->objCache[TO_UINT(OBJECT_STAGE::OBJECT_FETCH_STAGE)].reset();
-						pGBA_display->objCache[TO_UINT(OBJECT_STAGE::OBJECT_RENDER_STAGE)].reset();
-						pGBA_display->objCache[TO_UINT(OBJECT_STAGE::OBJECT_FETCH_STAGE)].vcount = (SCOUNTER32)((currentScanline + ONE) % 228);
-						pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_A01;
-						pGBA_display->objAccessPattern = RESET;
-						pGBA_display->cyclesPerSprite = RESET;
-						pGBA_display->cyclesPerScanline = RESET;
-						pGBA_display->vramCyclesStageForObjFSM = RESET;
-						SET_INITIAL_OBJ_MODE();
-						performObjectRenderring = YES;
-					}
-				}
-
-				if (pGBA_display->bgWaitCyclesDone == NO && renderBG == YES)
-				{
-					COUNTER32 offsetForTextMode = ZERO;
-					if (currentMode == MODE0 || currentMode == MODE1)
-					{
-						/*
-						* Refer https://nba-emu.github.io/hw-docs/ppu/background.html
-						* According to https://nba-emu.github.io/hw-docs/ppu/background.html#2, every BG waits 31 - 4 * (BG[x]HOFS mod 8) cycles in Mode 0 \n\
-						* To simply the implementation, we are just going to assume the minimum amount of time, i.e. 31 - 4 * (max(BG[x]HOFS mod 8))
-						* so, 32 - 4 * (7%8) = 32 - 4 * (7) = 35 - 28 = 4
-						* Therefore offsetForTextMode = 28
-						*/
-						PPUTODO("Simplified version of bg wait cycles is implemented for text modes");
-						offsetForTextMode = TWENTYEIGHT;
-					}
-
-					if (ppuCounter < (BG_WAIT_CYCLES - offsetForTextMode))
-					{
-						performBgRenderring = NO;
-					}
-					else
-					{
-						bgCycles = ppuCounter - (BG_WAIT_CYCLES - offsetForTextMode);
-						pGBA_display->bgWaitCyclesDone = YES;
-						performBgRenderring = YES;
-					}
-				}
-
-				if (pGBA_display->mergeWaitCyclesDone == NO && renderMerge == YES)
-				{
-					if (ppuCounter < MERGE_WAIT_CYCLES)
-					{
-						performMerging = NO;
-					}
-					else
-					{
-						mergeCycles = ppuCounter - MERGE_WAIT_CYCLES;
-						pGBA_display->mergeWaitCyclesDone = YES;
-						performMerging = YES;
-					}
-				}
-
-				INC64 currentCycles = ZERO;
-				INC64 targetCycles = winCycles;
-
-				if (performWinRenderring == YES && renderWindow == YES)
-				{
-					// Store the current mode and winAccessPatternState in local variables for efficiency
-					auto& winState = pGBA_display->winAccessPatternState[currentMode];
-
-					while (currentCycles < targetCycles)
-					{
-						if (winState == ZERO)
-						{
-							WIN_CYCLE();
-						}
-
-						// Advance the state (modulo 4)
-						winState = (winState + ONE) & THREE;
-
-						// next cycle...
-						++currentCycles;
-					}
-				}
-
-				PPUTODO("Optimize below code! We need to use a single while loop at line %d in %s", __LINE__, __FILE__);
-
-				currentCycles = ZERO;
-				targetCycles = objCycles;
-
-				if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.SCREEN_DISP_OBJ == SET && performObjectRenderring == YES && renderObj == YES)
-				{
-					while ((currentCycles < targetCycles) && pGBA_display->allObjectsRenderedForScanline == NO)
-					{
-						++pGBA_display->cyclesPerSprite;
-						++pGBA_display->cyclesPerScanline;
-
-						if (pGBA_display->currentObjectIsAffine == OBJECT_TYPE::OBJECT_IS_AFFINE)
-						{
-							// FSM runs only on even cycles
-							if ((pGBA_display->objAccessPattern & ONE) == RESET)
-							{
-								switch (pGBA_display->objAccessPatternState)
-								{
-								case OBJECT_ACCESS_PATTERN::OBJECT_A01:
-								{
-									pGBA_display->oamFoundValidObject = OBJ_A01_OBJ_CYCLE(pGBA_display->objAccessOAMIDState);
-									if (pGBA_display->oamFoundValidObject == NO)
-									{
-										if (INCREMENT_OAM_ID() == INVALID)
-										{
-											pGBA_display->allObjectsRenderedForScanline = YES;
-											pGBA_display->objAccessOAMIDState = RESET;
-											pGBA_display->objAccessPattern = RESET;
-											pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_A01;
-										}
-										pGBA_display->cyclesPerSprite = RESET;
-									}
-									else
-									{
-										pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_A2;
-										pGBA_display->currentObjectIsAffine = pGBA_display->nextObjectIsAffine;
-									}
-									BREAK;
-								}
-								case OBJECT_ACCESS_PATTERN::OBJECT_A2:
-								{
-									OBJ_A2_OBJ_CYCLE(pGBA_display->objAccessOAMIDState);
-									pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_PA;
-									BREAK;
-								}
-								case OBJECT_ACCESS_PATTERN::OBJECT_PA:
-								{
-									OBJ_PA_OBJ_CYCLE(pGBA_display->objAccessOAMIDState);
-									pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_PB;
-									BREAK;
-								}
-								case OBJECT_ACCESS_PATTERN::OBJECT_PB:
-								{
-									OBJ_PB_OBJ_CYCLE(pGBA_display->objAccessOAMIDState);
-									pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_PC;
-									BREAK;
-								}
-								case OBJECT_ACCESS_PATTERN::OBJECT_PC:
-								{
-									OBJ_PC_OBJ_CYCLE(pGBA_display->objAccessOAMIDState);
-									pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_PD;
-									BREAK;
-								}
-								case OBJECT_ACCESS_PATTERN::OBJECT_PD:
-								{
-									OBJ_PD_OBJ_CYCLE(pGBA_display->objAccessOAMIDState);
-									pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_BLANK_A01;
-									BREAK;
-								}
-								case OBJECT_ACCESS_PATTERN::OBJECT_BLANK_A01:
-								{
-									pGBA_display->oamFoundValidObject = OBJ_A01_OBJ_CYCLE(pGBA_display->objAccessOAMIDState + ONE);
-									pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_V;
-									pGBA_display->firstVRAMCycleForObjFSM = YES;
-									BREAK;
-								}
-								case OBJECT_ACCESS_PATTERN::OBJECT_V:
-								{
-									OBJ_V_OBJ_CYCLE(pGBA_display->objAccessOAMIDState, pGBA_display->currentObjectIsAffine, pGBA_display->vramCyclesStageForObjFSM);
-									++pGBA_display->vramCyclesStageForObjFSM;
-									if (pGBA_display->lastVRAMCycleForObjFSM == YES)
-									{
-										pGBA_display->lastVRAMCycleForObjFSM = NO;
-										pGBA_display->vramCyclesStageForObjFSM = RESET;
-										pGBA_display->cyclesPerSprite = RESET;
-										if (INCREMENT_OAM_ID() == INVALID)
-										{
-											pGBA_display->allObjectsRenderedForScanline = YES;
-											pGBA_display->objAccessOAMIDState = RESET;
-											pGBA_display->objAccessPattern = RESET;
-											pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_A01;
-										}
-										else
-										{
-											// valid if object is not disabled or we are in correct y coordinate for the object
-											if (pGBA_display->oamFoundValidObject == NO)
-											{
-												if (INCREMENT_OAM_ID() == INVALID)
-												{
-													pGBA_display->allObjectsRenderedForScanline = YES;
-													pGBA_display->objAccessOAMIDState = RESET;
-													pGBA_display->objAccessPattern = RESET;
-												}
-												else
-												{
-													pGBA_display->oamFoundValidObject = OBJ_A01_OBJ_CYCLE(pGBA_display->objAccessOAMIDState);
-													if (pGBA_display->oamFoundValidObject == NO)
-													{
-														if (INCREMENT_OAM_ID() == INVALID)
-														{
-															pGBA_display->allObjectsRenderedForScanline = YES;
-															pGBA_display->objAccessOAMIDState = RESET;
-															pGBA_display->objAccessPattern = RESET;
-														}
-														pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_A01;
-													}
-													else
-													{
-														pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_A2;
-														pGBA_display->currentObjectIsAffine = pGBA_display->nextObjectIsAffine;
-													}
-												}
-											}
-											else
-											{
-												pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_A2;
-												pGBA_display->currentObjectIsAffine = pGBA_display->nextObjectIsAffine;
-											}
-										}
-									}
-									BREAK;
-								}
-								default:
-								{
-									FATAL("Unknown Object Access Pattern State (Affine) in PPU Mode %d", currentMode);
-								}
-								}
-							}
-
-							++pGBA_display->objAccessPattern;
-						}
-						else if (pGBA_display->currentObjectIsAffine == OBJECT_TYPE::OBJECT_IS_NOT_AFFINE)
-						{
-							// FSM runs only on even cycles
-							if ((pGBA_display->objAccessPattern & ONE) == RESET)
-							{
-								switch (pGBA_display->objAccessPatternState)
-								{
-								case OBJECT_ACCESS_PATTERN::OBJECT_A01:
-								{
-									pGBA_display->oamFoundValidObject = OBJ_A01_OBJ_CYCLE(pGBA_display->objAccessOAMIDState);
-									if (pGBA_display->oamFoundValidObject == NO)
-									{
-										if (INCREMENT_OAM_ID() == INVALID)
-										{
-											pGBA_display->allObjectsRenderedForScanline = YES;
-											pGBA_display->objAccessOAMIDState = RESET;
-											pGBA_display->objAccessPattern = RESET;
-											pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_A01;
-										}
-										pGBA_display->cyclesPerSprite = RESET;
-									}
-									else
-									{
-										pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_A2;
-										pGBA_display->currentObjectIsAffine = pGBA_display->nextObjectIsAffine;
-									}
-									BREAK;
-								}
-								case OBJECT_ACCESS_PATTERN::OBJECT_A2:
-								{
-									OBJ_A2_OBJ_CYCLE(pGBA_display->objAccessOAMIDState);
-									pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_V;
-									pGBA_display->firstVRAMCycleForObjFSM = YES;
-									BREAK;
-								}
-								case OBJECT_ACCESS_PATTERN::OBJECT_V:
-								{
-									OBJ_V_OBJ_CYCLE(pGBA_display->objAccessOAMIDState, pGBA_display->currentObjectIsAffine, pGBA_display->vramCyclesStageForObjFSM);
-									++pGBA_display->vramCyclesStageForObjFSM;
-									if (pGBA_display->firstVRAMCycleForObjFSM == YES)
-									{
-										pGBA_display->firstVRAMCycleForObjFSM = NO;
-										pGBA_display->oamFoundValidObject = OBJ_A01_OBJ_CYCLE(pGBA_display->objAccessOAMIDState + ONE);
-									}
-									else if (pGBA_display->lastVRAMCycleForObjFSM == YES)
-									{
-										pGBA_display->lastVRAMCycleForObjFSM = NO;
-										pGBA_display->vramCyclesStageForObjFSM = RESET;
-										pGBA_display->cyclesPerSprite = RESET;
-										if (INCREMENT_OAM_ID() == INVALID)
-										{
-											pGBA_display->allObjectsRenderedForScanline = YES;
-											pGBA_display->objAccessOAMIDState = RESET;
-											pGBA_display->objAccessPattern = RESET;
-											pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_A01;
-										}
-										else
-										{
-											// valid if object is not disabled or we are in correct y coordinate for the object
-											if (pGBA_display->oamFoundValidObject == NO)
-											{
-												if (INCREMENT_OAM_ID() == INVALID)
-												{
-													pGBA_display->allObjectsRenderedForScanline = YES;
-													pGBA_display->objAccessOAMIDState = RESET;
-													pGBA_display->objAccessPattern = RESET;
-													pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_A01;
-												}
-												else
-												{
-													pGBA_display->oamFoundValidObject = OBJ_A01_OBJ_CYCLE(pGBA_display->objAccessOAMIDState);
-													if (pGBA_display->oamFoundValidObject == NO)
-													{
-														if (INCREMENT_OAM_ID() == INVALID)
-														{
-															pGBA_display->allObjectsRenderedForScanline = YES;
-															pGBA_display->objAccessOAMIDState = RESET;
-															pGBA_display->objAccessPattern = RESET;
-														}
-														pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_A01;
-													}
-													else
-													{
-														pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_A2;
-														pGBA_display->currentObjectIsAffine = pGBA_display->nextObjectIsAffine;
-													}
-												}
-											}
-											else
-											{
-												pGBA_display->objAccessPatternState = OBJECT_ACCESS_PATTERN::OBJECT_A2;
-												pGBA_display->currentObjectIsAffine = pGBA_display->nextObjectIsAffine;
-											}
-										}
-									}
-									BREAK;
-								}
-								default:
-								{
-									FATAL("Unknown Object Access Pattern State (Not Affine) in PPU Mode %d", currentMode);
-								}
-								}
-							}
-
-							++pGBA_display->objAccessPattern;
-						}
-
-						// next cycle...
-						++currentCycles;
-					}
-				}
-
-				currentCycles = ZERO;
-				targetCycles = bgCycles;
-
-				if (performBgRenderring == YES && renderBG == YES)
-				{
-#if (ENABLED)
-					// Cache the state once before the loop to avoid repeated array access
-					auto& bgState = pGBA_display->bgAccessPatternState[currentMode];
-
-					switch (currentMode)
-					{
-					case MODE0:
-					{
-						while (currentCycles < targetCycles)
-						{
-							MODE0_BG_SEQUENCE(bgState);
-
-							bgState = (bgState + ONE) & THIRTYONE;
-
-							// next cycle...
-							++currentCycles;
-						}
-						BREAK;
-					}
-					case MODE1:
-					{
-						while (currentCycles < targetCycles)
-						{
-							MODE1_BG_SEQUENCE(bgState);
-
-							bgState = (bgState + ONE) & THIRTYONE;
-
-							// next cycle...
-							++currentCycles;
-						}
-						BREAK;
-					}
-					case MODE2:
-					{
-						while (currentCycles < targetCycles)
-						{
-							MODE2_BG_SEQUENCE(bgState);
-
-							bgState = (bgState + ONE) & THIRTYONE;
-
-							// next cycle...
-							++currentCycles;
-						}
-						BREAK;
-					}
-					case MODE3:
-					{
-						while (currentCycles < targetCycles)
-						{
-							MODE3_BG_SEQUENCE(bgState);
-
-							bgState = (bgState + ONE) & THIRTYONE;
-
-							// next cycle...
-							++currentCycles;
-						}
-						BREAK;
-					}
-					case MODE4:
-					{
-						while (currentCycles < targetCycles)
-						{
-							MODE4_BG_SEQUENCE(bgState);
-
-							bgState = (bgState + ONE) & THIRTYONE;
-
-							// next cycle...
-							++currentCycles;
-						}
-						BREAK;
-					}
-					case MODE5:
-					{
-						while (currentCycles < targetCycles)
-						{
-							MODE5_BG_SEQUENCE(bgState);
-
-							bgState = (bgState + ONE) & THIRTYONE;
-
-							// next cycle...
-							++currentCycles;
-						}
-						BREAK;
-					}
-					default:
-					{
-						FATAL("Unknown BG mode");
-					}
-					}
-#else
-					while (currentCycles < targetCycles)
-					{
-						switch (pGBA_display->bgAccessPatternState[currentMode])
-						{
-						case ZERO:
-						{
-							CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG0));
-							CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG0));
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-							CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG0));
-							CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG0));
-#endif
-							CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG3));
-							BREAK;
-						}
-						case ONE:
-						{
-							CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG1));
-							CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG1));
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-							CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG1));
-							CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG1));
-#endif
-							CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG3));
-							BREAK;
-						}
-						case TWO:
-						{
-							CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG2));
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-							CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG2));
-#endif
-							CONDITIONAL(currentMode == MODE1, MODE1_M_AFFINE_BG_CYCLE());
-							CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG2));
-							BREAK;
-						}
-						case THREE:
-						{
-							CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG3));
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-							CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG3));
-#endif
-							CONDITIONAL(currentMode == MODE1, MODE1_T_AFFINE_BG_CYCLE());
-							CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG2));
-							CONDITIONAL(currentMode == MODE3, MODE3_B_BG_CYCLE());
-							CONDITIONAL(currentMode == MODE4, MODE4_B_BG_CYCLE());
-							CONDITIONAL(currentMode == MODE5, MODE5_B_BG_CYCLE());
-							++pGBA_display->currentBgPixel;
-							BREAK;
-						}
-						case FOUR:
-						{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-							CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG0));
-							CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG0));
-#endif
-							CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG0));
-							CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG0));
-							CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG3));
-							BREAK;
-						}
-						case FIVE:
-						{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-							CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG1));
-							CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG1));
-#endif
-							CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG1));
-							CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG1));
-							CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG3));
-							BREAK;
-						}
-						case SIX:
-						{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-							CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG2));
-#endif
-							CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG2));
-							CONDITIONAL(currentMode == MODE1, MODE1_M_AFFINE_BG_CYCLE());
-							CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG2));
-							BREAK;
-						}
-						case SEVEN:
-						{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-							CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG3));
-#endif
-							CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG3));
-							CONDITIONAL(currentMode == MODE1, MODE1_T_AFFINE_BG_CYCLE());
-							CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG2));
-							CONDITIONAL(currentMode == MODE3, MODE3_B_BG_CYCLE());
-							CONDITIONAL(currentMode == MODE4, MODE4_B_BG_CYCLE());
-							CONDITIONAL(currentMode == MODE5, MODE5_B_BG_CYCLE());
-							++pGBA_display->currentBgPixel;
-							BREAK;
-						}
-						case EIGHT:
-						{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-							CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG0));
-							CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG0));
-							CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG0));
-							CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG0));
-#endif
-							CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG3));
-							BREAK;
-						}
-						case NINE:
-						{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-							CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG1));
-							CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG1));
-							CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG1));
-							CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG1));
-#endif
-							CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG3));
-							BREAK;
-						}
-						case TEN:
-						{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-							CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG2));
-							CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG2));
-#endif
-							CONDITIONAL(currentMode == MODE1, MODE1_M_AFFINE_BG_CYCLE());
-							CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG2));
-							BREAK;
-						}
-						case ELEVEN:
-						{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-							CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG3));
-							CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG3));
-#endif
-							CONDITIONAL(currentMode == MODE1, MODE1_T_AFFINE_BG_CYCLE());
-							CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG2));
-							CONDITIONAL(currentMode == MODE3, MODE3_B_BG_CYCLE());
-							CONDITIONAL(currentMode == MODE4, MODE4_B_BG_CYCLE());
-							CONDITIONAL(currentMode == MODE5, MODE5_B_BG_CYCLE());
-							++pGBA_display->currentBgPixel;
-							BREAK;
-						}
-						case TWELVE:
-						{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-							CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG0));
-							CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG0));
-#endif
-							CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG0));
-							CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG0));
-							CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG3));
-							BREAK;
-						}
-						case THIRTEEN:
-						{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-							CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG1));
-							CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG1));
-#endif
-							CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG1));
-							CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG1));
-							CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG3));
-							BREAK;
-						}
-						case FOURTEEN:
-						{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-							CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG2));
-#endif
-							CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG2));
-							CONDITIONAL(currentMode == MODE1, MODE1_M_AFFINE_BG_CYCLE());
-							CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG2));
-							BREAK;
-						}
-						case FIFTEEN:
-						{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-							CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG3));
-#endif
-							CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG3));
-							CONDITIONAL(currentMode == MODE1, MODE1_T_AFFINE_BG_CYCLE());
-							CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG2));
-							CONDITIONAL(currentMode == MODE3, MODE3_B_BG_CYCLE());
-							CONDITIONAL(currentMode == MODE4, MODE4_B_BG_CYCLE());
-							CONDITIONAL(currentMode == MODE5, MODE5_B_BG_CYCLE());
-							++pGBA_display->currentBgPixel;
-							BREAK;
-						}
-						case SIXTEEN:
-						{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-							CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG0));
-							CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG0));
-							CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG0));
-							CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG0));
-#endif
-							CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG3));
-							BREAK;
-						}
-						case SEVENTEEN:
-						{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-							CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG1));
-							CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG1));
-							CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG1));
-							CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG1));
-#endif
-							CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG3));
-							BREAK;
-						}
-						case EIGHTEEN:
-						{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-							CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG2));
-							CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG2));
-#endif
-							CONDITIONAL(currentMode == MODE1, MODE1_M_AFFINE_BG_CYCLE());
-							CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG2));
-							BREAK;
-						}
-						case NINETEEN:
-						{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-							CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG3));
-							CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG3));
-#endif
-							CONDITIONAL(currentMode == MODE1, MODE1_T_AFFINE_BG_CYCLE());
-							CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG2));
-							CONDITIONAL(currentMode == MODE3, MODE3_B_BG_CYCLE());
-							CONDITIONAL(currentMode == MODE4, MODE4_B_BG_CYCLE());
-							CONDITIONAL(currentMode == MODE5, MODE5_B_BG_CYCLE());
-							++pGBA_display->currentBgPixel;
-							BREAK;
-						}
-						case TWENTY:
-						{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-							CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG0));
-							CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG0));
-#endif
-							CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG0));
-							CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG0));
-							CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG3));
-							BREAK;
-						}
-						case TWENTYONE:
-						{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-							CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG1));
-							CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG1));
-#endif
-							CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG1));
-							CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG1));
-							CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG3));
-							BREAK;
-						}
-						case TWENTYTWO:
-						{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-							CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG2));
-#endif
-							CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG2));
-							CONDITIONAL(currentMode == MODE1, MODE1_M_AFFINE_BG_CYCLE());
-							CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG2));
-							BREAK;
-						}
-						case TWENTYTHREE:
-						{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-							CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG3));
-#endif
-							CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG3));
-							CONDITIONAL(currentMode == MODE1, MODE1_T_AFFINE_BG_CYCLE());
-							CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG2));
-							CONDITIONAL(currentMode == MODE3, MODE3_B_BG_CYCLE());
-							CONDITIONAL(currentMode == MODE4, MODE4_B_BG_CYCLE());
-							CONDITIONAL(currentMode == MODE5, MODE5_B_BG_CYCLE());
-							++pGBA_display->currentBgPixel;
-							BREAK;
-						}
-						case TWENTYFOUR:
-						{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-							CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG0));
-							CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG0));
-							CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG0));
-							CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG0));
-#endif
-							CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG3));
-							BREAK;
-						}
-						case TWENTYFIVE:
-						{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-							CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG1));
-							CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG1));
-							CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG1));
-							CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG1));
-#endif
-							CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG3));
-							BREAK;
-						}
-						case TWENTYSIX:
-						{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-							CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG2));
-							CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG2));
-#endif
-							CONDITIONAL(currentMode == MODE1, MODE1_M_AFFINE_BG_CYCLE());
-							CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG2));
-							BREAK;
-						}
-						case TWENTYSEVEN:
-						{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-							CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG3));
-							CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG3));
-#endif
-							CONDITIONAL(currentMode == MODE1, MODE1_T_AFFINE_BG_CYCLE());
-							CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG2));
-							CONDITIONAL(currentMode == MODE3, MODE3_B_BG_CYCLE());
-							CONDITIONAL(currentMode == MODE4, MODE4_B_BG_CYCLE());
-							CONDITIONAL(currentMode == MODE5, MODE5_B_BG_CYCLE());
-							++pGBA_display->currentBgPixel;
-							BREAK;
-						}
-						case TWENTYEIGHT:
-						{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-							CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG0));
-							CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG0));
-#endif
-							CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG0));
-							CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG0));
-							CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG3));
-							BREAK;
-						}
-						case TWENTYNINE:
-						{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-							CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG1));
-							CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG1));
-#endif
-							CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG1));
-							CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG1));
-							CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG3));
-							BREAK;
-						}
-						case THIRTY:
-						{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-							CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG2));
-#endif
-							CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG2));
-							CONDITIONAL(currentMode == MODE1, MODE1_M_AFFINE_BG_CYCLE());
-							CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG2));
-							BREAK;
-						}
-						case THIRTYONE:
-						{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-							CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG3));
-#endif
-							CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG3));
-							CONDITIONAL(currentMode == MODE1, MODE1_T_AFFINE_BG_CYCLE());
-							CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG2));
-							CONDITIONAL(currentMode == MODE3, MODE3_B_BG_CYCLE());
-							CONDITIONAL(currentMode == MODE4, MODE4_B_BG_CYCLE());
-							CONDITIONAL(currentMode == MODE5, MODE5_B_BG_CYCLE());
-							++pGBA_display->currentBgPixel;
-							BREAK;
-						}
-						default:
-						{
-							FATAL("PPU mode %d (BG) out of sync", currentMode);
-						}
-						}
-
-						++pGBA_display->bgAccessPatternState[currentMode];
-						if (pGBA_display->bgAccessPatternState[currentMode] >= THIRTYTWO)
-						{
-							pGBA_display->bgAccessPatternState[currentMode] = ZERO;
-						}
-
-						// next cycle...
-						++currentCycles;
-					}
-#endif
-				}
-
-				currentCycles = ZERO;
-				targetCycles = mergeCycles;
-
-				if (performMerging == YES && renderMerge == YES)
-				{
-					// Cache the state once before the loop to avoid repeated array access
-					auto& mergeState = pGBA_display->mergeAccessPatternState[currentMode];
-
-					while (currentCycles < targetCycles)
-					{
-						if (mergeState == ZERO)
-						{
-							MERGE_AND_DISPLAY_PHASE1();
-						}
-						else if (mergeState == TWO)
-						{
-							MERGE_AND_DISPLAY_PHASE2();
-						}
-
-						// Move to the next state and wrap it at 4
-						mergeState = (mergeState + ONE) & THREE;
-
-						// next cycle...
-						++currentCycles;
-					}
-				}
-
-			}
-		};
-
-	auto HANDLE_VCOUNT = [&]()
-		{
-			if (pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.VCOUNT_SETTING_LYC == pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY)
-			{
-				if (
-					pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.VCOUNTER_IRQ_ENABLE
-					&&
-					pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.VCOUNT_FLAG == RESET
-					)
-				{
-					requestInterrupts(GBA_INTERRUPT::IRQ_VCOUNT);
-				}
-
-				pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.VCOUNT_FLAG = SET;
-			}
-			else
-			{
-				pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.VCOUNT_FLAG = RESET;
-			}
-		};
-
-	pGBA_display->wasVblankJustTriggered = NO;
-
-	pGBA_display->didLCDModeChangeJustNow = NO;
-
 	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.lcdCounter += ppuCycles;
 
 	switch (pGBA_display->currentLCDMode)
@@ -10474,7 +10585,7 @@ void GBA_t::processPPU(INC64 ppuCycles)
 				requestInterrupts(GBA_INTERRUPT::IRQ_HBLANK);
 			}
 
-			scheduleDMATrigger(DMA_TIMING::HBLANK);
+			RequestDMA(DMA_TIMING::HBLANK);
 
 			// Proceed to next lcd mode
 			pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.lcdCounter;
@@ -10530,20 +10641,22 @@ void GBA_t::processPPU(INC64 ppuCycles)
 
 				HANDLE_VCOUNT();
 
-				scheduleDMATrigger(DMA_TIMING::VBLANK);
-
 				// Refer http://problemkaputt.de/gbatek-gba-dma-transfers.htm
 				if (pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY >= TWO)
 				{
 					/*
 					* https://gbadev.net/tonc/dma.html
-					* For DMA1 and DMA2 it'll refill the FIFO when it has been emptied.
-					* Count and size are forced to 1 and 32bit, respectively.
 					* For DMA3 it will start the copy at the start of each rendering line, but with a 2 scanline delay.
 					*/
-					scheduleDMATrigger(DMA_TIMING::SPECIAL);
-					scheduleSpecialDMATrigger(DMA_SPECIAL_TIMING::VIDEO);
+					if (pGBA_peripherals->mDMA3CNT_H.mDMAnCNT_HFields.DMA_EN == SET 
+						&&
+						pGBA_instance->GBA_state.dma.cache[DMA::DMA3].scheduleType == DMA_TIMING::SPECIAL)
+					{
+						ActivateDMAChannel(DMA::DMA3);
+					}
 				}
+
+				RequestDMA(DMA_TIMING::VBLANK);
 
 				if (pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.VBLANK_IRQ_ENABLE == SET)
 				{
@@ -10618,12 +10731,14 @@ void GBA_t::processPPU(INC64 ppuCycles)
 				{
 					/*
 					* https://gbadev.net/tonc/dma.html
-					* For DMA1 and DMA2 it'll refill the FIFO when it has been emptied.
-					* Count and size are forced to 1 and 32bit, respectively.
 					* For DMA3 it will start the copy at the start of each rendering line, but with a 2 scanline delay.
 					*/
-					scheduleDMATrigger(DMA_TIMING::SPECIAL);
-					scheduleSpecialDMATrigger(DMA_SPECIAL_TIMING::VIDEO);
+					if (pGBA_peripherals->mDMA3CNT_H.mDMAnCNT_HFields.DMA_EN == SET
+						&&
+						pGBA_instance->GBA_state.dma.cache[DMA::DMA3].scheduleType == DMA_TIMING::SPECIAL)
+					{
+						ActivateDMAChannel(DMA::DMA3);
+					}
 				}
 
 				// Proceed to next lcd mode
@@ -10652,7 +10767,7 @@ void GBA_t::processPPU(INC64 ppuCycles)
 			pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.HBLANK_FLAG = SET;
 
 			// According to http://problemkaputt.de/gbatek-lcd-dimensions-and-timings.htm, we should not...but this is needed for tonc's irq_demo.gba
-			PPUTODO("Should we raise H-BLANK interrupt when we are in V-BLANK ?");
+			// GBATEK is confirmed to be wrong w.r.t this as per https://discord.com/channels/465585922579103744/465586361731121162/1313454859131031574
 			if (pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.HBLANK_IRQ_ENABLE == SET)
 			{
 				requestInterrupts(GBA_INTERRUPT::IRQ_HBLANK);
@@ -10759,27 +10874,24 @@ void GBA_t::processPPU(INC64 ppuCycles)
 				{
 					/*
 					* https://gbadev.net/tonc/dma.html
-					* For DMA1 and DMA2 it'll refill the FIFO when it has been emptied.
-					* Count and size are forced to 1 and 32bit, respectively.
 					* For DMA3 it will start the copy at the start of each rendering line, but with a 2 scanline delay.
 					*/
-					scheduleDMATrigger(DMA_TIMING::SPECIAL);
-					scheduleSpecialDMATrigger(DMA_SPECIAL_TIMING::VIDEO);
+					if (pGBA_peripherals->mDMA3CNT_H.mDMAnCNT_HFields.DMA_EN == SET
+						&&
+						pGBA_instance->GBA_state.dma.cache[DMA::DMA3].scheduleType == DMA_TIMING::SPECIAL)
+					{
+						ActivateDMAChannel(DMA::DMA3);
+					}
 				}
 				else if (pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY >= 162)
 				{
 					// Need to stop scheduling the Video Capture DMA (DMA 3) 
-					cancelScheduledDMATrigger(DMA_TIMING::SPECIAL);
-					cancelScheduledSpecialDMATrigger(DMA_SPECIAL_TIMING::VIDEO);
-
-					// Disable DMA 3 if it was enabled and in special mode
-					TODO("Does GBA stop DMA3 in special mode by directly disabling the ENABLE bit in mDMA3CNT_H ?");
-					if ((((DMA_TIMING)pGBA_peripherals->mDMA3CNT_H.mDMAnCNT_HFields.DMA_START_TIMING) == DMA_TIMING::SPECIAL)
+					if (pGBA_peripherals->mDMA3CNT_H.mDMAnCNT_HFields.DMA_EN == SET
 						&&
-						(pGBA_peripherals->mDMA3CNT_H.mDMAnCNT_HFields.DMA_EN == SET)
-						)
+						pGBA_instance->GBA_state.dma.cache[DMA::DMA3].scheduleType == DMA_TIMING::SPECIAL)
 					{
 						pGBA_peripherals->mDMA3CNT_H.mDMAnCNT_HFields.DMA_EN = RESET;
+						OnDMAChannelWritten(DMA::DMA3, ENABLED, DISABLED);
 					}
 				}
 
@@ -11322,30 +11434,6 @@ void GBA_t::processBackup()
 	}
 }
 
-#if (DEACTIVATED)
-void GBA_t::dumpIO()
-{
-	static uint64_t ioDumpCounter = 0;
-	if (ioDumpCounter == 1000)
-	{
-		std::ofstream fs("ioDump.txt");
-		if (!fs)
-		{
-			std::cerr << "Cannot open the output file." << std::endl;
-			RETURN;
-		}
-		auto addr = 0x04000000;
-		for (int ii = 0; ii < (sizeof(pGBA_memory->mGBAMemoryMap.mIO.mIOMemory16bit) / 2); ii++)
-		{
-			fs << std::hex << std::setfill('0') << addr << " = " << std::setw(4) << pGBA_memory->mGBAMemoryMap.mIO.mIOMemory16bit[ii] << std::endl;
-			addr += 2;
-		}
-		fs.close();
-	}
-	++ioDumpCounter;
-}
-#endif
-
 void GBA_t::loadQuirks()
 {
 	if (ImGui::IsKeyReleased(ImGuiKey_Q) == YES)
@@ -11387,7 +11475,6 @@ void GBA_t::initializeGraphics()
 
 	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.ppuCounter = RESET;
 	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter = RESET;
-
 	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.ppuCounter = RESET;
 	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.lcdCounter = RESET;
 
@@ -11433,7 +11520,6 @@ void GBA_t::initializeAudio()
 	SDL_ResumeAudioDevice(SDL_GetAudioStreamDevice(audioStream));
 
 	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.apuCounter = RESET;
-
 	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.apuCounter = RESET;
 
 	// Refer : http://problemkaputt.de/gbatek-gba-sound-control-registers.htm
@@ -11442,15 +11528,6 @@ void GBA_t::initializeAudio()
 	// Setup the volume for audio
 	pGBA_audio->emulatorVolume = pt.get<std::float_t>("gba._volume");
 	SDL_SetAudioDeviceGain(SDL_GetAudioStreamDevice(audioStream), pGBA_audio->emulatorVolume);
-}
-
-// TODO: Below function is not used for now...
-void GBA_t::reInitializeAudio()
-{
-	if (_ENABLE_AUDIO == YES)
-	{
-		;
-	}
 }
 
 FLAG GBA_t::runEmulationAtHostRate(uint32_t currentFrame)
@@ -11554,7 +11631,7 @@ FLAG GBA_t::initializeEmulator()
 	pGBA_audio = &(pGBA_instance->GBA_state.audio);
 	pGBA_display = &(pGBA_instance->GBA_state.display);
 
-	pGBA_instance->GBA_state.dma.currentlyActiveDMA = DMA::NONE;
+	pGBA_instance->GBA_state.dma.currentlyActiveDMA = DMA::NO_DMA;
 
 	pGBA_peripherals->mKEYINPUTHalfWord.mKEYINPUTHalfWord = 0x03FF; // Start with "Released"
 
@@ -12194,11 +12271,4 @@ FLAG GBA_t::getRomLoadedStatus()
 {
 	RETURN pAbsolute_GBA_instance->absolute_GBA_state.aboutRom.isRomLoaded;
 }
-
-#if (DEACTIVATED)
-void GBA_t::runDebugger()
-{
-
-}
-#endif
 #pragma endregion EMULATION_DEFINITIONS

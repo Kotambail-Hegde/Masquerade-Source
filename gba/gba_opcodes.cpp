@@ -71,6 +71,155 @@
 #define DATA_PROCESSING_INSTRUCTION						0x00000000
 #pragma endregion ARM7TDMI_SPECIFIC_MACROS
 
+bool GBA_t::TickMultiply(FLAG isSigned, uint64_t multiplier)
+{
+	uint32_t mask = 0xFFFFFF00;
+	bool full = false;
+
+	cpuIdleCycles();
+
+	while (TRUE)
+	{
+		multiplier &= mask;
+
+		if (multiplier == ZERO)
+		{
+			BREAK;
+		}
+
+		if (isSigned == YES)
+		{
+			if (multiplier == mask)
+			{
+				BREAK;
+			}
+		}
+
+		mask <<= EIGHT;
+		full = true;
+		cpuIdleCycles();
+	}
+
+	return full;
+}
+
+bool GBA_t::MultiplyCarrySimple(uint32_t multiplier)
+{
+	// Carry comes directly from final injected booth carry bit.
+	// Final booth addend is negative only if upper 2 bits are 10.
+	return (multiplier >> 30) == 2;
+}
+
+bool GBA_t::MultiplyCarryLo(
+	uint32_t multiplicand,
+	uint32_t multiplier,
+	uint32_t accum /* = 0 */
+)
+{
+	// Set low bit of multiplicand to cause negation to invert the upper bits.
+	// This bit cannot propagate to the resulting carry bit.
+	multiplicand |= 1;
+
+	// Optimized first iteration.
+	uint32_t booth = (int32_t)(multiplier << 31) >> 31;
+	uint32_t carry = multiplicand * booth;
+	uint32_t sum = carry + accum;
+
+	int shift = 29;
+
+	do
+	{
+		// Process 8 multiplier bits using 4 booth iterations.
+		for (int i = 0; i < 4; i++, shift -= 2)
+		{
+			// Get next booth factor (-2 to 2, shifted left by 30-shift).
+			uint32_t next_booth = (int32_t)(multiplier << shift) >> shift;
+			uint32_t factor = next_booth - booth;
+			booth = next_booth;
+
+			// Get scaled value of booth addend.
+			uint32_t addend = multiplicand * factor;
+
+			// Accumulate addend with carry-save add.
+			accum ^= carry ^ addend;
+			sum += addend;
+			carry = sum - accum;
+		}
+	}
+	while (booth != multiplier);
+
+	// Carry flag comes from bit 31 of carry-save adder's final carry.
+	return (carry >> 31);
+}
+
+bool GBA_t::MultiplyCarryHi(
+	bool sign_extend,
+	uint32_t multiplicand,
+	uint32_t multiplier,
+	uint32_t accum_hi /* = 0 */
+)
+{
+	// Only last 3 booth iterations are relevant to output carry.
+	// Reduce scale of both inputs to get upper bits of 64-bit booth addends
+	// in upper bits of 32-bit values, while handling sign extension.
+	if (sign_extend)
+	{
+		multiplicand = (int32_t)multiplicand >> 6;
+		multiplier = (int32_t)multiplier >> 26;
+	}
+	else
+	{
+		multiplicand >>= 6;
+		multiplier >>= 26;
+	}
+
+	// Set low bit of multiplicand to cause negation to invert the upper bits.
+	// This bit cannot propagate to the resulting carry bit.
+	multiplicand |= 1;
+
+	// Pre-populate magic bit 61 for carry.
+	uint32_t carry = ~accum_hi & 0x20000000;
+
+	// Pre-populate magic bits 63-60 for accum (with carry magic pre-added).
+	uint32_t accum = accum_hi - 0x08000000;
+
+	// Get factors for last 3 booth iterations.
+	uint32_t booth0 = (int32_t)(multiplier << 27) >> 27;
+	uint32_t booth1 = (int32_t)(multiplier << 29) >> 29;
+	uint32_t booth2 = (int32_t)(multiplier << 31) >> 31;
+
+	uint32_t factor0 = multiplier - booth0;
+	uint32_t factor1 = booth0 - booth1;
+	uint32_t factor2 = booth1 - booth2;
+
+	// Get scaled value of 3rd-last booth addend.
+	uint32_t addend = multiplicand * factor2;
+
+	// Finalize bits 61-60 of accum magic using its sign.
+	accum -= addend & 0x10000000;
+
+	// Get scaled value of 2nd-last booth addend.
+	addend = multiplicand * factor1;
+
+	// Finalize bits 63-62 of accum magic using its sign.
+	accum -= addend & 0x40000000;
+
+	// Get carry from carry-save add in bit 61 and propagate it to bit 62.
+	uint32_t sum = accum + (addend & 0x20000000);
+
+	// Subtract out carry magic to get actual accum magic.
+	accum -= carry;
+
+	// Get scaled value of last booth addend.
+	addend = multiplicand * factor0;
+
+	// Add to bit 62 and propagate carry.
+	sum += addend & 0x40000000;
+
+	// Cancel out accum magic bit 63 to get carry bit 63.
+	return (sum ^ accum) >> 31;
+}
+
 bool GBA_t::didConditionalCheckPass(uint32_t opCodeConditionalBits, uint32_t cpsr)
 {
 	CPUDEBUG("Condition: 0x%X", (uint32_t)opCodeConditionalBits);
@@ -483,7 +632,7 @@ bool GBA_t::MultipleLoadStore()
 				// Yet we have moved out this logic from above for loop
 				// Only reason I can think of is to handle the internal Cycles which was not there for "BLOCK DATA TRANSFER"
 
-				cpuIdleCycles(ONE);
+				cpuIdleCycles();
 
 				// If rb is not part of register list, then perform writeback
 				if (~registerList & (1 << rb))
@@ -719,13 +868,13 @@ bool GBA_t::PushPopRegisters()
 					GBA_WORD memoryToRegister = readRawMemory<GBA_WORD>(baseAddr, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU);
 					// update SP
 					cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)SP, getARMState(), baseAddr + sizeof(GBA_WORD));
-					cpuIdleCycles(ONE);
+					cpuIdleCycles();
 					// update PC
 					cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)PC, getARMState(), memoryToRegister);
 				}
 				else
 				{
-					cpuIdleCycles(ONE);
+					cpuIdleCycles();
 					// update SP
 					cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)SP, getARMState(), baseAddr);
 				}
@@ -811,7 +960,7 @@ bool GBA_t::LoadStoreHalfword()
 				, DISABLED
 			);
 			cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd, getARMState(), dataToBeWritten);
-			cpuIdleCycles(ONE);
+			cpuIdleCycles();
 		}
 		else
 		{
@@ -856,7 +1005,7 @@ bool GBA_t::SPRelativeLoadStore()
 				, DISABLED
 			);
 			cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd, getARMState(), dataToBeWritten);
-			cpuIdleCycles(ONE);
+			cpuIdleCycles();
 		}
 		else
 		{
@@ -936,7 +1085,7 @@ bool GBA_t::LoadStoreWithImmediateOffset()
 			{
 				GBA_WORD dataToBeWritten = readRawMemory<BYTE>(address, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::CPU);
 				cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd, getARMState(), dataToBeWritten);
-				cpuIdleCycles(ONE);
+				cpuIdleCycles();
 			}
 			else
 			{
@@ -950,7 +1099,7 @@ bool GBA_t::LoadStoreWithImmediateOffset()
 					, DISABLED
 				);
 				cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd, getARMState(), dataToBeWritten);
-				cpuIdleCycles(ONE);
+				cpuIdleCycles();
 			}
 		}
 		else
@@ -997,7 +1146,7 @@ bool GBA_t::LoadStoreWithRegisterOffset()
 			{
 				GBA_WORD dataToBeWritten = readRawMemory<BYTE>(address, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::CPU);
 				cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd, getARMState(), dataToBeWritten);
-				cpuIdleCycles(ONE);
+				cpuIdleCycles();
 			}
 			else
 			{
@@ -1011,7 +1160,7 @@ bool GBA_t::LoadStoreWithRegisterOffset()
 					, DISABLED
 				);
 				cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd, getARMState(), dataToBeWritten);
-				cpuIdleCycles(ONE);
+				cpuIdleCycles();
 			}
 		}
 		else
@@ -1064,7 +1213,7 @@ bool GBA_t::LoadStoreSignExtendedByteHalfword()
 			GBA_WORD dataToBeWritten = readRawMemory<BYTE>(address, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::CPU);
 			dataToBeWritten = signExtend32(dataToBeWritten, EIGHT);
 			cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd, getARMState(), dataToBeWritten);
-			cpuIdleCycles(ONE);
+			cpuIdleCycles();
 			BREAK;
 		}
 		case TWO:
@@ -1079,7 +1228,7 @@ bool GBA_t::LoadStoreSignExtendedByteHalfword()
 				, DISABLED
 			);
 			cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd, getARMState(), dataToBeWritten);
-			cpuIdleCycles(ONE);
+			cpuIdleCycles();
 			BREAK;
 		}
 		case THREE:
@@ -1099,7 +1248,7 @@ bool GBA_t::LoadStoreSignExtendedByteHalfword()
 				dataToBeWritten = signExtend32(dataToBeWritten, EIGHT);
 			}
 			cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd, getARMState(), dataToBeWritten);
-			cpuIdleCycles(ONE);
+			cpuIdleCycles();
 			BREAK;
 		}
 		default:
@@ -1140,7 +1289,7 @@ bool GBA_t::PCRelativeLoad()
 		uint32_t dataToBeWritten = readRawMemory<GBA_WORD>(relativeAddr, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU);
 		cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd, getARMState(), dataToBeWritten);
 
-		cpuIdleCycles(ONE);
+		cpuIdleCycles();
 
 		isThisTheInstruction = YES;
 	}
@@ -1318,7 +1467,7 @@ bool GBA_t::ALUOperations()
 		}
 		case ALU_SUBCODES::ALU_LSL:
 		{
-			cpuIdleCycles(ONE);
+			cpuIdleCycles();
 			subOpCodeResult = performShiftOperation(
 				YES
 				, SHIFT_TYPE::LSL
@@ -1333,7 +1482,7 @@ bool GBA_t::ALUOperations()
 		}
 		case ALU_SUBCODES::ALU_LSR:
 		{
-			cpuIdleCycles(ONE);
+			cpuIdleCycles();
 			subOpCodeResult = performShiftOperation(
 				YES
 				, SHIFT_TYPE::LSR
@@ -1348,7 +1497,7 @@ bool GBA_t::ALUOperations()
 		}
 		case ALU_SUBCODES::ALU_ASR:
 		{
-			cpuIdleCycles(ONE);
+			cpuIdleCycles();
 			subOpCodeResult = performShiftOperation(
 				YES
 				, SHIFT_TYPE::ASR
@@ -1387,7 +1536,7 @@ bool GBA_t::ALUOperations()
 		}
 		case ALU_SUBCODES::ALU_ROR:
 		{
-			cpuIdleCycles(ONE);
+			cpuIdleCycles();
 			subOpCodeResult = performShiftOperation(
 				YES
 				, SHIFT_TYPE::ROR
@@ -1446,10 +1595,23 @@ bool GBA_t::ALUOperations()
 		}
 		case ALU_SUBCODES::ALU_MUL:
 		{
+			// op1 -> dest
+			// op2 -> src
+
+			bool full = TickMultiply(YES, op1);
 			subOpCodeResult = op1 * op2;
 			pGBA_cpuInstance->registers.cpsr.psrFields.psrZeroBit = ((subOpCodeResult == ZERO) ? ONE : ZERO);
 			pGBA_cpuInstance->registers.cpsr.psrFields.psrNegativeBit = ((subOpCodeResult >> THIRTYONE) ? ONE : ZERO);
 			cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd, getARMState(), subOpCodeResult);
+			// Carry flag logic
+			if (full)
+			{
+				pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = MultiplyCarrySimple(op1) ? ONE : ZERO;
+			}
+			else
+			{
+				pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = MultiplyCarryLo(op2, op1) ? ONE : ZERO;
+			}
 			BREAK;
 		}
 		case ALU_SUBCODES::ALU_BIC:
@@ -1847,7 +2009,7 @@ bool GBA_t::BlockDataTransfer()
 
 		if (pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.BLOCK_DATA_TRANSFER.l)
 		{
-			cpuIdleCycles(ONE);
+			cpuIdleCycles();
 
 			// Refer 4.11.4 of https://www.dwedit.org/files/ARM7TDMI.pdf (3rd condition)
 			// R15 not in list and S bit set (User bank transfer)
@@ -1943,7 +2105,7 @@ bool GBA_t::BlockDataTransfer()
 
 		if (pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.BLOCK_DATA_TRANSFER.l)
 		{
-			cpuIdleCycles(ONE);
+			cpuIdleCycles();
 
 			// Refer 4.11.4 of https://www.dwedit.org/files/ARM7TDMI.pdf (1st condition)
 			// LDM with R15 in transfer list and S bit set (Mode changes)
@@ -2034,7 +2196,7 @@ bool GBA_t::SoftwareInterrupt()
 			// We have to save the immediate next instruction to BL, hence we store PC-4 in ARM mode
 			uint32_t pcToStoreInLR = pGBA_cpuInstance->registers.pc - FOUR;
 			cpuSetRegister(REGISTER_BANK_TYPE::RB_SVC, (REGISTER_TYPE)LR, getARMState(), pcToStoreInLR);
-			// Save SPSR as we will chnage ARM Mode
+			// Save SPSR as we will change ARM Mode
 			cpuSetRegister(REGISTER_BANK_TYPE::RB_SVC, (REGISTER_TYPE)SPSR, getARMState(), currentCPSR.psrMemory);
 
 			// Display the SWI comment
@@ -2072,7 +2234,7 @@ bool GBA_t::Undefined()
 		pGBA_cpuInstance->registers.pc += FOUR;
 		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFC;
 
-		cpuIdleCycles(ONE);
+		cpuIdleCycles();
 	}
 	RETURN isThisTheInstruction;
 }
@@ -2216,7 +2378,7 @@ bool GBA_t::SingleDataTransfer()
 
 			cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd, getARMState(), memory2register);
 
-			cpuIdleCycles(ONE);
+			cpuIdleCycles();
 		}
 	}
 	RETURN isThisTheInstruction;
@@ -2252,11 +2414,13 @@ bool GBA_t::SingleDataSwap()
 		if (b == YES)
 		{
 			BYTE swapAddrContent = readRawMemory<BYTE>(swapAddress, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::CPU);
-			writeRawMemory<BYTE>(swapAddress, static_cast<BYTE>(sourceRegisterContent), MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::CPU);
+			// Setting LOCK to YES (Source NBA)
+			CPUTODO("Find a source for need of LOCK during memory write in SingleDataSwap at %d in %s", __LINE__, __FILE__);
+			writeRawMemory<BYTE>(swapAddress, static_cast<BYTE>(sourceRegisterContent), MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::AUTOMATIC, YES);
 
 			cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd, getARMState(), swapAddrContent);
 
-			cpuIdleCycles(ONE);
+			cpuIdleCycles();
 		}
 		else
 		{
@@ -2270,11 +2434,13 @@ bool GBA_t::SingleDataSwap()
 				, DISABLED
 			);
 
-			writeRawMemory<GBA_WORD>(swapAddress, sourceRegisterContent, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU);
+			// Setting LOCK to YES (Source NBA)
+			CPUTODO("Find a source for need of LOCK during memory write in SingleDataSwap at %d in %s", __LINE__, __FILE__);
+			writeRawMemory<GBA_WORD>(swapAddress, sourceRegisterContent, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::AUTOMATIC, YES);
 
 			cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd, getARMState(), swapAddrContent);
 
-			cpuIdleCycles(ONE);
+			cpuIdleCycles();
 		}
 	}
 	RETURN isThisTheInstruction;
@@ -2283,34 +2449,6 @@ bool GBA_t::SingleDataSwap()
 bool GBA_t::MultiplyAndMultiplyAccumulate()
 {
 	bool isThisTheInstruction = NO;
-
-	auto TICK_MULTIPLY = [&](FLAG isSigned, uint64_t multiplier)
-		{
-			uint32_t mask = 0xFFFFFF00;
-
-			cpuIdleCycles(ONE);
-
-			while (TRUE)
-			{
-				multiplier &= mask;
-
-				if (multiplier == ZERO)
-				{
-					BREAK;
-				}
-
-				if (isSigned == YES)
-				{
-					if (multiplier == mask)
-					{
-						BREAK;
-					}
-				}
-
-				mask <<= EIGHT;
-				cpuIdleCycles(ONE);
-			}
-		};
 
 	// Multiply And Multiply Accumulate
 	uint32_t strippedOpCode = (pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode & MULTIPLY_AND_MULTIPLY_ACCUMULATE_MASK);
@@ -2329,10 +2467,10 @@ bool GBA_t::MultiplyAndMultiplyAccumulate()
 		pGBA_cpuInstance->registers.pc += FOUR;
 		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFC;
 
-		uint64_t op1 = ZERO;
-		uint64_t op2 = ZERO;
-		uint64_t offset = ZERO;
-		uint64_t result = ZERO;
+		uint32_t op1 = ZERO;
+		uint32_t op2 = ZERO;
+		uint32_t accum = ZERO;
+		uint32_t result = ZERO;
 
 		if (rd == rm)
 		{
@@ -2346,27 +2484,35 @@ bool GBA_t::MultiplyAndMultiplyAccumulate()
 
 		op1 = cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rm));
 		op2 = cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rs));
-		offset = cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rn));
 
 		result = op1 * op2;
 
-		TICK_MULTIPLY(YES, op2);
+		bool full = TickMultiply(YES, op2);
 
 		if (a == YES)
 		{
-			result += offset;
-			cpuIdleCycles(ONE);
+			accum = cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rn));
+			result += accum;
+			cpuIdleCycles();
 		}
-
-		result &= 0xFFFFFFFF;
 
 		if (s == YES)
 		{
 			pGBA_cpuInstance->registers.cpsr.psrFields.psrZeroBit = ((result == ZERO) ? ONE : ZERO);
 			pGBA_cpuInstance->registers.cpsr.psrFields.psrNegativeBit = ((result >> THIRTYONE) ? ONE : ZERO);
+
+			// Carry flag logic
+			if (full)
+			{
+				pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = MultiplyCarrySimple(op2) ? ONE : ZERO;
+			}
+			else
+			{
+				pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = MultiplyCarryLo(op1, op2, accum) ? ONE : ZERO;
+			}
 		}
 
-		cpuSetRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rd), getARMState(), TO_UINT32(result));
+		cpuSetRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rd), getARMState(), result);
 	}
 
 	if (strippedOpCode == MULTIPLY_ACCUMULATE_INSTRUCTION)
@@ -2374,8 +2520,8 @@ bool GBA_t::MultiplyAndMultiplyAccumulate()
 		isThisTheInstruction = YES;
 		uint32_t rm = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.MULTIPLY_LONG.rm;
 		uint32_t rs = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.MULTIPLY_LONG.rs;
-		uint64_t rdHi = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.MULTIPLY_LONG.rdhi;
-		uint64_t rdLo = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.MULTIPLY_LONG.rdlo;
+		uint32_t rdHi = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.MULTIPLY_LONG.rdhi;
+		uint32_t rdLo = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.MULTIPLY_LONG.rdlo;
 		bool s = (bool)(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.MULTIPLY_LONG.s);
 		bool a = (bool)(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.MULTIPLY_LONG.a);
 		bool u = (bool)(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.MULTIPLY_LONG.u);
@@ -2384,10 +2530,11 @@ bool GBA_t::MultiplyAndMultiplyAccumulate()
 		pGBA_cpuInstance->registers.pc += FOUR;
 		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFC;
 
-		uint64_t op1 = ZERO;
-		uint64_t op2 = ZERO;
-		uint64_t offset = ZERO;
+		uint32_t op1 = ZERO;
+		uint32_t op2 = ZERO;
 		uint64_t result = ZERO;
+		uint32_t accum_lo = ZERO;
+		uint32_t accum_hi = ZERO;
 
 		if (rdHi == rm || rdLo == rm || rdHi == rdLo)
 		{
@@ -2404,33 +2551,48 @@ bool GBA_t::MultiplyAndMultiplyAccumulate()
 
 		if (u == YES)
 		{
-			op1 = signExtend64(op1, THIRTYTWO);
-			op2 = signExtend64(op2, THIRTYTWO);
+			result = (int64_t)(int32_t)op1 * (int64_t)(int32_t)op2;
+		}
+		else
+		{
+			result = (uint64_t)op1 * (uint64_t)op2;
 		}
 
-		result = op1 * op2;
-
-		TICK_MULTIPLY(u, op2);
-		cpuIdleCycles(ONE);
+		bool full = TickMultiply(u, op2);
+		cpuIdleCycles();
 
 		if (a == YES)
 		{
-			uint64_t value = cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rdHi));
-			value <<= THIRTYTWO;
-			value |= (cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rdLo)) & 0xFFFFFFFF);
+			accum_hi = cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rdHi));
+			accum_lo = cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rdLo));
+			uint64_t value = (uint64_t)accum_hi << 32 | accum_lo;
 			result += value;
 
-			cpuIdleCycles(ONE);
+			cpuIdleCycles();
 		}
+
+		uint32_t result_hi = result >> 32;
 
 		if (s == YES)
 		{
 			pGBA_cpuInstance->registers.cpsr.psrFields.psrZeroBit = ((result == ZERO) ? ONE : ZERO);
-			pGBA_cpuInstance->registers.cpsr.psrFields.psrNegativeBit = ((result >> SIXTYTHREE) ? ONE : ZERO);
+			pGBA_cpuInstance->registers.cpsr.psrFields.psrNegativeBit = (result_hi >> THIRTYONE);
+
+			// Carry flag logic for long multiply
+			if (full)
+			{
+				pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit =
+					MultiplyCarryHi(u == YES, op1, op2, accum_hi) ? ONE : ZERO;
+			}
+			else
+			{
+				pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit =
+					MultiplyCarryLo(op1, op2, accum_lo) ? ONE : ZERO;
+			}
 		}
 
-		cpuSetRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rdHi), getARMState(), ((result >> THIRTYTWO) & 0xFFFFFFFF));
-		cpuSetRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rdLo), getARMState(), (result & 0xFFFFFFFF));
+		cpuSetRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rdHi), getARMState(), result_hi);
+		cpuSetRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rdLo), getARMState(), (uint32_t)(result & 0xFFFFFFFF));
 	}
 
 	RETURN isThisTheInstruction;
@@ -2550,7 +2712,7 @@ bool GBA_t::HalfWordDataTransfer()
 
 				cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd, getARMState(), memory2register);
 
-				cpuIdleCycles(ONE);
+				cpuIdleCycles();
 			}
 		};
 
@@ -2879,7 +3041,7 @@ bool GBA_t::DataProcessing()
 				pGBA_cpuInstance->registers.pc += FOUR;
 				pGBA_cpuInstance->registers.pc &= 0xFFFFFFFC;
 
-				cpuIdleCycles(ONE);
+				cpuIdleCycles();
 
 				dataToBeShifted = cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)operand2.op2ShiftRegType2.rm));
 

@@ -376,7 +376,7 @@
     printf("Press any key to continue...\n"); \
 } while(0)
 #endif
-#define RETURN										return
+#define RETURN										return 
 #define FOREVER										true
 #define DO_NOTHING									/* Do Nothing */
 #define STUB()										/* Do Nothing */
@@ -557,7 +557,20 @@
 #define MASQ_FLOAT64								9
 
 #define MASQ_UNUSED(x)								TODO("TODO: Unused variable \"" #x "\"\n")
+
+#if defined(_MSC_VER)
+#define MASQ_INLINE									__forceinline
+#elif defined(__GNUC__) || defined(__clang__)
+#define MASQ_INLINE __attribute__((always_inline))	inline
+#else
 #define MASQ_INLINE									inline
+#endif
+
+// Optional: No inline (for debugging)
+#ifdef DEBUG_NO_INLINE
+#undef MASQ_INLINE
+#define MASQ_INLINE
+#endif
 
 #define MASQ_UNLIKELY								[[unlikely]]
 #define MASQ_LIKELY									[[likely]]

@@ -44,11 +44,11 @@ PROTOTYPE-0152 								: Design philosophy used is DP3 and implementation uses I
 **TODOs*****************************************************************************************************************************************************
 
 * masquerade (P0152)						-> Implement
-                                            -> Issues
-                                            1) Current implementation of cycle accurate is not correct and mid instruction timing is not handled
-                                            2) Currently making ppu/apu/sio/timer cycle accurate makes it very slow
+*                                           -> Issues
+*                                            1) Current implementation of cycle accurate is not correct and mid instruction timing is not handled
+*                                            2) Currently making ppu/apu/sio/timer cycle accurate makes it very slow
                                             
-                                            With scheduler, if we just have mode events for PPU, then we would loose mid scanline updates, how to handle this? check discord and NBA
+*                                           With scheduler, if we just have mode events for PPU, then we would loose mid scanline updates, how to handle this? check discord and NBA
                                                
 
 * masquerade (P0152)/gameboy advance		-> Integrate ARM7TDMI SST (https://github.com/SingleStepTests/ARM7TDMI)

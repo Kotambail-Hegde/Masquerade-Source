@@ -1063,6 +1063,12 @@ private:
 
 private:
 
+	enum TICK_TYPE : uint8_t
+	{
+		CPU_TICK,
+		DMA_TICK
+	};
+
 	enum MEMORY_REGIONS : uint8_t
 	{
 		REGION_SYS_ROM = 0x00,
@@ -1111,23 +1117,23 @@ private:
 		IRQ_GAMEPAK = THIRTEEN
 	};
 
-	enum class TIMER
+	enum TIMER : uint8_t
 	{
 		TIMER0,
 		TIMER1,
 		TIMER2,
 		TIMER3,
-		TOTAL
+		TOTAL_TIMER
 	};
 
-	enum class DMA
+	enum DMA : uint8_t
 	{
 		DMA0,
 		DMA1,
 		DMA2,
 		DMA3,
-		TOTAL,
-		NONE
+		TOTAL_DMA,
+		NO_DMA
 	};
 
 	enum class DMA_SIZE
@@ -1146,14 +1152,14 @@ private:
 		TOTAL
 	};
 
-	enum class DMA_TIMING
+	enum DMA_TIMING : uint16_t
 	{
 		IMMEDIATE,
 		VBLANK,
 		HBLANK,
 		SPECIAL,
-		TOTAL,
-		NONE
+		TOTAL_DMA_TIMING,
+		NO_DMA_TIMING
 	};
 
 	enum class DMA_SPECIAL_TIMING
@@ -3085,7 +3091,7 @@ private:
 	{
 		int64_t cpuCounter;
 		int64_t dmaCounter;
-		int64_t timerCounter[TO_UINT(TIMER::TOTAL)];
+		int64_t timerCounter[TIMER::TOTAL_TIMER];
 		int64_t apuCounter;
 		int64_t apuFrameCounter;
 		int64_t ppuCounter;
@@ -3097,8 +3103,9 @@ private:
 	{
 		int64_t cpuCounter;
 		int64_t dmaCounter;
+		int64_t freeBusCyclesCounter;
 		int64_t globalTimerCounter;
-		int64_t timerCounter[TO_UINT(TIMER::TOTAL)];
+		int64_t timerCounter[TIMER::TOTAL_TIMER];
 		int64_t apuCounter;
 		int64_t apuFrameCounter;
 		int64_t ppuCounter;
@@ -3218,10 +3225,10 @@ private:
 
 	typedef struct
 	{
-		COUNTER64 enSetTime;
-		FLAG needStartupDelay;
 		INC8 startupDelay;
+		DMA_TIMING scheduleType;
 		FLAG currentState;
+		FLAG doingChunkTRX;
 		GBA_WORD source;
 		GBA_WORD destination;
 		GBA_WORD length;
@@ -3231,28 +3238,35 @@ private:
 		DMA_SIZE chunkSize;
 		GBA_WORD latchedData;	// Needed when DMA reads from unused memory
 		GBA_WORD wordToBeTransfered;	// Actual valid data that get transfered during valid transfers
+		uint16_t io_dmaen;
+		FLAG didAccessRom;  // <-- Add this to preserve ROM access state
 	} dmaCache_t;
 
 	typedef struct
 	{
-		MAP8 triggersForThisRun;
-		MAP8 specialTriggersForThisRun;
-		DMA currentlyActiveDMA; // currently running
-		FLAG anyDMAInMiddleOfTransaction;
-		FLAG dmaEnabledDynamically;
-		FLAG dmaDisabledDynamically;
-		INC32 dmaResidualTicks;
-		dmaCache_t cache[TO_UINT(DMA::TOTAL)];
+		MAP8 dmaIdMap;
+		MAP8 placeholder;
+	} dmaTrigCache_t;
+
+	typedef struct
+	{
+		DMA currentlyActiveDMA;
+		FLAG shouldReenterTransferLoop;
+		MAP8 runnableSet;
+		dmaCache_t cache[DMA::TOTAL_DMA];
+		dmaTrigCache_t trigCache[DMA_TIMING::TOTAL_DMA_TIMING];
 	} dma_t;
 
 private:
 
-	const uint16_t timerFrequency[TO_UINT(TIMER::TOTAL)] = { 1, 64, 256, 1024 };
+	const uint16_t timerFrequency[TIMER::TOTAL_TIMER] = { 1, 64, 256, 1024 };
 
 	typedef struct
 	{
 		uint16_t reload;
 		uint16_t counter;
+		uint16_t io_tmxcnt_l;
+		uint16_t io_tmxcnt_h;
 	} timerCache_t;
 
 	typedef struct
@@ -3548,9 +3562,19 @@ private:
 
 	typedef struct
 	{
+		uint16_t irqQ;
+		uint16_t syncDelay;
+	} interrupt_t;
+
+	typedef struct
+	{
 		cpu_t cpuInstance;
 		gbaMemory_t gbaMemory;
+		FLAG irqPend;
+		interrupt_t interrupt;
+		uint16_t dmaPendMap;
 		dma_t dma;
+		uint16_t timerPendMap;
 		timer_t timer[FOUR];
 		audio_t audio;
 		display_t display;
@@ -3819,12 +3843,82 @@ private:
 		}
 	}
 
+	MASQ_INLINE void ifRegUpdate(uint16_t data)
+	{
+		pGBA_peripherals->mIFHalfWord.mIFHalfWord |= (ONE << data);
+	}
+
+	MASQ_INLINE void cntlRegUpdate(TIMER timer, uint16_t data)
+	{
+		// Write should directly happen to "reload" instead of the actual mTIMERxCNT_L)
+		pGBA_instance->GBA_state.timer[timer].cache.reload = data; // Store the new value in "reload"
+	}
+
+	MASQ_INLINE void cnthRegUpdate(TIMER timer, uint16_t data)
+	{
+		auto setTimerCNTLRegister = [&](TIMER timer, uint16_t value)
+			{
+				// Use a switch statement for better performance in this context.
+				switch (timer)
+				{
+				case TIMER::TIMER0:
+					pGBA_peripherals->mTIMER0CNT_L = value;
+					BREAK;
+				case TIMER::TIMER1:
+					pGBA_peripherals->mTIMER1CNT_L = value;
+					BREAK;
+				case TIMER::TIMER2:
+					pGBA_peripherals->mTIMER2CNT_L = value;
+					BREAK;
+				case TIMER::TIMER3:
+					pGBA_peripherals->mTIMER3CNT_L = value;
+					BREAK;
+				default:
+					FATAL("Unknown Timer : %d", TO_UINT8(timer));
+					BREAK;
+				}
+			};
+
+		static mTIMERnCNT_HHalfWord_t* CNTHLUT[] = {
+			&pGBA_peripherals->mTIMER0CNT_H,
+			&pGBA_peripherals->mTIMER1CNT_H,
+			&pGBA_peripherals->mTIMER2CNT_H,
+			&pGBA_peripherals->mTIMER3CNT_H
+		};
+
+		mTIMERnCNT_HHalfWord_t* CNTH = CNTHLUT[timer];
+
+		BIT timerxEnBeforeUpdate = CNTH->mTIMERnCNT_HFields.TIMER_START_STOP;
+		CNTH->mTIMERnCNT_HHalfWord = data;
+		if (timerxEnBeforeUpdate == RESET && CNTH->mTIMERnCNT_HFields.TIMER_START_STOP == SET)
+		{
+			pGBA_instance->GBA_state.timer[timer].cache.counter = pGBA_instance->GBA_state.timer[timer].cache.reload;
+			setTimerCNTLRegister(timer, pGBA_instance->GBA_state.timer[timer].cache.counter);
+			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.timerCounter[timer] = RESET;
+			// Takes 2 cycles for CNTH to get applied after writing to control/reload
+			// Refer : https://discordapp.com/channels/465585922579103744/465586361731121162/1034239922602782801
+			pGBA_instance->GBA_state.timer[timer].currentState = DISABLED;
+			pGBA_instance->GBA_state.timer[timer].startupDelay = ONE;
+		}
+	}
+
 	GBA_HALFWORD readIO(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType = MEMORY_ACCESS_TYPE::AUTOMATIC);
 
 	// NOTE: For memory mirrors, refer http://problemkaputt.de/gbatek-gba-unpredictable-things.htm
 	template <typename T>
-	T readRawMemory(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType = MEMORY_ACCESS_TYPE::AUTOMATIC)
+	T readRawMemory(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType = MEMORY_ACCESS_TYPE::AUTOMATIC, FLAG LOCK = NO)
 	{
+		INC64 dmaCyclesInThisRun = RESET; // Currently there is no use for this, but using this to cache the count before the reset
+
+		if ((IsAnyDMARunning() == YES) && (source == MEMORY_ACCESS_SOURCE::CPU) && (LOCK == NO))
+		{
+			dmaTick();	
+			dmaCyclesInThisRun = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.dmaCounter;
+			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.dmaCounter = RESET;
+			// All currenlty enabled DMA transactions should be complete by the time we come here
+			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.freeBusCyclesCounter = RESET;
+		}
+
 		// https://discord.com/channels/465585922579103744/465586361731121162/1321107870573400137
 		// Refer: https://discord.com/channels/465585922579103744/465586361731121162/1321106423446245488
 		// Refer: https://discord.com/channels/465585922579103744/465586361731121162/1321105741448347659
@@ -3855,7 +3949,7 @@ private:
 						|| (IF_ADDRESS_WITHIN(address, OAM_START_ADDRESS, OAM_END_ADDRESS))
 						|| (IF_ADDRESS_WITHIN(address, OAM_MIRROR_START_ADDRESS, OAM_MIRROR_END_ADDRESS)))
 					{
-						pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter += ONE;
+						cpuTick();
 						RETURN ZERO;
 					}
 				}
@@ -3867,14 +3961,19 @@ private:
 						if ((IF_ADDRESS_WITHIN(address, OAM_START_ADDRESS, OAM_END_ADDRESS))
 							|| (IF_ADDRESS_WITHIN(address, OAM_MIRROR_START_ADDRESS, OAM_MIRROR_END_ADDRESS)))
 						{
-							pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter += ONE;
+							cpuTick();
 							RETURN ZERO;
 						}
 					}
 				}
 			}
 #endif
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter += getMemoryAccessCycles(address, accessWidth, source, accessType);
+			uint32_t cpuTicks = getMemoryAccessCycles(address, accessWidth, source, accessType);
+			while (cpuTicks)
+			{
+				cpuTick();
+				--cpuTicks;
+			}
 		}
 
 		if (source == MEMORY_ACCESS_SOURCE::DMA)
@@ -3892,7 +3991,7 @@ private:
 						|| (IF_ADDRESS_WITHIN(address, OAM_START_ADDRESS, OAM_END_ADDRESS))
 						|| (IF_ADDRESS_WITHIN(address, OAM_MIRROR_START_ADDRESS, OAM_MIRROR_END_ADDRESS)))
 					{
-						pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter += ONE;
+						cpuTick();
 						RETURN ZERO;
 					}
 				}
@@ -3904,14 +4003,19 @@ private:
 						if ((IF_ADDRESS_WITHIN(address, OAM_START_ADDRESS, OAM_END_ADDRESS))
 							|| (IF_ADDRESS_WITHIN(address, OAM_MIRROR_START_ADDRESS, OAM_MIRROR_END_ADDRESS)))
 						{
-							pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter += ONE;
+							cpuTick();
 							RETURN ZERO;
 						}
 					}
 				}
 			}
 #endif
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.dmaCounter += getMemoryAccessCycles(address, accessWidth, source, accessType);
+			uint32_t dmaTicks = getMemoryAccessCycles(address, accessWidth, source, accessType);
+			while (dmaTicks)
+			{
+				cpuTick(TICK_TYPE::DMA_TICK);
+				--dmaTicks;
+			}
 		}
 
 		if (IF_ADDRESS_WITHIN(address, SYSTEM_ROM_START_ADDRESS, SYSTEM_ROM_END_ADDRESS))
@@ -4257,8 +4361,24 @@ private:
 	void writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType = MEMORY_ACCESS_TYPE::AUTOMATIC);
 
 	template <typename T>
-	void writeRawMemory(uint32_t address, T data, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType = MEMORY_ACCESS_TYPE::AUTOMATIC)
+	void writeRawMemory(uint32_t address, T data, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType = MEMORY_ACCESS_TYPE::AUTOMATIC, FLAG LOCK = NO)
 	{
+		INC64 dmaCyclesInThisRun = RESET; // Currently there is no use for this, but using this to cache the count before the reset
+
+		if (source == MEMORY_ACCESS_SOURCE::PPU || source == MEMORY_ACCESS_SOURCE::APU)
+		{
+			FATAL("PPU or APU writing to memory!");
+		}
+
+		if ((IsAnyDMARunning() == YES) && (source == MEMORY_ACCESS_SOURCE::CPU) && (LOCK == NO))
+		{
+			dmaTick();
+			dmaCyclesInThisRun = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.dmaCounter;
+			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.dmaCounter = RESET;
+			// All currenlty enabled DMA transactions should be complete by the time we come here
+			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.freeBusCyclesCounter = RESET;
+		}
+
 		// https://discord.com/channels/465585922579103744/465586361731121162/1321107870573400137
 		// Refer: https://discord.com/channels/465585922579103744/465586361731121162/1321105741448347659
 		if (IF_ADDRESS_WITHIN(address, SYSTEM_ROM_START_ADDRESS, GAMEPAK_ROM_WS2_END_ADDRESS))
@@ -4288,7 +4408,7 @@ private:
 						|| (IF_ADDRESS_WITHIN(address, OAM_START_ADDRESS, OAM_END_ADDRESS))
 						|| (IF_ADDRESS_WITHIN(address, OAM_MIRROR_START_ADDRESS, OAM_MIRROR_END_ADDRESS)))
 					{
-						pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter += ONE;
+						cpuTick();
 						RETURN;
 					}
 				}
@@ -4302,7 +4422,7 @@ private:
 							if ((IF_ADDRESS_WITHIN(address, OAM_START_ADDRESS, OAM_END_ADDRESS))
 								|| (IF_ADDRESS_WITHIN(address, OAM_MIRROR_START_ADDRESS, OAM_MIRROR_END_ADDRESS)))
 							{
-								pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter += ONE;
+								cpuTick();
 								RETURN;
 							}
 						}
@@ -4310,7 +4430,12 @@ private:
 				}
 			}
 #endif
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter += getMemoryAccessCycles(address, accessWidth, source, accessType);
+			uint32_t cpuTicks = getMemoryAccessCycles(address, accessWidth, source, accessType);
+			while (cpuTicks)
+			{
+				cpuTick();
+				--cpuTicks;
+			}
 		}
 
 		if (source == MEMORY_ACCESS_SOURCE::DMA)
@@ -4328,7 +4453,7 @@ private:
 						|| (IF_ADDRESS_WITHIN(address, OAM_START_ADDRESS, OAM_END_ADDRESS))
 						|| (IF_ADDRESS_WITHIN(address, OAM_MIRROR_START_ADDRESS, OAM_MIRROR_END_ADDRESS)))
 					{
-						pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter += ONE;
+						cpuTick();
 						RETURN;
 					}
 				}
@@ -4342,7 +4467,7 @@ private:
 							if ((IF_ADDRESS_WITHIN(address, OAM_START_ADDRESS, OAM_END_ADDRESS))
 								|| (IF_ADDRESS_WITHIN(address, OAM_MIRROR_START_ADDRESS, OAM_MIRROR_END_ADDRESS)))
 							{
-								pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter += ONE;
+								cpuTick();
 								RETURN;
 							}
 						}
@@ -4350,7 +4475,12 @@ private:
 				}
 			}
 #endif
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.dmaCounter += getMemoryAccessCycles(address, accessWidth, source, accessType);
+			uint32_t dmaTicks = getMemoryAccessCycles(address, accessWidth, source, accessType);
+			while (dmaTicks)
+			{
+				cpuTick(TICK_TYPE::DMA_TICK);
+				--dmaTicks;
+			}
 		}
 
 		if (IF_ADDRESS_WITHIN(address, SYSTEM_ROM_START_ADDRESS, SYSTEM_ROM_END_ADDRESS))
@@ -4717,11 +4847,28 @@ private:
 
 	bool processSOC();
 
-	void InternalCycles(uint32_t cycles);
+	void busCycles();
 
-	void cpuIdleCycles(uint32_t cycles);
+	void cpuIdleCycles();
 
 	void fetchAndDecode(uint32_t newPC);
+
+	bool TickMultiply(FLAG isSigned, uint64_t multiplier);
+
+	bool MultiplyCarrySimple(uint32_t multiplier);
+
+	bool MultiplyCarryLo(
+		uint32_t multiplicand,
+		uint32_t multiplier,
+		uint32_t accum = 0
+	);
+
+	bool MultiplyCarryHi(
+		bool sign_extend,
+		uint32_t multiplicand,
+		uint32_t multiplier,
+		uint32_t accum_hi = 0
+	);
 
 	bool didConditionalCheckPass(uint32_t opCodeConditionalBits, uint32_t cpsr);
 
@@ -4801,9 +4948,9 @@ private:
 private:
 
 #pragma region CYCLE_ACCURATE
-	void cpuTick();
+	void cpuTick(TICK_TYPE type = TICK_TYPE::CPU_TICK);
 
-	void syncOtherGBModuleTicks();
+	void syncOtherGBAModuleTicks();
 
 	void timerTick();
 
@@ -4860,31 +5007,21 @@ private:
 
 	void latchDMARegisters(ID dmaID);
 
-	void scheduleSpecialDMATrigger(DMA_SPECIAL_TIMING trigger);
+	void OnDMAChannelWritten(DMA dmaID, FLAG oldEnable, FLAG newEnable);
 
-	void cancelScheduledSpecialDMATrigger(DMA_SPECIAL_TIMING trigger);
+	void ActivateDMAChannel(ID dmaID);
 
-	MAP8 getSpecialDMASchedule();
+	void RequestDMA(DMA_TIMING timing);
 
-	void scheduleDMATrigger(DMA_TIMING trigger);
+	void OnDMAActivated(ID dmaID);
 
-	void cancelScheduledDMATrigger(DMA_TIMING trigger);
+	void SelectNextDMA();
 
-	MAP8 getDMASchedule();
+	FLAG IsAnyDMARunning();
 
-	FLAG isThisDMATriggerScheduled(DMA_TIMING trigger);
+	void processDMA();
 
-	bool isAnyDMAScheduled();
-
-	void findNextActiveDMA();
-
-	FLAG isAnyDMAEnabled();
-
-	void updateDMAInProgressFlag(FLAG flag);
-
-	FLAG isAnyDMAInProgress();
-
-	INC64 processDMA();
+	void RunDMAChannel();
 
 private:
 
@@ -4922,6 +5059,127 @@ private:
 
 private:
 
+	// ============================================
+	// PIXEL AND WINDOW OPERATIONS
+	// ============================================
+
+	MASQ_INLINE void RESET_PIXEL(uint32_t x, uint32_t y);
+
+	MASQ_INLINE FLAG GET_WINDOW_OUTPUT(uint32_t x, uint32_t y,
+		FLAG win0in, FLAG win1in,
+		FLAG winout, FLAG objin);
+
+	MASQ_INLINE void HANDLE_WINDOW_FOR_BG(uint32_t x, uint32_t y, ID bgID);
+
+	MASQ_INLINE void HANDLE_WINDOW_FOR_OBJ(uint32_t x, uint32_t y);
+
+	MASQ_INLINE FLAG DOES_WINDOW_ALLOW_BLENDING(uint32_t x, uint32_t y);
+
+	// ============================================
+	// COLOR BLENDING OPERATIONS
+	// ============================================
+
+	MASQ_INLINE gbaColor_t BLEND(gbaColor_t layer1Pixel, gbaColor_t layer2Pixel,
+		BYTE eva, BYTE evb);
+
+	MASQ_INLINE gbaColor_t BRIGHTEN(gbaColor_t color, BYTE evy);
+
+	MASQ_INLINE gbaColor_t DARKEN(gbaColor_t color, BYTE evy);
+
+	// ============================================
+	// MERGE AND DISPLAY
+	// ============================================
+
+	MASQ_INLINE void MERGE_AND_DISPLAY_PHASE1();
+
+	MASQ_INLINE void MERGE_AND_DISPLAY_PHASE2();
+
+	// ============================================
+	// OBJECT (SPRITE) RENDERING
+	// ============================================
+
+	MASQ_INLINE void SET_INITIAL_OBJ_MODE();
+
+	MASQ_INLINE FLAG OBJ_A01_OBJ_CYCLE(ID oamID);
+
+	MASQ_INLINE void OBJ_A2_OBJ_CYCLE(ID oamID);
+
+	MASQ_INLINE void OBJ_PA_OBJ_CYCLE(ID oamID);
+
+	MASQ_INLINE void OBJ_PB_OBJ_CYCLE(ID oamID);
+
+	MASQ_INLINE void OBJ_PC_OBJ_CYCLE(ID oamID);
+
+	MASQ_INLINE void OBJ_PD_OBJ_CYCLE(ID oamID);
+
+	MASQ_INLINE void OBJ_V_OBJ_CYCLE(ID oamID, OBJECT_TYPE isAffine, STATE8 state);
+
+	MASQ_INLINE int32_t INCREMENT_OAM_ID();
+
+	// ============================================
+	// WINDOW RENDERING
+	// ============================================
+
+	MASQ_INLINE void WIN_CYCLE();
+
+	// ============================================
+	// MODE 0 BACKGROUND RENDERING
+	// ============================================
+
+	MASQ_INLINE void MODE0_M_BG_CYCLE(ID bgID);
+	MASQ_INLINE void MODE0_T_BG_CYCLE(ID bgID);
+	MASQ_INLINE void RENDER_MODE0_MODE1_PIXEL_X(ID bgID, GBA_HALFWORD pixelData, STATE8 state);
+	MASQ_INLINE void MODE0_BG_SEQUENCE(SSTATE32 state);
+
+	// ============================================
+	// MODE 1 BACKGROUND RENDERING
+	// ============================================
+
+	MASQ_INLINE void MODE1_M_TEXT_BG_CYCLE(ID bgID);
+	MASQ_INLINE void MODE1_T_TEXT_BG_CYCLE(ID bgID);
+	MASQ_INLINE void MODE1_M_AFFINE_BG_CYCLE();
+	MASQ_INLINE void MODE1_T_AFFINE_BG_CYCLE();
+	MASQ_INLINE void MODE1_BG_SEQUENCE(SSTATE32 state);
+
+	// ============================================
+	// MODE 2 BACKGROUND RENDERING
+	// ============================================
+
+	MASQ_INLINE void MODE2_M_BG_CYCLE(ID bgID);
+	MASQ_INLINE void MODE2_T_BG_CYCLE(ID bgID);
+	MASQ_INLINE void MODE2_BG_SEQUENCE(SSTATE32 state);
+
+	// ============================================
+	// MODE 3 BACKGROUND RENDERING (BITMAP)
+	// ============================================
+
+	MASQ_INLINE void MODE3_B_BG_CYCLE();
+	MASQ_INLINE void MODE3_BG_SEQUENCE(SSTATE32 state);
+
+	// ============================================
+	// MODE 4 BACKGROUND RENDERING (BITMAP)
+	// ============================================
+
+	MASQ_INLINE void MODE4_B_BG_CYCLE();
+	MASQ_INLINE void MODE4_BG_SEQUENCE(SSTATE32 state);
+
+	// ============================================
+	// MODE 5 BACKGROUND RENDERING (BITMAP)
+	// ============================================
+
+	MASQ_INLINE void MODE5_B_BG_CYCLE();
+	MASQ_INLINE void MODE5_BG_SEQUENCE(SSTATE32 state);
+
+	// ============================================
+	// MODE PROCESSING AND CONTROL
+	// ============================================
+
+	MASQ_INLINE void PROCESS_PPU_MODES(INC64 ppuCycles, FLAG renderBG,
+		FLAG renderWindow, FLAG renderObj,
+		FLAG renderMerge);
+
+	MASQ_INLINE void HANDLE_VCOUNT();
+
 	void processPPU(INC64 ppuCycles);
 
 	void displayCompleteScreen();
@@ -4933,12 +5191,6 @@ private:
 private:
 
 	void processBackup();
-
-#if (DEACTIVATED)
-private:
-
-	void GBA_t::dumpIO();
-#endif
 
 private:
 
@@ -4981,8 +5233,6 @@ public:
 	void initializeGraphics();
 
 	void initializeAudio();
-
-	void reInitializeAudio();
 
 public:
 
