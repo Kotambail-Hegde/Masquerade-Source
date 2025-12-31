@@ -539,134 +539,6 @@ float GBA_t::getEmulationFPS()
 #pragma endregion INFRASTRUCTURE_DEFINITIONS
 
 #pragma region ARM7TDMI_DEFINITIONS
-GBA_t::REGISTER_BANK_TYPE GBA_t::getRegisterBankFromOperatingMode(OP_MODE_TYPE opMode)
-{
-	REGISTER_BANK_TYPE rb;
-
-	switch (opMode)
-	{
-	case OP_MODE_TYPE::OP_USR:
-	{
-		rb = REGISTER_BANK_TYPE::RB_USR_SYS;
-		BREAK;
-	}
-	case OP_MODE_TYPE::OP_FIQ:
-	{
-		rb = REGISTER_BANK_TYPE::RB_FIQ;
-		BREAK;
-	}
-	case OP_MODE_TYPE::OP_IRQ:
-	{
-		rb = REGISTER_BANK_TYPE::RB_IRQ;
-		BREAK;
-	}
-	case OP_MODE_TYPE::OP_SVC:
-	{
-		rb = REGISTER_BANK_TYPE::RB_SVC;
-		BREAK;
-	}
-	case OP_MODE_TYPE::OP_ABT:
-	{
-		rb = REGISTER_BANK_TYPE::RB_ABT;
-		BREAK;
-	}
-	case OP_MODE_TYPE::OP_UND:
-	{
-		rb = REGISTER_BANK_TYPE::RB_UND;
-		BREAK;
-	}
-	case OP_MODE_TYPE::OP_SYS:
-	{
-		rb = REGISTER_BANK_TYPE::RB_USR_SYS;
-		BREAK;
-	}
-	default:
-	{
-		rb = REGISTER_BANK_TYPE::RB_USR_SYS;
-		BREAK;
-	}
-	}
-
-	RETURN rb;
-}
-
-GBA_t::REGISTER_BANK_TYPE GBA_t::getCurrentlyValidRegisterBank()
-{
-	RETURN getRegisterBankFromOperatingMode(getARMMode());
-}
-
-// TODO: As of now, "getOperatingModeFromRegisterBank" function cannot differentiate between USR mode and SYS modes
-GBA_t::OP_MODE_TYPE GBA_t::getOperatingModeFromRegisterBank(REGISTER_BANK_TYPE rb)
-{
-	OP_MODE_TYPE opMode;
-
-	switch (rb)
-	{
-	case REGISTER_BANK_TYPE::RB_USR_SYS:
-	{
-		opMode = OP_MODE_TYPE::OP_USR; // TODO: We are determining the opMode to be USR, but it can be SYS as well...
-		BREAK;
-	}
-	case REGISTER_BANK_TYPE::RB_FIQ:
-	{
-		opMode = OP_MODE_TYPE::OP_FIQ;
-		BREAK;
-	}
-	case REGISTER_BANK_TYPE::RB_IRQ:
-	{
-		opMode = OP_MODE_TYPE::OP_IRQ;
-		BREAK;
-	}
-	case REGISTER_BANK_TYPE::RB_SVC:
-	{
-		opMode = OP_MODE_TYPE::OP_SVC;
-		BREAK;
-	}
-	case REGISTER_BANK_TYPE::RB_ABT:
-	{
-		opMode = OP_MODE_TYPE::OP_ABT;
-		BREAK;
-	}
-	case REGISTER_BANK_TYPE::RB_UND:
-	{
-		opMode = OP_MODE_TYPE::OP_UND;
-		BREAK;
-	}
-	default:
-	{
-		opMode = OP_MODE_TYPE::OP_USR;
-		BREAK;
-	}
-	}
-
-	RETURN opMode;
-}
-
-void GBA_t::setARMState(STATE_TYPE armState)
-{
-	pGBA_cpuInstance->registers.cpsr.psrFields.psrStateBit = (uint32_t)armState;
-	pGBA_cpuInstance->armState = armState;
-
-}
-
-void GBA_t::setARMMode(OP_MODE_TYPE opMode)
-{
-	pGBA_cpuInstance->registers.cpsr.psrFields.psrModeBits = (uint32_t)opMode;
-	pGBA_cpuInstance->armMode = opMode;
-}
-
-GBA_t::STATE_TYPE GBA_t::getARMState()
-{
-	pGBA_cpuInstance->armState = (STATE_TYPE)pGBA_cpuInstance->registers.cpsr.psrFields.psrStateBit;
-	RETURN pGBA_cpuInstance->armState;
-}
-
-GBA_t::OP_MODE_TYPE GBA_t::getARMMode()
-{
-	pGBA_cpuInstance->armMode = (OP_MODE_TYPE)pGBA_cpuInstance->registers.cpsr.psrFields.psrModeBits;
-	RETURN pGBA_cpuInstance->armMode;
-}
-
 void GBA_t::cpuSetRegister(REGISTER_BANK_TYPE rb, REGISTER_TYPE rt, STATE_TYPE st, uint32_t u32parameter)
 {
 	uint8_t registerType = ((uint8_t)rt);
@@ -781,109 +653,80 @@ uint32_t GBA_t::cpuReadRegister(REGISTER_BANK_TYPE rb, REGISTER_TYPE rt)
 	RETURN ((uint32_t)NULL);
 }
 
-uint32_t GBA_t::getMemoryAccessCycles(GBA_WORD mCurrentAddress, MEMORY_ACCESS_WIDTH mAccessWidth, MEMORY_ACCESS_SOURCE mSource, MEMORY_ACCESS_TYPE accessType)
+MASQ_INLINE uint32_t GBA_t::getMemoryAccessCycles(GBA_WORD mCurrentAddress,
+	MEMORY_ACCESS_WIDTH mAccessWidth,
+	MEMORY_ACCESS_SOURCE mSource,
+	MEMORY_ACCESS_TYPE accessType)
 {
-	auto isAddressInDifferentRegion = [&](uint32_t currentAddr, uint32_t previousAddr)
-		{
-			if ((currentAddr >> TWENTYFOUR) != (previousAddr >> TWENTYFOUR))
-			{
-				RETURN YES;
-			}
-			else
-			{
-				RETURN NO;
-			}
-		};
+	static constexpr GBA_WORD ACCESS_WIDTH_OFFSETS[] = { ONE, TWO, FOUR };
 
-	uint32_t nCycles = ZERO;
-	MEMORY_REGIONS mRegion = static_cast<MEMORY_REGIONS>(mCurrentAddress >> TWENTYFOUR);
-	MEMORY_ACCESS_TYPE mType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
+	const uint32_t currentRegion = mCurrentAddress >> TWENTYFOUR;
+	const uint32_t previousAddr = pGBA_instance->GBA_state.gbaMemory.previouslyAccessedMemory;
+	const uint32_t previousRegion = previousAddr >> TWENTYFOUR;
 
-	if (accessType == MEMORY_ACCESS_TYPE::AUTOMATIC)
+	MEMORY_ACCESS_TYPE mType;
+
+	// Handle override (rare)
+	if (pGBA_memory->setNextMemoryAccessType != MEMORY_ACCESS_TYPE::AUTOMATIC) MASQ_UNLIKELY
 	{
-		if (isAddressInDifferentRegion(mCurrentAddress, pGBA_instance->GBA_state.gbaMemory.previouslyAccessedMemory) == YES)
+		mType = pGBA_memory->setNextMemoryAccessType;
+		pGBA_memory->setNextMemoryAccessType = MEMORY_ACCESS_TYPE::AUTOMATIC;
+	}
+	// Handle explicit access type
+	else if (accessType != MEMORY_ACCESS_TYPE::AUTOMATIC) MASQ_LIKELY
+	{
+		mType = accessType;
+	}
+	// Automatic determination
+	else MASQ_LIKELY
+	{
+		// Different region check (inlined)
+		if (currentRegion != previousRegion) MASQ_UNLIKELY
 		{
 			mType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
 		}
-		else
+		else MASQ_LIKELY
 		{
-			GBA_WORD offset = ZERO;
-			switch (mAccessWidth)
-			{
-			case MEMORY_ACCESS_WIDTH::EIGHT_BIT:     offset = ONE; BREAK;
-			case MEMORY_ACCESS_WIDTH::SIXTEEN_BIT:   offset = TWO; BREAK;
-			case MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT: offset = FOUR; BREAK;
-			default:
-				FATAL("Unknown memory access width");
-			}
+			// Lookup offset (no branch)
+			const GBA_WORD offset = ACCESS_WIDTH_OFFSETS[TO_UINT8(mAccessWidth)];
 
-			// Check for 128KB boundary special case in GamePak ROM
-			FLAG isGamePakROM =
-				(mRegion >= MEMORY_REGIONS::REGION_FLASH_ROM0_L) &&
-				(mRegion <= MEMORY_REGIONS::REGION_FLASH_ROM2_H);
+			// GamePak ROM 128KB boundary check
+			const FLAG isGamePakROM = (currentRegion >= 0x08) && (currentRegion <= 0x0D);
+			const FLAG is128KBoundary = (mCurrentAddress & 0x1FFFF) == ZERO;
 
-			FLAG is128KBoundary = (mCurrentAddress & 0x1FFFF) == ZERO;
-
-			if (isGamePakROM && is128KBoundary)
+			if (isGamePakROM && is128KBoundary) MASQ_UNLIKELY
 			{
 				mType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
 			}
-			else
+			else MASQ_LIKELY
 			{
 				// Normal sequential check
-				mType = (mCurrentAddress == pGBA_instance->GBA_state.gbaMemory.previouslyAccessedMemory + offset)
+				mType = (mCurrentAddress == previousAddr + offset)
 					? MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE
 					: MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
 			}
 		}
 	}
-	else
+
+	// Lookup cycles from table
+	uint32_t nCycles;
+
+	if (currentRegion < TO_UINT8(MEMORY_REGIONS::TOTAL_MEMORY_REGIONS) &&
+		TO_UINT8(mType) < TO_UINT8(MEMORY_ACCESS_TYPE::TOTAL_MEMORY_ACCESS_TYPES) &&
+		TO_UINT8(mAccessWidth) < TO_UINT8(MEMORY_ACCESS_WIDTH::TOTAL_ACCESS_WIDTH_POSSIBLE)) MASQ_LIKELY
 	{
-		// Override the access type if asked by caller (Needed for special conditions where normal algorithm is not suitable)
-		mType = accessType;
+		nCycles = WAIT_CYCLES[currentRegion][TO_UINT8(mType)][TO_UINT8(mAccessWidth)];
+	}
+	else MASQ_UNLIKELY
+	{
+		nCycles = ONE;  // Invalid memory
 	}
 
-	if (pGBA_memory->setNextMemoryAccessType != MEMORY_ACCESS_TYPE::AUTOMATIC)
-	{
-		mType = pGBA_memory->setNextMemoryAccessType;
-		pGBA_memory->setNextMemoryAccessType = MEMORY_ACCESS_TYPE::AUTOMATIC;
-	}
-
-	if (
-		((TO_UINT8(mRegion) < TO_UINT8(MEMORY_REGIONS::TOTAL_MEMORY_REGIONS)) && (TO_UINT8(mRegion) >= ZERO))
-		&&
-		((TO_UINT8(mType) < TO_UINT8(MEMORY_ACCESS_TYPE::TOTAL_MEMORY_ACCESS_TYPES)) && (TO_UINT8(mType) >= ZERO))
-		&&
-		((TO_UINT8(mAccessWidth) < TO_UINT8(MEMORY_ACCESS_WIDTH::TOTAL_ACCESS_WIDTH_POSSIBLE)) && (TO_UINT8(mAccessWidth) >= ZERO))
-		)
-	{
-		nCycles = WAIT_CYCLES[TO_UINT8(mRegion)][TO_UINT8(mType)][TO_UINT8(mAccessWidth)];
-	}
-	else
-	{
-		nCycles = ONE; // For invalid memory
-	}
-
-	// previous address <= current address 
+	// Update state for next call
 	pGBA_instance->GBA_state.gbaMemory.previouslyAccessedMemory = mCurrentAddress;
-	// previous access type <= current access type 
 	pGBA_memory->getPreviousMemoryAccessType = mType;
 
-#if (DEACTIVATED)
-	if (mSource == MEMORY_ACCESS_SOURCE::CPU)
-	{
-		if (mType == MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE)
-		{
-			LOG("NS : 0x%X; cycles = %d", mCurrentAddress, nCycles);
-		}
-		if (mType == MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE)
-		{
-			LOG("S : 0x%X; cycles = %d", mCurrentAddress, nCycles);
-		}
-	}
-#endif
-
-	RETURN nCycles;
+	return nCycles;
 }
 
 GBA_HALFWORD  GBA_t::readIO(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType)
@@ -3906,7 +3749,7 @@ void GBA_t::unimplementedInstruction()
 #pragma region EMULATION_DEFINITIONS
 
 #pragma region CYCLE_ACCURATE
-void GBA_t::cpuTick(TICK_TYPE type)
+MASQ_INLINE void GBA_t::cpuTick(TICK_TYPE type)
 {
 	if (type == TICK_TYPE::DMA_TICK)
 	{
@@ -3927,7 +3770,7 @@ void GBA_t::dmaTick()
 	processDMA();
 }
 
-void GBA_t::syncOtherGBAModuleTicks()
+MASQ_INLINE void GBA_t::syncOtherGBAModuleTicks()
 {
 	timerTick();
 	serialTick();
@@ -4176,32 +4019,122 @@ void GBA_t::captureIO()
 	handleKeypadInterrupts();
 }
 
+MASQ_INLINE void GBA_t::setTimerCNTLRegister(TIMER timer, uint16_t value)
+{
+	// Use array lookup instead of switch for better performance
+	static uint16_t* CNTL_LUT[] = {
+		&pGBA_peripherals->mTIMER0CNT_L,
+		&pGBA_peripherals->mTIMER1CNT_L,
+		&pGBA_peripherals->mTIMER2CNT_L,
+		&pGBA_peripherals->mTIMER3CNT_L
+	};
+
+	const uint8_t timerIdx = TO_UINT8(timer);
+
+	if (timerIdx < 4) MASQ_LIKELY
+	{
+		*CNTL_LUT[timerIdx] = value;
+	}
+	else MASQ_UNLIKELY
+	{
+		FATAL("Unknown Timer : %d", timerIdx);
+	}
+}
+
+MASQ_INLINE void GBA_t::timerCommonProcessing(TIMER timerID, uint16_t reloadValueIfOverflow, mTIMERnCNT_HHalfWord_t* CNTH, INC64 timerCycles)
+{
+	const uint8_t timerIdx = TO_UINT(timerID);
+	auto& timerState = pGBA_instance->GBA_state.timer[timerIdx];
+
+	uint32_t oldTimerValue = timerState.cache.counter;
+	uint16_t newTimerValue = RESET;
+
+	while (timerCycles != RESET)
+	{
+		// Timer increment
+		++oldTimerValue;
+
+		// Overflow check
+		if (oldTimerValue > 0xFFFF) MASQ_UNLIKELY
+		{
+			timerState.overflow = YES;
+
+			// Increase cascade events for next timers
+			++timerState.cascadeEvents;
+
+			// Account for additional ticks post overflow
+			newTimerValue = (uint16_t)(oldTimerValue - 0x10000);
+
+			// Reload the internal counter
+			newTimerValue += reloadValueIfOverflow;
+
+			// Request interrupt if enabled
+			if (CNTH->mTIMERnCNT_HFields.TIMER_IRQ_EN == YES) MASQ_UNLIKELY
+			{
+				requestInterrupts((GBA_INTERRUPT)(timerIdx + TO_UINT(GBA_INTERRUPT::IRQ_TIMER0)));
+			}
+
+			// Handle FIFO audio for Timer 0 or Timer 1
+			if ((timerID == TIMER::TIMER0 || timerID == TIMER::TIMER1) &&
+				pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.PSG_FIFO_MASTER_EN == ONE) MASQ_UNLIKELY
+			{
+				// Process both FIFOs
+				for (INC8 fifoID = DIRECT_SOUND_A; fifoID <= DIRECT_SOUND_B; ++fifoID)
+				{
+					auto& fifo = pGBA_audio->FIFO[fifoID];
+
+					if (fifo.timer == timerIdx)
+					{
+						if (fifo.size > ZERO) MASQ_LIKELY
+						{
+							fifo.latch = ((GBA_AUDIO_SAMPLE_TYPE)fifo.fifo[fifo.position] << ONE);
+							fifo.position = (fifo.position + ONE) & THIRTYONE;
+							fifo.size--;
+						}
+						else MASQ_UNLIKELY
+						{
+							fifo.latch = (GBA_AUDIO_SAMPLE_TYPE)MUTE_AUDIO;
+						}
+					}
+
+					// Trigger DMA refill if FIFO low
+					if (fifo.size < SIXTEEN) MASQ_UNLIKELY
+					{
+						// Only DMA 1 and DMA 2 can fill sound FIFO in Special Mode
+						mDMAnCNT_HHalfWord_t* dmacntH = (fifoID == DIRECT_SOUND_A)
+							? &pGBA_peripherals->mDMA1CNT_H
+							: &pGBA_peripherals->mDMA2CNT_H;
+
+						ID dmaID = (fifoID == DIRECT_SOUND_A) ? DMA::DMA1 : DMA::DMA2;
+
+						if (dmacntH->mDMAnCNT_HFields.DMA_EN == SET &&
+							dmacntH->mDMAnCNT_HFields.DMA_START_TIMING == DMA_TIMING::SPECIAL)
+						{
+							ActivateDMAChannel(dmaID);
+						}
+					}
+				}
+			}
+		}
+		else MASQ_LIKELY
+		{
+			newTimerValue = (uint16_t)oldTimerValue;
+			timerState.overflow = NO;
+		}
+
+		timerState.cache.counter = newTimerValue;
+
+		// Update TIMER CNTL register for read operations
+		setTimerCNTLRegister(timerID, newTimerValue);
+
+		// Decrement cycles
+		--timerCycles;
+	}
+}
+
+
 void GBA_t::processTimer(INC64 timerCycles)
 {
-	// Inline setTimerCNTLRegister for direct access, avoiding the function call overhead.
-	auto setTimerCNTLRegister = [&](TIMER timer, uint16_t value)
-		{
-			// Use a switch statement for better performance in this context.
-			switch (timer)
-			{
-			case TIMER::TIMER0:
-				pGBA_peripherals->mTIMER0CNT_L = value;
-				BREAK;
-			case TIMER::TIMER1:
-				pGBA_peripherals->mTIMER1CNT_L = value;
-				BREAK;
-			case TIMER::TIMER2:
-				pGBA_peripherals->mTIMER2CNT_L = value;
-				BREAK;
-			case TIMER::TIMER3:
-				pGBA_peripherals->mTIMER3CNT_L = value;
-				BREAK;
-			default:
-				FATAL("Unknown Timer : %d", TO_UINT8(timer));
-				BREAK;
-			}
-		};
-
 	// Use a lookup table for faster register retrieval.
 	static mTIMERnCNT_HHalfWord_t* CNTHLUT[] = {
 		&pGBA_peripherals->mTIMER0CNT_H,
@@ -4209,89 +4142,6 @@ void GBA_t::processTimer(INC64 timerCycles)
 		&pGBA_peripherals->mTIMER2CNT_H,
 		&pGBA_peripherals->mTIMER3CNT_H
 	};
-
-	auto timerCommonProcessing = [&](TIMER timerID, uint16_t reloadValueIfOverflow, mTIMERnCNT_HHalfWord_t* CNTH, INC64 timerCycles)
-		{
-			uint32_t oldTimerValue = pGBA_instance->GBA_state.timer[TO_UINT(timerID)].cache.counter;
-			uint16_t newTimerValue = RESET;
-
-			while (timerCycles != RESET)
-			{
-				// Timer increment
-				++oldTimerValue;
-
-				// Overflow
-				if (oldTimerValue > 0xFFFF)
-				{
-					pGBA_instance->GBA_state.timer[TO_UINT(timerID)].overflow = YES;
-
-					// Increase cascade events for next timers.
-					++pGBA_instance->GBA_state.timer[TO_UINT(timerID)].cascadeEvents;
-
-					// Account for few additional ticks that would have happened post reload (if overflow was not clean...i.e overflow resulted in value > 0xFFFF + 1)
-					newTimerValue = (uint16_t)((uint32_t)oldTimerValue - ((uint32_t)0x10000));
-					// Reload the internal counter
-					newTimerValue += reloadValueIfOverflow;
-
-					// Request interrupt (if needed)
-					if (CNTH->mTIMERnCNT_HFields.TIMER_IRQ_EN == YES)
-					{
-						requestInterrupts((GBA_INTERRUPT)(TO_UINT(timerID) + TO_UINT(GBA_INTERRUPT::IRQ_TIMER0)));
-					}
-
-					// Indicate there is an overflow in Timer 0 or Timer 1 to APU
-					if (timerID == TIMER::TIMER0 || timerID == TIMER::TIMER1)
-					{
-						if (pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.PSG_FIFO_MASTER_EN == ONE)
-						{
-							for (INC8 fifoID = DIRECT_SOUND_A; fifoID <= DIRECT_SOUND_B; ++fifoID)
-							{
-								if (pGBA_audio->FIFO[fifoID].timer == TO_UINT8(timerID))
-								{
-									if (pGBA_audio->FIFO[fifoID].size > ZERO)
-									{
-										pGBA_audio->FIFO[fifoID].latch = ((GBA_AUDIO_SAMPLE_TYPE)pGBA_audio->FIFO[fifoID].fifo[pGBA_audio->FIFO[fifoID].position] << ONE);
-										pGBA_audio->FIFO[fifoID].position = (pGBA_audio->FIFO[fifoID].position + ONE) & THIRTYONE;
-										pGBA_audio->FIFO[fifoID].size--;
-									}
-									else
-									{
-										pGBA_audio->FIFO[fifoID].latch = (GBA_AUDIO_SAMPLE_TYPE)MUTE_AUDIO;
-									}
-								}
-								if (pGBA_audio->FIFO[fifoID].size < SIXTEEN)
-								{
-									// As per http://problemkaputt.de/gbatek-gba-dma-transfers.htm
-									// only DMA 1 and DMA 2 can be requested to fill sound FIFO, that too in Special Mode
-
-									mDMAnCNT_HHalfWord_t* dmacntH = ((fifoID == DIRECT_SOUND_A) ? &pGBA_peripherals->mDMA1CNT_H : &pGBA_peripherals->mDMA2CNT_H);
-									ID dmaID = (fifoID == DIRECT_SOUND_A) ? DMA::DMA1 : DMA::DMA2;
-
-									if (dmacntH->mDMAnCNT_HFields.DMA_EN == SET
-										&&
-										dmacntH->mDMAnCNT_HFields.DMA_START_TIMING == DMA_TIMING::SPECIAL)
-									{
-										ActivateDMAChannel(dmaID);
-									}
-								}
-							}
-						}
-					}
-				}
-				else
-				{
-					newTimerValue = (uint16_t)oldTimerValue;
-					pGBA_instance->GBA_state.timer[TO_UINT(timerID)].overflow = NO;
-				}
-
-				pGBA_instance->GBA_state.timer[TO_UINT(timerID)].cache.counter = newTimerValue;
-				// Set the TIMER CNTL register with current timer count (needed for read operation)
-				setTimerCNTLRegister((TIMER)timerID, newTimerValue);
-
-				// Decrement 'timerCycles'
-				--timerCycles;
-			}
-		};
 
 	pGBA_instance->GBA_state.timer[ZERO].cascadeEvents = RESET;
 	pGBA_instance->GBA_state.timer[ONE].cascadeEvents = RESET;
@@ -5103,7 +4953,7 @@ FLAG GBA_t::isChannel3Active()
 		&& pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_3].isChannelActuallyEnabled == ENABLED);
 }
 
-void GBA_t::tickChannel(AUDIO_CHANNELS channel, INC64 tCycles)
+MASQ_INLINE void GBA_t::tickChannel(AUDIO_CHANNELS channel, INC64 tCycles)
 {
 	if (pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.PSG_FIFO_MASTER_EN == ONE)
 	{
@@ -6059,6 +5909,18 @@ MASQ_INLINE GBA_t::gbaColor_t GBA_t::DARKEN(gbaColor_t color, BYTE evy)
 
 }
 
+MASQ_INLINE GBA_t::mBGnCNTHalfWord_t* GBA_t::getBGxCNT(ID bgID)
+{
+	switch (bgID)
+	{
+	case BG0: RETURN &pGBA_peripherals->mBG0CNTHalfWord;
+	case BG1: RETURN &pGBA_peripherals->mBG1CNTHalfWord;
+	case BG2: RETURN &pGBA_peripherals->mBG2CNTHalfWord;
+	case BG3: RETURN &pGBA_peripherals->mBG3CNTHalfWord;
+	}
+	RETURN nullptr;
+}
+
 MASQ_INLINE void GBA_t::MERGE_AND_DISPLAY_PHASE1()
 {
 
@@ -6070,7 +5932,7 @@ MASQ_INLINE void GBA_t::MERGE_AND_DISPLAY_PHASE1()
 	pGBA_display->mergeCache.xCoordinate = x;
 	pGBA_display->mergeCache.yCoordinate = y;
 
-	if ((x >= ((uint16_t)LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (y >= ((uint16_t)LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
+	if ((x >= ((uint16_t)LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (y >= ((uint16_t)LCD_DIMENSIONS::LCD_TOTAL_V_LINES))) MASQ_UNLIKELY
 	{
 		; // Do nothing...
 	}
@@ -6085,34 +5947,12 @@ MASQ_INLINE void GBA_t::MERGE_AND_DISPLAY_PHASE1()
 		pGBA_display->priorities[ZERO] = THREE; // Set to lowest priority by default
 		pGBA_display->priorities[ONE] = THREE; // Set to lowest priority by default
 
-		if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.FORCED_BLANK == SET)
+		if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.FORCED_BLANK == SET) MASQ_UNLIKELY
 		{
 			pGBA_display->colorForBlending[ZERO] = GBA_WHITE;
 		}
-		else
+		else MASQ_LIKELY
 		{
-			auto getBGxCNT = [&](ID bgID)
-				{
-					if (bgID == BG0)
-					{
-						RETURN(&pGBA_peripherals->mBG0CNTHalfWord);
-					}
-					if (bgID == BG1)
-					{
-						RETURN(&pGBA_peripherals->mBG1CNTHalfWord);
-					}
-					if (bgID == BG2)
-					{
-						RETURN(&pGBA_peripherals->mBG2CNTHalfWord);
-					}
-					if (bgID == BG3)
-					{
-						RETURN(&pGBA_peripherals->mBG3CNTHalfWord);
-					}
-
-					RETURN(mBGnCNTHalfWord_t*)NULL;
-				};
-
 			ID minBG = MIN_MAX_BG_LAYERS[pGBA_display->currentPPUMode][ZERO];
 			ID maxBG = MIN_MAX_BG_LAYERS[pGBA_display->currentPPUMode][ONE];
 
@@ -6219,7 +6059,7 @@ MASQ_INLINE void GBA_t::MERGE_AND_DISPLAY_PHASE2()
 	uint32_t x = pGBA_display->mergeCache.xCoordinate;
 	uint32_t y = pGBA_display->mergeCache.yCoordinate;
 
-	if ((x >= ((uint16_t)LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (y >= ((uint16_t)LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
+	if ((x >= ((uint16_t)LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (y >= ((uint16_t)LCD_DIMENSIONS::LCD_TOTAL_V_LINES))) MASQ_UNLIKELY
 	{
 		; // Do nothing...
 	}
@@ -6227,11 +6067,11 @@ MASQ_INLINE void GBA_t::MERGE_AND_DISPLAY_PHASE2()
 	{
 		gbaColor_t finalPixel = { ZERO };
 
-		if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.FORCED_BLANK == SET)
+		if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.FORCED_BLANK == SET) MASQ_UNLIKELY
 		{
 			finalPixel = GBA_WHITE;
 		}
-		else
+		else MASQ_LIKELY
 		{
 			if (pGBA_display->gfx_obj_mode[x][y] == OBJECT_MODE::ALPHA_BLENDING
 				// No need to check BLDCNT for OBJ if alpha blending is set in OAM (Refer : http://problemkaputt.de/gbatek-lcd-i-o-color-special-effects.htm)
@@ -6956,6 +6796,20 @@ MASQ_INLINE int32_t GBA_t::INCREMENT_OAM_ID()
 
 }
 
+MASQ_INLINE void GBA_t::HANDLE_WINDOW_INTERNAL(uint32_t x1, uint32_t x2, uint32_t y1, uint32_t y2, FLAG& winH, FLAG& winV, int winIndex, uint32_t xPixelCoordinate, uint32_t yPixelCoordinate)
+{
+		// Check and adjust the boundaries
+		if (x2 > getScreenWidth() || x1 > x2) x2 = getScreenWidth();
+		if (y2 > getScreenHeight() || y1 > y2) y2 = getScreenHeight();
+
+		// Horizontal and vertical range checks
+		winH = (xPixelCoordinate >= x1 && xPixelCoordinate <= x2) ? YES : NO;
+		winV = (yPixelCoordinate >= y1 && yPixelCoordinate <= y2) ? YES : NO;
+
+		// Update the window pixel array
+		pGBA_display->gfx_window[winIndex][xPixelCoordinate][yPixelCoordinate] = winH && winV;
+};
+
 MASQ_INLINE void GBA_t::WIN_CYCLE()
 {
 
@@ -6967,32 +6821,17 @@ MASQ_INLINE void GBA_t::WIN_CYCLE()
 		RETURN;
 	}
 
-	// Helper lambda to handle the window logic for both Win0 and Win1
-	auto handle_window = [&](uint32_t x1, uint32_t x2, uint32_t y1, uint32_t y2, FLAG& winH, FLAG& winV, int winIndex)
-		{
-			// Check and adjust the boundaries
-			if (x2 > getScreenWidth() || x1 > x2) x2 = getScreenWidth();
-			if (y2 > getScreenHeight() || y1 > y2) y2 = getScreenHeight();
-
-			// Horizontal and vertical range checks
-			winH = (xPixelCoordinate >= x1 && xPixelCoordinate <= x2) ? YES : NO;
-			winV = (yPixelCoordinate >= y1 && yPixelCoordinate <= y2) ? YES : NO;
-
-			// Update the window pixel array
-			pGBA_display->gfx_window[winIndex][xPixelCoordinate][yPixelCoordinate] = winH && winV;
-		};
-
 	// Handle Win0
 	FLAG win01H = NO, win01V = NO;
-	handle_window(pGBA_peripherals->mWIN0HHalfWord.mWINniFields.i1, pGBA_peripherals->mWIN0HHalfWord.mWINniFields.i2,
+	HANDLE_WINDOW_INTERNAL(pGBA_peripherals->mWIN0HHalfWord.mWINniFields.i1, pGBA_peripherals->mWIN0HHalfWord.mWINniFields.i2,
 		pGBA_peripherals->mWIN0VHalfWord.mWINniFields.i1, pGBA_peripherals->mWIN0VHalfWord.mWINniFields.i2,
-		win01H, win01V, WIN0);
+		win01H, win01V, WIN0, xPixelCoordinate, yPixelCoordinate);
 
 	// Handle Win1
 	FLAG win11H = NO, win11V = NO;
-	handle_window(pGBA_peripherals->mWIN1HHalfWord.mWINniFields.i1, pGBA_peripherals->mWIN1HHalfWord.mWINniFields.i2,
+	HANDLE_WINDOW_INTERNAL(pGBA_peripherals->mWIN1HHalfWord.mWINniFields.i1, pGBA_peripherals->mWIN1HHalfWord.mWINniFields.i2,
 		pGBA_peripherals->mWIN1VHalfWord.mWINniFields.i1, pGBA_peripherals->mWIN1VHalfWord.mWINniFields.i2,
-		win11H, win11V, WIN1);
+		win11H, win11V, WIN1, xPixelCoordinate, yPixelCoordinate);
 
 	// increment windows pixel counter
 	++pGBA_display->currentWinPixel;

@@ -392,6 +392,39 @@ private:
 		RT_NONE
 	};
 
+	static constexpr GBA_t::REGISTER_BANK_TYPE OP_MODE_TO_REGISTER_BANK[32] = {
+		GBA_t::REGISTER_BANK_TYPE::RB_USR_SYS, GBA_t::REGISTER_BANK_TYPE::RB_USR_SYS,
+		GBA_t::REGISTER_BANK_TYPE::RB_USR_SYS, GBA_t::REGISTER_BANK_TYPE::RB_USR_SYS,
+		GBA_t::REGISTER_BANK_TYPE::RB_USR_SYS, GBA_t::REGISTER_BANK_TYPE::RB_USR_SYS,
+		GBA_t::REGISTER_BANK_TYPE::RB_USR_SYS, GBA_t::REGISTER_BANK_TYPE::RB_USR_SYS,
+		GBA_t::REGISTER_BANK_TYPE::RB_USR_SYS, GBA_t::REGISTER_BANK_TYPE::RB_USR_SYS,
+		GBA_t::REGISTER_BANK_TYPE::RB_USR_SYS, GBA_t::REGISTER_BANK_TYPE::RB_USR_SYS,
+		GBA_t::REGISTER_BANK_TYPE::RB_USR_SYS, GBA_t::REGISTER_BANK_TYPE::RB_USR_SYS,
+		GBA_t::REGISTER_BANK_TYPE::RB_USR_SYS, GBA_t::REGISTER_BANK_TYPE::RB_USR_SYS,
+		GBA_t::REGISTER_BANK_TYPE::RB_USR_SYS,  // 0x10 - OP_USR
+		GBA_t::REGISTER_BANK_TYPE::RB_FIQ,      // 0x11 - OP_FIQ
+		GBA_t::REGISTER_BANK_TYPE::RB_IRQ,      // 0x12 - OP_IRQ
+		GBA_t::REGISTER_BANK_TYPE::RB_SVC,      // 0x13 - OP_SVC
+		GBA_t::REGISTER_BANK_TYPE::RB_USR_SYS, GBA_t::REGISTER_BANK_TYPE::RB_USR_SYS,
+		GBA_t::REGISTER_BANK_TYPE::RB_USR_SYS,
+		GBA_t::REGISTER_BANK_TYPE::RB_ABT,      // 0x17 - OP_ABT
+		GBA_t::REGISTER_BANK_TYPE::RB_USR_SYS, GBA_t::REGISTER_BANK_TYPE::RB_USR_SYS,
+		GBA_t::REGISTER_BANK_TYPE::RB_USR_SYS,
+		GBA_t::REGISTER_BANK_TYPE::RB_UND,      // 0x1B - OP_UND
+		GBA_t::REGISTER_BANK_TYPE::RB_USR_SYS, GBA_t::REGISTER_BANK_TYPE::RB_USR_SYS,
+		GBA_t::REGISTER_BANK_TYPE::RB_USR_SYS,
+		GBA_t::REGISTER_BANK_TYPE::RB_USR_SYS   // 0x1F - OP_SYS
+	};
+
+	static constexpr GBA_t::OP_MODE_TYPE REGISTER_BANK_TO_OP_MODE[6] = {
+		GBA_t::OP_MODE_TYPE::OP_USR,  // RB_USR_SYS
+		GBA_t::OP_MODE_TYPE::OP_FIQ,  // RB_FIQ
+		GBA_t::OP_MODE_TYPE::OP_SVC,  // RB_SVC
+		GBA_t::OP_MODE_TYPE::OP_ABT,  // RB_ABT
+		GBA_t::OP_MODE_TYPE::OP_IRQ,  // RB_IRQ
+		GBA_t::OP_MODE_TYPE::OP_UND   // RB_UND
+	};
+
 #define SP						(uint8_t)REGISTER_TYPE::RT_13
 #define LR						(uint8_t)REGISTER_TYPE::RT_14
 #define PC						(uint8_t)REGISTER_TYPE::RT_15
@@ -3746,22 +3779,47 @@ public:
 #pragma region ARM7TDMI_DEFINITIONS
 private:
 
-	REGISTER_BANK_TYPE getRegisterBankFromOperatingMode(OP_MODE_TYPE opMode);
+	MASQ_INLINE REGISTER_BANK_TYPE getRegisterBankFromOperatingMode(OP_MODE_TYPE opMode)
+	{
+		RETURN OP_MODE_TO_REGISTER_BANK[static_cast<uint8_t>(opMode) & 0x1F];
+	}
 
-	REGISTER_BANK_TYPE getCurrentlyValidRegisterBank();
+	MASQ_INLINE REGISTER_BANK_TYPE getCurrentlyValidRegisterBank()
+	{
+		RETURN OP_MODE_TO_REGISTER_BANK[static_cast<uint8_t>(getARMMode()) & 0x1F];
+	}
 
 	// TODO: As of now, "getOperatingModeFromRegisterBank" function cannot differentiate between USR mode and SYS modes
-	OP_MODE_TYPE getOperatingModeFromRegisterBank(REGISTER_BANK_TYPE rb);
+	MASQ_INLINE OP_MODE_TYPE GgetOperatingModeFromRegisterBank(REGISTER_BANK_TYPE rb)
+	{
+		RETURN REGISTER_BANK_TO_OP_MODE[static_cast<uint8_t>(rb)];
+	}
 
 private:
 
-	void setARMState(STATE_TYPE armState);
+	MASQ_INLINE void setARMState(STATE_TYPE armState)
+	{
+		pGBA_cpuInstance->registers.cpsr.psrFields.psrStateBit = (uint32_t)armState;
+		pGBA_cpuInstance->armState = armState;
+	}
 
-	void setARMMode(OP_MODE_TYPE opMode);
+	MASQ_INLINE void setARMMode(OP_MODE_TYPE opMode)
+	{
+		pGBA_cpuInstance->registers.cpsr.psrFields.psrModeBits = (uint32_t)opMode;
+		pGBA_cpuInstance->armMode = opMode;
+	}
 
-	STATE_TYPE getARMState();
+	MASQ_INLINE STATE_TYPE getARMState()
+	{
+		pGBA_cpuInstance->armState = (STATE_TYPE)pGBA_cpuInstance->registers.cpsr.psrFields.psrStateBit;
+		RETURN pGBA_cpuInstance->armState;
+	}
 
-	OP_MODE_TYPE getARMMode();
+	MASQ_INLINE OP_MODE_TYPE getARMMode()
+	{
+		pGBA_cpuInstance->armMode = (OP_MODE_TYPE)pGBA_cpuInstance->registers.cpsr.psrFields.psrModeBits;
+		RETURN pGBA_cpuInstance->armMode;
+	}
 
 private:
 
@@ -3769,7 +3827,7 @@ private:
 
 	uint32_t cpuReadRegister(REGISTER_BANK_TYPE rb, REGISTER_TYPE rt);
 
-	uint32_t getMemoryAccessCycles(GBA_WORD mCurrentAddress, MEMORY_ACCESS_WIDTH mAccessWidth, MEMORY_ACCESS_SOURCE mSource, MEMORY_ACCESS_TYPE accessType);
+	MASQ_INLINE uint32_t getMemoryAccessCycles(GBA_WORD mCurrentAddress, MEMORY_ACCESS_WIDTH mAccessWidth, MEMORY_ACCESS_SOURCE mSource, MEMORY_ACCESS_TYPE accessType);
 
 	// Refer "Reading from Unused Memory (00004000-01FFFFFF,10000000-FFFFFFFF)" of https://problemkaputt.de/gbatek-gba-unpredictable-things.htm
 	template <typename T>
@@ -4853,24 +4911,24 @@ private:
 
 	void fetchAndDecode(uint32_t newPC);
 
-	bool TickMultiply(FLAG isSigned, uint64_t multiplier);
+	MASQ_INLINE bool TickMultiply(FLAG isSigned, uint64_t multiplier);
 
-	bool MultiplyCarrySimple(uint32_t multiplier);
+	MASQ_INLINE bool MultiplyCarrySimple(uint32_t multiplier);
 
-	bool MultiplyCarryLo(
+	MASQ_INLINE bool MultiplyCarryLo(
 		uint32_t multiplicand,
 		uint32_t multiplier,
 		uint32_t accum = 0
 	);
 
-	bool MultiplyCarryHi(
+	MASQ_INLINE bool MultiplyCarryHi(
 		bool sign_extend,
 		uint32_t multiplicand,
 		uint32_t multiplier,
 		uint32_t accum_hi = 0
 	);
 
-	bool didConditionalCheckPass(uint32_t opCodeConditionalBits, uint32_t cpsr);
+	MASQ_INLINE bool didConditionalCheckPass(uint32_t opCodeConditionalBits, uint32_t cpsr);
 
 	GBA_WORD performShiftOperation(bool updateFlag, SHIFT_TYPE shiftType, uint32_t shiftAmount, uint32_t dataToBeShifted, bool quirkEnabled);
 
@@ -4948,9 +5006,9 @@ private:
 private:
 
 #pragma region CYCLE_ACCURATE
-	void cpuTick(TICK_TYPE type = TICK_TYPE::CPU_TICK);
+	MASQ_INLINE void cpuTick(TICK_TYPE type = TICK_TYPE::CPU_TICK);
 
-	void syncOtherGBAModuleTicks();
+	MASQ_INLINE void syncOtherGBAModuleTicks();
 
 	void timerTick();
 
@@ -4986,6 +5044,10 @@ private:
 	void captureIO();
 
 private:
+
+	MASQ_INLINE void setTimerCNTLRegister(TIMER timer, uint16_t value);
+
+	MASQ_INLINE void timerCommonProcessing(TIMER timerID, uint16_t reloadValueIfOverflow, mTIMERnCNT_HHalfWord_t* CNTH, INC64 timerCycles);
 
 	void processTimer(INC64 timerCycles);
 
@@ -5037,7 +5099,7 @@ private:
 
 	FLAG isChannel3Active();
 
-	void tickChannel(AUDIO_CHANNELS channel, INC64 tCycles);
+	MASQ_INLINE void tickChannel(AUDIO_CHANNELS channel, INC64 tCycles);
 
 	void processSoundLength();
 
@@ -5090,6 +5152,8 @@ private:
 	// MERGE AND DISPLAY
 	// ============================================
 
+	MASQ_INLINE mBGnCNTHalfWord_t* getBGxCNT(ID bgID);
+
 	MASQ_INLINE void MERGE_AND_DISPLAY_PHASE1();
 
 	MASQ_INLINE void MERGE_AND_DISPLAY_PHASE2();
@@ -5119,6 +5183,11 @@ private:
 	// ============================================
 	// WINDOW RENDERING
 	// ============================================
+
+	MASQ_INLINE void HANDLE_WINDOW_INTERNAL(uint32_t x1, uint32_t x2,
+		uint32_t y1, uint32_t y2,
+		FLAG& winH, FLAG& winV, int winIndex, 
+		uint32_t xPixelCoordinate, uint32_t yPixelCoordinate);
 
 	MASQ_INLINE void WIN_CYCLE();
 

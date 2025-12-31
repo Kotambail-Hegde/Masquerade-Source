@@ -71,7 +71,7 @@
 #define DATA_PROCESSING_INSTRUCTION						0x00000000
 #pragma endregion ARM7TDMI_SPECIFIC_MACROS
 
-bool GBA_t::TickMultiply(FLAG isSigned, uint64_t multiplier)
+MASQ_INLINE bool GBA_t::TickMultiply(FLAG isSigned, uint64_t multiplier)
 {
 	uint32_t mask = 0xFFFFFF00;
 	bool full = false;
@@ -103,14 +103,14 @@ bool GBA_t::TickMultiply(FLAG isSigned, uint64_t multiplier)
 	return full;
 }
 
-bool GBA_t::MultiplyCarrySimple(uint32_t multiplier)
+MASQ_INLINE bool GBA_t::MultiplyCarrySimple(uint32_t multiplier)
 {
 	// Carry comes directly from final injected booth carry bit.
 	// Final booth addend is negative only if upper 2 bits are 10.
 	return (multiplier >> 30) == 2;
 }
 
-bool GBA_t::MultiplyCarryLo(
+MASQ_INLINE bool GBA_t::MultiplyCarryLo(
 	uint32_t multiplicand,
 	uint32_t multiplier,
 	uint32_t accum /* = 0 */
@@ -152,7 +152,7 @@ bool GBA_t::MultiplyCarryLo(
 	return (carry >> 31);
 }
 
-bool GBA_t::MultiplyCarryHi(
+MASQ_INLINE bool GBA_t::MultiplyCarryHi(
 	bool sign_extend,
 	uint32_t multiplicand,
 	uint32_t multiplier,
@@ -220,7 +220,7 @@ bool GBA_t::MultiplyCarryHi(
 	return (sum ^ accum) >> 31;
 }
 
-bool GBA_t::didConditionalCheckPass(uint32_t opCodeConditionalBits, uint32_t cpsr)
+MASQ_INLINE bool GBA_t::didConditionalCheckPass(uint32_t opCodeConditionalBits, uint32_t cpsr)
 {
 	CPUDEBUG("Condition: 0x%X", (uint32_t)opCodeConditionalBits);
 
