@@ -48,33 +48,6 @@
 */
 #pragma endregion INFORMATION
 
-#pragma region GBA_SPECIFIC_MACROS
-#define AUDIO_FIFO_SIZE_FOR_GBA							FOUR
-
-#define APU_FRAME_SEQUENCER_RATE_HZ						(512.0f)
-#define DC_BIAS_FOR_AUDIO_SAMPLES						ZERO
-#define DISABLE_FIRST_PULSE_CHANNEL						NO
-#define DISABLE_SECOND_PULSE_CHANNEL					NO
-#define DISABLE_WAVE_CHANNEL							NO
-#define DISABLE_NOISE_CHANNEL							NO
-#define DISABLE_DMAA_CHANNEL							NO
-#define DISABLE_DMAB_CHANNEL							NO
-
-#define NRW_WAVE_BANK									ZERO
-#define RW_WAVE_BANK									ONE
-
-#define CPSR_FLAG(F, C)									(F == 1 ? C:"-")
-
-#define loadPipeline									fetchAndDecode
-#define initializeSerialClockSpeed						processSerialClockSpeedBit
-#define performOverFlowCheck							getUpdatedFrequency
-
-#ifdef _MSC_VER  
-#define __packed  
-#pragma pack(1)  
-#endif
-#pragma endregion GBA_SPECIFIC_MACROS
-
 #pragma region GBA_SPECIFIC_DECLARATIONS
 // GBA File Logger (https://github.com/skylersaleh/GBA-Logs)
 FLAG skylersalehLogs = DISABLED;
@@ -2740,7 +2713,7 @@ void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH acc
 		{
 			pGBA_instance->GBA_state.timer[TIMER::TIMER0].cache.counter = pGBA_instance->GBA_state.timer[TIMER::TIMER0].cache.reload;
 			pGBA_peripherals->mTIMER0CNT_L = pGBA_instance->GBA_state.timer[TIMER::TIMER0].cache.counter;
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.timerCounter[TIMER::TIMER0] = RESET;
+			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.timerCounter[TIMER::TIMER0] = RESET;
 			// Takes 2 cycles for CNTH to get applied after writing to control/reload
 			// Refer : https://discordapp.com/channels/465585922579103744/465586361731121162/1034239922602782801
 			pGBA_instance->GBA_state.timer[TIMER::TIMER0].currentState = DISABLED;
@@ -2763,7 +2736,7 @@ void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH acc
 		{
 			pGBA_instance->GBA_state.timer[TIMER::TIMER1].cache.counter = pGBA_instance->GBA_state.timer[TIMER::TIMER1].cache.reload;
 			pGBA_peripherals->mTIMER1CNT_L = pGBA_instance->GBA_state.timer[TIMER::TIMER1].cache.counter;
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.timerCounter[TIMER::TIMER1] = RESET;
+			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.timerCounter[TIMER::TIMER1] = RESET;
 			// Takes 2 cycles for CNTH to get applied after writing to control/reload
 			// Refer : https://discordapp.com/channels/465585922579103744/465586361731121162/1034239922602782801
 			pGBA_instance->GBA_state.timer[TIMER::TIMER1].currentState = DISABLED;
@@ -2786,7 +2759,7 @@ void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH acc
 		{
 			pGBA_instance->GBA_state.timer[TIMER::TIMER2].cache.counter = pGBA_instance->GBA_state.timer[TIMER::TIMER2].cache.reload;
 			pGBA_peripherals->mTIMER2CNT_L = pGBA_instance->GBA_state.timer[TIMER::TIMER2].cache.counter;
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.timerCounter[TIMER::TIMER2] = RESET;
+			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.timerCounter[TIMER::TIMER2] = RESET;
 			// Takes 2 cycles for CNTH to get applied after writing to control/reload
 			// Refer : https://discordapp.com/channels/465585922579103744/465586361731121162/1034239922602782801
 			pGBA_instance->GBA_state.timer[TIMER::TIMER2].currentState = DISABLED;
@@ -2809,7 +2782,7 @@ void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH acc
 		{
 			pGBA_instance->GBA_state.timer[TIMER::TIMER3].cache.counter = pGBA_instance->GBA_state.timer[TIMER::TIMER3].cache.reload;
 			pGBA_peripherals->mTIMER3CNT_L = pGBA_instance->GBA_state.timer[TIMER::TIMER3].cache.counter;
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.timerCounter[TIMER::TIMER3] = RESET;
+			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.timerCounter[TIMER::TIMER3] = RESET;
 			// Takes 2 cycles for CNTH to get applied after writing to control/reload
 			// Refer : https://discordapp.com/channels/465585922579103744/465586361731121162/1034239922602782801
 			pGBA_instance->GBA_state.timer[TIMER::TIMER3].currentState = DISABLED;
@@ -3122,7 +3095,7 @@ FLAG GBA_t::processSOC()
 	if (pGBA_cpuInstance->haltCntState == HALT_CONTROLLER::RUN)
 	{
 		runCPUPipeline();
-		cyclesInThisRun = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter;
+		cyclesInThisRun = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter;
 	}
 	else if (pGBA_cpuInstance->haltCntState == HALT_CONTROLLER::HALT)
 	{
@@ -3139,13 +3112,13 @@ FLAG GBA_t::processSOC()
 			dmaTick();
 		}
 
-		dmaCyclesInThisRun = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.dmaCounter;
-		pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.dmaCounter = RESET;
+		dmaCyclesInThisRun = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.dmaCounter;
+		pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.dmaCounter = RESET;
 
 		if (dmaCyclesInThisRun == RESET)
 		{
 			busCycles();
-			cyclesInThisRun = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter;
+			cyclesInThisRun = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter;
 		}
 
 		// Refer to http://problemkaputt.de/gbatek-gba-system-control.htm
@@ -3164,8 +3137,8 @@ FLAG GBA_t::processSOC()
 	processPPU(cyclesInThisRun);
 #endif
 
-	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter = RESET;
-	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.dmaCounter = RESET;
+	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter = RESET;
+	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.dmaCounter = RESET;
 
 	RETURN status;
 }
@@ -3183,7 +3156,7 @@ void GBA_t::cpuIdleCycles()
 		dmaTick();
 	}
 
-	auto& ticks = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate;
+	auto& ticks = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate;
 
 	// Note that below method of using "free bus cycles" is inspired from NBA
 
@@ -3384,97 +3357,97 @@ void GBA_t::runCPUPipeline()
 
 		if (ThumbSoftwareInterrupt() == YES)
 		{
-			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter != RESET);
+			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (UnconditionalBranch() == YES)
 		{
-			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter != RESET);
+			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (ConditionalBranch() == YES)
 		{
-			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter != RESET);
+			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (MultipleLoadStore() == YES)
 		{
-			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter != RESET);
+			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (LongBranchWithLink() == YES)
 		{
-			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter != RESET);
+			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (AddOffsetToStackPointer() == YES)
 		{
-			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter != RESET);
+			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (PushPopRegisters() == YES)
 		{
-			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter != RESET);
+			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (LoadStoreHalfword() == YES)
 		{
-			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter != RESET);
+			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (SPRelativeLoadStore() == YES)
 		{
-			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter != RESET);
+			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (LoadAddress() == YES)
 		{
-			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter != RESET);
+			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (LoadStoreWithImmediateOffset() == YES)
 		{
-			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter != RESET);
+			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (LoadStoreWithRegisterOffset() == YES)
 		{
-			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter != RESET);
+			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (LoadStoreSignExtendedByteHalfword() == YES)
 		{
-			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter != RESET);
+			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (PCRelativeLoad() == YES)
 		{
-			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter != RESET);
+			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (HiRegisterOperationsBranchExchange() == YES)
 		{
-			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter != RESET);
+			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (ALUOperations() == YES)
 		{
-			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter != RESET);
+			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (MoveCompareAddSubtractImmediate() == YES)
 		{
-			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter != RESET);
+			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (AddSubtract() == YES)
 		{
-			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter != RESET);
+			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (MoveShiftedRegister() == YES)
 		{
-			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter != RESET);
+			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 
@@ -3497,57 +3470,57 @@ void GBA_t::runCPUPipeline()
 		{
 			if (BranchAndBranchExchange() == YES)
 			{
-				ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter != RESET);
+				ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 				RETURN;
 			}
 			if (BlockDataTransfer() == YES)
 			{
-				ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter != RESET);
+				ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 				RETURN;
 			}
 			if (BranchAndBranchLink() == YES)
 			{
-				ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter != RESET);
+				ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 				RETURN;
 			}
 			if (SoftwareInterrupt() == YES)
 			{
-				ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter != RESET);
+				ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 				RETURN;
 			}
 			if (Undefined() == YES)
 			{
-				ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter != RESET);
+				ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 				RETURN;
 			}
 			if (SingleDataTransfer() == YES)
 			{
-				ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter != RESET);
+				ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 				RETURN;
 			}
 			if (SingleDataSwap() == YES)
 			{
-				ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter != RESET);
+				ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 				RETURN;
 			}
 			if (MultiplyAndMultiplyAccumulate() == YES)
 			{
-				ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter != RESET);
+				ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 				RETURN;
 			}
 			if (HalfWordDataTransfer() == YES)
 			{
-				ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter != RESET);
+				ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 				RETURN;
 			}
 			if (psrTransfer() == YES)
 			{
-				ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter != RESET);
+				ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 				RETURN;
 			}
 			if (DataProcessing() == YES)
 			{
-				ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter != RESET);
+				ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 				RETURN;
 			}
 
@@ -3566,7 +3539,7 @@ void GBA_t::runCPUPipeline()
 		FATAL("Unknown Operating Mode");
 	}
 
-	ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.cpuCounter != RESET);
+	ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 }
 
 void GBA_t::skylersalehLogProcess()
@@ -3721,10 +3694,8 @@ FLAG GBA_t::isInterruptReadyToBeServed()
 	{
 		RETURN YES;
 	}
-	else
-	{
-		RETURN NO;
-	}
+
+	RETURN NO;
 }
 
 FLAG GBA_t::handleInterruptsIfApplicable()
@@ -3867,7 +3838,7 @@ void GBA_t::processTimer(INC64 timerCycles)
 	pGBA_instance->GBA_state.timer[THREE].cascadeEvents = RESET;
 
 	// Refer : https://discordapp.com/channels/465585922579103744/465586361731121162/929789580889178142
-	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.globalTimerCounter += timerCycles;
+	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.globalTimerCounter += timerCycles;
 
 	// Process timers in a loop
 	for (INC8 timerID = ZERO; timerID < FOUR; timerID++)
@@ -3895,7 +3866,7 @@ void GBA_t::processTimer(INC64 timerCycles)
 				if (isCountUpMode == NO)
 				{
 					// Refer : https://discord.com/channels/465585922579103744/465586361731121162/929789580889178142
-					auto systemTimer = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.globalTimerCounter;
+					auto systemTimer = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.globalTimerCounter;
 					auto prescalar = timerFrequency[CNTH->mTIMERnCNT_HFields.PRESCALER_SEL];
 					auto moduloPow2Prescalar = prescalar - ONE;
 
@@ -4301,7 +4272,7 @@ FLAG GBA_t::IsAnyDMARunning()
 
 void GBA_t::processDMA()
 {
-	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.dmaCounter = RESET;
+	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.dmaCounter = RESET;
 
 	if (IsAnyDMARunning() == NO)
 	{
@@ -4457,671 +4428,27 @@ void GBA_t::RunDMAChannel()
 #undef DMA_REENTER_EARLY_RETURN
 }
 
-DIM16 GBA_t::getChannelPeriod(AUDIO_CHANNELS channel)
-{
-	DIM16 period = ZERO;
-	switch (channel)
-	{
-	case AUDIO_CHANNELS::CHANNEL_1:
-		period = pGBA_peripherals->mSOUND1CNT_XHalfWord.mSOUND1CNT_XFields.FREQ;
-		RETURN period;
-	case AUDIO_CHANNELS::CHANNEL_2:
-		period = pGBA_peripherals->mSOUND2CNT_HHalfWord.mSOUND2CNT_HFields.FREQ;
-		RETURN period;
-	case AUDIO_CHANNELS::CHANNEL_3:
-		period = pGBA_peripherals->mSOUND3CNT_XHalfWord.mSOUND3CNT_XFields.SAMPLE_RATE;
-		RETURN period;
-	default:
-		RETURN period;
-	}
-}
-
-FLAG GBA_t::enableChannelWhenTriggeredIfDACIsEnabled(AUDIO_CHANNELS channel)
-{
-	FLAG wasEnableSuccess = NO;
-
-	if (pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.PSG_FIFO_MASTER_EN == ONE)
-	{
-		switch (channel)
-		{
-		case AUDIO_CHANNELS::CHANNEL_1:
-			if (isDACEnabled(channel) == YES) // DAC check
-			{
-				// Since we triggered the channel, "length timer expiring" or "frequency sweep overflow" checks are reset
-				pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].isChannelActuallyEnabled = ENABLED;
-				pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.SOUND1_ON_FLAG = ONE;
-				wasEnableSuccess = YES;
-			}
-			else
-			{
-				pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].isChannelActuallyEnabled = DISABLED;
-				pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.SOUND1_ON_FLAG = ZERO;
-				pGBA_peripherals->mSOUND1CNT_XHalfWord.mSOUND1CNT_XFields.INITIAL = ZERO;
-				wasEnableSuccess = NO;
-			}
-			BREAK;
-		case AUDIO_CHANNELS::CHANNEL_2:
-			if (isDACEnabled(channel) == YES) // DAC check
-			{
-				// Since we triggered the channel, "length timer expiring" or "frequency sweep overflow" checks are reset
-				pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].isChannelActuallyEnabled = ENABLED;
-				pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.SOUND2_ON_FLAG = ONE;
-				wasEnableSuccess = YES;
-			}
-			else
-			{
-				pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].isChannelActuallyEnabled = DISABLED;
-				pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.SOUND2_ON_FLAG = ZERO;
-				pGBA_peripherals->mSOUND2CNT_HHalfWord.mSOUND2CNT_HFields.INITIAL = ZERO;
-				wasEnableSuccess = NO;
-			}
-			BREAK;
-		case AUDIO_CHANNELS::CHANNEL_3:
-			if (isDACEnabled(channel) == YES) // DAC check
-			{
-				// Since we triggered the channel, "length timer expiring" or "frequency sweep overflow" checks are reset
-				pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_3].isChannelActuallyEnabled = ENABLED;
-				pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.SOUND3_ON_FLAG = ONE;
-				wasEnableSuccess = YES;
-			}
-			else
-			{
-				pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_3].isChannelActuallyEnabled = DISABLED;
-				pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.SOUND3_ON_FLAG = ZERO;
-				pGBA_peripherals->mSOUND3CNT_XHalfWord.mSOUND3CNT_XFields.INITIAL = ZERO;
-				wasEnableSuccess = NO;
-			}
-			BREAK;
-		case AUDIO_CHANNELS::CHANNEL_4:
-			if (isDACEnabled(channel) == YES) // DAC check
-			{
-				// Since we triggered the channel, "length timer expiring" or "frequency sweep overflow" checks are reset
-				pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].isChannelActuallyEnabled = ENABLED;
-				pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.SOUND4_ON_FLAG = ONE;
-				wasEnableSuccess = YES;
-			}
-			else
-			{
-				pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].isChannelActuallyEnabled = DISABLED;
-				pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.SOUND4_ON_FLAG = ZERO;
-				pGBA_peripherals->mSOUND4CNT_HHalfWord.mSOUND4CNT_HFields.INITIAL = ZERO;
-				wasEnableSuccess = NO;
-			}
-			BREAK;
-		default:
-			FATAL("Unknown Audio Channel : %d", TO_UINT8(channel));
-			BREAK;
-		}
-	}
-
-	RETURN wasEnableSuccess;
-}
-
-void GBA_t::continousDACCheck()
-{
-	if ((pGBA_peripherals->mSOUND1CNT_HHalfWord.mSOUND1CNT_HHalfWord & 0xF800) == ZERO)
-	{
-		pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.SOUND1_ON_FLAG = RESET;
-		pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].isChannelActuallyEnabled = DISABLED;
-	}
-
-	if ((pGBA_peripherals->mSOUND2CNT_LHalfWord.mSOUND2CNT_LHalfWord & 0xF800) == ZERO)
-	{
-		pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.SOUND2_ON_FLAG = RESET;
-		pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].isChannelActuallyEnabled = DISABLED;
-	}
-
-	if (pGBA_peripherals->mSOUND3CNT_LHalfWord.mSOUND3CNT_LFields.CHANNEL_3_OFF == ZERO)
-	{
-		pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.SOUND3_ON_FLAG = RESET;
-		pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_3].isChannelActuallyEnabled = DISABLED;
-	}
-
-	if ((pGBA_peripherals->mSOUND4CNT_LHalfWord.mSOUND4CNT_LHalfWord & 0xF800) == ZERO)
-	{
-		pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.SOUND4_ON_FLAG = RESET;
-		pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].isChannelActuallyEnabled = DISABLED;
-	}
-}
-
-FLAG GBA_t::isDACEnabled(AUDIO_CHANNELS channel)
-{
-	FLAG status = NO;
-
-	if (pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.PSG_FIFO_MASTER_EN == ONE)
-	{
-		switch (channel)
-		{
-		case AUDIO_CHANNELS::CHANNEL_1:
-			if ((pGBA_peripherals->mSOUND1CNT_HHalfWord.mSOUND1CNT_HHalfWord & 0xF800) != ZERO)
-			{
-				status = YES;
-			}
-			BREAK;
-		case AUDIO_CHANNELS::CHANNEL_2:
-			if ((pGBA_peripherals->mSOUND2CNT_LHalfWord.mSOUND2CNT_LHalfWord & 0xF800) != ZERO)
-			{
-				status = YES;
-			}
-			BREAK;
-		case AUDIO_CHANNELS::CHANNEL_3:
-			if (pGBA_peripherals->mSOUND3CNT_LHalfWord.mSOUND3CNT_LFields.CHANNEL_3_OFF == ONE)
-			{
-				status = YES;
-			}
-			BREAK;
-		case AUDIO_CHANNELS::CHANNEL_4:
-			if ((pGBA_peripherals->mSOUND4CNT_LHalfWord.mSOUND4CNT_LHalfWord & 0xF800) != ZERO)
-			{
-				status = YES;
-			}
-			BREAK;
-		default:
-			RETURN status;
-		}
-	}
-
-	RETURN status;
-}
-
-FLAG GBA_t::isAudioChannelEnabled(AUDIO_CHANNELS channel)
-{
-	FLAG status = NO;
-
-	if (pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.PSG_FIFO_MASTER_EN == ONE)
-	{
-		switch (channel)
-		{
-		case AUDIO_CHANNELS::CHANNEL_1:
-			if (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].isChannelActuallyEnabled == ENABLED)
-			{
-				status = YES;
-			}
-			BREAK;
-		case AUDIO_CHANNELS::CHANNEL_2:
-			if (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].isChannelActuallyEnabled == ENABLED)
-			{
-				status = YES;
-			}
-			BREAK;
-		case AUDIO_CHANNELS::CHANNEL_3:
-			if (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_3].isChannelActuallyEnabled == ENABLED)
-			{
-				status = YES;
-			}
-			BREAK;
-		case AUDIO_CHANNELS::CHANNEL_4:
-			if (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].isChannelActuallyEnabled == ENABLED)
-			{
-				status = YES;
-			}
-			BREAK;
-		default:
-			RETURN status;
-		}
-	}
-
-	RETURN status;
-}
-
-FLAG GBA_t::isChannel3Active()
-{
-	RETURN(pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.SOUND3_ON_FLAG == ONE
-		&& pGBA_peripherals->mSOUND3CNT_XHalfWord.mSOUND3CNT_XFields.INITIAL == ONE
-		&& pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_3].isChannelActuallyEnabled == ENABLED);
-}
-
-void GBA_t::processSoundLength()
-{
-	if (pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.PSG_FIFO_MASTER_EN == ONE)
-	{
-		if (pGBA_peripherals->mSOUND1CNT_XHalfWord.mSOUND1CNT_XFields.LENGTH_FLAG == ONE
-			&& pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].lengthTimer > ZERO)
-		{
-			--pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].lengthTimer;
-
-			if (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].lengthTimer == ZERO)
-			{
-				pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.SOUND1_ON_FLAG = RESET;
-				pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].isChannelActuallyEnabled = DISABLED;
-			}
-		}
-
-		if (pGBA_peripherals->mSOUND2CNT_HHalfWord.mSOUND2CNT_HFields.LENGTH_FLAG == ONE
-			&& pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].lengthTimer > ZERO)
-		{
-			--pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].lengthTimer;
-
-			if (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].lengthTimer == ZERO)
-			{
-				pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.SOUND2_ON_FLAG = RESET;
-				pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].isChannelActuallyEnabled = DISABLED;
-			}
-		}
-
-		if (pGBA_peripherals->mSOUND3CNT_XHalfWord.mSOUND3CNT_XFields.LENGTH_FLAG == ONE
-			&& pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_3].lengthTimer > ZERO)
-		{
-			--pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_3].lengthTimer;
-
-			if (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_3].lengthTimer == ZERO)
-			{
-				pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.SOUND3_ON_FLAG = RESET;
-				pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_3].isChannelActuallyEnabled = DISABLED;
-			}
-		}
-
-		if (pGBA_peripherals->mSOUND4CNT_HHalfWord.mSOUND4CNT_HFields.LENGTH_FLAG == ONE
-			&& pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].lengthTimer > ZERO)
-		{
-			--pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].lengthTimer;
-
-			if (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].lengthTimer == ZERO)
-			{
-				pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.SOUND4_ON_FLAG = RESET;
-				pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].isChannelActuallyEnabled = DISABLED;
-			}
-		}
-	}
-}
-
-SDIM32 GBA_t::getUpdatedFrequency()
-{
-	SDIM32 newFrequency = ZERO;
-
-	if (pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.PSG_FIFO_MASTER_EN == ONE)
-	{
-		newFrequency = pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].shadowFrequency
-			>> pGBA_peripherals->mSOUND1CNT_LHalfWord.mSOUND1CNT_LFields.SWEEP_SHIFT;
-
-		if (pGBA_peripherals->mSOUND1CNT_LHalfWord.mSOUND1CNT_LFields.SWEEP_FREQ_DIR == ZERO)
-		{
-			newFrequency = pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].shadowFrequency + newFrequency;
-		}
-		else
-		{
-			pGBA_instance->GBA_state.audio.wasSweepDirectionNegativeAtleastOnceSinceLastTrigger = YES;
-			newFrequency = pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].shadowFrequency - newFrequency;
-		}
-
-		if (newFrequency > 2047)
-		{
-			pGBA_peripherals->mSOUND1CNT_XHalfWord.mSOUND1CNT_XFields.INITIAL = RESET;
-			pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.SOUND1_ON_FLAG = RESET;
-			pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].isChannelActuallyEnabled = DISABLED;
-		}
-	}
-
-	RETURN newFrequency;
-}
-
-void GBA_t::processFrequencySweep()
-{
-	if (pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.PSG_FIFO_MASTER_EN == ONE)
-	{
-		if (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].sweepTimer > ZERO)
-		{
-			--pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].sweepTimer;
-		}
-
-		if (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].sweepTimer == ZERO)
-		{
-			// reload the sweep timer
-			if (pGBA_peripherals->mSOUND1CNT_LHalfWord.mSOUND1CNT_LFields.SWEEP_TIME > ZERO)
-			{
-				pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].sweepTimer
-					= pGBA_peripherals->mSOUND1CNT_LHalfWord.mSOUND1CNT_LFields.SWEEP_TIME;
-			}
-			else
-			{
-				pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].sweepTimer
-					= EIGHT;
-			}
-
-			// since the sweep timer has expired (and reloaded), update the frequency sweep
-			if (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].sweepEnabled == ENABLED
-				&& pGBA_peripherals->mSOUND1CNT_LHalfWord.mSOUND1CNT_LFields.SWEEP_TIME > ZERO)
-			{
-				int32_t newFrequency = getUpdatedFrequency();
-
-				if (newFrequency <= 2047 && pGBA_peripherals->mSOUND1CNT_LHalfWord.mSOUND1CNT_LFields.SWEEP_SHIFT > ZERO)
-				{
-					pGBA_peripherals->mSOUND1CNT_XHalfWord.mSOUND1CNT_XFields.FREQ = newFrequency & 0x7FF;
-
-					pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].shadowFrequency = newFrequency;
-
-					performOverFlowCheck();
-				}
-			}
-		}
-	}
-}
-
-void GBA_t::processEnvelopeSweep()
-{
-	if (pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.PSG_FIFO_MASTER_EN == ONE)
-	{
-		if (pGBA_peripherals->mSOUND1CNT_HHalfWord.mSOUND1CNT_HFields.ENVP_STEP_TIME != ZERO)
-		{
-			if (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].envelopePeriodTimer > ZERO)
-			{
-				--pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].envelopePeriodTimer;
-			}
-
-			if (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].envelopePeriodTimer == ZERO)
-			{
-				pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].envelopePeriodTimer
-					= pGBA_peripherals->mSOUND1CNT_HHalfWord.mSOUND1CNT_HFields.ENVP_STEP_TIME;
-
-				// volume is greater than 0 and we are in decrementing mode
-				if (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].currentVolume > 0x00
-					&& pGBA_peripherals->mSOUND1CNT_HHalfWord.mSOUND1CNT_HFields.ENVP_DIR == ZERO)
-				{
-					--pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].currentVolume;
-				}
-				// volume is less than 15 and we are in incrementing mode
-				else if (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].currentVolume < 0x0F
-					&& pGBA_peripherals->mSOUND1CNT_HHalfWord.mSOUND1CNT_HFields.ENVP_DIR == ONE)
-				{
-					++pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].currentVolume;
-				}
-
-				// volume is either 0 or 15
-				if (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].currentVolume == 0x0F
-					|| pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].currentVolume == 0x00)
-				{
-					pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].isVolumeEnvelopeStillDoingAutomaticUpdates = NO;
-				}
-			}
-		}
-
-		if (pGBA_peripherals->mSOUND2CNT_LHalfWord.mSOUND2CNT_LFields.ENVP_STEP_TIME != ZERO)
-		{
-			if (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].envelopePeriodTimer > ZERO)
-			{
-				--pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].envelopePeriodTimer;
-			}
-
-			if (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].envelopePeriodTimer == ZERO)
-			{
-				pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].envelopePeriodTimer
-					= pGBA_peripherals->mSOUND2CNT_LHalfWord.mSOUND2CNT_LFields.ENVP_STEP_TIME;
-
-				// volume is greater than 0 and we are in decrementing mode
-				if (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].currentVolume > 0x00
-					&& pGBA_peripherals->mSOUND2CNT_LHalfWord.mSOUND2CNT_LFields.ENVP_DIR == ZERO)
-				{
-					--pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].currentVolume;
-				}
-				// volume is less than 15 and we are in incrementing mode
-				else if (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].currentVolume < 0x0F
-					&& pGBA_peripherals->mSOUND2CNT_LHalfWord.mSOUND2CNT_LFields.ENVP_DIR == ONE)
-				{
-					++pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].currentVolume;
-				}
-
-				// volume is either 0 or 15
-				if (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].currentVolume == 0x0F
-					|| pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].currentVolume == 0x00)
-				{
-					pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].isVolumeEnvelopeStillDoingAutomaticUpdates = NO;
-				}
-			}
-		}
-
-		if (pGBA_peripherals->mSOUND4CNT_LHalfWord.mSOUND4CNT_LFields.ENVP_STEP_TIME != ZERO)
-		{
-			if (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].envelopePeriodTimer > ZERO)
-			{
-				--pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].envelopePeriodTimer;
-			}
-
-			if (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].envelopePeriodTimer == ZERO)
-			{
-				pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].envelopePeriodTimer
-					= pGBA_peripherals->mSOUND4CNT_LHalfWord.mSOUND4CNT_LFields.ENVP_STEP_TIME;
-
-				// volume is greater than 0 and we are in decrementing mode
-				if (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].currentVolume > 0x00
-					&& pGBA_peripherals->mSOUND4CNT_LHalfWord.mSOUND4CNT_LFields.ENVP_DIR == ZERO)
-				{
-					--pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].currentVolume;
-				}
-				// volume is less than 15 and we are in incrementing mode
-				else if (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].currentVolume < 0x0F
-					&& pGBA_peripherals->mSOUND4CNT_LHalfWord.mSOUND4CNT_LFields.ENVP_DIR == ONE)
-				{
-					++pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].currentVolume;
-				}
-
-				// volume is either 0 or 15
-				if (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].currentVolume == 0x0F
-					|| pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].currentVolume == 0x00)
-				{
-					pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].isVolumeEnvelopeStillDoingAutomaticUpdates = NO;
-				}
-			}
-		}
-	}
-}
-
-GBA_AUDIO_SAMPLE_TYPE GBA_t::getAmplitude(AUDIO_CHANNELS channel)
-{
-	GBA_AUDIO_SAMPLE_TYPE amplitude = LO;
-
-	switch (channel)
-	{
-	case AUDIO_CHANNELS::CHANNEL_1:
-		amplitude = pGBA_instance->GBA_state.audio.sampleReadByChannel1;
-		BREAK;
-	case AUDIO_CHANNELS::CHANNEL_2:
-		amplitude = pGBA_instance->GBA_state.audio.sampleReadByChannel2;
-		BREAK;
-	case AUDIO_CHANNELS::CHANNEL_3:
-		amplitude = pGBA_instance->GBA_state.audio.sampleReadByChannel3;
-		BREAK;
-	case AUDIO_CHANNELS::CHANNEL_4:
-		amplitude = pGBA_instance->GBA_state.audio.sampleReadByChannel4;
-		BREAK;
-	default:
-		FATAL("Unknown Audio Channel : %d", TO_UINT8(channel));
-		BREAK;
-	}
-
-	RETURN amplitude;
-}
-
-GBA_AUDIO_SAMPLE_TYPE GBA_t::getDACOutput(AUDIO_CHANNELS channel)
-{
-	GBA_AUDIO_SAMPLE_TYPE dacOutput = (GBA_AUDIO_SAMPLE_TYPE)MUTE_AUDIO;
-
-	// Refer https://discord.com/channels/465585922579103744/465586361731121162/908490205814738974
-	if (isDACEnabled(channel) == YES)
-	{
-		if (channel == AUDIO_CHANNELS::CHANNEL_3)
-		{
-			dacOutput = (getAmplitude(channel) * (BYTE)pGBA_instance->GBA_state.audio.channel3OutputLevelAndShift);
-		}
-		else
-		{
-			dacOutput = (getAmplitude(channel) * (BYTE)pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)(channel)].currentVolume);
-		}
-	}
-
-	RETURN dacOutput;
-}
-
-void GBA_t::captureDownsampledAudioSamples(INC64 sampleCount)
-{
-	constexpr int PSG_VOL[FOUR] = { ONE, TWO, FOUR, ZERO };
-	constexpr int DMA_VOL[TWO] = { TWO, FOUR};
-
-	pGBA_instance->GBA_state.audio.downSamplingRatioCounter += sampleCount;
-
-	if (pGBA_instance->GBA_state.audio.downSamplingRatioCounter >= (CEIL(GBA_REFERENCE_CLOCK_HZ / EMULATED_AUDIO_SAMPLING_RATE_FOR_GBA)))
-	{
-		pGBA_instance->GBA_state.audio.downSamplingRatioCounter -= (CEIL(GBA_REFERENCE_CLOCK_HZ / EMULATED_AUDIO_SAMPLING_RATE_FOR_GBA));
-
-		GBA_AUDIO_SAMPLE_TYPE leftSample = TO_UINT16(MUTE_AUDIO);
-		GBA_AUDIO_SAMPLE_TYPE rightSample = TO_UINT16(MUTE_AUDIO);
-
-		GBA_AUDIO_SAMPLE_TYPE channel1Sample = getDACOutput(AUDIO_CHANNELS::CHANNEL_1);
-		GBA_AUDIO_SAMPLE_TYPE channel2Sample = getDACOutput(AUDIO_CHANNELS::CHANNEL_2);
-		GBA_AUDIO_SAMPLE_TYPE channel3Sample = getDACOutput(AUDIO_CHANNELS::CHANNEL_3);
-		GBA_AUDIO_SAMPLE_TYPE channel4Sample = getDACOutput(AUDIO_CHANNELS::CHANNEL_4);
-
-		// process left samples
-		if (DISABLE_FIRST_PULSE_CHANNEL == NO && pGBA_peripherals->mSOUNDCNT_LHalfWord.mSOUNDCNT_LFields.SOUND_ENABLE_1L == ONE)
-		{
-			leftSample += channel1Sample;
-		}
-		if (DISABLE_SECOND_PULSE_CHANNEL == NO && pGBA_peripherals->mSOUNDCNT_LHalfWord.mSOUNDCNT_LFields.SOUND_ENABLE_2L == ONE)
-		{
-			leftSample += channel2Sample;
-		}
-		if (DISABLE_WAVE_CHANNEL == NO && pGBA_peripherals->mSOUNDCNT_LHalfWord.mSOUNDCNT_LFields.SOUND_ENABLE_3L == ONE)
-		{
-			leftSample += channel3Sample;
-		}
-		if (DISABLE_NOISE_CHANNEL == NO && pGBA_peripherals->mSOUNDCNT_LHalfWord.mSOUNDCNT_LFields.SOUND_ENABLE_4L == ONE)
-		{
-			leftSample += channel4Sample;
-		}
-
-		leftSample *= pGBA_peripherals->mSOUNDCNT_LHalfWord.mSOUNDCNT_LFields.SOUND_MASTER_VOL_L;
-		leftSample >>= (FIVE - PSG_VOL[pGBA_peripherals->mSOUNDCNT_HHalfWord.mSOUNDCNT_HFields.SOUND_VOL]);
-
-		if (DISABLE_DMAA_CHANNEL == NO && pGBA_peripherals->mSOUNDCNT_HHalfWord.mSOUNDCNT_HFields.DMA_SOUND_A_EN_L == SET)
-		{
-			leftSample += (pGBA_audio->FIFO[DIRECT_SOUND_A].latch << DMA_VOL[pGBA_peripherals->mSOUNDCNT_HHalfWord.mSOUNDCNT_HFields.DMA_SOUND_A_VOL]);
-		}
-
-		if (DISABLE_DMAB_CHANNEL == NO && pGBA_peripherals->mSOUNDCNT_HHalfWord.mSOUNDCNT_HFields.DMA_SOUND_B_EN_L == SET)
-		{
-			leftSample += (pGBA_audio->FIFO[DIRECT_SOUND_B].latch << DMA_VOL[pGBA_peripherals->mSOUNDCNT_HHalfWord.mSOUNDCNT_HFields.DMA_SOUND_B_VOL]);
-		}
-
-		leftSample += pGBA_peripherals->mSOUNDBIASHalfWord.mSOUNDBIASFields.BIAS_LVL;
-		leftSample = std::clamp(GBA_AUDIO_SAMPLE_TYPE(leftSample), GBA_AUDIO_SAMPLE_TYPE(0), GBA_AUDIO_SAMPLE_TYPE(0x3FF));
-		leftSample -= pGBA_peripherals->mSOUNDBIASHalfWord.mSOUNDBIASFields.BIAS_LVL; // Getting back signed value
-
-		leftSample *= THIRTYTWO;
-
-		// process right samples
-		if (DISABLE_FIRST_PULSE_CHANNEL == NO && pGBA_peripherals->mSOUNDCNT_LHalfWord.mSOUNDCNT_LFields.SOUND_ENABLE_1R == ONE)
-		{
-			rightSample += channel1Sample;
-		}
-		if (DISABLE_SECOND_PULSE_CHANNEL == NO && pGBA_peripherals->mSOUNDCNT_LHalfWord.mSOUNDCNT_LFields.SOUND_ENABLE_2R == ONE)
-		{
-			rightSample += channel2Sample;
-		}
-		if (DISABLE_WAVE_CHANNEL == NO && pGBA_peripherals->mSOUNDCNT_LHalfWord.mSOUNDCNT_LFields.SOUND_ENABLE_3R == ONE)
-		{
-			rightSample += channel3Sample;
-		}
-		if (DISABLE_NOISE_CHANNEL == NO && pGBA_peripherals->mSOUNDCNT_LHalfWord.mSOUNDCNT_LFields.SOUND_ENABLE_4R == ONE)
-		{
-			rightSample += channel4Sample;
-		}
-
-		rightSample *= pGBA_peripherals->mSOUNDCNT_LHalfWord.mSOUNDCNT_LFields.SOUND_MASTER_VOL_R;
-		rightSample >>= (FIVE - PSG_VOL[pGBA_peripherals->mSOUNDCNT_HHalfWord.mSOUNDCNT_HFields.SOUND_VOL]);
-
-		if (DISABLE_DMAA_CHANNEL == NO && pGBA_peripherals->mSOUNDCNT_HHalfWord.mSOUNDCNT_HFields.DMA_SOUND_A_EN_R == SET)
-		{
-			rightSample += (pGBA_audio->FIFO[DIRECT_SOUND_A].latch << DMA_VOL[pGBA_peripherals->mSOUNDCNT_HHalfWord.mSOUNDCNT_HFields.DMA_SOUND_A_VOL]);
-		}
-
-		if (DISABLE_DMAB_CHANNEL == NO && pGBA_peripherals->mSOUNDCNT_HHalfWord.mSOUNDCNT_HFields.DMA_SOUND_B_EN_R == SET)
-		{
-			rightSample += (pGBA_audio->FIFO[DIRECT_SOUND_B].latch << DMA_VOL[pGBA_peripherals->mSOUNDCNT_HHalfWord.mSOUNDCNT_HFields.DMA_SOUND_B_VOL]);
-		}
-
-		rightSample += pGBA_peripherals->mSOUNDBIASHalfWord.mSOUNDBIASFields.BIAS_LVL;
-		rightSample = std::clamp(GBA_AUDIO_SAMPLE_TYPE(rightSample), GBA_AUDIO_SAMPLE_TYPE(0), GBA_AUDIO_SAMPLE_TYPE(0x3FF));
-		rightSample -= pGBA_peripherals->mSOUNDBIASHalfWord.mSOUNDBIASFields.BIAS_LVL; // Getting back signed value
-
-		rightSample *= THIRTYTWO;
-
-		if (pGBA_instance->GBA_state.audio.accumulatedTone >= AUDIO_BUFFER_SIZE_FOR_GBA)
-		{
-			if (ImGui::IsKeyPressed(ImGuiKey_KeypadAdd) == YES)
-			{
-				auto gain = getEmulationVolume();
-
-				gain += 0.05f;
-
-				if (gain >= 1.000f)
-				{
-					gain = 0.9998f;
-				}
-				else if (gain <= 0.000f)
-				{
-					gain = 0.0001f;
-				}
-
-				setEmulationVolume(gain);
-			}
-			if (ImGui::IsKeyPressed(ImGuiKey_KeypadSubtract) == YES)
-			{
-				auto gain = getEmulationVolume();
-
-				gain -= 0.05f;
-
-				if (gain >= 1.000f)
-				{
-					gain = 0.9998f;
-				}
-				else if (gain <= 0.000f)
-				{
-					gain = 0.0001f;
-				}
-
-				setEmulationVolume(gain);
-			}
-
-			if (SDL_PutAudioStreamData(audioStream, pGBA_instance->GBA_state.audio.audioBuffer, sizeof(pGBA_instance->GBA_state.audio.audioBuffer)) == FAILURE)
-			{
-				SDL_Log("Could not put data on Audio stream, %s", SDL_GetError());
-				FATAL("SDL_PutAudioStreamData Error");
-			}
-
-			pGBA_instance->GBA_state.audio.accumulatedTone = RESET;
-		}
-		else
-		{
-			pGBA_instance->GBA_state.audio.audioBuffer[pGBA_instance->GBA_state.audio.accumulatedTone] = leftSample;
-			++pGBA_instance->GBA_state.audio.accumulatedTone;
-			if (pGBA_instance->GBA_state.audio.accumulatedTone < AUDIO_BUFFER_SIZE_FOR_GBA)
-			{
-				pGBA_instance->GBA_state.audio.audioBuffer[pGBA_instance->GBA_state.audio.accumulatedTone] = rightSample;
-				++pGBA_instance->GBA_state.audio.accumulatedTone;
-			}
-
-		}
-	}
-
-	RETURN;
-}
-
 void GBA_t::processAPU(INC64 apuCycles)
 {
-	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.apuCounter += apuCycles;
+	auto& apuState = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate;
 
-	// GBA Audio
-	continousDACCheck();	// If DAC is disabled, then Channel needs to be disabled immediately
+	apuState.apuCounter += apuCycles;
 
+	// DAC check - if DAC disabled, channel disabled immediately
+	continousDACCheck();
+
+	// Tick all 4 channels
 	tickChannel(AUDIO_CHANNELS::CHANNEL_1, apuCycles);
 	tickChannel(AUDIO_CHANNELS::CHANNEL_2, apuCycles);
 	tickChannel(AUDIO_CHANNELS::CHANNEL_3, apuCycles);
 	tickChannel(AUDIO_CHANNELS::CHANNEL_4, apuCycles);
 
-	if (pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.apuCounter >= static_cast<int64_t>(GBA_REFERENCE_CLOCK_HZ / APU_FRAME_SEQUENCER_RATE_HZ))	// 512 Hz
-	{
-		APUTODO("Make sure we are running @ 512Hz");
+	// Frame sequencer @ 512 Hz
+	static constexpr int64_t FRAME_SEQ_THRESHOLD = static_cast<int64_t>(GBA_REFERENCE_CLOCK_HZ / APU_FRAME_SEQUENCER_RATE_HZ);
 
-		if (pGBA_instance->GBA_state.audio.wasPowerCycled == YES)
+	if (apuState.apuCounter >= FRAME_SEQ_THRESHOLD) MASQ_UNLIKELY
+	{
+		if (pGBA_instance->GBA_state.audio.wasPowerCycled == YES) MASQ_UNLIKELY
 		{
 			APUTODO("Not handling power cycling!");
 			pGBA_instance->GBA_state.audio.wasPowerCycled = NO;
@@ -5129,26 +4456,27 @@ void GBA_t::processAPU(INC64 apuCycles)
 
 		pGBA_instance->GBA_state.audio.nextHalfWillNotClockLengthCounter = FALSE;
 
-		if ((pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.apuFrameCounter & ONE) == ZERO) // 256 Hz
+		// 256 Hz - every other frame
+		if ((apuState.apuFrameCounter & ONE) == ZERO) MASQ_UNLIKELY
 		{
 			pGBA_instance->GBA_state.audio.nextHalfWillNotClockLengthCounter = TRUE;
 			processSoundLength();
 		}
 
-		if ((pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.apuFrameCounter & THREE) == TWO) // 128 Hz
+		// 128 Hz - every 4th frame at offset 2
+		if ((apuState.apuFrameCounter & THREE) == TWO) MASQ_UNLIKELY
 		{
 			processFrequencySweep();
 		}
 
-		if (pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.apuFrameCounter == SEVEN) // 64 Hz
+		// 64 Hz - frame 7 only
+		if (apuState.apuFrameCounter == SEVEN) MASQ_UNLIKELY
 		{
 			processEnvelopeSweep();
 		}
 
-		++pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.apuFrameCounter;
-		pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.apuFrameCounter &= SEVEN;
-
-		pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.apuCounter -= static_cast<int64_t>(GBA_REFERENCE_CLOCK_HZ / APU_FRAME_SEQUENCER_RATE_HZ);
+		apuState.apuFrameCounter = (apuState.apuFrameCounter + ONE) & SEVEN;
+		apuState.apuCounter -= FRAME_SEQ_THRESHOLD;
 	}
 
 	captureDownsampledAudioSamples(apuCycles);
@@ -5196,7 +4524,7 @@ void GBA_t::processPPU(INC64 ppuCycles)
 	// On every new scanline, we just add the PD/PB to "Internal Reference Point" registers and load it to the "Affine Buffer"
 	// On every new frame, we just add BGX/BGY to "Internal Reference Point" registers and load it to the "Affine Buffer"
 
-	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.lcdCounter += ppuCycles;
+	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter += ppuCycles;
 
 	switch (pGBA_display->currentLCDMode)
 	{
@@ -5205,12 +4533,12 @@ void GBA_t::processPPU(INC64 ppuCycles)
 		PROCESS_PPU_MODES(ppuCycles + pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange, YES, YES, YES, YES);
 		pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = RESET;
 
-		if (pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.lcdCounter >= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE)
+		if (pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter >= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE)
 		{
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.lcdCounter -= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE;
+			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter -= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE;
 
 			// Note: In process PPU, we should account for cycles which occur only in MODE_LCD_H_DRAW_V_DRAW
-			ppuCycles -= pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.lcdCounter;
+			ppuCycles -= pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter;
 
 			pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.HBLANK_FLAG = SET;
 
@@ -5222,7 +4550,7 @@ void GBA_t::processPPU(INC64 ppuCycles)
 			RequestDMA(DMA_TIMING::HBLANK);
 
 			// Proceed to next lcd mode
-			pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.lcdCounter;
+			pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter;
 			pGBA_display->didLCDModeChangeJustNow = YES;
 			pGBA_display->currentLCDMode = LCD_MODES::MODE_LCD_H_BLANK_V_DRAW;
 			PPUINFO("Entering MODE_LCD_H_BLANK_V_DRAW");
@@ -5236,9 +4564,9 @@ void GBA_t::processPPU(INC64 ppuCycles)
 		PROCESS_PPU_MODES(ppuCycles + pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange, NO, NO, YES, NO);
 		pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = RESET;
 
-		if (pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.lcdCounter >= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK)
+		if (pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter >= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK)
 		{
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.lcdCounter -= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK;
+			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter -= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK;
 
 			pGBA_display->currentMergePixel = RESET;
 			pGBA_display->currentBgPixel = RESET;
@@ -5253,7 +4581,7 @@ void GBA_t::processPPU(INC64 ppuCycles)
 			pGBA_display->winWaitCyclesDone = CLEAR;
 			pGBA_display->bgWaitCyclesDone = CLEAR;
 			pGBA_display->objWaitCyclesDone = CLEAR;
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.ppuCounter = RESET;
+			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.ppuCounter = RESET;
 			for (INC8 mode = MODE0; mode <= MODE5; mode++)
 			{
 				pGBA_display->winAccessPatternState[mode] = RESET;
@@ -5298,7 +4626,7 @@ void GBA_t::processPPU(INC64 ppuCycles)
 				}
 
 				// Proceed to next lcd mode
-				pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.lcdCounter;
+				pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter;
 				pGBA_display->wasVblankJustTriggered = YES;
 				pGBA_display->didLCDModeChangeJustNow = YES;
 				pGBA_display->currentLCDMode = LCD_MODES::MODE_LCD_H_DRAW_V_BLANK;
@@ -5376,7 +4704,7 @@ void GBA_t::processPPU(INC64 ppuCycles)
 				}
 
 				// Proceed to next lcd mode
-				pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.lcdCounter;
+				pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter;
 				pGBA_display->didLCDModeChangeJustNow = YES;
 				pGBA_display->currentLCDMode = LCD_MODES::MODE_LCD_H_DRAW_V_DRAW;
 				PPUINFO("Entering MODE_LCD_H_DRAW_V_DRAW");
@@ -5391,12 +4719,12 @@ void GBA_t::processPPU(INC64 ppuCycles)
 		PROCESS_PPU_MODES(ppuCycles + pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange, NO, YES, YES, NO);
 		pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = RESET;
 
-		if (pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.lcdCounter >= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE)
+		if (pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter >= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE)
 		{
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.lcdCounter -= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE;
+			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter -= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE;
 
 			// Note: In process PPU, we should account for cycles which occur only in MODE_LCD_H_DRAW_V_BLANK
-			ppuCycles -= pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.lcdCounter;
+			ppuCycles -= pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter;
 
 			pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.HBLANK_FLAG = SET;
 
@@ -5408,7 +4736,7 @@ void GBA_t::processPPU(INC64 ppuCycles)
 			}
 
 			// Proceed to the next lcd mode
-			pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.lcdCounter;
+			pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter;
 			pGBA_display->didLCDModeChangeJustNow = YES;
 			pGBA_display->currentLCDMode = LCD_MODES::MODE_LCD_H_BLANK_V_BLANK;
 			PPUINFO("Entering MODE_LCD_H_BLANK_V_BLANK");
@@ -5422,9 +4750,9 @@ void GBA_t::processPPU(INC64 ppuCycles)
 		PROCESS_PPU_MODES(ppuCycles + pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange, NO, NO, YES, NO);
 		pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = RESET;
 
-		if (pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.lcdCounter >= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK)
+		if (pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter >= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK)
 		{
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.lcdCounter -= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK;
+			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter -= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK;
 
 			pGBA_display->currentMergePixel = RESET;
 			pGBA_display->currentBgPixel = RESET;
@@ -5439,7 +4767,7 @@ void GBA_t::processPPU(INC64 ppuCycles)
 			pGBA_display->winWaitCyclesDone = CLEAR;
 			pGBA_display->bgWaitCyclesDone = CLEAR;
 			pGBA_display->objWaitCyclesDone = CLEAR;
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.ppuCounter = RESET;
+			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.ppuCounter = RESET;
 			for (INC8 mode = MODE0; mode <= MODE5; mode++)
 			{
 				pGBA_display->winAccessPatternState[mode] = RESET;
@@ -5482,7 +4810,7 @@ void GBA_t::processPPU(INC64 ppuCycles)
 				HANDLE_VCOUNT();
 
 				// Proceed to the next lcd mode
-				pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.lcdCounter;
+				pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter;
 				pGBA_display->didLCDModeChangeJustNow = YES;
 				pGBA_display->currentLCDMode = LCD_MODES::MODE_LCD_H_DRAW_V_DRAW;
 				PPUINFO("Entering MODE_LCD_H_DRAW_V_DRAW");
@@ -5530,7 +4858,7 @@ void GBA_t::processPPU(INC64 ppuCycles)
 				}
 
 				// Proceed to the next lcd mode
-				pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.lcdCounter;
+				pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter;
 				pGBA_display->didLCDModeChangeJustNow = YES;
 				pGBA_display->currentLCDMode = LCD_MODES::MODE_LCD_H_DRAW_V_BLANK;
 				PPUINFO("Entering MODE_LCD_H_DRAW_V_BLANK");
@@ -5760,16 +5088,16 @@ void GBA_t::processSIO(INC64 sioCycles)
 		{
 			if (static_cast<SIO_PARTY>(sioCnt.SHIFT_CLK) == SIO_PARTY::MASTER)
 			{
-				pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.sioCounter += sioCycles;
+				pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.sioCounter += sioCycles;
 			}
 
 			TODO("For now, we will fix the cyclesToTxRxData");
 			// Set cycles to transfer data
 			cyclesToTxRxData = (sioMode == SIO_MODE::NORMAL_8BIT) ? (EIGHT * EIGHT) : (EIGHT * THIRTYTWO);
 
-			if (pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.sioCounter >= cyclesToTxRxData)
+			if (pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.sioCounter >= cyclesToTxRxData)
 			{
-				pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.sioCounter -= cyclesToTxRxData;
+				pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.sioCounter -= cyclesToTxRxData;
 
 				// Raise interrupt if enabled
 				interruptRequested = (sioCnt.IRQ_EN == SET);
@@ -5784,7 +5112,7 @@ void GBA_t::processSIO(INC64 sioCycles)
 		}
 		else
 		{
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.sioCounter = RESET;
+			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.sioCounter = RESET;
 		}
 
 		BREAK;
@@ -6109,8 +5437,6 @@ void GBA_t::initializeGraphics()
 
 	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.ppuCounter = RESET;
 	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter = RESET;
-	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.ppuCounter = RESET;
-	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.lcdCounter = RESET;
 
 	// From Nano Boy Advance
 	pGBA_peripherals->mBG2PAHalfWord.mBGnPxHalfWord = 0x100;
@@ -6154,7 +5480,6 @@ void GBA_t::initializeAudio()
 	SDL_ResumeAudioDevice(SDL_GetAudioStreamDevice(audioStream));
 
 	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.apuCounter = RESET;
-	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_count_accurate.apuCounter = RESET;
 
 	// Refer : http://problemkaputt.de/gbatek-gba-sound-control-registers.htm
 	pGBA_peripherals->mSOUNDBIASHalfWord.mSOUNDBIASHalfWord = 0x200;
