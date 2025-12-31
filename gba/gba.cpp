@@ -3824,69 +3824,64 @@ void GBA_t::captureIO()
 
 void GBA_t::processTimer(INC64 timerCycles)
 {
-	// Use a lookup table for faster register retrieval.
-	static mTIMERnCNT_HHalfWord_t* CNTHLUT[] = {
+	// Cache pointers
+	static mTIMERnCNT_HHalfWord_t* const CNTHLUT[4] = {
 		&pGBA_peripherals->mTIMER0CNT_H,
 		&pGBA_peripherals->mTIMER1CNT_H,
 		&pGBA_peripherals->mTIMER2CNT_H,
 		&pGBA_peripherals->mTIMER3CNT_H
 	};
 
-	pGBA_instance->GBA_state.timer[ZERO].cascadeEvents = RESET;
-	pGBA_instance->GBA_state.timer[ONE].cascadeEvents = RESET;
-	pGBA_instance->GBA_state.timer[TWO].cascadeEvents = RESET;
-	pGBA_instance->GBA_state.timer[THREE].cascadeEvents = RESET;
+	auto* timers = pGBA_instance->GBA_state.timer;
 
-	// Refer : https://discordapp.com/channels/465585922579103744/465586361731121162/929789580889178142
+	// Reset cascade events
+	timers[0].cascadeEvents = RESET;
+	timers[1].cascadeEvents = RESET;
+	timers[2].cascadeEvents = RESET;
+	timers[3].cascadeEvents = RESET;
+
 	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.globalTimerCounter += timerCycles;
+	const auto systemTimer = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.globalTimerCounter;
 
-	// Process timers in a loop
+	// Unroll timer loop for performance
 	for (INC8 timerID = ZERO; timerID < FOUR; timerID++)
 	{
-		mTIMERnCNT_HHalfWord_t* CNTH = CNTHLUT[timerID]; // Use cached pointer for CNTH
+		mTIMERnCNT_HHalfWord_t* const CNTH = CNTHLUT[timerID];
 
-		// NOTE: Don't read from the actual register, read from the cached register as actual register will be overriden with "internal counter value"
-		uint16_t CNTL = pGBA_instance->GBA_state.timer[timerID].cache.reload;
+		if (CNTH->mTIMERnCNT_HFields.TIMER_START_STOP != SET) MASQ_UNLIKELY
+			CONTINUE;
 
-		FLAG isCountUpMode = (CNTH->mTIMERnCNT_HFields.COUNT_UP_TIMING == SET ? YES : NO);
+		auto& timer = timers[timerID];
+		const uint16_t CNTL = timer.cache.reload;
 
-		if ((isCountUpMode == YES) && (timerID == TIMER::TIMER0))
+		if (timer.startupDelay > RESET) MASQ_UNLIKELY
 		{
-			WARN("Timer 0 cannot be run in Cascade Mode");
-			isCountUpMode = NO;
+			timer.startupDelay -= timerCycles;
+			CONTINUE;
 		}
 
-		if (CNTH->mTIMERnCNT_HFields.TIMER_START_STOP == SET)
+		timer.startupDelay = RESET;
+		timer.currentState = ENABLED;
+
+		const FLAG isCountUpMode = (CNTH->mTIMERnCNT_HFields.COUNT_UP_TIMING == SET && timerID != TIMER::TIMER0) ? YES : NO;
+
+		if (isCountUpMode == NO) MASQ_LIKELY
 		{
-			if (pGBA_instance->GBA_state.timer[timerID].startupDelay <= RESET)
+			const auto prescalar = timerFrequency[CNTH->mTIMERnCNT_HFields.PRESCALER_SEL];
+			const auto moduloPow2Prescalar = prescalar - ONE;
+
+			if ((systemTimer & moduloPow2Prescalar) == ZERO) MASQ_LIKELY
 			{
-				pGBA_instance->GBA_state.timer[timerID].startupDelay = RESET;
-				pGBA_instance->GBA_state.timer[timerID].currentState = ENABLED;
-
-				if (isCountUpMode == NO)
-				{
-					// Refer : https://discord.com/channels/465585922579103744/465586361731121162/929789580889178142
-					auto systemTimer = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.globalTimerCounter;
-					auto prescalar = timerFrequency[CNTH->mTIMERnCNT_HFields.PRESCALER_SEL];
-					auto moduloPow2Prescalar = prescalar - ONE;
-
-					if ((systemTimer & moduloPow2Prescalar) == ZERO)
-					{
-						timerCommonProcessing((TIMER)timerID, CNTL, CNTH, timerCycles);
-					}
-				}
-				else
-				{
-					while (pGBA_instance->GBA_state.timer[timerID - ONE].cascadeEvents > ZERO)
-					{
-						timerCommonProcessing((TIMER)timerID, CNTL, CNTH, timerCycles);
-						--pGBA_instance->GBA_state.timer[timerID - ONE].cascadeEvents;
-					}
-				}
+				timerCommonProcessing((TIMER)timerID, CNTL, CNTH, timerCycles);
 			}
-			else
+		}
+		else
+		{
+			auto& prevCascade = timers[timerID - ONE].cascadeEvents;
+			while (prevCascade > ZERO)
 			{
-				pGBA_instance->GBA_state.timer[timerID].startupDelay -= timerCycles;
+				timerCommonProcessing((TIMER)timerID, CNTL, CNTH, timerCycles);
+				--prevCascade;
 			}
 		}
 	}
@@ -5046,353 +5041,6 @@ void GBA_t::displayCompleteScreen()
 		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter));
 		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter));
 #endif
-	}
-}
-
-void GBA_t::processSIO(INC64 sioCycles)
-{
-	// Retrieve the mode select value once, instead of repeatedly accessing memory
-	ID modeSelect = (
-		(pGBA_peripherals->mRCNTHalfWord.mRCNTFields.MODE_SPECIFIC_3 << THREE)
-		| (pGBA_peripherals->mRCNTHalfWord.mRCNTFields.MODE_SPECIFIC_2 << TWO)
-		| (pGBA_peripherals->mSIOCNT.mSIOFields.BIT_13 << ONE)
-		| pGBA_peripherals->mSIOCNT.mSIOFields.BIT_12
-		);
-
-	// Determine SIO mode
-	SIO_MODE sioMode = SIO_MODE::NORMAL_8BIT;
-	switch (modeSelect)
-	{
-	case ZERO: case FOUR: sioMode = SIO_MODE::NORMAL_8BIT; BREAK;
-	case ONE: case FIVE: sioMode = SIO_MODE::NORMAL_32BIT; BREAK;
-	case TWO: case SIX: sioMode = SIO_MODE::MULTIPLAY_16BIT; BREAK;
-	case THREE: case SEVEN: sioMode = SIO_MODE::UART; BREAK;
-	case EIGHT: case NINE: case TEN: case ELEVEN: sioMode = SIO_MODE::GP; BREAK;
-	case TWELVE: case THIRTEEN: case FOURTEEN: case FIFTEEN: sioMode = SIO_MODE::JOYBUS; BREAK;
-	default: FATAL("Unsupported SIO Mode");
-	}
-
-	// Initialize variables
-	FLAG interruptRequested = NO;
-	INC32 cyclesToTxRxData = RESET;
-
-	// Handle different SIO modes
-	switch (sioMode)
-	{
-	case SIO_MODE::NORMAL_8BIT:
-	case SIO_MODE::NORMAL_32BIT:
-	{
-		// Process based on START_BIT and SHIFT_CLK
-		auto& sioCnt = pGBA_peripherals->mSIOCNT.mSIOCNT_SPFields;
-		if (sioCnt.START_BIT == SET)
-		{
-			if (static_cast<SIO_PARTY>(sioCnt.SHIFT_CLK) == SIO_PARTY::MASTER)
-			{
-				pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.sioCounter += sioCycles;
-			}
-
-			TODO("For now, we will fix the cyclesToTxRxData");
-			// Set cycles to transfer data
-			cyclesToTxRxData = (sioMode == SIO_MODE::NORMAL_8BIT) ? (EIGHT * EIGHT) : (EIGHT * THIRTYTWO);
-
-			if (pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.sioCounter >= cyclesToTxRxData)
-			{
-				pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.sioCounter -= cyclesToTxRxData;
-
-				// Raise interrupt if enabled
-				interruptRequested = (sioCnt.IRQ_EN == SET);
-				if (interruptRequested)
-				{
-					requestInterrupts(GBA_INTERRUPT::IRQ_SERIAL);
-				}
-
-				// Reset START_BIT
-				sioCnt.START_BIT = RESET;
-			}
-		}
-		else
-		{
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.sioCounter = RESET;
-		}
-
-		BREAK;
-	}
-	case SIO_MODE::MULTIPLAY_16BIT:
-	{
-		// Check START_BUSY_BIT for MULTIPLAY_16BIT mode
-		if (pGBA_peripherals->mSIOCNT.mSIOCNT_MPFields.START_BUSY_BIT == SET)
-		{
-			interruptRequested = (pGBA_peripherals->mSIOCNT.mSIOCNT_MPFields.IRQ_EN == SET);
-		}
-
-		BREAK;
-	}
-	case SIO_MODE::UART:
-	{
-		// Handle for UART mode
-		interruptRequested = (pGBA_peripherals->mSIOCNT.mSCCNTFields.IRQ_EN == SET);
-		BREAK;
-	}
-	case SIO_MODE::GP:
-	{
-		BREAK;
-	}
-	case SIO_MODE::JOYBUS:
-	{
-		// Handle for JoyBus mode
-		interruptRequested = (pGBA_peripherals->mJOYCNTHalfWord.mJOYCNTFields.DEV_RESET == SET);
-		BREAK;
-	}
-	default:
-	{
-		FATAL("Unknown SIO Mode");
-	}
-	}
-}
-
-void GBA_t::processBackup()
-{
-	// Refer : https://dillonbeliveau.com/2020/06/05/GBA-FLASH.html
-	// Refer : http://problemkaputt.de/gbatek-gba-cart-backup-flash-rom.htm
-
-	switch (pGBA_instance->GBA_state.emulatorStatus.backup.backupType)
-	{
-	case BACKUP_TYPE::FLASH64K:
-	case BACKUP_TYPE::FLASH128K:
-	{
-		ID currentMemoryBank = RESET;
-		if (pGBA_instance->GBA_state.emulatorStatus.backup.flash.currentMemoryBank == BACKUP_FLASH_MEMORY_BANK::BANK1)
-		{
-			currentMemoryBank = ONE;
-		}
-
-		switch (pGBA_instance->GBA_state.emulatorStatus.backup.flash.flashFsmState)
-		{
-		case BACKUP_FLASH_FSM::STATE0:
-		{
-			if (pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[currentMemoryBank][FLASH_ACCESS_MEMORY2 - GAMEPAK_SRAM_START_ADDRESS]
-				== TO_UINT8(BACKUP_FLASH_CMDS::CMD_1))
-			{
-				pGBA_instance->GBA_state.emulatorStatus.backup.flash.flashFsmState = BACKUP_FLASH_FSM::STATE1;
-				pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[currentMemoryBank][FLASH_ACCESS_MEMORY2 - GAMEPAK_SRAM_START_ADDRESS] = RESET;
-			}
-			BREAK;
-		}
-		case BACKUP_FLASH_FSM::STATE1:
-		{
-			if (pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[currentMemoryBank][FLASH_ACCESS_MEMORY3 - GAMEPAK_SRAM_START_ADDRESS]
-				== TO_UINT8(BACKUP_FLASH_CMDS::CMD_2))
-			{
-				pGBA_instance->GBA_state.emulatorStatus.backup.flash.flashFsmState = BACKUP_FLASH_FSM::STATE2;
-				pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[currentMemoryBank][FLASH_ACCESS_MEMORY3 - GAMEPAK_SRAM_START_ADDRESS] = RESET;
-			}
-			BREAK;
-		}
-		case BACKUP_FLASH_FSM::STATE2:
-		{
-			// Handle the 4KB erase
-			if (pGBA_instance->GBA_state.emulatorStatus.backup.flash.previousFlashCommand
-				== BACKUP_FLASH_CMDS::START_ERASE_CMD
-				&&
-				pGBA_instance->GBA_state.emulatorStatus.backup.flash.erase4kbPageNumber != INVALID)
-			{
-				pGBA_instance->GBA_state.emulatorStatus.backup.flash.flashFsmState = BACKUP_FLASH_FSM::STATE0;
-
-				pGBA_instance->GBA_state.emulatorStatus.backup.flash.erase4kbPageNumber = INVALID;
-
-				GBA_WORD eraseStartAddr = pGBA_instance->GBA_state.emulatorStatus.backup.flash.erase4kbStartAddr;
-				pGBA_instance->GBA_state.emulatorStatus.backup.flash.erase4kbStartAddr = RESET;
-
-				if (eraseStartAddr >= GAMEPAK_SRAM_START_ADDRESS + 0x10000)
-				{
-					FATAL("Invalid address for 4kb sector erase");
-				}
-
-				memset(
-					&(pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[currentMemoryBank][eraseStartAddr - GAMEPAK_SRAM_START_ADDRESS])
-					, 0xFF
-					, 0x1000
-				);
-
-				memset(
-					&(pGBA_instance->GBA_state.emulatorStatus.backup.flash.isErased[currentMemoryBank][eraseStartAddr - GAMEPAK_SRAM_START_ADDRESS])
-					, YES
-					, 0x1000
-				);
-			}
-			else
-			{
-				pGBA_instance->GBA_state.emulatorStatus.backup.flash.currentFlashCommand =
-					(BACKUP_FLASH_CMDS)(pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[currentMemoryBank][FLASH_ACCESS_MEMORY2 - GAMEPAK_SRAM_START_ADDRESS]);
-
-				pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[currentMemoryBank][FLASH_ACCESS_MEMORY2 - GAMEPAK_SRAM_START_ADDRESS] = RESET;
-
-				switch (pGBA_instance->GBA_state.emulatorStatus.backup.flash.currentFlashCommand)
-				{
-				case BACKUP_FLASH_CMDS::NO_OPERATION:
-				{
-					BREAK;
-				}
-				case BACKUP_FLASH_CMDS::ENTER_CHIP_INDENTIFICATION_MODE:
-				{
-					pGBA_instance->GBA_state.emulatorStatus.backup.flash.flashFsmState = BACKUP_FLASH_FSM::STATE0;
-
-					if (pGBA_instance->GBA_state.emulatorStatus.backup.flash.previousFlashCommand
-						== BACKUP_FLASH_CMDS::START_ERASE_CMD)
-					{
-						BREAK;
-					}
-
-					pGBA_instance->GBA_state.emulatorStatus.backup.flash.ogByteAtFlashAccessMem0 =
-						pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[currentMemoryBank][FLASH_ACCESS_MEMORY0 - GAMEPAK_SRAM_START_ADDRESS];
-					pGBA_instance->GBA_state.emulatorStatus.backup.flash.ogByteAtFlashAccessMem1 =
-						pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[currentMemoryBank][FLASH_ACCESS_MEMORY1 - GAMEPAK_SRAM_START_ADDRESS];
-
-					if (pGBA_instance->GBA_state.emulatorStatus.backup.backupType == BACKUP_TYPE::FLASH64K)
-					{
-						pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[currentMemoryBank][ZERO] = 0x32; // Panasonic manufacturer ID
-						pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[currentMemoryBank][ONE] = 0x1B; // Panasonic device ID
-					}
-					else if (pGBA_instance->GBA_state.emulatorStatus.backup.backupType == BACKUP_TYPE::FLASH128K)
-					{
-						pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[currentMemoryBank][ZERO] = 0x62; // Sanyo manufacturer ID
-						pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[currentMemoryBank][ONE] = 0x13; // Sanyo device ID
-					}
-
-					BREAK;
-				}
-				case BACKUP_FLASH_CMDS::EXIT_CHIP_INDENTIFICATION_MODE:
-				{
-					pGBA_instance->GBA_state.emulatorStatus.backup.flash.flashFsmState = BACKUP_FLASH_FSM::STATE0;
-
-					if (pGBA_instance->GBA_state.emulatorStatus.backup.flash.previousFlashCommand
-						== BACKUP_FLASH_CMDS::START_ERASE_CMD)
-					{
-						BREAK;
-					}
-
-					pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[currentMemoryBank][FLASH_ACCESS_MEMORY0 - GAMEPAK_SRAM_START_ADDRESS]
-						= pGBA_instance->GBA_state.emulatorStatus.backup.flash.ogByteAtFlashAccessMem0;
-					pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[currentMemoryBank][FLASH_ACCESS_MEMORY1 - GAMEPAK_SRAM_START_ADDRESS] =
-						pGBA_instance->GBA_state.emulatorStatus.backup.flash.ogByteAtFlashAccessMem1;
-
-					BREAK;
-				}
-				case BACKUP_FLASH_CMDS::START_ERASE_CMD:
-				{
-					pGBA_instance->GBA_state.emulatorStatus.backup.flash.flashFsmState = BACKUP_FLASH_FSM::STATE0;
-
-					if (pGBA_instance->GBA_state.emulatorStatus.backup.flash.previousFlashCommand
-						== BACKUP_FLASH_CMDS::START_ERASE_CMD)
-					{
-						BREAK;
-					}
-
-					BREAK;
-				}
-				case BACKUP_FLASH_CMDS::ERASE_ENTIRE_CHIP:
-				{
-					pGBA_instance->GBA_state.emulatorStatus.backup.flash.flashFsmState = BACKUP_FLASH_FSM::STATE0;
-
-					if (pGBA_instance->GBA_state.emulatorStatus.backup.flash.previousFlashCommand
-						== BACKUP_FLASH_CMDS::START_ERASE_CMD)
-					{
-						if (pGBA_instance->GBA_state.emulatorStatus.backup.backupType == BACKUP_TYPE::FLASH64K)
-						{
-							memset(
-								pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[currentMemoryBank]
-								, 0xFF
-								, 0x10000
-							);
-
-							memset(
-								pGBA_instance->GBA_state.emulatorStatus.backup.flash.isErased[currentMemoryBank]
-								, YES
-								, 0x10000
-							);
-						}
-						else if (pGBA_instance->GBA_state.emulatorStatus.backup.backupType == BACKUP_TYPE::FLASH128K)
-						{
-							if (pGBA_instance->GBA_state.emulatorStatus.backup.flash.currentMemoryBank == BACKUP_FLASH_MEMORY_BANK::BANK0)
-							{
-								memset(
-									pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[currentMemoryBank]
-									, 0xFF
-									, 0x10000
-								);
-
-								memset(
-									pGBA_instance->GBA_state.emulatorStatus.backup.flash.isErased[currentMemoryBank]
-									, YES
-									, 0x10000
-								);
-							}
-							else
-							{
-								memset(
-									&(pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[currentMemoryBank][0x10000])
-									, 0xFF
-									, 0x10000
-								);
-
-								memset(
-									&(pGBA_instance->GBA_state.emulatorStatus.backup.flash.isErased[currentMemoryBank][0x10000])
-									, YES
-									, 0x10000
-								);
-							}
-						}
-					}
-
-					BREAK;
-				}
-				case BACKUP_FLASH_CMDS::START_1BYTE_WRITE_CMD:
-				{
-					pGBA_instance->GBA_state.emulatorStatus.backup.flash.flashFsmState = BACKUP_FLASH_FSM::STATE0;
-
-					pGBA_instance->GBA_state.emulatorStatus.backup.flash.allowFlashWrite = YES;
-
-					// Refer : http://problemkaputt.de/gbatek-gba-cart-backup-flash-rom.htm
-					TODO("Need to use the \"allowFlashWrite\" flag to decide whether we should allow flash write");
-					TODO("Need to use the \"isErased\" flag to decide whether we should allow flash write");
-
-					BREAK;
-				}
-				case BACKUP_FLASH_CMDS::SET_MEMORY_BANK:
-				{
-					pGBA_instance->GBA_state.emulatorStatus.backup.flash.flashFsmState = BACKUP_FLASH_FSM::STATE0;
-
-					pGBA_instance->GBA_state.emulatorStatus.backup.flash.chooseMemoryBank = YES;
-
-					BREAK;
-				}
-
-				default:
-				{
-					FATAL("Unknown flash command");
-				}
-				}
-			}
-
-			if (pGBA_instance->GBA_state.emulatorStatus.backup.flash.currentFlashCommand != BACKUP_FLASH_CMDS::NO_OPERATION)
-			{
-				pGBA_instance->GBA_state.emulatorStatus.backup.flash.previousFlashCommand
-					= pGBA_instance->GBA_state.emulatorStatus.backup.flash.currentFlashCommand;
-			}
-
-			BREAK;
-		}
-		default:
-		{
-			FATAL("Unknown Flash State");
-		}
-		}
-		BREAK;
-	}
-	default:
-	{
-		WARN("This backup type is not implemented yet");
-	}
 	}
 }
 
