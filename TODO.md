@@ -43,18 +43,19 @@ PROTOTYPE-0152 								: Design philosophy used is DP3 and implementation uses I
 
 **TODOs*****************************************************************************************************************************************************
 
-* masquerade (P0052)						-> CICD
-
-* masquerade (P0052)/GBC					-> MMIO_exec_1.gb should pass in CGB as well
-*											-> Looks like this might be related to ppu timing diffs between CGB and DMG
-*											-> We see in DMG, FF06 is INC C (0xC) but in CGB, its DEC C (0xD)
-*											-> We also see more loops in cgb before FF06 check whereas these extra loops is after the FF06 check in DMG
-*											-> Basically the loop in question is checking for LY = 144, so some LY timing...
-
 * masquerade (P0152)						-> Implement
+*                                           -> Issues
+*                                            1) Current implementation of cycle accurate is not correct and mid instruction timing is not handled
+*                                            2) Currently making ppu/apu/sio/timer cycle accurate makes it very slow
+                                            
+*                                           With scheduler, if we just have mode events for PPU, then we would loose mid scanline updates, how to handle this? check discord and NBA
+                                               
+
 * masquerade (P0152)/gameboy advance		-> Integrate ARM7TDMI SST (https://github.com/SingleStepTests/ARM7TDMI)
 * masquerade (P0152)/gameboy advance		-> Pokemon Emerald ingame save fails (passes few times at the start, then it fails continously)
 * masquerade (P0152)/masquerade-qa			-> Create automated gba tests
+
+* masquerade (P0152)						-> Android Support
 
 * masquerade (P0152)/COSMAC VIP				-> Implement
 
@@ -83,6 +84,12 @@ PROTOTYPE-0152 								: Design philosophy used is DP3 and implementation uses I
 * masquerade (P0152)/GB/GBC					-> Serial implmentation in Prototype-52 branch for GB/GBC
 * 											-> Serial Clock is also based on DIV similar to Audio as per AntonioND's doc. Implement this!
 *											-> Serial Link, looks like is showing latency issues with ASIO. Check how pyboy intends to implement this?
+
+* masquerade (P0152)/GBC					-> MMIO_exec_1.gb should pass in CGB as well
+*											-> Looks like this might be related to ppu timing diffs between CGB and DMG
+*											-> We see in DMG, FF06 is INC C (0xC) but in CGB, its DEC C (0xD)
+*											-> We also see more loops in cgb before FF06 check whereas these extra loops is after the FF06 check in DMG
+*											-> Basically the loop in question is checking for LY = 144, so some LY timing...
 
 * masquerade (P0152)/gameboy advance		-> Idle loop detection
 
