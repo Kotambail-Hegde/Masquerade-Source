@@ -1,148 +1,138 @@
 <!doctype html>
 <html lang="en-us">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport"
-          content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no" />
-    <title>Dear ImGui Emscripten example</title>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no" />
+  <title>Dear ImGui Emscripten example</title>
 
-    <style>
-      * {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-      }
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
 
-      html, body {
-        width: 100vw;
-        height: 100vh;
-        overflow: hidden;
-        background-color: black;
-        touch-action: none;
-      }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: black;
+      touch-action: none;
+    }
 
-      canvas.emscripten {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100vw;
-        height: 100vh;
-        border: 0;
-        margin: 0;
-        padding: 0;
-        display: block;
+    canvas.emscripten {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 0;
+      bottom: 0;
 
-        image-rendering: pixelated;
-        image-rendering: crisp-edges;
-        image-rendering: -moz-crisp-edges;
-        image-rendering: -webkit-optimize-contrast;
-      }
-    </style>
-  </head>
+      width: auto;
+      height: auto;
 
-  <body>
-    <canvas class="emscripten" id="canvas"
-            oncontextmenu="event.preventDefault()"></canvas>
+      border: 0;
+      margin: 0;
+      padding: 0;
+      display: block;
 
-    <script type="text/javascript">
-      var Module = {
-        preRun: [],
-        postRun: [],
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+      image-rendering: -moz-crisp-edges;
+      image-rendering: -webkit-optimize-contrast;
+    }
+  </style>
+</head>
 
-        print: function () {
-          console.log(Array.prototype.slice.call(arguments).join(" "));
-        },
+<body>
+  <canvas class="emscripten" id="canvas"
+          oncontextmenu="event.preventDefault()"></canvas>
 
-        printErr: function () {
-          console.error(Array.prototype.slice.call(arguments).join(" "));
-        },
+  <script type="text/javascript">
+    var Module = {
+      preRun: [],
+      postRun: [],
 
-        canvas: (function () {
-          return document.getElementById("canvas");
-        })(),
+      print: function () {
+        console.log(Array.prototype.slice.call(arguments).join(" "));
+      },
 
-        setStatus: function (text) {
-          console.log("status:", text);
-        },
+      printErr: function () {
+        console.error(Array.prototype.slice.call(arguments).join(" "));
+      },
 
-        monitorRunDependencies: function () {},
+      canvas: (function () {
+        return document.getElementById("canvas");
+      })(),
 
-        // Disable SDL auto HiDPI handling (we control it manually)
-        SDL: {
-          hints: {
-            SDL_HINT_VIDEO_HIGHDPI_DISABLED: "1"
-          }
-        }
-      };
+      setStatus: function (text) {
+        console.log("status:", text);
+      },
 
-      // ---------------- DPI-safe canvas resize ----------------
+      monitorRunDependencies: function () {}
+    };
 
-      function resizeCanvasToDisplaySize() {
-        const canvas = Module.canvas;
-        if (!canvas) return;
+    // ---------- HARD CANVAS SIZE SYNC ----------
+    function forceCanvasSize() {
+      const canvas = Module.canvas;
+      if (!canvas) return;
 
-        const dpr = window.devicePixelRatio || 1;
+      const dpr = window.devicePixelRatio || 1;
 
-        const cssWidth  = canvas.clientWidth;
-        const cssHeight = canvas.clientHeight;
+      const w = window.innerWidth;
+      const h = window.innerHeight;
 
-        const displayWidth  = Math.round(cssWidth  * dpr);
-        const displayHeight = Math.round(cssHeight * dpr);
+      const bw = Math.floor(w * dpr);
+      const bh = Math.floor(h * dpr);
 
-        if (canvas.width !== displayWidth ||
-            canvas.height !== displayHeight) {
+      if (canvas.width !== bw || canvas.height !== bh) {
+        canvas.width  = bw;
+        canvas.height = bh;
 
-          canvas.width  = displayWidth;
-          canvas.height = displayHeight;
-
-          if (Module._emscripten_set_canvas_element_size) {
-            Module._emscripten_set_canvas_element_size(
-              canvas.id,
-              displayWidth,
-              displayHeight
-            );
-          }
+        if (Module._emscripten_set_canvas_element_size) {
+          Module._emscripten_set_canvas_element_size(
+            canvas.id, bw, bh
+          );
         }
       }
+    }
 
-      // Resize on load + window resize
-      window.addEventListener("resize", resizeCanvasToDisplaySize);
+    window.addEventListener("resize", forceCanvasSize);
 
-      // Detect DPR changes (monitor move, scaling change)
-      let __lastDPR = window.devicePixelRatio;
-      setInterval(() => {
-        if (window.devicePixelRatio !== __lastDPR) {
-          __lastDPR = window.devicePixelRatio;
-          resizeCanvasToDisplaySize();
+    // Firefox: DPR can change without resize
+    let __lastDPR = window.devicePixelRatio;
+    setInterval(() => {
+      if (window.devicePixelRatio !== __lastDPR) {
+        __lastDPR = window.devicePixelRatio;
+        forceCanvasSize();
+      }
+    }, 200);
+
+    Module.onRuntimeInitialized = function () {
+      forceCanvasSize();
+    };
+
+    // ---------- ROM ARGUMENT PARSING (UNCHANGED) ----------
+    (function () {
+      var params = new URLSearchParams(window.location.search);
+      var romCount = parseInt(params.get("roms") || "0", 10);
+      Module.arguments = [];
+
+      for (let i = 0; i < romCount; ++i) {
+        let rom = params.get("rom" + i);
+        if (rom) {
+          rom = rom.replace(/^\//, "");
+          rom = "/" + rom;
+          Module.arguments.push(rom);
         }
-      }, 250);
+      }
+    })();
 
-      Module.onRuntimeInitialized = function () {
-        resizeCanvasToDisplaySize();
-      };
+    window.onerror = function (event) {
+      console.log("onerror:", event);
+    };
+  </script>
 
-      // ---------------- ROM argument parsing (unchanged) ----------------
-
-      (function () {
-        var params = new URLSearchParams(window.location.search);
-        var romCount = parseInt(params.get("roms") || "0", 10);
-        Module.arguments = [];
-
-        for (let i = 0; i < romCount; ++i) {
-          let rom = params.get("rom" + i);
-          if (rom) {
-            rom = rom.replace(/^\//, "");
-            rom = "/" + rom;
-            Module.arguments.push(rom);
-          }
-        }
-      })();
-
-      window.onerror = function (event) {
-        console.log("onerror:", event);
-      };
-    </script>
-
-    {{{ SCRIPT }}}
-  </body>
+  {{{ SCRIPT }}}
+</body>
 </html>
