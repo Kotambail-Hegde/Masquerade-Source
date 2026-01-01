@@ -31,6 +31,7 @@ on:
       - '**/*.cxx'
       - '**/*.hxx'
       - '**/*.py'
+      - '**/*.cmake'
 
 permissions:
   contents: write
