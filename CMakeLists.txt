@@ -633,7 +633,14 @@ add_custom_command(
     COMMENT "Copying dependencies..."
 )
 
-# Windows-only copy for SDL3.dll
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
+    add_custom_command(
+        TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy
+            "${SDL3_SO}"
+            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/SDL3.so"
+    )
+endif()
 if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
     add_custom_command(
         TARGET ${PROJECT_NAME} POST_BUILD
