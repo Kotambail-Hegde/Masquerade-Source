@@ -1720,7 +1720,7 @@ public:
 			// - Remember that in C/C++ if you want to include a backslash \ in a string literal you need to write a double backslash \\ !
 			// - Our Emscripten build process allows embedding fonts to be accessible at runtime from the "fonts/" folder. See Makefile.emscripten for details.
 			//io.Fonts->AddFontDefault();
-			io.Fonts->AddFontFromFileTTF((_FONT_LOCATION + "segoeui.ttf").c_str(), 16.0f);
+			io.Fonts->AddFontFromFileTTF((std::filesystem::path(_FONT_LOCATION) / "segoeui.ttf").string().c_str(),16.0f);
 			//io.Fonts->AddFontFromFileTTF("../../misc/fonts/DroidSans.ttf", 16.0f);
 			//io.Fonts->AddFontFromFileTTF("../../misc/fonts/Roboto-Medium.ttf", 16.0f);
 			//io.Fonts->AddFontFromFileTTF("../../misc/fonts/Cousine-Regular.ttf", 15.0f);
@@ -3906,15 +3906,18 @@ void postPrimaryBootLoader()
 #ifdef __EMSCRIPTEN__
 	listEmFiles();
 #endif
-	// Setup all the paths
+
+	// --- Setup all the paths
 #ifndef __EMSCRIPTEN__
-	_EXE_LOCATION = getexepath().parent_path().string(); // This will give complete path till masquerade.exe without 'masquerade.exe'
+	_EXE_LOCATION = getexepath().parent_path().string(); // path till masquerade.exe
 	_CONFIG_LOCATION = (std::filesystem::path(_EXE_LOCATION) / "assets" / "CONFIG.ini").string();
 #else
 	_CONFIG_LOCATION = "assets/CONFIG.ini";
 #endif
+
 	LOG("Searching for %s", _CONFIG_LOCATION.c_str());
-	// Read CONFIG.ini
+
+	// --- Read CONFIG.ini
 	try
 	{
 		boost::property_tree::ini_parser::read_ini(_CONFIG_LOCATION, config);
@@ -3924,17 +3927,34 @@ void postPrimaryBootLoader()
 		std::cout << ex.what() << std::endl;
 		FATAL("Unable to read the CONFIG.ini");
 	}
+
 #ifndef __EMSCRIPTEN__
-	_FONT_LOCATION = (std::filesystem::path(_EXE_LOCATION) / "assets" / "ui" / "fonts" / "").string();
+	_FONT_LOCATION = (std::filesystem::path(_EXE_LOCATION) / "assets" / "ui" / "fonts").string();
 #else
 	_FONT_LOCATION = "assets/ui/fonts/";
 #endif
+
+	// ------------------------------------------------------------------
+	// Normalize ALL paths coming from CONFIG.ini (Windows → POSIX safe)
+	// ------------------------------------------------------------------
+	auto normalizePath = [](std::string& p)
+		{
+			std::replace(p.begin(), p.end(), '\\', '/');
+		};
+
 #ifndef __EMSCRIPTEN__
-	_IMGUI_LOCATION = (std::filesystem::path(config.get<std::string>("internal._ui_working_directory")) / "IMGUI.ini").string();
+	std::string uiWorkingDir = config.get<std::string>("internal._ui_working_directory");
+	normalizePath(uiWorkingDir);
+
+	_IMGUI_LOCATION = (std::filesystem::path(uiWorkingDir) / "IMGUI.ini").string();
 #else
 	_IMGUI_LOCATION = "assets/ui/config/IMGUI.ini";
 #endif
-	// Check if IMGUI.ini exists!
+
+	// --- Ensure IMGUI directory exists
+	std::filesystem::create_directories(std::filesystem::path(_IMGUI_LOCATION).parent_path());
+
+	// --- Check if IMGUI.ini exists
 	struct stat buffer;
 	if (stat(_IMGUI_LOCATION.c_str(), &buffer) != ZERO)
 	{
@@ -3944,34 +3964,47 @@ void postPrimaryBootLoader()
 		{
 			throw std::runtime_error("Failed to open file: " + _IMGUI_LOCATION);
 		}
+
 		LOG("Not able to find IMGUI.ini");
 		LOG("Creating a masquerade default for now!");
 		out << imguiDefaultIni;
 		out.close();
 	}
+
 	LOG("Searching for %s", _IMGUI_LOCATION.c_str());
+
 	createLUTForCRC();
+
 #ifndef __EMSCRIPTEN__
 	recentlyOpenedListPath = config.get<std::string>("internal._working_directory");
+	normalizePath(recentlyOpenedListPath);
 #else
 	recentlyOpenedListPath = "assets/internal";
 #endif
-	// check if directory mentioned by "recentlyOpenedListPath" exists, if not we need to explicitly create it
+
+	// --- Ensure working directory exists
 	ifNoDirectoryThenCreate(recentlyOpenedListPath);
+
 #ifndef __EMSCRIPTEN__
 	recentlyOpenedListPath = (std::filesystem::path(recentlyOpenedListPath) / "recentlyOpenedListPath.dir").string();
+
 	recentlyOpenedList = readDequeFromFile(recentlyOpenedListPath);
 #else
 	recentlyOpenedListPath += "/recentlyOpenedListPath.dir";
 #endif
+
 #ifndef __EMSCRIPTEN__
-	_CHEAT_SAVE_LOCATION = (std::filesystem::path(config.get<std::string>("internal._working_directory")) / "cheats.txt").string();
+	_CHEAT_SAVE_LOCATION = (std::filesystem::path(config.get<std::string>("internal._working_directory")) /"cheats.txt").string();
+	normalizePath(_CHEAT_SAVE_LOCATION);
 #else
 	_CHEAT_SAVE_LOCATION = "assets/internal/cheats.txt";
 #endif
+
 	BYTE bootType = BOOT;
+
 BOOT_AGAIN:
 	romsToRun.fill("");
+
 	if (bootType == BOOT)
 	{
 		for (int ii = ZERO; ii < gArgc - ONE; ii++)
@@ -3985,10 +4018,12 @@ BOOT_AGAIN:
 		if (dynamicDragNDropAndMenuSelect.size() != ZERO)
 		{
 			const DIM8 numberOfInputs = static_cast<DIM8>(dynamicDragNDropAndMenuSelect.size());
+
 			for (DIM8 ii = ZERO; ii < numberOfInputs; ii++)
 			{
 				romsToRun[ii] = dynamicDragNDropAndMenuSelect[ii].c_str();
 			}
+
 			arrangeRoms(romsToRun);
 			dynamicDragNDropAndMenuSelect.clear();
 			bootType = BOOT;
@@ -3996,15 +4031,17 @@ BOOT_AGAIN:
 		}
 		else if (rebootNeededOnMenuClick == YES)
 		{
-			rebootNeededOnMenuClick = NO; // Clear the flag...
+			rebootNeededOnMenuClick = NO;
 			secondaryBootLoader(numberOfRomsSelected, romsToRun, bootType);
 		}
 	}
+
 	if (dynamicDragNDropAndMenuSelect.size() != ZERO || rebootNeededOnMenuClick == YES)
 	{
 		bootType = REBOOT;
 		goto BOOT_AGAIN;
 	}
+
 	RETURN;
 }
 
