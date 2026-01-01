@@ -1720,7 +1720,7 @@ public:
 			// - Remember that in C/C++ if you want to include a backslash \ in a string literal you need to write a double backslash \\ !
 			// - Our Emscripten build process allows embedding fonts to be accessible at runtime from the "fonts/" folder. See Makefile.emscripten for details.
 			//io.Fonts->AddFontDefault();
-			io.Fonts->AddFontFromFileTTF((_FONT_LOCATION + "segoeui.ttf").c_str(), 16.0f);
+			io.Fonts->AddFontFromFileTTF((std::filesystem::path(_FONT_LOCATION) / "segoeui.ttf").string().c_str(),16.0f);
 			//io.Fonts->AddFontFromFileTTF("../../misc/fonts/DroidSans.ttf", 16.0f);
 			//io.Fonts->AddFontFromFileTTF("../../misc/fonts/Roboto-Medium.ttf", 16.0f);
 			//io.Fonts->AddFontFromFileTTF("../../misc/fonts/Cousine-Regular.ttf", 15.0f);
@@ -3943,8 +3943,7 @@ void postPrimaryBootLoader()
 		};
 
 #ifndef __EMSCRIPTEN__
-	std::string uiWorkingDir =
-		config.get<std::string>("internal._ui_working_directory");
+	std::string uiWorkingDir = config.get<std::string>("internal._ui_working_directory");
 	normalizePath(uiWorkingDir);
 
 	_IMGUI_LOCATION = (std::filesystem::path(uiWorkingDir) / "IMGUI.ini").string();
