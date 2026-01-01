@@ -3,19 +3,29 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no" />
-    <title>Dear ImGui Emscripten example</title>
+    <title>Masquerade</title>
     <style>
-      body { margin: 0; background-color: black }
-      /* FIXME: with our GLFW example this block seems to break resizing and io.DisplaySize gets stuck */
-      .emscripten {
-        position: absolute;
-        top: 0px;
-        left: 0px;
-        margin: 0px;
-        border: 0;
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html, body {
         width: 100%;
         height: 100%;
         overflow: hidden;
+        background-color: black;
+        touch-action: none;
+      }
+      .emscripten {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        border: 0;
+        margin: 0;
+        padding: 0;
         display: block;
         image-rendering: optimizeSpeed;
         image-rendering: -moz-crisp-edges;
@@ -34,7 +44,22 @@
     <script type="text/javascript">
       var Module = {
         preRun: [],
-        postRun: [],
+        postRun: [
+          function() {
+            // Fix for CI builds: Force canvas resize after module initialization
+            // This ensures ImGui gets correct canvas dimensions on first load
+            setTimeout(function() {
+              var canvas = document.getElementById('canvas');
+              if (canvas) {
+                // Trigger browser resize event
+                window.dispatchEvent(new Event('resize'));
+                
+                // Log for debugging
+                console.log('Canvas force-resized to: ' + canvas.width + 'x' + canvas.height);
+              }
+            }, 100);
+          }
+        ],
         print: (function () {
           return function (text) {
             text = Array.prototype.slice.call(arguments).join(' ');
@@ -67,6 +92,9 @@
 		for (let i = 0; i < romCount; ++i) {
 		  let rom = params.get("rom" + i);
 		  if (rom) {
+			// Decode URL encoding (handles spaces, capitals, numbers, special chars)
+			rom = decodeURIComponent(rom);
+
 			// GH-Pages fix: remove leading slash in URL parameter
 			rom = rom.replace(/^\//, "");
 
@@ -74,6 +102,7 @@
 			rom = "/" + rom;
 
 			Module.arguments.push(rom);
+			console.log('ROM argument added: ' + rom);
 		  }
 		}
       })();
