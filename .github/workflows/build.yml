@@ -587,10 +587,8 @@ jobs:
         - name: Prepare Pages Deployment
           run: |
             mkdir -p pages
-            [ -f build/bin/masquerade.html ] && cp build/bin/masquerade.html pages/index.html
-            [ -f build/bin/masquerade.js ] && cp build/bin/masquerade.js pages/
-            [ -f build/bin/masquerade.wasm ] && cp build/bin/masquerade.wasm pages/
-            [ -f build/bin/masquerade.data ] && cp build/bin/masquerade.data pages/
+            cp build/bin/masquerade.html pages/
+            cp build/bin/masquerade.data pages/
             echo "Files to deploy:"
             ls -lh pages/
 
