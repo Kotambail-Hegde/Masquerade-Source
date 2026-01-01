@@ -18,37 +18,26 @@
       height: 100%;
       overflow: hidden;
       background-color: black;
-      touch-action: none;
     }
 
-    canvas.emscripten {
+    canvas {
+      display: block;
       position: absolute;
-      left: 0;
-      right: 0;
-      top: 0;
-      bottom: 0;
-
-      width: auto;
-      height: auto;
-
+      inset: 0;
       border: 0;
       margin: 0;
       padding: 0;
-      display: block;
 
       image-rendering: pixelated;
       image-rendering: crisp-edges;
-      image-rendering: -moz-crisp-edges;
-      image-rendering: -webkit-optimize-contrast;
     }
   </style>
 </head>
 
 <body>
-  <canvas class="emscripten" id="canvas"
-          oncontextmenu="event.preventDefault()"></canvas>
+  <canvas id="canvas" oncontextmenu="event.preventDefault()"></canvas>
 
-  <script type="text/javascript">
+  <script>
     var Module = {
       preRun: [],
       postRun: [],
@@ -65,22 +54,19 @@
         return document.getElementById("canvas");
       })(),
 
-      setStatus: function (text) {
-        console.log("status:", text);
-      },
-
       monitorRunDependencies: function () {}
     };
 
-    // ---------- HARD CANVAS SIZE SYNC ----------
-    function forceCanvasSize() {
+    function resizeCanvas() {
       const canvas = Module.canvas;
       if (!canvas) return;
 
       const dpr = window.devicePixelRatio || 1;
+      const w = document.documentElement.clientWidth;
+      const h = document.documentElement.clientHeight;
 
-      const w = window.innerWidth;
-      const h = window.innerHeight;
+      canvas.style.width  = w + "px";
+      canvas.style.height = h + "px";
 
       const bw = Math.floor(w * dpr);
       const bh = Math.floor(h * dpr);
@@ -90,47 +76,38 @@
         canvas.height = bh;
 
         if (Module._emscripten_set_canvas_element_size) {
-          Module._emscripten_set_canvas_element_size(
-            canvas.id, bw, bh
-          );
+          Module._emscripten_set_canvas_element_size(canvas.id, bw, bh);
         }
       }
     }
 
-    window.addEventListener("resize", forceCanvasSize);
+    window.addEventListener("resize", resizeCanvas);
 
-    // Firefox: DPR can change without resize
-    let __lastDPR = window.devicePixelRatio;
+    // DPR change without resize (Firefox / multi-monitor)
+    let __dpr = window.devicePixelRatio;
     setInterval(() => {
-      if (window.devicePixelRatio !== __lastDPR) {
-        __lastDPR = window.devicePixelRatio;
-        forceCanvasSize();
+      if (window.devicePixelRatio !== __dpr) {
+        __dpr = window.devicePixelRatio;
+        resizeCanvas();
       }
     }, 200);
 
-    Module.onRuntimeInitialized = function () {
-      forceCanvasSize();
-    };
+    Module.onRuntimeInitialized = resizeCanvas;
 
-    // ---------- ROM ARGUMENT PARSING (UNCHANGED) ----------
+    // ROM args (unchanged)
     (function () {
-      var params = new URLSearchParams(window.location.search);
-      var romCount = parseInt(params.get("roms") || "0", 10);
+      const params = new URLSearchParams(window.location.search);
+      const romCount = parseInt(params.get("roms") || "0", 10);
       Module.arguments = [];
 
       for (let i = 0; i < romCount; ++i) {
         let rom = params.get("rom" + i);
         if (rom) {
           rom = rom.replace(/^\//, "");
-          rom = "/" + rom;
-          Module.arguments.push(rom);
+          Module.arguments.push("/" + rom);
         }
       }
     })();
-
-    window.onerror = function (event) {
-      console.log("onerror:", event);
-    };
   </script>
 
   {{{ SCRIPT }}}
