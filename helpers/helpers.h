@@ -572,8 +572,13 @@
 #define MASQ_INLINE
 #endif
 
+#ifdef __EMSCRIPTEN__
+#define MASQ_UNLIKELY
+#define MASQ_LIKELY
+#else
 #define MASQ_UNLIKELY								[[unlikely]]
 #define MASQ_LIKELY									[[likely]]
+#endif
 
 // Themes
 #define ENABLED_IMGUI_DEFAULT_THEME					NO

@@ -948,16 +948,35 @@ private:
 			INFO("Empty Buffer");
 			RETURN;
 		}
+
+		// EMSCRIPTEN FIX: Convert to lowercase and replace spaces with underscores
+		// Emscripten's IDBFS has issues with uppercase letters and spaces in filenames
+		std::string sanitized_filename = filename;
 		
+		// Convert to lowercase
+		std::transform(sanitized_filename.begin(), sanitized_filename.end(), sanitized_filename.begin(),
+			[](unsigned char c) { return std::tolower(c); });
+		
+		// Replace spaces with underscores
+		std::replace(sanitized_filename.begin(), sanitized_filename.end(), ' ', '_');
+
+		if (sanitized_filename != filename)
+		{
+			INFO("Filename sanitized (lowercase + spaces → underscores):");
+			INFO("  Original: %s", filename.c_str());
+			INFO("  Sanitized: %s", sanitized_filename.c_str());
+		}
+
 		std::vector<std::string> extracted_files;
 		INC32 count = ONE;
-		
-		// Use original filename AS-IS to debug
-		std::string persistent_path = "/persistent/" + filename;
+
+		// USE SANITIZED FILENAME HERE
+		std::string persistent_path = "/persistent/" + sanitized_filename;
 		INFO("File uploaded: %s (type: %s), size: %zu bytes", persistent_path.c_str(), mime_type.c_str(), buffer.size());
-		INFO("Filename length: %zu", filename.length());
-		INFO("Has spaces: %s", (filename.find(' ') != std::string::npos) ? "YES" : "NO");
-		
+		INFO("Filename length: %zu", sanitized_filename.length());
+		INFO("Has spaces: %s", (sanitized_filename.find(' ') != std::string::npos) ? "YES" : "NO");
+		INFO("Has uppercase: %s", (std::any_of(sanitized_filename.begin(), sanitized_filename.end(), [](unsigned char c) { return std::isupper(c); })) ? "YES" : "NO");
+
 		// Debug: list what's in /persistent before write
 		INFO("=== Contents of /persistent BEFORE write ===");
 		try {
@@ -968,7 +987,7 @@ private:
 		} catch (const std::exception& e) {
 			INFO("Error listing directory: %s", e.what());
 		}
-		
+
 		std::ofstream ofs(persistent_path, std::ios::binary);
 		if (!ofs)
 		{
@@ -976,10 +995,10 @@ private:
 			INFO("Errno: %d", errno);
 			RETURN;
 		}
-		
+
 		INFO("File opened successfully for writing");
 		ofs.write(buffer.data(), buffer.size());
-		
+
 		if (!ofs)
 		{
 			INFO("CRITICAL: Failed to write data to file: %s", persistent_path.c_str());
@@ -989,10 +1008,10 @@ private:
 		{
 			INFO("Data written successfully: %zu bytes", buffer.size());
 		}
-		
+
 		ofs.close();
 		INFO("File closed");
-		
+
 		// Debug: list what's in /persistent after write
 		INFO("=== Contents of /persistent AFTER write ===");
 		try {
@@ -1003,7 +1022,7 @@ private:
 		} catch (const std::exception& e) {
 			INFO("Error listing directory: %s", e.what());
 		}
-		
+
 		// Verify file exists
 		std::ifstream test(persistent_path, std::ios::binary);
 		if (test.good())
@@ -1018,7 +1037,7 @@ private:
 			INFO("Errno: %d", errno);
 		}
 		test.close();
-		
+
 		// Try to open it a different way
 		INFO("=== Attempting alternative file access ===");
 		struct stat file_stat;
@@ -1030,7 +1049,7 @@ private:
 		{
 			INFO("stat() failed: %d", errno);
 		}
-		
+
 		std::string ext = get_extension(persistent_path.c_str());
 		if (strcmp(ext.c_str(), "zip") == 0)
 		{
@@ -1039,12 +1058,13 @@ private:
 		}
 		else
 		{
-			extracted_files.emplace_back(filename);
+			// USE SANITIZED FILENAME HERE TOO
+			extracted_files.emplace_back(sanitized_filename);
 		}
-		
+
 		INFO("Calling savePersistentFS...");
 		savePersistentFS(onSavePersistentFSComplete);
-		
+
 		for (const auto& path : extracted_files)
 		{
 			auto it = std::find(recentlyOpenedList.begin(), recentlyOpenedList.end(), path);
@@ -1059,7 +1079,7 @@ private:
 			}
 			dynamicDragNDropAndMenuSelect.push_back(path);
 		}
-		
+
 		INFO("=== handle_upload_file complete ===");
 	}
 #endif
@@ -3562,9 +3582,7 @@ public:
 									else
 									{
 										// Restart -> Reset the URL such that rom information is stripped out and only bare minimum remains
-										emscripten_run_script(
-											"location.href = window.location.pathname.replace(/[^/]+$/, '') + 'masquerade.html';"
-										);
+										emscripten_run_script("location.href = window.location.pathname.replace(/[^/]+$/, '') + 'masquerade.html';");
 									}
 								}
 #endif
