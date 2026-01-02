@@ -4136,13 +4136,27 @@ int main(int argc, char* argv[])
 	SETBIT(ENABLE_LOGS, LOG_VERBOSITY);
 	SETBIT(ENABLE_LOGS, LOG_VERBOSITY_INFO);
 
-	// Handle commands if applicable
-	if (gArgc > ONE)
+	if (argc > ONE)
 	{
-		if (strcmp(gArgv[ONE], "-h") == ZERO || strcmp(gArgv[ONE], "--help") == ZERO)
+		std::string arg = argv[1];
+		if (arg == "--version" || arg == "-v" || arg == "--help" || arg == "-h")
 		{
-			INFO("Figure it out yourself...");
-			RETURN ZERO;
+			if (arg == "--version" || arg == "-v")
+			{
+				// Print version to stdout (no formatting, just the number)
+				LOG("%.4f\n", VERSION);
+				fflush(stdout);
+				RETURN 0;
+			}
+			else if (arg == "--help" || arg == "-h")
+			{
+				LOG("Masquerade Multi-System Emulator v%.4f\n", VERSION);
+				LOG("\nUsage:\n");
+				LOG("  masquerade [ROM_FILE...]       - Load and run ROM(s)\n");
+				LOG("  masquerade --version           - Print version and exit\n");
+				LOG("  masquerade --help              - Show this help message\n");
+				RETURN ZERO;
+			}
 		}
 	}
 

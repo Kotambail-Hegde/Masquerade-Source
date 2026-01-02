@@ -36,7 +36,6 @@ const fs::path OTA_RELATIVE_PATH = PLATFORM_DIR / "masquerade-OTA";
 #error "Unsupported platform for OTA"
 #endif
 
-
 // ==========================================================
 // OpenSSL runtime loader
 // ==========================================================
@@ -83,11 +82,11 @@ struct OpenSSLWrapper {
 
     bool is_available() {
         init();
-        return loaded;
+        RETURN loaded;
     }
 
     void cleanup() {
-        if (!loaded) return;
+        if (!loaded) RETURN;
 #ifdef _WIN32
         if (libssl) FreeLibrary(libssl);
         if (libcrypto) FreeLibrary(libcrypto);
@@ -101,11 +100,98 @@ struct OpenSSLWrapper {
 
 inline OpenSSLWrapper g_openssl;
 
+// ==========================================================
+// Query current main app version dynamically (Cross-platform)
+// ==========================================================
+double getCurrentMainAppVersion(const fs::path& app_path)
+{
+    try
+    {
+        INFO("Attempting to query version from: %s", app_path.string().c_str());
+
+        if (!fs::exists(app_path))
+        {
+            WARN("Main app not found at: %s", app_path.string().c_str());
+            RETURN 0.0;
+        }
+
+        namespace bp = boost::process;
+
+        // Build command with quotes for paths with spaces
+        std::string cmd = "\"" + app_path.string() + "\" --version";
+        INFO("Executing command: %s", cmd.c_str());
+
+        // Create pipe to capture stdout
+        bp::ipstream pipe_stream;
+        bp::child c;
+
+        try
+        {
+            // Execute app with --version flag
+            c = bp::child(cmd, bp::std_out > pipe_stream);
+            INFO("Child process created successfully");
+        }
+        catch (const std::exception& e)
+        {
+            FATAL("Failed to create child process: %s", e.what());
+            RETURN 0.0;
+        }
+
+        // Read version from stdout
+        std::string line;
+        if (std::getline(pipe_stream, line))
+        {
+            INFO("Read line from process: [%s]", line.c_str());
+
+            // Trim whitespace
+            line.erase(0, line.find_first_not_of(" \t\r\n"));
+            line.erase(line.find_last_not_of(" \t\r\n") + 1);
+
+            INFO("Trimmed line: [%s]", line.c_str());
+
+            try
+            {
+                double version = std::stod(line);
+                INFO("Current main app version: %.4f", version);
+                c.wait();
+                RETURN version;
+            }
+            catch (const std::exception& e)
+            {
+                WARN("Failed to parse version string: %s (error: %s)", line.c_str(), e.what());
+                c.wait();
+                RETURN 0.0;
+            }
+        }
+        else
+        {
+            WARN("No output from version query - getline failed");
+            WARN("Checking child process exit status...");
+            try
+            {
+                c.wait();
+                int exit_code = c.exit_code();
+                WARN("Child process exited with code: %d", exit_code);
+            }
+            catch (const std::exception& e)
+            {
+                WARN("Error waiting for child process: %s", e.what());
+            }
+            RETURN 0.0;
+        }
+    }
+    catch (const std::exception& e)
+    {
+        FATAL("Failed to query main app version: %s", e.what());
+        RETURN 0.0;
+    }
+}
+
 // ----------------------
 // Check if OpenSSL is available
 // ----------------------
 bool openssl_dlls_present() {
-    return g_openssl.is_available();
+    RETURN g_openssl.is_available();
 }
 
 // ----------------------
@@ -116,7 +202,7 @@ std::string https_get(const std::string& host, const std::string& target)
     if (!openssl_dlls_present())
     {
         INFO("Skipping HTTPS GET: OpenSSL not available.");
-        return {};
+        RETURN{};
     }
 
     try
@@ -146,12 +232,12 @@ std::string https_get(const std::string& host, const std::string& target)
         if (ec && ec != net::error::eof)
             FATAL("HTTPS shutdown failed: %s", ec.message().c_str());
 
-        return res.body();
+        RETURN res.body();
     }
     catch (const std::exception& e)
     {
         FATAL("HTTPS GET failed: %s", e.what());
-        return {};
+        RETURN{};
     }
 }
 
@@ -189,8 +275,17 @@ bool ota_t::checkForUpdates(boost::property_tree::ptree& pt)
         boost::property_tree::ptree root;
         boost::property_tree::read_json(ss, root);
 
+        fs::path current_dir = fs::current_path();
+
         double remote_version = root.get<double>("name", 0.0);
-        double current_version = VERSION;
+
+        // Query main app in current directory (same dir as OTA)
+#ifdef _WIN32
+        fs::path main_app = current_dir / "masquerade.exe";
+#else
+        fs::path main_app = current_dir / "masquerade";
+#endif
+        double current_version = getCurrentMainAppVersion(main_app);
 
         isOtaPossible = (current_version < remote_version) ? YES : NO;
         INFO("OTA check: current=%.4f, remote=%.4f, possible=%s",
@@ -206,14 +301,14 @@ bool ota_t::checkForUpdates(boost::property_tree::ptree& pt)
 }
 
 // ==========================================================
-// Download GitHub ZIP
+// Download GitHub ZIP (with configurable body limit)
 // ==========================================================
 inline std::string download_github_zip(const std::string& zip_url)
 {
     if (!openssl_dlls_present())
     {
         INFO("Skipping GitHub download: OpenSSL not available.");
-        return {};
+        RETURN{};
     }
 
     try
@@ -224,7 +319,7 @@ inline std::string download_github_zip(const std::string& zip_url)
         if (!std::regex_match(zip_url, match, re))
         {
             FATAL("Invalid ZIP URL: %s", zip_url.c_str());
-            return {};
+            RETURN{};
         }
 
         std::string host = match[1];
@@ -251,10 +346,16 @@ inline std::string download_github_zip(const std::string& zip_url)
 
         http::write(stream, req);
 
-        // Receive response
+        // Receive response with NO BODY SIZE LIMIT
         beast::flat_buffer buffer;
         http::response<http::dynamic_body> res;
-        http::read(stream, buffer, res);
+
+        // Create parser with unlimited body size
+        http::response_parser<http::dynamic_body> parser;
+        parser.body_limit((std::numeric_limits<std::uint64_t>::max)()); // Remove size limit
+
+        http::read(stream, buffer, parser);
+        res = parser.get();
 
         // Handle redirect
         if (res.result_int() == 302 || res.result_int() == 301)
@@ -262,31 +363,32 @@ inline std::string download_github_zip(const std::string& zip_url)
             std::string loc(res[http::field::location]);
             INFO("Redirecting to: %s", loc.c_str());
             stream.shutdown();
-            return download_github_zip(loc); // recursive
+            RETURN download_github_zip(loc); // recursive
         }
 
         if (res.result() != http::status::ok)
         {
             FATAL("GitHub download failed: HTTP %d", res.result_int());
-            return {};
+            RETURN{};
         }
 
         // Extract body
         auto body = res.body();
         std::string data(beast::buffers_to_string(body.data()));
+        INFO("Downloaded %zu bytes from GitHub", data.size());
 
         stream.shutdown();
-        return data;
+        RETURN data;
     }
     catch (const std::exception& e)
     {
         FATAL("GitHub download exception: %s", e.what());
-        return {};
+        RETURN{};
     }
 }
 
 // ==========================================================
-// Perform OTA upgrade
+// Perform OTA upgrade (with new folder structure support)
 // ==========================================================
 bool ota_t::upgrade(boost::property_tree::ptree& pt)
 {
@@ -309,12 +411,21 @@ bool ota_t::upgrade(boost::property_tree::ptree& pt)
         boost::property_tree::ptree root;
         boost::property_tree::read_json(ss, root);
 
+        fs::path current_dir = fs::current_path();
+
         double remote_version = root.get<double>("name", 0.0);
-        double current_version = VERSION;
+
+        // Query main app in current directory (same dir as OTA)
+#ifdef _WIN32
+        fs::path main_app = current_dir / "masquerade.exe";
+#else
+        fs::path main_app = current_dir / "masquerade";
+#endif
+        double current_version = getCurrentMainAppVersion(main_app);
 
         if (current_version >= remote_version)
         {
-            INFO("Already up-to-date.");
+            INFO("Already up-to-date (%.4f >= %.4f).", current_version, remote_version);
             RETURN SUCCESS;
         }
 
@@ -327,10 +438,7 @@ bool ota_t::upgrade(boost::property_tree::ptree& pt)
 
         INFO("OTA update available: %s", zip_url.c_str());
 
-        fs::path current_dir = fs::current_path();
         fs::path temp_zip = current_dir / "masquerade_update.zip";
-        fs::path exe_to_backup = current_dir / APP_RELATIVE_PATH;           // masquerade
-        fs::path ota_exe = current_dir / OTA_RELATIVE_PATH;                 // running OTA
 
         // === Download ZIP ===
         INFO("Downloading ZIP to: %s", temp_zip.string().c_str());
@@ -382,17 +490,15 @@ bool ota_t::upgrade(boost::property_tree::ptree& pt)
                 }
             }
 
-            // 2. Backup LICENSE.md
-            fs::path license_file = current_dir / "LICENSE.md";
-            if (fs::exists(license_file))
+            // 2. Backup LICENSE.md and README.md
+            std::vector<std::string> docs = { "LICENSE.md", "README.md" };
+            for (const auto& doc : docs)
             {
-                fs::copy_file(license_file, backup_dir / "LICENSE.md", fs::copy_options::overwrite_existing);
-            }
-
-            // 3. Backup main exe only (skip OTA exe)
-            if (fs::exists(exe_to_backup))
-            {
-                fs::copy_file(exe_to_backup, backup_dir / exe_to_backup.filename(), fs::copy_options::overwrite_existing);
+                fs::path doc_file = current_dir / doc;
+                if (fs::exists(doc_file))
+                {
+                    fs::copy_file(doc_file, backup_dir / doc, fs::copy_options::overwrite_existing);
+                }
             }
 
             INFO("Backup completed successfully.");
@@ -430,63 +536,112 @@ bool ota_t::upgrade(boost::property_tree::ptree& pt)
         if (source_dir.empty())
             source_dir = temp_extract_dir; // fallback if no subfolder
 
-        // === Replace only selected files (assets/, LICENSE.md, masquerade.exe) ===
-        INFO("Replacing selected files from update...");
+        // === Determine platform-specific paths ===
+        std::string platform_folder;
+#if defined(_WIN32)
+        platform_folder = "windows";
+#elif defined(__linux__)
+        platform_folder = "linux";
+#elif defined(__APPLE__)
+        platform_folder = "macos";
+#else
+#error "Unsupported platform for OTA"
+#endif
+
+        INFO("OTA updating for platform: %s", platform_folder.c_str());
+
+        fs::path platform_src = source_dir / platform_folder;
+        if (!fs::exists(platform_src))
+        {
+            FATAL("Platform folder '%s' not found in update package.", platform_folder.c_str());
+            RETURN FAILURE;
+        }
+
+        // === Replace platform-specific files ===
+        INFO("Replacing platform-specific files from update...");
 
         try
         {
-            // 1. Copy assets folder recursively
-            fs::path assets_src = source_dir / "assets";
+            // 1. Copy all executables from platform folder (EXCEPT OTA app and crypto libs)
+            for (const auto& entry : fs::directory_iterator(platform_src))
+            {
+                if (entry.is_regular_file())
+                {
+                    std::string filename = entry.path().filename().string();
+
+                    // Skip OTA executable and crypto libraries
+                    if (filename.find("OTA") != std::string::npos ||
+                        filename.find("libssl") != std::string::npos ||
+                        filename.find("libcrypto") != std::string::npos)
+                    {
+                        INFO("Skipping: %s (self-managed)", filename.c_str());
+                        continue;
+                    }
+
+                    // Copy exe, dll (SDL3), and so files
+                    if (filename.find(".exe") != std::string::npos ||
+                        filename.find(".dll") != std::string::npos ||
+                        filename.find(".so") != std::string::npos)
+                    {
+                        fs::path dest = current_dir / filename;
+                        fs::copy_file(entry.path(), dest, fs::copy_options::overwrite_existing);
+                        INFO("Copied: %s", filename.c_str());
+                    }
+                }
+            }
+
+            // 2. Copy assets folder recursively (located inside platform folder)
+            fs::path assets_src = platform_src / "assets";
             fs::path assets_dst = current_dir / "assets";
 
             if (fs::exists(assets_src))
             {
-                INFO("Copying assets folder...");
-                for (const auto& entry : fs::recursive_directory_iterator(assets_src))
+                INFO("Copying assets folder from: %s", assets_src.string().c_str());
+                try
                 {
-                    const fs::path relative = fs::relative(entry.path(), assets_src);
-                    const fs::path target = assets_dst / relative;
+                    for (const auto& entry : fs::recursive_directory_iterator(assets_src))
+                    {
+                        const fs::path relative = fs::relative(entry.path(), assets_src);
+                        const fs::path target = assets_dst / relative;
 
-                    if (entry.is_directory())
-                    {
-                        fs::create_directories(target);
+                        if (entry.is_directory())
+                        {
+                            fs::create_directories(target);
+                        }
+                        else
+                        {
+                            fs::create_directories(target.parent_path());
+                            fs::copy_file(entry.path(), target, fs::copy_options::overwrite_existing);
+                        }
                     }
-                    else
-                    {
-                        fs::create_directories(target.parent_path());
-                        fs::copy_file(entry.path(), target, fs::copy_options::overwrite_existing);
-                    }
+                    INFO("Assets folder updated successfully.");
+                }
+                catch (const std::exception& e)
+                {
+                    FATAL("Failed to copy assets folder: %s", e.what());
+                    throw;
                 }
             }
             else
             {
-                WARN("No assets folder found in update package.");
+                WARN("No assets folder found at: %s", assets_src.string().c_str());
             }
 
-            // 2. Copy LICENSE.md
-            fs::path license_src = source_dir / "LICENSE.md";
-            fs::path license_dst = current_dir / "LICENSE.md";
-            if (fs::exists(license_src))
+            // 3. Copy documentation files
+            std::vector<std::string> docs = { "LICENSE.md", "README.md" };
+            for (const auto& doc : docs)
             {
-                fs::copy_file(license_src, license_dst, fs::copy_options::overwrite_existing);
-                INFO("Copied LICENSE.md");
-            }
-            else
-            {
-                WARN("LICENSE.md not found in update package.");
-            }
-
-            // 3. Copy masquerade.exe
-            fs::path exe_src = source_dir / "masquerade.exe";
-            fs::path exe_dst = current_dir / "masquerade.exe";
-            if (fs::exists(exe_src))
-            {
-                fs::copy_file(exe_src, exe_dst, fs::copy_options::overwrite_existing);
-                INFO("Copied masquerade.exe");
-            }
-            else
-            {
-                WARN("masquerade.exe not found in update package.");
+                fs::path doc_src = source_dir / doc;
+                fs::path doc_dst = current_dir / doc;
+                if (fs::exists(doc_src))
+                {
+                    fs::copy_file(doc_src, doc_dst, fs::copy_options::overwrite_existing);
+                    INFO("Copied: %s", doc.c_str());
+                }
+                else
+                {
+                    INFO("Note: %s not found in update package (not critical).", doc.c_str());
+                }
             }
         }
         catch (const std::exception& e)

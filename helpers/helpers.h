@@ -81,6 +81,8 @@
 #include <boost/beast/http.hpp>
 #include <boost/beast/version.hpp>
 #include <boost/beast/ssl.hpp>
+#include <boost/process.hpp>   
+#include <boost/asio/io_context.hpp>
 #endif
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/json_parser.hpp>
