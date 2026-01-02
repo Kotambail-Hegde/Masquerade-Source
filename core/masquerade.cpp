@@ -287,7 +287,7 @@ void displayNonPGEBasedFPS()
 {
 	if (debugConfig._DEBUG_PROFILER == true)
 	{
-		LOG("Non-PGE FPS: %d", profilerFrameRate);
+		INFO("Non-PGE FPS: %d", profilerFrameRate);
 		profilerFrameRate = ZERO;
 	}
 }
@@ -327,7 +327,7 @@ EMSCRIPTEN_KEEPALIVE
 void listEmFilesRecursive(const std::string& path = "/") {
     DIR* dir = opendir(path.c_str());
     if (!dir) {
-        LOG("Cannot open directory: %s", path.c_str());
+        INFO("Cannot open directory: %s", path.c_str());
         RETURN;
     }
 
@@ -338,7 +338,7 @@ void listEmFilesRecursive(const std::string& path = "/") {
         if (name == "." || name == "..") continue;
 
         std::string fullPath = path + (path.back() == '/' ? "" : "/") + name;
-        LOG("%s", fullPath.c_str());
+        INFO("%s", fullPath.c_str());
 
         struct stat st;
         if (stat(fullPath.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
@@ -351,9 +351,9 @@ void listEmFilesRecursive(const std::string& path = "/") {
 
 EMSCRIPTEN_KEEPALIVE
 void listEmFiles() {
-    LOG("____________________________________");
+    INFO("____________________________________");
     listEmFilesRecursive("/");
-    LOG("____________________________________");
+    INFO("____________________________________");
 }
 
 using Callback = void(*)();
@@ -521,7 +521,7 @@ public:
 
 		if (toEmulate == nullptr)
 		{
-			LOG("unsupported rom");
+			INFO("unsupported rom");
 			throw std::runtime_error("unsupported rom");
 		}
 		else
@@ -564,8 +564,8 @@ private:
 
 				if (_MUTE_AUDIO == YES)
 				{
-					LOG("AUDIO is by default MUTED");
-					LOG("Press M to toggle between MUTE/UNMUTE");
+					INFO("AUDIO is by default MUTED");
+					INFO("Press M to toggle between MUTE/UNMUTE");
 				}
 
 				_ENABLE_FRAME_LIMIT = to_bool(config.get<std::string>("mods._ENABLE_FRAME_LIMIT"));
@@ -606,7 +606,7 @@ private:
 			accumulator[level] += fElapsedTime;
 			if (accumulator[level] > 1.0f)
 			{
-				LOG("PGE FPS level %u : %u", level, frames[level]);
+				INFO("PGE FPS level %u : %u", level, frames[level]);
 				frames[level] = 0;
 				accumulator[level] = 0.0f;
 			}
@@ -788,7 +788,7 @@ private:
 
 		myFPS = current_instance->getEmulationFPS() * _XFPS;
 
-		LOG("Launching the %s Emulator", current_instance->getEmulatorName());
+		INFO("Launching the %s Emulator", current_instance->getEmulatorName());
 
 		if (debugConfig._DEBUG_MEMORY == true)
 		{
@@ -949,57 +949,127 @@ private:
 			RETURN;
 		}
 
+		// EMSCRIPTEN FIX: Convert to lowercase and replace spaces with underscores
+		// Emscripten's IDBFS has issues with uppercase letters and spaces in filenames
+		std::string sanitized_filename = filename;
+		
+		// Convert to lowercase
+		std::transform(sanitized_filename.begin(), sanitized_filename.end(), sanitized_filename.begin(),
+			[](unsigned char c) { return std::tolower(c); });
+		
+		// Replace spaces with underscores
+		std::replace(sanitized_filename.begin(), sanitized_filename.end(), ' ', '_');
+
+		if (sanitized_filename != filename)
+		{
+			INFO("Filename sanitized (lowercase + spaces → underscores):");
+			INFO("  Original: %s", filename.c_str());
+			INFO("  Sanitized: %s", sanitized_filename.c_str());
+		}
+
 		std::vector<std::string> extracted_files;
 		INC32 count = ONE;
 
-		// Save buffer to EM FS file
-		// Note that a normal file write in EM will store the content in its FS which is what we want
-		std::string persistent_path = "/persistent/" + filename;
+		// USE SANITIZED FILENAME HERE
+		std::string persistent_path = "/persistent/" + sanitized_filename;
 		INFO("File uploaded: %s (type: %s), size: %zu bytes", persistent_path.c_str(), mime_type.c_str(), buffer.size());
+		INFO("Filename length: %zu", sanitized_filename.length());
+		INFO("Has spaces: %s", (sanitized_filename.find(' ') != std::string::npos) ? "YES" : "NO");
+		INFO("Has uppercase: %s", (std::any_of(sanitized_filename.begin(), sanitized_filename.end(), [](unsigned char c) { return std::isupper(c); })) ? "YES" : "NO");
+
+		// Debug: list what's in /persistent before write
+		INFO("=== Contents of /persistent BEFORE write ===");
+		try {
+			for (const auto& entry : std::filesystem::directory_iterator("/persistent"))
+			{
+				INFO("  - %s", entry.path().filename().c_str());
+			}
+		} catch (const std::exception& e) {
+			INFO("Error listing directory: %s", e.what());
+		}
+
 		std::ofstream ofs(persistent_path, std::ios::binary);
 		if (!ofs)
 		{
-			LOG("Failed to open file for writing: %s", persistent_path.c_str());
+			INFO("CRITICAL: Failed to open file for writing: %s", persistent_path.c_str());
+			INFO("Errno: %d", errno);
 			RETURN;
 		}
+
+		INFO("File opened successfully for writing");
 		ofs.write(buffer.data(), buffer.size());
+
 		if (!ofs)
 		{
-			LOG("Failed to write data to file: %s", persistent_path.c_str());
-		}
-		ofs.close();
-
-		std::ifstream test(persistent_path, std::ios::binary);
-		if (test.good())
-		{
-			LOG("File verified on disk: %s", persistent_path.c_str());
+			INFO("CRITICAL: Failed to write data to file: %s", persistent_path.c_str());
+			INFO("Errno: %d", errno);
 		}
 		else
 		{
-			LOG("File NOT found after save: %s", persistent_path.c_str());
+			INFO("Data written successfully: %zu bytes", buffer.size());
+		}
+
+		ofs.close();
+		INFO("File closed");
+
+		// Debug: list what's in /persistent after write
+		INFO("=== Contents of /persistent AFTER write ===");
+		try {
+			for (const auto& entry : std::filesystem::directory_iterator("/persistent"))
+			{
+				INFO("  - %s (size: %zu bytes)", entry.path().filename().c_str(), std::filesystem::file_size(entry.path()));
+			}
+		} catch (const std::exception& e) {
+			INFO("Error listing directory: %s", e.what());
+		}
+
+		// Verify file exists
+		std::ifstream test(persistent_path, std::ios::binary);
+		if (test.good())
+		{
+			test.seekg(0, std::ios::end);
+			size_t file_size = test.tellg();
+			INFO("File verified on disk: %s (size: %zu bytes)", persistent_path.c_str(), file_size);
+		}
+		else
+		{
+			INFO("CRITICAL: File NOT readable after save: %s", persistent_path.c_str());
+			INFO("Errno: %d", errno);
 		}
 		test.close();
+
+		// Try to open it a different way
+		INFO("=== Attempting alternative file access ===");
+		struct stat file_stat;
+		if (stat(persistent_path.c_str(), &file_stat) == 0)
+		{
+			INFO("stat() succeeded: file size = %ld bytes", file_stat.st_size);
+		}
+		else
+		{
+			INFO("stat() failed: %d", errno);
+		}
 
 		std::string ext = get_extension(persistent_path.c_str());
 		if (strcmp(ext.c_str(), "zip") == 0)
 		{
-			LOG("It's a ZIP file!");
+			INFO("It's a ZIP file!");
 			count = extract_all_to_persistent_dir(persistent_path.c_str(), extracted_files);
 		}
 		else
 		{
-			extracted_files.emplace_back(filename);
+			// USE SANITIZED FILENAME HERE TOO
+			extracted_files.emplace_back(sanitized_filename);
 		}
 
+		INFO("Calling savePersistentFS...");
 		savePersistentFS(onSavePersistentFSComplete);
 
 		for (const auto& path : extracted_files)
 		{
 			auto it = std::find(recentlyOpenedList.begin(), recentlyOpenedList.end(), path);
-			// Check if the element was found
 			if (it != recentlyOpenedList.end())
 			{
-				// Element found, delete it
 				recentlyOpenedList.erase(it);
 			}
 			recentlyOpenedList.push_front(path);
@@ -1009,6 +1079,8 @@ private:
 			}
 			dynamicDragNDropAndMenuSelect.push_back(path);
 		}
+
+		INFO("=== handle_upload_file complete ===");
 	}
 #endif
 
@@ -1138,7 +1210,7 @@ private:
 				{
 					nfdchar_t* path;
 					NFD_PathSet_GetPath(outPaths, i, &path);
-					LOG("Opening %i: %s", (int)i, path);
+					INFO("Opening %i: %s", (int)i, path);
 					dynamicDragNDropAndMenuSelect.push_back(std::string(path));
 					// remember to free the pathset path with NFD_PathSet_FreePath (not NFD_FreePath!)
 					NFD_PathSet_FreePath(path);
@@ -1162,7 +1234,7 @@ private:
 
 			if (result == NFD_OKAY)
 			{
-				LOG("Opening : %s", outPath);
+				INFO("Opening : %s", outPath);
 				auto it = std::find(recentlyOpenedList.begin(), recentlyOpenedList.end(), std::string(outPath));
 				// Check if the element was found
 				if (it != recentlyOpenedList.end())
@@ -1210,7 +1282,7 @@ private:
 
 		if (result == NFD_OKAY)
 		{
-			LOG("Load : %s", outPath);
+			INFO("Load : %s", outPath);
 			auto it = std::find(recentlyOpenedList.begin(), recentlyOpenedList.end(), std::string(outPath));
 
 			if (type == ROM::GAME_BOY)
@@ -1262,7 +1334,7 @@ private:
 
 		if (result == NFD_OKAY)
 		{
-			LOG("Load : %s", outPath);
+			INFO("Load : %s", outPath);
 			auto it = std::find(recentlyOpenedList.begin(), recentlyOpenedList.end(), std::string(outPath));
 
 			std::string option = "spaceinvaders._" + type;
@@ -2077,7 +2149,7 @@ public:
 												{
 													if (ImGui::MenuItem(element.c_str()))
 													{
-														LOG("Opening : %s", element.c_str());
+														INFO("Opening : %s", element.c_str());
 														std::string copyOfElement = element;
 														auto it = std::find(recentlyOpenedList.begin(), recentlyOpenedList.end(), element);
 														// Check if the element was found
@@ -2617,7 +2689,7 @@ public:
 													hoverOverGameType = YES;
 													if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
 													{
-														LOG("%s", filePath.string().c_str());
+														INFO("%s", filePath.string().c_str());
 														dynamicDragNDropAndMenuSelect.push_back(filePath.string());
 														done = YES;
 													}
@@ -2657,7 +2729,7 @@ public:
 												// We will remove 'seleted/hovered color' here for this selectable and manually implement below
 												if (ImGui::Selectable((filePath.stem().string() + "##file").c_str(), isHoveringOverPath[ii], 0, ImVec2(selectableWidth, 0)))
 												{
-													LOG("%s", filePath.string().c_str());
+													INFO("%s", filePath.string().c_str());
 													dynamicDragNDropAndMenuSelect.push_back(filePath.string());
 													done = YES;
 												}
@@ -2730,7 +2802,7 @@ public:
 													// If the path is selected, this also should be considered
 													if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
 													{
-														LOG("%s", filePath.string().c_str());
+														INFO("%s", filePath.string().c_str());
 														dynamicDragNDropAndMenuSelect.push_back(filePath.string());
 														done = YES;
 													}
@@ -3510,9 +3582,7 @@ public:
 									else
 									{
 										// Restart -> Reset the URL such that rom information is stripped out and only bare minimum remains
-										emscripten_run_script(
-											"location.href = window.location.pathname.replace(/[^/]+$/, '') + 'masquerade.html';"
-										);
+										emscripten_run_script("location.href = window.location.pathname.replace(/[^/]+$/, '') + 'masquerade.html';");
 									}
 								}
 #endif
@@ -3703,27 +3773,27 @@ abstractEmulation_t* getType(int nFiles, std::array<std::string, MAX_NUMBER_ROMS
 
 		if ((rom[ZERO] == "-8080SST") || (toUpper(rom[ZERO]) == "-I8080SST"))
 		{
-			LOG("Setting up the 8080 SST environment");
+			INFO("Setting up the 8080 SST environment");
 			RETURN new spaceInvaders_t(nFiles, rom, config);
 		}
 		else if (toUpper(rom[ZERO]) == "-Z80SST")
 		{
-			LOG("Setting up the Z80 SST environment");
+			INFO("Setting up the Z80 SST environment");
 			RETURN new pacMan_t(nFiles, rom, config);
 		}
 		else if ((toUpper(rom[ZERO]) == "-R6502SST") || (toUpper(rom[ZERO]) == "-N6502SST"))
 		{
-			LOG("Setting up the Ricoh2A03 / NES6502 SST environment");
+			INFO("Setting up the Ricoh2A03 / NES6502 SST environment");
 			RETURN new NES_t(nFiles, rom, config, ce);
 		}
 		else if (toUpper(rom[ZERO]) == "-SM83SST")
 		{
-			LOG("Setting up the SM83 SST environment");
+			INFO("Setting up the SM83 SST environment");
 			RETURN new GBc_t(nFiles, rom, config, ce);
 		}
 		else if (toUpper(rom[ZERO]) == "-ARM7TDMISST")
 		{
-			LOG("Setting up the ARM7TDMI SST environment");
+			INFO("Setting up the ARM7TDMI SST environment");
 			RETURN new GBA_t(nFiles, rom, config);
 		}
 
@@ -3735,28 +3805,28 @@ abstractEmulation_t* getType(int nFiles, std::array<std::string, MAX_NUMBER_ROMS
 
 		if (_fileExtentionToEmulationPlatform.find(filepath.extension().string())->second != suspectedID)
 		{
-			LOG("ROM file is corrupted");
+			INFO("ROM file is corrupted");
 			RETURN new defaults_t;
 		}
 
 		if ((rom[ZERO] == "-8080") || (toUpper(rom[ZERO]) == "-I8080"))
 		{
-			LOG("Setting up the 8080 test environment");
+			INFO("Setting up the 8080 test environment");
 			RETURN new spaceInvaders_t(--nFiles, rom, config);
 		}
 		else if (toUpper(rom[ZERO]) == "-Z80")
 		{
-			LOG("Setting up the Z80 test environment");
+			INFO("Setting up the Z80 test environment");
 			RETURN new pacMan_t(--nFiles, rom, config);
 		}
 		else if (toUpper(rom[ZERO]) == "-6502")
 		{
-			LOG("Setting up the 6502 test environment");
+			INFO("Setting up the 6502 test environment");
 			RETURN new NES_t(--nFiles, rom, config, ce);
 		}
 		else
 		{
-			LOG("Undefined Core");
+			INFO("Undefined Core");
 			RETURN new defaults_t;
 		}
 	}
@@ -3772,7 +3842,7 @@ abstractEmulation_t* getType(int nFiles, std::array<std::string, MAX_NUMBER_ROMS
 				}
 				else
 				{
-					LOG("Setting up the GBA environment in replay mode");
+					INFO("Setting up the GBA environment in replay mode");
 					RETURN new GBA_t(nFiles, rom, config);
 				}
 			}
@@ -3807,7 +3877,7 @@ abstractEmulation_t* getType(int nFiles, std::array<std::string, MAX_NUMBER_ROMS
 
 				if (_fileExtentionToEmulationPlatform.find(filepath[count].extension().string())->second != suspectedID)
 				{
-					LOG("Some of the ROM files are corrupted");
+					INFO("Some of the ROM files are corrupted");
 					delete[] filepath;
 					RETURN new defaults_t;
 				}
@@ -3839,11 +3909,11 @@ FLAG startMasquerade(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLA
 {
 	FLAG status = SUCCESS;
 
-	LOG("Running Masquerade Emulator!");
-	LOG("If you experience screen tearing -> Please ensure V-Sync is enabled");
-	LOG("Nvidia Control Panel > 3D Settings > Global settings > V - Sync->ON");
-	LOG("If you experience low/limitted FPS -> Please ensure V-Sync is disabled");
-	LOG("Nvidia Control Panel > 3D Settings > Global settings > V - Sync->OFF");
+	INFO("Running Masquerade Emulator!");
+	INFO("If you experience screen tearing -> Please ensure V-Sync is enabled");
+	INFO("Nvidia Control Panel > 3D Settings > Global settings > V - Sync->ON");
+	INFO("If you experience low/limitted FPS -> Please ensure V-Sync is disabled");
+	INFO("Nvidia Control Panel > 3D Settings > Global settings > V - Sync->OFF");
 
 	// check if scaling is needed
 	_XSCALE = config.get<DIM32>("mods._XSCALE");
@@ -3883,9 +3953,9 @@ void secondaryBootLoader(int argc, std::array<std::string, MAX_NUMBER_ROMS_PER_P
 {
 	if (argc == SINGLE_ROM_FILE)
 	{
-		LOG("ROM loaded: %s", argv[ZERO].c_str());
-		LOG("ROM length: %zu", argv[ZERO].length());
-		LOG("ROM contains spaces: %s", (argv[ZERO].find(' ') != std::string::npos) ? "YES" : "NO");
+		INFO("ROM loaded: %s", argv[ZERO].c_str());
+		INFO("ROM length: %zu", argv[ZERO].length());
+		INFO("ROM contains spaces: %s", (argv[ZERO].find(' ') != std::string::npos) ? "YES" : "NO");
 
 		auto it = std::find(recentlyOpenedList.begin(), recentlyOpenedList.end(), argv[ZERO].c_str());
 		// Check if the element was found
@@ -3902,10 +3972,10 @@ void secondaryBootLoader(int argc, std::array<std::string, MAX_NUMBER_ROMS_PER_P
 	}
 	else if (argc > SINGLE_ROM_FILE)
 	{
-		LOG("ROM file loaded:");
+		INFO("ROM file loaded:");
 		for (int count = ZERO; count < argc; count++)
 		{
-			LOG("%s", argv[count].c_str());
+			INFO("%s", argv[count].c_str());
 		}
 	}
 
@@ -3928,7 +3998,7 @@ void postPrimaryBootLoader()
 	_CONFIG_LOCATION = "assets/CONFIG.ini";
 #endif
 
-	LOG("Searching for %s", _CONFIG_LOCATION.c_str());
+	INFO("Searching for %s", _CONFIG_LOCATION.c_str());
 
 	// --- Read CONFIG.ini
 	try
@@ -3978,13 +4048,13 @@ void postPrimaryBootLoader()
 			throw std::runtime_error("Failed to open file: " + _IMGUI_LOCATION);
 		}
 
-		LOG("Not able to find IMGUI.ini");
-		LOG("Creating a masquerade default for now!");
+		INFO("Not able to find IMGUI.ini");
+		INFO("Creating a masquerade default for now!");
 		out << imguiDefaultIni;
 		out.close();
 	}
 
-	LOG("Searching for %s", _IMGUI_LOCATION.c_str());
+	INFO("Searching for %s", _IMGUI_LOCATION.c_str());
 
 	createLUTForCRC();
 
@@ -4071,7 +4141,7 @@ int main(int argc, char* argv[])
 	{
 		if (strcmp(gArgv[ONE], "-h") == ZERO || strcmp(gArgv[ONE], "--help") == ZERO)
 		{
-			LOG("Figure it out yourself...");
+			INFO("Figure it out yourself...");
 			RETURN ZERO;
 		}
 	}
