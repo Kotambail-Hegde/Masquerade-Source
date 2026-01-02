@@ -969,6 +969,17 @@ private:
 		}
 		ofs.close();
 
+		std::ifstream test(persistent_path, std::ios::binary);
+		if (test.good())
+		{
+			LOG("File verified on disk: %s", persistent_path.c_str());
+		}
+		else
+		{
+			LOG("File NOT found after save: %s", persistent_path.c_str());
+		}
+		test.close();
+
 		std::string ext = get_extension(persistent_path.c_str());
 		if (strcmp(ext.c_str(), "zip") == 0)
 		{
@@ -3873,6 +3884,8 @@ void secondaryBootLoader(int argc, std::array<std::string, MAX_NUMBER_ROMS_PER_P
 	if (argc == SINGLE_ROM_FILE)
 	{
 		LOG("ROM loaded: %s", argv[ZERO].c_str());
+		LOG("ROM length: %zu", argv[ZERO].length());
+		LOG("ROM contains spaces: %s", (argv[ZERO].find(' ') != std::string::npos) ? "YES" : "NO");
 
 		auto it = std::find(recentlyOpenedList.begin(), recentlyOpenedList.end(), argv[ZERO].c_str());
 		// Check if the element was found

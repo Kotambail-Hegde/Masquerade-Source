@@ -5,27 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no" />
     <title>Dear ImGui Emscripten example</title>
     <style>
-      * {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-      }
-      html, body {
+      body { margin: 0; background-color: black }
+      /* FIXME: with our GLFW example this block seems to break resizing and io.DisplaySize gets stuck */
+      .emscripten {
+        position: absolute;
+        top: 0px;
+        left: 0px;
+        margin: 0px;
+        border: 0;
         width: 100%;
         height: 100%;
         overflow: hidden;
-        background-color: black;
-        touch-action: none;
-      }
-      .emscripten {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        border: 0;
-        margin: 0;
-        padding: 0;
         display: block;
         image-rendering: optimizeSpeed;
         image-rendering: -moz-crisp-edges;
@@ -43,27 +33,8 @@
 
     <script type="text/javascript">
       var Module = {
-        preRun: [
-          function() {
-            // PRE-initialize canvas size BEFORE module loads (prevents flash of wrong size)
-            var canvas = document.getElementById('canvas');
-            if (canvas) {
-              canvas.width = window.innerWidth;
-              canvas.height = window.innerHeight;
-              console.log('Canvas pre-sized to: ' + canvas.width + 'x' + canvas.height);
-            }
-          }
-        ],
-        postRun: [
-          function() {
-            // POST-load resize to ensure ImGui has correct dimensions
-            var canvas = document.getElementById('canvas');
-            if (canvas) {
-              window.dispatchEvent(new Event('resize'));
-              console.log('Canvas post-resize triggered');
-            }
-          }
-        ],
+        preRun: [],
+        postRun: [],
         print: (function () {
           return function (text) {
             text = Array.prototype.slice.call(arguments).join(' ');
@@ -93,31 +64,18 @@
         var romCount = parseInt(params.get("roms") || "0", 10);
         Module.arguments = [];
 
-        console.log('=== ROM LOADING DEBUG ===');
-        console.log('Total ROMs to load: ' + romCount);
-
 		for (let i = 0; i < romCount; ++i) {
 		  let rom = params.get("rom" + i);
 		  if (rom) {
-		    console.log('ROM' + i + ' RAW from URL: "' + rom + '"');
-		    
-			// Decode URL encoding (handles spaces, capitals, numbers, special chars)
-			rom = decodeURIComponent(rom);
-			console.log('ROM' + i + ' after decodeURIComponent: "' + rom + '"');
-
 			// GH-Pages fix: remove leading slash in URL parameter
 			rom = rom.replace(/^\//, "");
-			console.log('ROM' + i + ' after removing leading slash: "' + rom + '"');
 
 			// Add slash back because Emscripten paths must start with /
 			rom = "/" + rom;
-			console.log('ROM' + i + ' FINAL path: "' + rom + '"');
 
 			Module.arguments.push(rom);
 		  }
 		}
-		
-		console.log('=== ROM LOADING COMPLETE ===');
       })();
 
       window.onerror = function (event) {
