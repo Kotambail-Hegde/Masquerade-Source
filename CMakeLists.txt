@@ -526,7 +526,7 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
             "-msimd128"
             "-fno-math-errno"
             "-fno-rtti"
-            "-sSINGLE_FILE=1"
+            #"-sSINGLE_FILE=1"
         )
     else()
         message(STATUS "Using native Clang")
