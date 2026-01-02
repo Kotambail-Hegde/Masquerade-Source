@@ -67,6 +67,9 @@
 		for (let i = 0; i < romCount; ++i) {
 		  let rom = params.get("rom" + i);
 		  if (rom) {
+			// Decode URL encoding (handles spaces, capitals, numbers, special chars)
+			rom = decodeURIComponent(rom);
+
 			// GH-Pages fix: remove leading slash in URL parameter
 			rom = rom.replace(/^\//, "");
 
@@ -74,6 +77,7 @@
 			rom = "/" + rom;
 
 			Module.arguments.push(rom);
+			console.log('ROM argument added: ' + rom);
 		  }
 		}
       })();
