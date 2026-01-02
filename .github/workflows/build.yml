@@ -436,9 +436,9 @@ jobs:
                 external/SDL
                 external/emscripten-browser-file
                 external/boost
-              key: emscripten-external-all-v1-${{ hashFiles('.github/workflows/*.yml') }}
+              key: emscripten-external-all-v3-${{ hashFiles('.github/workflows/*.yml') }}
               restore-keys: |
-                emscripten-external-all-v1-
+                emscripten-external-all-v3-
 
           # --- Cache SDL3 (Emscripten build + install)
           - name: Cache SDL3 Emscripten
@@ -448,9 +448,9 @@ jobs:
               path: |
                 external/SDL-build/emscripten
                 external/SDL-install/emscripten
-              key: sdl3-emscripten-v2-${{ hashFiles('external/SDL/**') }}
+              key: sdl3-emscripten-v3-${{ hashFiles('external/SDL/**') }}
               restore-keys: |
-                sdl3-emscripten-v2-
+                sdl3-emscripten-v3-
 
           # --- Clone dependencies
           - name: Clone dependencies
