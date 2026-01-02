@@ -948,38 +948,89 @@ private:
 			INFO("Empty Buffer");
 			RETURN;
 		}
-
+		
 		std::vector<std::string> extracted_files;
 		INC32 count = ONE;
-
-		// Save buffer to EM FS file
-		// Note that a normal file write in EM will store the content in its FS which is what we want
+		
+		// Use original filename AS-IS to debug
 		std::string persistent_path = "/persistent/" + filename;
 		INFO("File uploaded: %s (type: %s), size: %zu bytes", persistent_path.c_str(), mime_type.c_str(), buffer.size());
+		INFO("Filename length: %zu", filename.length());
+		INFO("Has spaces: %s", (filename.find(' ') != std::string::npos) ? "YES" : "NO");
+		
+		// Debug: list what's in /persistent before write
+		LOG("=== Contents of /persistent BEFORE write ===");
+		try {
+			for (const auto& entry : std::filesystem::directory_iterator("/persistent"))
+			{
+				LOG("  - %s", entry.path().filename().c_str());
+			}
+		} catch (const std::exception& e) {
+			LOG("Error listing directory: %s", e.what());
+		}
+		
 		std::ofstream ofs(persistent_path, std::ios::binary);
 		if (!ofs)
 		{
-			LOG("Failed to open file for writing: %s", persistent_path.c_str());
+			LOG("CRITICAL: Failed to open file for writing: %s", persistent_path.c_str());
+			LOG("Errno: %d", errno);
 			RETURN;
 		}
+		
+		LOG("File opened successfully for writing");
 		ofs.write(buffer.data(), buffer.size());
+		
 		if (!ofs)
 		{
-			LOG("Failed to write data to file: %s", persistent_path.c_str());
-		}
-		ofs.close();
-
-		std::ifstream test(persistent_path, std::ios::binary);
-		if (test.good())
-		{
-			LOG("File verified on disk: %s", persistent_path.c_str());
+			LOG("CRITICAL: Failed to write data to file: %s", persistent_path.c_str());
+			LOG("Errno: %d", errno);
 		}
 		else
 		{
-			LOG("File NOT found after save: %s", persistent_path.c_str());
+			LOG("Data written successfully: %zu bytes", buffer.size());
+		}
+		
+		ofs.close();
+		LOG("File closed");
+		
+		// Debug: list what's in /persistent after write
+		LOG("=== Contents of /persistent AFTER write ===");
+		try {
+			for (const auto& entry : std::filesystem::directory_iterator("/persistent"))
+			{
+				LOG("  - %s (size: %zu bytes)", entry.path().filename().c_str(), std::filesystem::file_size(entry.path()));
+			}
+		} catch (const std::exception& e) {
+			LOG("Error listing directory: %s", e.what());
+		}
+		
+		// Verify file exists
+		std::ifstream test(persistent_path, std::ios::binary);
+		if (test.good())
+		{
+			test.seekg(0, std::ios::end);
+			size_t file_size = test.tellg();
+			LOG("File verified on disk: %s (size: %zu bytes)", persistent_path.c_str(), file_size);
+		}
+		else
+		{
+			LOG("CRITICAL: File NOT readable after save: %s", persistent_path.c_str());
+			LOG("Errno: %d", errno);
 		}
 		test.close();
-
+		
+		// Try to open it a different way
+		LOG("=== Attempting alternative file access ===");
+		struct stat file_stat;
+		if (stat(persistent_path.c_str(), &file_stat) == 0)
+		{
+			LOG("stat() succeeded: file size = %ld bytes", file_stat.st_size);
+		}
+		else
+		{
+			LOG("stat() failed: %d", errno);
+		}
+		
 		std::string ext = get_extension(persistent_path.c_str());
 		if (strcmp(ext.c_str(), "zip") == 0)
 		{
@@ -990,16 +1041,15 @@ private:
 		{
 			extracted_files.emplace_back(filename);
 		}
-
+		
+		LOG("Calling savePersistentFS...");
 		savePersistentFS(onSavePersistentFSComplete);
-
+		
 		for (const auto& path : extracted_files)
 		{
 			auto it = std::find(recentlyOpenedList.begin(), recentlyOpenedList.end(), path);
-			// Check if the element was found
 			if (it != recentlyOpenedList.end())
 			{
-				// Element found, delete it
 				recentlyOpenedList.erase(it);
 			}
 			recentlyOpenedList.push_front(path);
@@ -1009,6 +1059,8 @@ private:
 			}
 			dynamicDragNDropAndMenuSelect.push_back(path);
 		}
+		
+		LOG("=== handle_upload_file complete ===");
 	}
 #endif
 

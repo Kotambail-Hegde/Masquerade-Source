@@ -43,7 +43,6 @@ PROTOTYPE-0152 								: Design philosophy used is DP3 and implementation uses I
 
 **TODOs*****************************************************************************************************************************************************
 
-* masquerade (P0052)						-> Emscripten CI builds appear "zoomed". This issue is not seen in emscripten local builds
 * masquerade (P0052)						-> Emscripten builds is not able to accept rom with captials, numbers, - or _
 * masquerade (P0052)						-> Linux builds for gb is getting stuck with partial BIOS. Implication is that there is some non-portable C++ code (bit fields???)
 * masquerade (P0052)/OTA					-> Size limit. Need to remove size limit
