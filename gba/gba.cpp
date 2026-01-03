@@ -367,7 +367,7 @@ void GBA_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void*
 {
 	uint8_t indexToCheck = 0;
 
-	if (!rom[indexToCheck].empty())
+	if (!rom[indexToCheck].empty() || (ROM_TYPE == ROM::TEST_SST))
 	{
 		if (!initializeEmulator())
 		{
@@ -3245,44 +3245,6 @@ void GBA_t::fetchAndDecode(uint32_t newPC)
 
 void GBA_t::runCPUPipeline()
 {
-#if _DEBUG
-	// NOTE: 15006 in masquerade-gba is 17049 in nba before internal cycles were added for arm.gba (BIOS BYPASSED)
-	// NOTE: 14412 in masquerade-gba is 27309 in nba for IE.gba (BIOS BYPASSED)
-	// NOTE: 707850 in masquerade-gba is 675687 in nba for BIOS (BEFORE HALT IMPLEMENTATION)
-	// NOTE: 829250 in masquerade-gba is 797084 in nba for BIOS (BEFORE HALT IMPLEMENTATION)
-	// NOTE: 832893 in masquerade-gba is 800727 in nba for BIOS (BEFORE HALT IMPLEMENTATION)
-	// NOTE: 832975 in masquerade-gba is 800809 in nba for BIOS (BEFORE HALT IMPLEMENTATION)
-	// NOTE: 977672 in masquerade-gba is APPROXIMATELY 800813 in nba for BIOS (BEFORE HALT IMPLEMENTATION)
-	// NOTE: 977688 in masquerade-gba is 800829 in nba for BIOS (BEFORE HALT IMPLEMENTATION)
-	// NOTE: 978688 in masquerade-gba is 801828 in nba for BIOS (BEFORE HALT IMPLEMENTATION)
-	// NOTE: VBLANK interrupts in nba @ (BEFORE HALT IMPLEMENTATION)	:807860	 -> 811373	-> 814886  -> 818399  -> 821912	 -> 825436
-	// NOTE: VBLANK interrupts in masquerade-gba @ 						:1273235 -> 1421016 -> 1568797 -> 1716580 -> 1864361 -> 2012143
-
-	// NOTE: 7324044 in masquerade-gba is 7445797 in nba for BIOS with HALT implemented (BIOS -> ROM)
-
-	static COUNTER64 threshold = UINT64_MAX;
-
-	if (emulationCounter[ONE] == threshold)
-	{
-		volatile FLAG breakpoint0 = 1;
-	}
-
-	if (emulationCounter[ONE] > threshold && pGBA_cpuInstance->pipeline.decodeStageOpCode.opCode.rawOpCode == 0xe8bd4010)
-	{
-		volatile FLAG breakpoint1 = 1;
-	}
-
-#if (DISABLED)
-	if (emulationCounter[ONE] < threshold - 500)
-	{
-		;
-	}
-	else
-	{
-		;
-	}
-#endif
-#endif
 	if (pGBA_cpuInstance->registers.pc >= GAMEPAK_ROM_WS0_START_ADDRESS)
 	{
 		pGBA_instance->GBA_state.emulatorStatus.isBiosExecutionDone = YES;
@@ -5171,49 +5133,46 @@ FLAG GBA_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 	pGBA_display->wasVblankJustTriggered = NO;
 	pGBA_display->didLCDModeChangeJustNow = NO;
 
-	if (ROM_TYPE == ROM::COMPARE)
+	if (ROM_TYPE == ROM::TEST_SST)
 	{
-#if _DEBUG
-		if (repSkyLogIttr == 1362 - 1)
-		{
-			volatile int breakpoint = RESET;
-		}
-#endif
-
-		FLAG matches = YES;
-		SCOUNTER8 failedRegister = -ONE;
-		if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_r0 == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_0)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_0);
-		if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_r1 == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_1)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_1);
-		if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_r2 == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_2)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_2);
-		if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_r3 == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_3)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_3);
-		if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_r4 == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_4)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_4);
-		if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_r5 == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_5)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_5);
-		if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_r6 == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_6)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_6);
-		if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_r7 == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_7)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_7);
-		if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_r8 == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_8)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_8);
-		if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_r9 == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_9)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_9);
-		if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_r10 == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_10)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_10);
-		if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_r11 == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_11)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_11);
-		if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_r12 == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_12)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_12);
-		if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_r13 == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_13)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_13);
-		if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_r14 == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_14)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_14);
-		if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_r15 == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_15)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_15);
-		if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_CPSR == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_16)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_16);
-		if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_SPSR == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_17)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_17);
-
-		if (matches == NO || failedRegister != -ONE)
-		{
-			FATAL("Compare Mismatch Detected for register R%d on iteration %u", failedRegister, repSkyLogIttr);
-		}
-
-		++repSkyLogIttr;
+		FATAL("ARM7TDMI SST are not supported Yet");
+		RETURN FAILURE;
 	}
+	else
+	{
+		if (ROM_TYPE == ROM::COMPARE)
+		{
+			FLAG matches = YES;
+			SCOUNTER8 failedRegister = -ONE;
+			if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_r0 == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_0)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_0);
+			if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_r1 == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_1)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_1);
+			if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_r2 == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_2)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_2);
+			if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_r3 == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_3)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_3);
+			if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_r4 == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_4)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_4);
+			if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_r5 == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_5)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_5);
+			if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_r6 == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_6)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_6);
+			if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_r7 == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_7)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_7);
+			if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_r8 == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_8)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_8);
+			if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_r9 == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_9)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_9);
+			if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_r10 == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_10)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_10);
+			if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_r11 == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_11)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_11);
+			if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_r12 == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_12)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_12);
+			if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_r13 == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_13)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_13);
+			if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_r14 == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_14)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_14);
+			if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_r15 == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_15)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_15);
+			if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_CPSR == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_16)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_16);
+			if (matches) matches &= (repSkyLog[repSkyLogIttr].rep_SPSR == cpuReadRegister(getCurrentlyValidRegisterBank(), REGISTER_TYPE::RT_17)); else if (failedRegister == -ONE) failedRegister = TO_UINT(REGISTER_TYPE::RT_17);
 
-	processSOC();
+			if (matches == NO || failedRegister != -ONE)
+			{
+				FATAL("Compare Mismatch Detected for register R%d on iteration %u", failedRegister, repSkyLogIttr);
+			}
 
-#if (DISABLED)
-	runDebugger();
-#endif
+			++repSkyLogIttr;
+		}
+
+		processSOC();
+	}
 
 	RETURN pGBA_display->wasVblankJustTriggered;
 }
@@ -5250,9 +5209,6 @@ FLAG GBA_t::initializeEmulator()
 
 	pGBA_cpuInstance->haltCntState = HALT_CONTROLLER::RUN;
 
-	WARN("Running in Cycle Count Accuracy Mode instead of Cycle Accuracy Mode");
-	pGBA_instance->GBA_state.emulatorStatus.isCycleAccurate = NO;
-
 	// Initialize the backup interface
 
 	pGBA_instance->GBA_state.emulatorStatus.backup.flash.erase4kbPageNumber = (SSTATE32)INVALID;
@@ -5271,125 +5227,128 @@ FLAG GBA_t::initializeEmulator()
 	memset(pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[ZERO], 0xFF, sizeof(pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[ZERO]));
 	memset(pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[ONE], 0xFF, sizeof(pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[ONE]));
 
-	// initialization specific to OpenGL
+	if (isCLI() == NO)
+	{
+		// initialization specific to OpenGL
 #if (GL_FIXED_FUNCTION_PIPELINE == YES) && !defined(IMGUI_IMPL_OPENGL_ES2) && !defined(IMGUI_IMPL_OPENGL_ES3)
-	glEnable(GL_TEXTURE_2D);
-	glGenFramebuffers(1, &frame_buffer);
-	glBindFramebuffer(GL_FRAMEBUFFER, frame_buffer);
+		glEnable(GL_TEXTURE_2D);
+		glGenFramebuffers(1, &frame_buffer);
+		glBindFramebuffer(GL_FRAMEBUFFER, frame_buffer);
 
-	glGenTextures(1, &masquerade_texture);
-	glBindTexture(GL_TEXTURE_2D, masquerade_texture);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, getScreenWidth() * FRAME_BUFFER_SCALE, getScreenHeight() * FRAME_BUFFER_SCALE, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glGenTextures(1, &masquerade_texture);
+		glBindTexture(GL_TEXTURE_2D, masquerade_texture);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, getScreenWidth() * FRAME_BUFFER_SCALE, getScreenHeight() * FRAME_BUFFER_SCALE, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 
-	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, masquerade_texture, 0);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, masquerade_texture, 0);
 
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-	glGenTextures(1, &gameboyAdvance_texture);
-	glBindTexture(GL_TEXTURE_2D, gameboyAdvance_texture);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, getScreenWidth(), getScreenHeight(), 0, GL_RGBA, GL_UNSIGNED_BYTE, (GLvoid*)pGBA_instance->GBA_state.display.imGuiBuffer.imGuiBuffer1D);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glGenTextures(1, &gameboyAdvance_texture);
+		glBindTexture(GL_TEXTURE_2D, gameboyAdvance_texture);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, getScreenWidth(), getScreenHeight(), 0, GL_RGBA, GL_UNSIGNED_BYTE, (GLvoid*)pGBA_instance->GBA_state.display.imGuiBuffer.imGuiBuffer1D);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 
-	// for "Dot Matrix"
-	glGenTextures(1, &matrix_texture);
+		// for "Dot Matrix"
+		glGenTextures(1, &matrix_texture);
 
-	glBindTexture(GL_TEXTURE_2D, matrix_texture);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 4, 4, 0, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8, (GLvoid*)matrix);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+		glBindTexture(GL_TEXTURE_2D, matrix_texture);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 4, 4, 0, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8, (GLvoid*)matrix);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 #else
 	// 1. Setup framebuffer
-	GL_CALL(glGenFramebuffers(1, &frame_buffer));
-	GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, frame_buffer));
+		GL_CALL(glGenFramebuffers(1, &frame_buffer));
+		GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, frame_buffer));
 
-	// 2. Create texture to attach to framebuffer (masquerade_texture)
-	GL_CALL(glGenTextures(1, &masquerade_texture));
-	GL_CALL(glBindTexture(GL_TEXTURE_2D, masquerade_texture));
-	GL_CALL(glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, getScreenWidth() * FRAME_BUFFER_SCALE, getScreenHeight() * FRAME_BUFFER_SCALE, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr));
-	GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST));
-	GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST));
-	GL_CALL(glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, masquerade_texture, 0));
+		// 2. Create texture to attach to framebuffer (masquerade_texture)
+		GL_CALL(glGenTextures(1, &masquerade_texture));
+		GL_CALL(glBindTexture(GL_TEXTURE_2D, masquerade_texture));
+		GL_CALL(glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, getScreenWidth() * FRAME_BUFFER_SCALE, getScreenHeight() * FRAME_BUFFER_SCALE, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr));
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST));
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST));
+		GL_CALL(glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, masquerade_texture, 0));
 
-	// Optional: Check framebuffer status
-	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-	{
-		LOG("Error: Framebuffer is not complete!");
-	}
-	GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, 0)); // Unbind
+		// Optional: Check framebuffer status
+		if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+		{
+			LOG("Error: Framebuffer is not complete!");
+		}
+		GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, 0)); // Unbind
 
-	// 3. Game Boy Advance texture (used to upload emulated framebuffer)
-	GL_CALL(glGenTextures(1, &gameboyAdvance_texture));
-	GL_CALL(glBindTexture(GL_TEXTURE_2D, gameboyAdvance_texture));
-	GL_CALL(glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, getScreenWidth(), getScreenHeight(), 0, GL_RGBA, GL_UNSIGNED_BYTE, (GLvoid*)pGBA_instance->GBA_state.display.imGuiBuffer.imGuiBuffer1D));
-	GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST));
-	GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST));
+		// 3. Game Boy Advance texture (used to upload emulated framebuffer)
+		GL_CALL(glGenTextures(1, &gameboyAdvance_texture));
+		GL_CALL(glBindTexture(GL_TEXTURE_2D, gameboyAdvance_texture));
+		GL_CALL(glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, getScreenWidth(), getScreenHeight(), 0, GL_RGBA, GL_UNSIGNED_BYTE, (GLvoid*)pGBA_instance->GBA_state.display.imGuiBuffer.imGuiBuffer1D));
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST));
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST));
 
-	// 4. Dot Matrix overlay texture
-	GL_CALL(glGenTextures(1, &matrix_texture));
-	GL_CALL(glBindTexture(GL_TEXTURE_2D, matrix_texture));
-	GL_CALL(glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 4, 4, 0, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8, (GLvoid*)matrix));
-	GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST));
-	GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST));
-	GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT));
-	GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT));
+		// 4. Dot Matrix overlay texture
+		GL_CALL(glGenTextures(1, &matrix_texture));
+		GL_CALL(glBindTexture(GL_TEXTURE_2D, matrix_texture));
+		GL_CALL(glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 4, 4, 0, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8, (GLvoid*)matrix));
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST));
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST));
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT));
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT));
 
-	// 5. Fullscreen Quad VAO/VBO (for textured quad rendering)
-	float fullscreenVertices[] = {
-		//  X     Y      U     V
-		-1.0f,  1.0f,  0.0f, 1.0f,  // Top-left
-		-1.0f, -1.0f,  0.0f, 0.0f,  // Bottom-left
-		 1.0f, -1.0f,  1.0f, 0.0f,  // Bottom-right
+		// 5. Fullscreen Quad VAO/VBO (for textured quad rendering)
+		float fullscreenVertices[] = {
+			//  X     Y      U     V
+			-1.0f,  1.0f,  0.0f, 1.0f,  // Top-left
+			-1.0f, -1.0f,  0.0f, 0.0f,  // Bottom-left
+			 1.0f, -1.0f,  1.0f, 0.0f,  // Bottom-right
 
-		-1.0f,  1.0f,  0.0f, 1.0f,  // Top-left
-		 1.0f, -1.0f,  1.0f, 0.0f,  // Bottom-right
-		 1.0f,  1.0f,  1.0f, 1.0f   // Top-right
-	};
+			-1.0f,  1.0f,  0.0f, 1.0f,  // Top-left
+			 1.0f, -1.0f,  1.0f, 0.0f,  // Bottom-right
+			 1.0f,  1.0f,  1.0f, 1.0f   // Top-right
+		};
 
-	GL_CALL(glGenVertexArrays(1, &fullscreenVAO));
-	GL_CALL(glBindVertexArray(fullscreenVAO));
+		GL_CALL(glGenVertexArrays(1, &fullscreenVAO));
+		GL_CALL(glBindVertexArray(fullscreenVAO));
 
-	GL_CALL(glGenBuffers(1, &fullscreenVBO));
-	GL_CALL(glBindBuffer(GL_ARRAY_BUFFER, fullscreenVBO));
-	GL_CALL(glBufferData(GL_ARRAY_BUFFER, sizeof(fullscreenVertices), fullscreenVertices, GL_STATIC_DRAW));
+		GL_CALL(glGenBuffers(1, &fullscreenVBO));
+		GL_CALL(glBindBuffer(GL_ARRAY_BUFFER, fullscreenVBO));
+		GL_CALL(glBufferData(GL_ARRAY_BUFFER, sizeof(fullscreenVertices), fullscreenVertices, GL_STATIC_DRAW));
 
-	// Attribute 0: position (vec2)
-	GL_CALL(glEnableVertexAttribArray(0));
-	GL_CALL(glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0));
+		// Attribute 0: position (vec2)
+		GL_CALL(glEnableVertexAttribArray(0));
+		GL_CALL(glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0));
 
-	// Attribute 1: UV (vec2)
-	GL_CALL(glEnableVertexAttribArray(1));
-	GL_CALL(glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float))));
+		// Attribute 1: UV (vec2)
+		GL_CALL(glEnableVertexAttribArray(1));
+		GL_CALL(glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float))));
 
-	GL_CALL(glBindVertexArray(0));
+		GL_CALL(glBindVertexArray(0));
 
-	std::string shaderPath;
+		std::string shaderPath;
 #ifndef __EMSCRIPTEN__
-	shaderPath = pt.get<std::string>("internal._working_directory");
+		shaderPath = pt.get<std::string>("internal._working_directory");
 #else
-	shaderPath = "assets/internal";
+		shaderPath = "assets/internal";
 #endif
 
-	// 6. Compile passthrough shader
-	shaderProgramSource_t passthroughShader = parseShader(shaderPath + "/shaders/passthrough.shaders");
-	shaderProgramBasic = createShader(passthroughShader.vertexSource, passthroughShader.fragmentSource);
-	// 7. Compile blend shader (for LCD effect)
-	shaderProgramSource_t blendShader = parseShader(shaderPath + "/shaders/blend.shaders");
-	shaderProgramBlend = createShader(blendShader.vertexSource, blendShader.fragmentSource);
+		// 6. Compile passthrough shader
+		shaderProgramSource_t passthroughShader = parseShader(shaderPath + "/shaders/passthrough.shaders");
+		shaderProgramBasic = createShader(passthroughShader.vertexSource, passthroughShader.fragmentSource);
+		// 7. Compile blend shader (for LCD effect)
+		shaderProgramSource_t blendShader = parseShader(shaderPath + "/shaders/blend.shaders");
+		shaderProgramBlend = createShader(blendShader.vertexSource, blendShader.fragmentSource);
 
-	DEBUG("PASSTHROUGH VERTEX");
-	DEBUG("%s", passthroughShader.vertexSource.c_str());
-	DEBUG("PASSTHROUGH FRAGMENT");
-	DEBUG("%s", passthroughShader.fragmentSource.c_str());
-	DEBUG("BLEND VERTEX");
-	DEBUG("%s", blendShader.vertexSource.c_str());
-	DEBUG("BLEND FRAGMENT");
-	DEBUG("%s", blendShader.fragmentSource.c_str());
+		DEBUG("PASSTHROUGH VERTEX");
+		DEBUG("%s", passthroughShader.vertexSource.c_str());
+		DEBUG("PASSTHROUGH FRAGMENT");
+		DEBUG("%s", passthroughShader.fragmentSource.c_str());
+		DEBUG("BLEND VERTEX");
+		DEBUG("%s", blendShader.vertexSource.c_str());
+		DEBUG("BLEND FRAGMENT");
+		DEBUG("%s", blendShader.fragmentSource.c_str());
 #endif
+	}
 
 	RETURN status;
 }
@@ -5839,7 +5798,6 @@ FLAG GBA_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 	}
 	else
 	{
-		FATAL("Unsupported ROM type for GBA : %d", TO_UINT(ROM_TYPE));
 		RETURN false;
 	}
 

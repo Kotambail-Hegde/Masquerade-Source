@@ -43,6 +43,7 @@ PROTOTYPE-0152 								: Design philosophy used is DP3 and implementation uses I
 
 **TODOs*****************************************************************************************************************************************************
 
+* masquerade (P0052)/gameboy advance		-> Integrate ARM7TDMI SST (https://github.com/SingleStepTests/ARM7TDMI)
 * masquerade (P0052)						-> Linux builds for gb is getting stuck with partial BIOS. Implication is that there is some non-portable C++ code (bit fields???)
 
 * masquerade (P0152)						-> Implement
@@ -52,7 +53,6 @@ PROTOTYPE-0152 								: Design philosophy used is DP3 and implementation uses I
  
 *                                           With scheduler, if we just have mode events for PPU, then we would loose mid scanline updates, how to handle this? check discord and NBA
 
-* masquerade (P0152)/gameboy advance		-> Integrate ARM7TDMI SST (https://github.com/SingleStepTests/ARM7TDMI)
 * masquerade (P0152)/gameboy advance		-> Pokemon Emerald ingame save fails (passes few times at the start, then it fails continously)
 * masquerade (P0152)/masquerade-qa			-> Create automated gba tests
 

@@ -381,7 +381,7 @@ private:
 		OP_NONE = THIRTYTWO
 	};
 
-	enum class REGISTER_BANK_TYPE
+	enum REGISTER_BANK_TYPE : uint8_t
 	{
 		RB_USR_SYS,
 		RB_FIQ,
@@ -393,12 +393,12 @@ private:
 		RB_NONE
 	};
 
-	enum class REGISTER_TYPE
+	enum class REGISTER_TYPE : uint8_t
 	{	//							|		ARM State		|		THUMB State		|
 		/*--------------------------|------------------------------------------------*/
 		RT_0,				// 0	|		Applicable		|		Applicable		|
 		RT_1,				// 1	|		Applicable		|		Applicable		|
-		RT_2,				// TWO	|		Applicable		|		Applicable		|
+		RT_2,				// 2	|		Applicable		|		Applicable		|
 		RT_3,				// 3	|		Applicable		|		Applicable		|
 		RT_4,				// 4	|		Applicable		|		Applicable		|
 		RT_5,				// 5	|		Applicable		|		Applicable		|
@@ -416,7 +416,7 @@ private:
 		RT_16,				// 16	|		CPSR			|		CPSR			|
 		RT_17,				// 17	|		SPSR			|		SPSR			|
 		/*---------------------------------------------------------------------------*/
-		RT_TOTAL,			// TOTAL = 18
+		RT_TOTAL,			// 18
 		RT_NONE
 	};
 
@@ -453,15 +453,15 @@ private:
 		OP_MODE_TYPE::OP_UND   // RB_UND
 	};
 
-#define SP						(uint8_t)REGISTER_TYPE::RT_13
-#define LR						(uint8_t)REGISTER_TYPE::RT_14
-#define PC						(uint8_t)REGISTER_TYPE::RT_15
-#define CPSR					(uint8_t)REGISTER_TYPE::RT_16
-#define SPSR					(uint8_t)REGISTER_TYPE::RT_17
-#define REGISTER_BANKS			(uint8_t)REGISTER_BANK_TYPE::RB_TOTAL
+#define SP						TO_UINT8(REGISTER_TYPE::RT_13)
+#define LR						TO_UINT8(REGISTER_TYPE::RT_14)
+#define PC						TO_UINT8(REGISTER_TYPE::RT_15)
+#define CPSR					TO_UINT8(REGISTER_TYPE::RT_16)
+#define SPSR					TO_UINT8(REGISTER_TYPE::RT_17)
+#define REGISTER_BANKS			TO_UINT8(REGISTER_BANK_TYPE::RB_TOTAL)
 #define LO_GP_REGISTERS			EIGHT
 #define HI_GP_REGISTERS			EIGHT
-#define TOTAL_GP_REGISTERS		(uint8_t)REGISTER_TYPE::RT_TOTAL
+#define TOTAL_GP_REGISTERS		TO_UINT8(REGISTER_TYPE::RT_TOTAL)
 
 	enum class CPSR_CONDITION_CODE
 	{
@@ -3235,7 +3235,6 @@ private:
 
 	typedef struct
 	{
-		FLAG isCycleAccurate;
 		FLAG isBiosExecutionDone;
 		uint32_t checksum;
 		uint64_t unusableMemoryReads;
