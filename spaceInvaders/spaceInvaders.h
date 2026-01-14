@@ -16,7 +16,6 @@
 #pragma endregion INCLUDES
 
 #pragma region MACROS
-#define I8080_IN_SST_MODE									NO
 #define SPACE_INVADERS_FPS									60.0f
 #define EMULATED_AUDIO_SAMPLING_RATE_FOR_SPACEINVADERS		48000.0f
 #define SPACE_INVADERS_AUDIO_AS_STATIC_BUFFERS				(NO)
@@ -47,6 +46,10 @@ public:
 private:
 
 	boost::property_tree::ptree pt;
+
+private:
+
+	uint8_t const SST_ROMS = TWO;
 
 private:
 

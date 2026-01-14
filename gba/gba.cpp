@@ -163,14 +163,19 @@ GBA_t::GBA_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 
 	if (nFiles == SST_ROMS)
 	{
-		SETBIT(ENABLE_LOGS, LOG_VERBOSITY_WARN);
+		//SETBIT(ENABLE_LOGS, LOG_VERBOSITY_WARN);
 		SETBIT(ENABLE_LOGS, LOG_VERBOSITY_INFO);
 		SETBIT(ENABLE_LOGS, LOG_VERBOSITY_EVENT);
 
 		INFO("Running in sst Cpu Test Mode!");
 		_JSON_LOCATION = rom[ONE];
 
+#if (ENABLE_ARM7TDMI_SST == YES)
 		ROM_TYPE = ROM::TEST_SST;
+#else
+		FATAL("SSTs are not supported in this build");
+		RETURN;
+#endif
 	}
 	else if (nFiles == REPLAY_ROM_FILE)
 	{
@@ -367,7 +372,11 @@ void GBA_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void*
 {
 	uint8_t indexToCheck = 0;
 
-	if (!rom[indexToCheck].empty() || (ROM_TYPE == ROM::TEST_SST))
+#if (ENABLE_ARM7TDMI_SST == YES)
+	if (!rom[indexToCheck].empty() || ROM_TYPE == ROM::TEST_SST)
+#else
+	if (!rom[indexToCheck].empty())
+#endif
 	{
 		if (!initializeEmulator())
 		{
@@ -518,6 +527,14 @@ void GBA_t::cpuSetRegister(REGISTER_BANK_TYPE rb, REGISTER_TYPE rt, STATE_TYPE s
 		}
 		else if (registerType == PC) // PC is not banked
 		{
+			if (getARMState() == STATE_TYPE::ST_THUMB)
+			{
+				pGBA_cpuInstance->registers.pc = (u32parameter & 0xFFFFFFFE);
+			}
+			else if (getARMState() == STATE_TYPE::ST_ARM)
+			{
+				pGBA_cpuInstance->registers.pc = (u32parameter & 0xFFFFFFFC);
+			}
 			loadPipeline(u32parameter);
 			RETURN;
 		}
@@ -542,14 +559,21 @@ void GBA_t::cpuSetRegister(REGISTER_BANK_TYPE rb, REGISTER_TYPE rt, STATE_TYPE s
 	{
 		if (registerType == CPSR) // CPSR is not banked
 		{
+			// ARM7TDMI: bit 4 is always forced to 1
+			u32parameter |= 0x00000010;
 			pGBA_registers->cpsr.psrMemory = u32parameter;
 			setARMMode((OP_MODE_TYPE)pGBA_registers->cpsr.psrFields.psrModeBits);
 			RETURN;
 		}
 		else if (registerType == SPSR)
 		{
+			if ((pGBA_registers->cpsr.psrFields.psrStateBit == RESET) && ((u32parameter & (1u << 5)) != 0))
+			{
+				WARN("MSR: Attempt to set Thumb bit (T)");
+			}
+
+			if (registerBank == ZERO) RETURN; 
 			pGBA_registers->spsr[registerBank].psrMemory = u32parameter;
-			pGBA_registers->spsr[ZERO].psrMemory = ERROR; // SPSR doesn't exist for User and System modes
 			RETURN;
 		}
 	}
@@ -3055,37 +3079,6 @@ FLAG GBA_t::processSOC()
 {
 	FLAG status = true;
 
-#if (DEACTIVATED) // We cannot have this anymore as ENABLE_LOGS can get modified via GUI, but below code snippet will override this
-	ENABLE_LOGS = pGBA_instance->GBA_state.emulatorStatus.debugger.loggerInterface.logger;
-#endif
-
-#if (DEACTIVATED) 
-#if _DEBUG
-	static COUNTER64 threshold = UINT64_MAX;
-
-	if (emulationCounter[ZERO] == threshold)
-	{
-		volatile FLAG breakpoint0 = 1;
-	}
-
-#if (DISABLED)
-	if (emulationCounter[ZERO] < threshold - 500)
-	{
-		;
-	}
-	else
-	{
-		;
-	}
-#endif
-
-	if (pGBA_instance->GBA_state.emulatorStatus.debugger.agbReturn != ZERO)
-	{
-		volatile int breakpoint = 0;
-	}
-#endif
-#endif
-
 	INFRA("[Loop 0]: %" PRId64, emulationCounter[ZERO]);
 	++emulationCounter[ZERO];
 
@@ -3146,6 +3139,28 @@ FLAG GBA_t::processSOC()
 void GBA_t::busCycles()
 {
 	cpuTick();
+
+#if (ENABLE_ARM7TDMI_SST == YES)
+	if (ROM_TYPE == ROM::TEST_SST) MASQ_UNLIKELY
+	{
+		// If this SST entry is already active, keep incrementing it
+		if (sst.internal[sst.index].cycle != 0)
+		{
+			sst.internal[sst.index].cycle += ONE;
+		}
+		// First cycle of this SST entry
+		else if (sst.index != RESET)
+		{
+			sst.internal[sst.index].cycle =
+				sst.internal[sst.index - 1].cycle + ONE;
+		}
+		// Very first SST entry
+		else
+		{
+			sst.internal[sst.index].cycle = ONE;
+		}
+	}
+#endif
 }
 
 void GBA_t::cpuIdleCycles()
@@ -3189,14 +3204,14 @@ void GBA_t::fetchAndDecode(uint32_t newPC)
 		// Stage 1:
 		pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode = pGBA_cpuInstance->pipeline.decodeStageOpCode.opCode.rawOpCode;
 		pGBA_cpuInstance->pipeline.decodeStageOpCode.opCode.rawOpCode = pGBA_cpuInstance->pipeline.fetchStageOpCode.opCode.rawOpCode;
-		pGBA_cpuInstance->pipeline.fetchStageOpCode.opCode.rawOpCode = readRawMemory<GBA_HALFWORD>(pGBA_cpuInstance->registers.pc, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
+		pGBA_cpuInstance->pipeline.fetchStageOpCode.opCode.rawOpCode = readRawMemory<GBA_HALFWORD>(pGBA_cpuInstance->registers.pc, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
 		pGBA_cpuInstance->registers.pc += TWO;
 		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFE;
 
 		// Stage 2:
 		pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode = pGBA_cpuInstance->pipeline.decodeStageOpCode.opCode.rawOpCode;
 		pGBA_cpuInstance->pipeline.decodeStageOpCode.opCode.rawOpCode = pGBA_cpuInstance->pipeline.fetchStageOpCode.opCode.rawOpCode;
-		pGBA_cpuInstance->pipeline.fetchStageOpCode.opCode.rawOpCode = readRawMemory<GBA_HALFWORD>(pGBA_cpuInstance->registers.pc, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE);
+		pGBA_cpuInstance->pipeline.fetchStageOpCode.opCode.rawOpCode = readRawMemory<GBA_HALFWORD>(pGBA_cpuInstance->registers.pc, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH, MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE);
 		pGBA_cpuInstance->registers.pc += TWO;
 		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFE;
 
@@ -3217,14 +3232,14 @@ void GBA_t::fetchAndDecode(uint32_t newPC)
 		// Stage 1:
 		pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode = pGBA_cpuInstance->pipeline.decodeStageOpCode.opCode.rawOpCode;
 		pGBA_cpuInstance->pipeline.decodeStageOpCode.opCode.rawOpCode = pGBA_cpuInstance->pipeline.fetchStageOpCode.opCode.rawOpCode;
-		pGBA_cpuInstance->pipeline.fetchStageOpCode.opCode.rawOpCode = readRawMemory<GBA_WORD>(pGBA_cpuInstance->registers.pc, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
+		pGBA_cpuInstance->pipeline.fetchStageOpCode.opCode.rawOpCode = readRawMemory<GBA_WORD>(pGBA_cpuInstance->registers.pc, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
 		pGBA_cpuInstance->registers.pc += FOUR;
 		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFC;
 
 		// Stage 2:
 		pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode = pGBA_cpuInstance->pipeline.decodeStageOpCode.opCode.rawOpCode;
 		pGBA_cpuInstance->pipeline.decodeStageOpCode.opCode.rawOpCode = pGBA_cpuInstance->pipeline.fetchStageOpCode.opCode.rawOpCode;
-		pGBA_cpuInstance->pipeline.fetchStageOpCode.opCode.rawOpCode = readRawMemory<GBA_WORD>(pGBA_cpuInstance->registers.pc, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE);
+		pGBA_cpuInstance->pipeline.fetchStageOpCode.opCode.rawOpCode = readRawMemory<GBA_WORD>(pGBA_cpuInstance->registers.pc, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH, MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE);
 		pGBA_cpuInstance->registers.pc += FOUR;
 		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFC;
 
@@ -3235,7 +3250,7 @@ void GBA_t::fetchAndDecode(uint32_t newPC)
 			pGBA_cpuInstance->registers.pc - FOUR,
 			pGBA_cpuInstance->pipeline.decodeStageOpCode.opCode.rawOpCode,
 			pGBA_cpuInstance->registers.pc,
-			pGBA_cpuInstance->pipeline.fetchStageOpCode.opCode.rawOpCode)
+			pGBA_cpuInstance->pipeline.fetchStageOpCode.opCode.rawOpCode);
 	}
 	else
 	{
@@ -3310,7 +3325,7 @@ void GBA_t::runCPUPipeline()
 		pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode = pGBA_cpuInstance->pipeline.decodeStageOpCode.opCode.rawOpCode;
 		pGBA_cpuInstance->pipeline.decodeStageOpCode.opCode.rawOpCode = pGBA_cpuInstance->pipeline.fetchStageOpCode.opCode.rawOpCode;
 		// NOTE: PC always point to fetchStageOpCode
-		pGBA_cpuInstance->pipeline.fetchStageOpCode.opCode.rawOpCode = readRawMemory<GBA_HALFWORD>(pGBA_cpuInstance->registers.pc, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::CPU);
+		pGBA_cpuInstance->pipeline.fetchStageOpCode.opCode.rawOpCode = readRawMemory<GBA_HALFWORD>(pGBA_cpuInstance->registers.pc, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH, MEMORY_ACCESS_TYPE::AUTOMATIC);
 
 		uint32_t extension1 = TO_UINT32(11 - OP_MODE_NAMES[currentCPSR.psrFields.psrModeBits].length());
 		DISASSEMBLY("[THUMB] [%s] %*c 0x%08X : [0x%04X]     [%-23s]", OP_MODE_NAMES[currentCPSR.psrFields.psrModeBits].c_str(), extension1, ' ', (GBA_WORD)(pGBA_cpuInstance->registers.pc - FOUR), pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode, disassembled.c_str());
@@ -3319,99 +3334,120 @@ void GBA_t::runCPUPipeline()
 
 		if (ThumbSoftwareInterrupt() == YES)
 		{
+			pGBA_instance->GBA_state.emulatorStatus.lastOpcode = ARM7TDMI_Opcode::ThumbSoftwareInterrupt;
 			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (UnconditionalBranch() == YES)
 		{
+			pGBA_instance->GBA_state.emulatorStatus.lastOpcode = ARM7TDMI_Opcode::UnconditionalBranch;
 			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (ConditionalBranch() == YES)
 		{
+			pGBA_instance->GBA_state.emulatorStatus.lastOpcode = ARM7TDMI_Opcode::ConditionalBranch;
 			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (MultipleLoadStore() == YES)
 		{
+			pGBA_instance->GBA_state.emulatorStatus.lastOpcode = ARM7TDMI_Opcode::MultipleLoadStore;
 			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (LongBranchWithLink() == YES)
 		{
+			pGBA_instance->GBA_state.emulatorStatus.lastOpcode = ARM7TDMI_Opcode::LongBranchWithLink;
 			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (AddOffsetToStackPointer() == YES)
 		{
+			pGBA_instance->GBA_state.emulatorStatus.lastOpcode = ARM7TDMI_Opcode::AddOffsetToStackPointer;
 			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (PushPopRegisters() == YES)
 		{
+			pGBA_instance->GBA_state.emulatorStatus.lastOpcode = ARM7TDMI_Opcode::PushPopRegisters;
 			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (LoadStoreHalfword() == YES)
 		{
+			pGBA_instance->GBA_state.emulatorStatus.lastOpcode = ARM7TDMI_Opcode::LoadStoreHalfword;
 			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (SPRelativeLoadStore() == YES)
 		{
+			pGBA_instance->GBA_state.emulatorStatus.lastOpcode = ARM7TDMI_Opcode::SPRelativeLoadStore;
 			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (LoadAddress() == YES)
 		{
+			pGBA_instance->GBA_state.emulatorStatus.lastOpcode = ARM7TDMI_Opcode::LoadAddress;
 			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (LoadStoreWithImmediateOffset() == YES)
 		{
+			pGBA_instance->GBA_state.emulatorStatus.lastOpcode = ARM7TDMI_Opcode::LoadStoreWithImmediateOffset;
 			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (LoadStoreWithRegisterOffset() == YES)
 		{
+			pGBA_instance->GBA_state.emulatorStatus.lastOpcode = ARM7TDMI_Opcode::LoadStoreWithRegisterOffset;
 			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (LoadStoreSignExtendedByteHalfword() == YES)
 		{
+			pGBA_instance->GBA_state.emulatorStatus.lastOpcode = ARM7TDMI_Opcode::LoadStoreSignExtendedByteHalfword;
 			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (PCRelativeLoad() == YES)
 		{
+			pGBA_instance->GBA_state.emulatorStatus.lastOpcode = ARM7TDMI_Opcode::PCRelativeLoad;
 			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (HiRegisterOperationsBranchExchange() == YES)
 		{
+			pGBA_instance->GBA_state.emulatorStatus.lastOpcode = ARM7TDMI_Opcode::HiRegisterOperationsBranchExchange;
 			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (ALUOperations() == YES)
 		{
+			pGBA_instance->GBA_state.emulatorStatus.lastOpcode = ARM7TDMI_Opcode::ALUOperations;
 			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (MoveCompareAddSubtractImmediate() == YES)
 		{
+			pGBA_instance->GBA_state.emulatorStatus.lastOpcode = ARM7TDMI_Opcode::MoveCompareAddSubtractImmediate;
 			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (AddSubtract() == YES)
 		{
+			pGBA_instance->GBA_state.emulatorStatus.lastOpcode = ARM7TDMI_Opcode::AddSubtract;
 			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
 		if (MoveShiftedRegister() == YES)
 		{
+			pGBA_instance->GBA_state.emulatorStatus.lastOpcode = ARM7TDMI_Opcode::MoveShiftedRegister;
 			ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 			RETURN;
 		}
+
+		pGBA_instance->GBA_state.emulatorStatus.lastOpcode = ARM7TDMI_Opcode::UNKNOWN;
 
 		FATAL("Unknown THUMB Instruction");
 	}
@@ -3421,7 +3457,7 @@ void GBA_t::runCPUPipeline()
 		pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode = pGBA_cpuInstance->pipeline.decodeStageOpCode.opCode.rawOpCode;
 		pGBA_cpuInstance->pipeline.decodeStageOpCode.opCode.rawOpCode = pGBA_cpuInstance->pipeline.fetchStageOpCode.opCode.rawOpCode;
 		// NOTE: PC always point to fetchStageOpCode
-		pGBA_cpuInstance->pipeline.fetchStageOpCode.opCode.rawOpCode = readRawMemory<GBA_WORD>(pGBA_cpuInstance->registers.pc, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU);
+		pGBA_cpuInstance->pipeline.fetchStageOpCode.opCode.rawOpCode = readRawMemory<GBA_WORD>(pGBA_cpuInstance->registers.pc, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH, MEMORY_ACCESS_TYPE::AUTOMATIC);
 
 		uint32_t extension1 = TO_UINT32(11 - OP_MODE_NAMES[currentCPSR.psrFields.psrModeBits].length());
 		DISASSEMBLY("[ARM]   [%s] %*c 0x%08X : [0x%08X] [%-23s]", OP_MODE_NAMES[currentCPSR.psrFields.psrModeBits].c_str(), extension1, ' ', (GBA_WORD)(pGBA_cpuInstance->registers.pc - EIGHT), pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode, disassembled.c_str());
@@ -3432,59 +3468,72 @@ void GBA_t::runCPUPipeline()
 		{
 			if (BranchAndBranchExchange() == YES)
 			{
+				pGBA_instance->GBA_state.emulatorStatus.lastOpcode = ARM7TDMI_Opcode::BranchAndBranchExchange;
 				ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 				RETURN;
 			}
 			if (BlockDataTransfer() == YES)
 			{
+				pGBA_instance->GBA_state.emulatorStatus.lastOpcode = ARM7TDMI_Opcode::BlockDataTransfer;
 				ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 				RETURN;
 			}
 			if (BranchAndBranchLink() == YES)
 			{
+				pGBA_instance->GBA_state.emulatorStatus.lastOpcode = ARM7TDMI_Opcode::BranchAndBranchLink;
 				ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 				RETURN;
 			}
 			if (SoftwareInterrupt() == YES)
 			{
+				pGBA_instance->GBA_state.emulatorStatus.lastOpcode = ARM7TDMI_Opcode::SoftwareInterrupt;
 				ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 				RETURN;
 			}
 			if (Undefined() == YES)
 			{
+				pGBA_instance->GBA_state.emulatorStatus.lastOpcode = ARM7TDMI_Opcode::Undefined;
 				ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 				RETURN;
 			}
 			if (SingleDataTransfer() == YES)
 			{
+				pGBA_instance->GBA_state.emulatorStatus.lastOpcode = ARM7TDMI_Opcode::SingleDataTransfer;
 				ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 				RETURN;
 			}
 			if (SingleDataSwap() == YES)
 			{
+				pGBA_instance->GBA_state.emulatorStatus.lastOpcode = ARM7TDMI_Opcode::SingleDataSwap;
 				ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 				RETURN;
 			}
 			if (MultiplyAndMultiplyAccumulate() == YES)
 			{
+				pGBA_instance->GBA_state.emulatorStatus.lastOpcode = ARM7TDMI_Opcode::MultiplyAndMultiplyAccumulate;
 				ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 				RETURN;
 			}
 			if (HalfWordDataTransfer() == YES)
 			{
+				pGBA_instance->GBA_state.emulatorStatus.lastOpcode = ARM7TDMI_Opcode::HalfWordDataTransfer;
 				ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 				RETURN;
 			}
 			if (psrTransfer() == YES)
 			{
+				pGBA_instance->GBA_state.emulatorStatus.lastOpcode = ARM7TDMI_Opcode::PSRTransfer;
 				ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 				RETURN;
 			}
 			if (DataProcessing() == YES)
 			{
+				pGBA_instance->GBA_state.emulatorStatus.lastOpcode = ARM7TDMI_Opcode::DataProcessing;
 				ASSERT(pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter != RESET);
 				RETURN;
 			}
+
+			pGBA_instance->GBA_state.emulatorStatus.lastOpcode = ARM7TDMI_Opcode::UNKNOWN;
 
 			unimplementedInstruction();
 			FATAL("Unknown ARM Instruction");
@@ -3712,6 +3761,7 @@ FLAG GBA_t::handleInterruptsIfApplicable()
 
 		// Set PC to IRQ exception vector
 		cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)PC, getARMState(), 0x18);
+		reloadPipeline(pGBA_registers->pc);
 
 		interruptWasServiced = YES;
 	}
@@ -5133,12 +5183,461 @@ FLAG GBA_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 	pGBA_display->wasVblankJustTriggered = NO;
 	pGBA_display->didLCDModeChangeJustNow = NO;
 
-	if (ROM_TYPE == ROM::TEST_SST)
+#if (ENABLE_ARM7TDMI_SST == YES)
+	if (ROM_TYPE == ROM::TEST_SST) MASQ_UNLIKELY
 	{
-		FATAL("ARM7TDMI SST are not supported Yet");
-		RETURN FAILURE;
+		static FLAG SST_DEBUG_PRINT = NO;
+
+		// ------------------------------------------------------------
+		// Move large arrays to heap with a struct
+		// ------------------------------------------------------------
+		struct TestState {
+			uint32_t R[16] = {};
+			uint32_t R_fiq[7] = {};
+			uint32_t R_svc[2] = {};
+			uint32_t R_abt[2] = {};
+			uint32_t R_irq[2] = {};
+			uint32_t R_und[2] = {};
+			uint32_t spsr[5] = {};
+			uint32_t pipeline[2] = {};
+			uint32_t cpsr = 0;
+			uint32_t access = 0;
+		};
+
+		// ------------------------------------------------------------
+		// Enumerate all JSON files
+		// ------------------------------------------------------------
+		std::vector<std::string> testFiles;
+		try
+		{
+			std::filesystem::path testDir(_JSON_LOCATION);
+			for (const auto& entry : std::filesystem::directory_iterator(testDir))
+			{
+				if (entry.is_regular_file() && entry.path().extension() == ".json")
+				{
+					testFiles.push_back(entry.path().filename().string());
+				}
+			}
+			std::sort(testFiles.begin(), testFiles.end());
+		}
+		catch (const std::exception& e)
+		{
+			FATAL("Failed to enumerate test files: %s", e.what());
+			RETURN false;
+		}
+
+		INFO("Found %zu GBA SST test files", testFiles.size());
+
+		// ------------------------------------------------------------
+		// Helper: read JSON array into C array
+		// ------------------------------------------------------------
+		auto readArray = [](const rapidjson::Value& parent,
+			const char* key,
+			uint32_t* out,
+			size_t count)
+			{
+				if (!parent.HasMember(key) || !parent[key].IsArray()) return;
+
+				const rapidjson::Value& arr = parent[key];
+				size_t i = 0;
+				for (rapidjson::SizeType idx = 0; idx < arr.Size() && i < count; ++idx)
+				{
+					out[i++] = arr[idx].GetUint();
+				}
+			};
+
+		COUNTER32 testSetIndex = 0;
+		static COUNTER32 DEBUG_START_TEST_SET = ZERO;
+
+		std::vector<ARM7TDMI_SST_t::Transaction> transactions;
+		transactions.reserve(100);
+
+		// ------------------------------------------------------------
+		// Iterate test files
+		// ------------------------------------------------------------
+		for (const auto& testFileName : testFiles)
+		{
+			std::filesystem::path fullPath = std::filesystem::path(_JSON_LOCATION) / testFileName;
+
+			testSetIndex++;
+
+			INFO("================================================================================");
+			if ((std::strcmp(testFileName.c_str(), "arm_cdp.json") == 0)
+				|| (std::strcmp(testFileName.c_str(), "arm_mcr_mrc.json") == 0)
+				|| (std::strcmp(testFileName.c_str(), "arm_stc_ldc.json") == 0))
+			{
+				INFO("Skipping: %s", testFileName.c_str());
+				CONTINUE;
+			}
+			else
+			{
+				INFO("Loading: %s", testFileName.c_str());
+			}
+			INFO("================================================================================");
+
+			if (testSetIndex < DEBUG_START_TEST_SET)
+				CONTINUE;
+
+			{
+				// Read entire file into string
+				std::ifstream ifs(fullPath);
+				if (!ifs.is_open())
+				{
+					WARN("Failed to open %s", testFileName.c_str());
+					CONTINUE;
+				}
+
+				std::string jsonStr((std::istreambuf_iterator<char>(ifs)),
+					std::istreambuf_iterator<char>());
+				ifs.close();
+
+				// Parse from string
+				rapidjson::Document testCase;
+				testCase.Parse(jsonStr.c_str());
+
+				if (testCase.HasParseError())
+				{
+					WARN("Failed to parse %s: error code %u at offset %zu",
+						testFileName.c_str(),
+						(unsigned)testCase.GetParseError(),
+						testCase.GetErrorOffset());
+					CONTINUE;
+				}
+
+				if (!testCase.IsArray())
+				{
+					WARN("%s does not contain a JSON array", testFileName.c_str());
+					CONTINUE;
+				}
+
+				COUNTER32 passedCount = 0;
+				COUNTER32 failedCount = 0;
+				COUNTER32 testIndex = 0;
+				static COUNTER32 DEBUG_START_TEST = 0;
+
+				// --------------------------------------------------------
+				// Iterate each JSON entry
+				// --------------------------------------------------------
+				for (rapidjson::SizeType itemIdx = 0; itemIdx < testCase.Size(); ++itemIdx)
+				{
+					const rapidjson::Value& item = testCase[itemIdx];
+
+					// ======== ALLOCATE ON HEAP ========
+					auto initial = std::make_unique<TestState>();
+					auto final = std::make_unique<TestState>();
+
+					// Reset state
+					sst.SST_Reset();
+					for (int i = 0; i < 8; ++i) pGBA_registers->unbankedLORegisters[i] = 0;
+					pGBA_registers->cpsr.psrMemory = 0;
+					for (uint8_t rb = RB_USR_SYS; rb < RB_TOTAL; ++rb)
+					{
+						for (int i = 0; i < 7; ++i)
+							pGBA_registers->bankedHIRegisters[rb][i] = 0;
+
+						pGBA_registers->spsr[rb].psrMemory = 0;
+					}
+					pGBA_registers->pc = 0;
+
+					if (testIndex++ < DEBUG_START_TEST)
+						CONTINUE;
+
+					FLAG quitThisRun = NO;
+
+					// ================= INITIAL =================
+					if (!item.HasMember("initial") || !item["initial"].IsObject())
+					{
+						WARN("Test %u missing 'initial' object", testIndex - 1);
+						CONTINUE;
+					}
+
+					const rapidjson::Value& initialJson = item["initial"];
+
+					readArray(initialJson, "R", initial->R, 16);
+					readArray(initialJson, "R_fiq", initial->R_fiq, 7);
+					readArray(initialJson, "R_svc", initial->R_svc, 2);
+					readArray(initialJson, "R_abt", initial->R_abt, 2);
+					readArray(initialJson, "R_irq", initial->R_irq, 2);
+					readArray(initialJson, "R_und", initial->R_und, 2);
+					readArray(initialJson, "SPSR", initial->spsr, 5);
+					readArray(initialJson, "pipeline", initial->pipeline, 2);
+
+					initial->cpsr = initialJson.HasMember("CPSR") ? initialJson["CPSR"].GetUint() : 0;
+					initial->access = initialJson.HasMember("access") ? initialJson["access"].GetUint() : 0;
+
+					// ================= FINAL =================
+					if (!item.HasMember("final") || !item["final"].IsObject())
+					{
+						WARN("Test %u missing 'final' object", testIndex - 1);
+						CONTINUE;
+					}
+
+					const rapidjson::Value& finalJson = item["final"];
+
+					readArray(finalJson, "R", final->R, 16);
+					readArray(finalJson, "R_fiq", final->R_fiq, 7);
+					readArray(finalJson, "R_svc", final->R_svc, 2);
+					readArray(finalJson, "R_abt", final->R_abt, 2);
+					readArray(finalJson, "R_irq", final->R_irq, 2);
+					readArray(finalJson, "R_und", final->R_und, 2);
+					readArray(finalJson, "SPSR", final->spsr, 5);
+					readArray(finalJson, "pipeline", final->pipeline, 2);
+
+					final->cpsr = finalJson.HasMember("CPSR") ? finalJson["CPSR"].GetUint() : 0;
+					final->access = finalJson.HasMember("access") ? finalJson["access"].GetUint() : 0;
+
+					// ================= OPCODE =================
+					uint32_t opcode = item.HasMember("opcode") ? item["opcode"].GetUint() : 0;
+					uint32_t baseAddr = item.HasMember("base_addr") ? item["base_addr"].GetUint() : 0;
+
+					// ================= TRANSACTIONS =================
+					transactions.clear();
+					if (item.HasMember("transactions") && item["transactions"].IsArray())
+					{
+						const rapidjson::Value& txArray = item["transactions"];
+						for (rapidjson::SizeType i = 0; i < txArray.Size(); ++i)
+						{
+							const rapidjson::Value& t = txArray[i];
+							transactions.push_back({
+								t.HasMember("kind") ? t["kind"].GetUint() : 0,
+								t.HasMember("size") ? t["size"].GetUint() : 0,
+								t.HasMember("addr") ? t["addr"].GetUint() : 0,
+								t.HasMember("data") ? t["data"].GetUint() : 0,
+								t.HasMember("cycle") ? t["cycle"].GetUint() : 0,
+								t.HasMember("access") ? t["access"].GetUint() : 0
+								});
+						}
+					}
+
+					sst.transactions = transactions;
+
+					if (SST_DEBUG_PRINT)
+					{
+						std::cout << "\n--- Initial State ---\n";
+						for (int i = 0; i < 16; ++i) std::cout << "R[" << i << "]: 0x" << std::hex << initial->R[i] << "\n";
+						for (int i = 0; i < 7; ++i) std::cout << "R_fiq[" << i << "]: 0x" << std::hex << initial->R_fiq[i] << "\n";
+						for (int i = 0; i < 2; ++i) std::cout << "R_svc[" << i << "]: 0x" << std::hex << initial->R_svc[i] << "\n";
+						for (int i = 0; i < 2; ++i) std::cout << "R_abt[" << i << "]: 0x" << std::hex << initial->R_abt[i] << "\n";
+						for (int i = 0; i < 2; ++i) std::cout << "R_irq[" << i << "]: 0x" << std::hex << initial->R_irq[i] << "\n";
+						for (int i = 0; i < 2; ++i) std::cout << "R_und[" << i << "]: 0x" << std::hex << initial->R_und[i] << "\n";
+						for (int i = 0; i < 5; ++i) std::cout << "SPSR[" << i << "]: 0x" << std::hex << initial->spsr[i] << "\n";
+						for (int i = 0; i < 2; ++i) std::cout << "Pipeline[" << i << "]: 0x" << std::hex << initial->pipeline[i] << "\n";
+						std::cout << "CPSR: 0x" << std::hex << initial->cpsr << "\n";
+						std::cout << "Access: " << std::dec << initial->access << "\n";
+
+						std::cout << "\n--- Final State ---\n";
+						for (int i = 0; i < 16; ++i) std::cout << "R[" << i << "]: 0x" << std::hex << final->R[i] << "\n";
+						for (int i = 0; i < 7; ++i) std::cout << "R_fiq[" << i << "]: 0x" << std::hex << final->R_fiq[i] << "\n";
+						for (int i = 0; i < 2; ++i) std::cout << "R_svc[" << i << "]: 0x" << std::hex << final->R_svc[i] << "\n";
+						for (int i = 0; i < 2; ++i) std::cout << "R_abt[" << i << "]: 0x" << std::hex << final->R_abt[i] << "\n";
+						for (int i = 0; i < 2; ++i) std::cout << "R_irq[" << i << "]: 0x" << std::hex << final->R_irq[i] << "\n";
+						for (int i = 0; i < 2; ++i) std::cout << "R_und[" << i << "]: 0x" << std::hex << final->R_und[i] << "\n";
+						for (int i = 0; i < 5; ++i) std::cout << "SPSR[" << i << "]: 0x" << std::hex << final->spsr[i] << "\n";
+						for (int i = 0; i < 2; ++i) std::cout << "Pipeline[" << i << "]: 0x" << std::hex << final->pipeline[i] << "\n";
+						std::cout << "CPSR: 0x" << std::hex << final->cpsr << "\n";
+						std::cout << "Access: " << std::dec << final->access << "\n";
+
+						std::cout << "\n--- Opcode/Base ---\n";
+						std::cout << "Opcode: 0x" << std::hex << opcode << "\n";
+						std::cout << "Base Address: 0x" << std::hex << baseAddr << "\n";
+
+						std::cout << "\n--- Transactions (" << transactions.size() << ") ---\n";
+						for (size_t i = 0; i < transactions.size(); ++i)
+						{
+							std::cout << "[" << i << "] kind=" << transactions[i].kind
+								<< " size=" << transactions[i].size
+								<< " addr=0x" << std::hex << transactions[i].addr
+								<< " data=0x" << transactions[i].data
+								<< " cycle=" << std::dec << transactions[i].cycle
+								<< " access=" << transactions[i].access << "\n";
+						}
+					}
+
+					// === Setup initial state ===
+					pGBA_registers->unbankedLORegisters[0] = initial->R[0];
+					pGBA_registers->unbankedLORegisters[1] = initial->R[1];
+					pGBA_registers->unbankedLORegisters[2] = initial->R[2];
+					pGBA_registers->unbankedLORegisters[3] = initial->R[3];
+					pGBA_registers->unbankedLORegisters[4] = initial->R[4];
+					pGBA_registers->unbankedLORegisters[5] = initial->R[5];
+					pGBA_registers->unbankedLORegisters[6] = initial->R[6];
+					pGBA_registers->unbankedLORegisters[7] = initial->R[7];
+					pGBA_registers->cpsr.psrMemory = initial->cpsr;
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_USR_SYS][0] = initial->R[8];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_USR_SYS][1] = initial->R[9];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_USR_SYS][2] = initial->R[10];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_USR_SYS][3] = initial->R[11];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_USR_SYS][4] = initial->R[12];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_USR_SYS][5] = initial->R[13];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_USR_SYS][6] = initial->R[14];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_FIQ][0] = initial->R_fiq[0];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_FIQ][1] = initial->R_fiq[1];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_FIQ][2] = initial->R_fiq[2];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_FIQ][3] = initial->R_fiq[3];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_FIQ][4] = initial->R_fiq[4];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_FIQ][5] = initial->R_fiq[5];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_FIQ][6] = initial->R_fiq[6];
+					pGBA_registers->spsr[REGISTER_BANK_TYPE::RB_FIQ].psrMemory = initial->spsr[0];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_SVC][0] = initial->R[8];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_SVC][1] = initial->R[9];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_SVC][2] = initial->R[10];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_SVC][3] = initial->R[11];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_SVC][4] = initial->R[12];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_SVC][5] = initial->R_svc[0];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_SVC][6] = initial->R_svc[1];
+					pGBA_registers->spsr[REGISTER_BANK_TYPE::RB_SVC].psrMemory = initial->spsr[1];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_ABT][0] = initial->R[8];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_ABT][1] = initial->R[9];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_ABT][2] = initial->R[10];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_ABT][3] = initial->R[11];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_ABT][4] = initial->R[12];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_ABT][5] = initial->R_abt[0];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_ABT][6] = initial->R_abt[1];
+					pGBA_registers->spsr[REGISTER_BANK_TYPE::RB_ABT].psrMemory = initial->spsr[2];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_IRQ][0] = initial->R[8];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_IRQ][1] = initial->R[9];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_IRQ][2] = initial->R[10];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_IRQ][3] = initial->R[11];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_IRQ][4] = initial->R[12];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_IRQ][5] = initial->R_irq[0];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_IRQ][6] = initial->R_irq[1];
+					pGBA_registers->spsr[REGISTER_BANK_TYPE::RB_IRQ].psrMemory = initial->spsr[3];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_UND][0] = initial->R[8];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_UND][1] = initial->R[9];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_UND][2] = initial->R[10];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_UND][3] = initial->R[11];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_UND][4] = initial->R[12];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_UND][5] = initial->R_und[0];
+					pGBA_registers->bankedHIRegisters[REGISTER_BANK_TYPE::RB_UND][6] = initial->R_und[1];
+					pGBA_registers->spsr[REGISTER_BANK_TYPE::RB_UND].psrMemory = initial->spsr[4];
+
+					pGBA_cpuInstance->pipeline.decodeStageOpCode.opCode.rawOpCode = initial->pipeline[0];
+					pGBA_registers->pc = initial->R[15];
+
+					pGBA_memory->setNextMemoryAccessType = (initial->access & ARM7TDMI_SST_t::Sequential) ? MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE : MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
+
+					// === Execute processSOC() ===
+					processSOC();
+
+					// === Verify final state (using macro to avoid lambda) ===
+					#define CHECK_VALUE(name, actual, expected) \
+						if ((actual) != (expected)) { \
+							if (!((std::strcmp(name, "PC") == 0) && (((expected) & 0xFFFFFFFC) == ((actual) & 0xFFFFFFFC)))) { \
+								INFO("test number %d", testIndex); \
+								INFO("Actual %u", (uint32_t)(actual)); \
+								INFO("Expected %u", (uint32_t)(expected)); \
+								FATAL("%s Mismatch", name); \
+								quitThisRun = YES; \
+							} \
+						}
+
+					// Unbanked LO registers
+					for (int i = 0; i < 8; ++i)
+						CHECK_VALUE(("R[" + std::to_string(i) + "]").c_str(), pGBA_registers->unbankedLORegisters[i], final->R[i]);
+
+					// CPSR
+					CHECK_VALUE("CPSR", pGBA_registers->cpsr.psrMemory, final->cpsr);
+
+					// Banked HI Registers and SPSRs
+					struct BankCheck {
+						REGISTER_BANK_TYPE type;
+						uint32_t* R_final_arr;
+						uint32_t SPSR_val;
+						const char* name;
+					};
+
+					BankCheck banks[] = {
+						{REGISTER_BANK_TYPE::RB_USR_SYS, &final->R[8], 0, "RB_USR_SYS"},
+						{REGISTER_BANK_TYPE::RB_FIQ, final->R_fiq, final->spsr[0], "RB_FIQ"},
+						{REGISTER_BANK_TYPE::RB_SVC, final->R_svc, final->spsr[1], "RB_SVC"},
+						{REGISTER_BANK_TYPE::RB_ABT, final->R_abt, final->spsr[2], "RB_ABT"},
+						{REGISTER_BANK_TYPE::RB_IRQ, final->R_irq, final->spsr[3], "RB_IRQ"},
+						{REGISTER_BANK_TYPE::RB_UND, final->R_und, final->spsr[4], "RB_UND"}
+					};
+
+					for (auto& b : banks)
+					{
+						int j = 0;
+						for (int i = ((b.type == REGISTER_BANK_TYPE::RB_USR_SYS || b.type == REGISTER_BANK_TYPE::RB_FIQ) ? 0 : 5); i < 7; ++i)
+						{
+							char buf[64];
+							snprintf(buf, sizeof(buf), "%s[%d]", b.name, i);
+							CHECK_VALUE(buf, pGBA_registers->bankedHIRegisters[b.type][i], b.R_final_arr[j++]);
+						}
+
+						if (b.SPSR_val != 0)
+						{
+							char buf[64];
+							snprintf(buf, sizeof(buf), "SPSR_%s", b.name);
+							CHECK_VALUE(buf, pGBA_registers->spsr[b.type].psrMemory, b.SPSR_val);
+						}
+					}
+
+					// PC
+					CHECK_VALUE("PC", pGBA_registers->pc, final->R[15]);
+
+					// Transaction
+					uint32_t count = std::min<uint32_t>((uint32_t)transactions.size(), (uint32_t)sst.index);
+
+					for (uint32_t i = 0; i < count; ++i)
+					{
+						char buf[64];
+
+						snprintf(buf, sizeof(buf), "TX[%u].kind", i);
+						CHECK_VALUE(buf, (uint32_t)sst.internal[i].kind, transactions[i].kind);
+
+						snprintf(buf, sizeof(buf), "TX[%u].size", i);
+						CHECK_VALUE(buf, (uint32_t)sst.internal[i].size, transactions[i].size);
+
+						snprintf(buf, sizeof(buf), "TX[%u].addr", i);
+						CHECK_VALUE(buf, (uint32_t)sst.internal[i].addr, transactions[i].addr);
+
+						snprintf(buf, sizeof(buf), "TX[%u].data", i);
+						CHECK_VALUE(buf, (uint32_t)sst.internal[i].data, transactions[i].data);
+
+						TODO("SST: Cycle matching is disabled");
+						//snprintf(buf, sizeof(buf), "TX[%u].cycle", i);
+						//CHECK_VALUE(buf, (uint32_t)sst.internal[i].cycle, transactions[i].cycle);
+
+						snprintf(buf, sizeof(buf), "TX[%u].access", i);
+						CHECK_VALUE(buf, (uint32_t)(sst.internal[i].access), transactions[i].access);
+
+						if (quitThisRun == YES)
+						{
+							volatile int bp = 0;
+						}
+					}
+
+					#undef CHECK_VALUE
+
+					// Count mismatch is also an error
+					if (transactions.size() != sst.index)
+					{
+						FATAL("Transaction count mismatch: live=%u ref=%zu\n", sst.index, transactions.size());
+						quitThisRun = YES;
+					}
+
+					if (quitThisRun == YES)
+					{
+						++failedCount;
+						BREAK;
+					}
+
+					++passedCount;
+				}
+
+				INFO("Test file %s : %u passed, %u failed",
+					testFileName.c_str(), passedCount, failedCount);
+			}
+		}
+
+		INFO("================================================================================");
+		INFO("GBA SST Testing Complete");
+		INFO("================================================================================");
+		PAUSE;
 	}
 	else
+#endif
 	{
 		if (ROM_TYPE == ROM::COMPARE)
 		{

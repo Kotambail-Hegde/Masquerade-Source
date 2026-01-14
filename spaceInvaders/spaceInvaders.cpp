@@ -18,10 +18,8 @@
 // CPU cycles per single space invaders frame
 static const uint32_t CPU_CYCLES_PER_FRAME = 16666 * TWO;	// 2 MHz
 
-#if (I8080_IN_SST_MODE == YES)
 static std::string _JSON_LOCATION;
 static boost::property_tree::ptree testCase;
-#endif
 
 static uint32_t spaceInvaders_texture;
 static uint32_t matrix_texture;
@@ -37,17 +35,23 @@ spaceInvaders_t::spaceInvaders_t(int nFiles, std::array<std::string, MAX_NUMBER_
 
 	this->pt = config;
 
-#if (I8080_IN_SST_MODE == YES)
-	SETBIT(ENABLE_LOGS, LOG_VERBOSITY_WARN);
-	SETBIT(ENABLE_LOGS, LOG_VERBOSITY_INFO);
-	SETBIT(ENABLE_LOGS, LOG_VERBOSITY_EVENT);
+	if (nFiles == SST_ROMS)
+	{
+		SETBIT(ENABLE_LOGS, LOG_VERBOSITY_WARN);
+		SETBIT(ENABLE_LOGS, LOG_VERBOSITY_INFO);
+		SETBIT(ENABLE_LOGS, LOG_VERBOSITY_EVENT);
 
-	INFO("Running in sst Cpu Test Mode!");
-	_JSON_LOCATION = pt.get<std::string>("spaceinvaders._sst_location");
+		INFO("Running in sst Cpu Test Mode!");
+		_JSON_LOCATION = pt.get<std::string>("spaceinvaders._sst_location");
 
-	ROM_TYPE = ROM::TEST_SST;
+#if (ENABLE_I8080_SST == YES)
+		ROM_TYPE = ROM::TEST_SST;
 #else
-	if (nFiles == TEST_ROMS)
+		FATAL("SSTs are not supported in this build");
+		RETURN;
+#endif
+	}
+	else if (nFiles == TEST_ROMS)
 	{
 		++indexToCheck;
 		ROM_TYPE = ROM::TEST_ROM_COM;
@@ -71,7 +75,6 @@ spaceInvaders_t::spaceInvaders_t(int nFiles, std::array<std::string, MAX_NUMBER_
 	{
 		this->rom[ii] = rom[ii + indexToCheck];
 	}
-#endif
 }
 
 void spaceInvaders_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void* network)
@@ -87,7 +90,11 @@ void spaceInvaders_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* au
 		indexToCheck = TEST_ROMS - ONE;
 	}
 
-	if ((!rom[indexToCheck].empty()) || (ROM_TYPE == ROM::TEST_SST))
+#if (ENABLE_I8080_SST == YES)
+	if (!rom[indexToCheck].empty() || ROM_TYPE == ROM::TEST_SST)
+#else
+	if (!rom[indexToCheck].empty())
+#endif
 	{
 		if (!initializeEmulator())
 		{
@@ -95,7 +102,9 @@ void spaceInvaders_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* au
 			throw std::runtime_error("memory allocation failure");
 		}
 
+#if (ENABLE_I8080_SST == YES)
 		if (ROM_TYPE != ROM::TEST_SST)
+#endif
 		{
 			loadRom(rom);
 		}
@@ -169,7 +178,7 @@ FLAG spaceInvaders_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 {
 	bool vblank = false;
 
-#if (I8080_IN_SST_MODE == YES)
+#if (ENABLE_I8080_SST == YES)
 #define SST_DEBUG_PRINT (NO)
 	COUNTER32 opcode = ZERO;
 	while (FOREVER)
@@ -214,7 +223,7 @@ FLAG spaceInvaders_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 
 		++opcode;
 	}
-#else
+#endif
 	if (ROM_TYPE == ROM::TEST_ROM_COM)
 	{
 		LOG("Starting the test");
@@ -326,7 +335,6 @@ FLAG spaceInvaders_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 	{
 		vblank = processCPU();
 	}
-#endif
 
 	RETURN vblank;
 }

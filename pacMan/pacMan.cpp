@@ -124,7 +124,12 @@ pacMan_t::pacMan_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATF
 		INFO("Running in sst Cpu Test Mode!");
 		_JSON_LOCATION = rom[ONE];
 
+#if (ENABLE_Z80_SST == YES)
 		ROM_TYPE = ROM::TEST_SST;
+#else
+		FATAL("SSTs are not supported in this build");
+		RETURN;
+#endif
 	}
 	else if (nFiles == PAC_MAN_ROMS)
 	{
@@ -168,7 +173,11 @@ void pacMan_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, vo
 		indexToCheck = RESET;
 	}
 
-	if ((!rom[indexToCheck].empty()) || (ROM_TYPE == ROM::TEST_SST))
+#if (ENABLE_Z80_SST == YES)
+	if (!rom[indexToCheck].empty() || ROM_TYPE == ROM::TEST_SST)
+#else
+	if (!rom[indexToCheck].empty())
+#endif
 	{
 		if (!initializeEmulator())
 		{
@@ -176,7 +185,9 @@ void pacMan_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, vo
 			throw std::runtime_error("memory allocation failure");
 		}
 
+#if (ENABLE_Z80_SST == YES)
 		if (ROM_TYPE != ROM::TEST_SST)
+#endif
 		{
 			loadRom(rom);
 
@@ -259,11 +270,13 @@ float pacMan_t::getEmulationFPS()
 void pacMan_t::cpuTickT()
 {
 	pPacMan_cpuInstance->cpuCounter += ONE;
+#if (ENABLE_Z80_SST == YES)
 	if (ROM_TYPE == ROM::TEST_SST)
 	{
 		++pPacMan_instance->pacMan_state.others.tomHarte.cycles.cyclePerInst;
 	}
 	else
+#endif
 	{
 		syncOtherGBModuleTicks();
 	}
@@ -443,6 +456,7 @@ BYTE pacMan_t::cpuReadPointer(pacMan_t::POINTER_TYPE mrt)
 // 5) processinterrupts?
 BYTE pacMan_t::readRawMemoryFromCPU(uint16_t address, FLAG opcodeFetch)
 {
+#if (ENABLE_Z80_SST == YES)
 	if (ROM_TYPE == ROM::TEST_SST)
 	{
 		auto data = pPacMan_memory->pacManRawMemory[address];
@@ -539,6 +553,7 @@ BYTE pacMan_t::readRawMemoryFromCPU(uint16_t address, FLAG opcodeFetch)
 		RETURN data;
 	}
 	else
+#endif
 	{
 		if (ROM_TYPE == ROM::TEST_ROM_COM || ROM_TYPE == ROM::TEST_ROM_CIM || ROM_TYPE == ROM::TEST_ROM_TAP)
 		{
@@ -640,6 +655,7 @@ BYTE pacMan_t::readRawMemoryFromGFX(uint16_t address)
 // 5) processinterrupts?
 void pacMan_t::writeRawMemoryFromCPU(uint16_t address, BYTE data)
 {
+#if (ENABLE_Z80_SST == YES)
 	if (ROM_TYPE == ROM::TEST_SST)
 	{
 		while (pPacMan_instance->pacMan_state.others.tomHarte.cycles.cyclePerInst != ZERO)
@@ -697,6 +713,7 @@ void pacMan_t::writeRawMemoryFromCPU(uint16_t address, BYTE data)
 		pPacMan_memory->pacManRawMemory[address] = data;
 	}
 	else
+#endif
 	{
 		if (ROM_TYPE == ROM::TEST_ROM_COM || ROM_TYPE == ROM::TEST_ROM_CIM || ROM_TYPE == ROM::TEST_ROM_TAP)
 		{
@@ -3202,6 +3219,7 @@ FLAG pacMan_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 {
 	pPacMan_instance->pacMan_state.display.isVblank = NO;
 
+#if (ENABLE_Z80_SST == YES)
 	if (ROM_TYPE == ROM::TEST_SST)
 	{
 		static FLAG SST_DEBUG_PRINT = NO;
@@ -3922,6 +3940,7 @@ FLAG pacMan_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 		}
 	}
 	else
+#endif
 	{
 		if (ROM_TYPE == ROM::TEST_ROM_COM || ROM_TYPE == ROM::TEST_ROM_CIM || ROM_TYPE == ROM::TEST_ROM_TAP)
 		{

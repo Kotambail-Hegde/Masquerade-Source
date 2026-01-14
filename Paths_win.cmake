@@ -23,3 +23,6 @@ set(STB_ROOT "C:/Data/Softwares/stb")
 
 # Emscripten Browser File Library
 set(EFB_ROOT "C:/Data/Softwares/Emscripten/emscripten-browser-file")
+
+# Rapid JSON
+set(RAPID_JSON_ROOT "C:/Data/Softwares/RapidJSON/rapidjson")

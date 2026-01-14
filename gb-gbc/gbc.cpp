@@ -207,7 +207,12 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 		INFO("Running in sst Cpu Test Mode!");
 		_JSON_LOCATION = rom[ONE];
 
+#if (ENABLE_SM83_SST == YES)
 		ROM_TYPE = ROM::TEST_SST;
+#else
+		FATAL("SSTs are not supported in this build");
+		RETURN;
+#endif
 	}
 	else
 	{
@@ -434,7 +439,11 @@ void GBc_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void*
 {
 	uint8_t indexToCheck = 0;
 
-	if (!rom[indexToCheck].empty() || (ROM_TYPE == ROM::TEST_SST))
+#if (ENABLE_SM83_SST == YES)
+	if (!rom[indexToCheck].empty() || ROM_TYPE == ROM::TEST_SST)
+#else
+	if (!rom[indexToCheck].empty())
+#endif
 	{
 		if (!initializeEmulator())
 		{
@@ -1255,6 +1264,7 @@ FLAG GBc_t::isCGBCompatibilityModeEnabled()
 
 void GBc_t::cpuTickM(CPU_TICK_TYPE type)
 {
+#if (ENABLE_SM83_SST == YES)
 	if (ROM_TYPE == ROM::TEST_SST)
 	{
 		pGBc_instance->GBc_state.emulatorStatus.ticks.cpuCounter++;
@@ -1265,6 +1275,7 @@ void GBc_t::cpuTickM(CPU_TICK_TYPE type)
 		}
 	}
 	else
+#endif
 	{
 		pGBc_instance->GBc_state.emulatorStatus.ticks.cpuCounter++;
 
@@ -6673,6 +6684,7 @@ FLAG GBc_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 {
 	pGBc_display->wasVblankJustTriggerred = CLEAR;
 
+#if (ENABLE_SM83_SST == YES)
 	if (ROM_TYPE == ROM::TEST_SST)
 	{
 		static FLAG SST_DEBUG_PRINT = NO;
@@ -7031,6 +7043,7 @@ FLAG GBc_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 		}
 	}
 	else
+#endif
 	{
 		processSOC();
 
@@ -8383,6 +8396,7 @@ byte GBc_t::readRawMemory(uint16_t address
 	, FLAG FirstPriority_readFromVRAMBank01ForCGB
 	, FLAG SecondPriority_readFromVRAMBank00ForCGB)
 {
+#if (ENABLE_SM83_SST == YES)
 	if (ROM_TYPE == ROM::TEST_SST)
 	{
 		auto data = pGBc_memory->GBcRawMemory[address];
@@ -8397,6 +8411,7 @@ byte GBc_t::readRawMemory(uint16_t address
 		RETURN data;
 	}
 	else
+#endif
 	{
 
 		// Refer : https://discord.com/channels/465585922579103744/465586075830845475/1063495906441302016
@@ -9455,6 +9470,7 @@ byte GBc_t::readRawMemory(uint16_t address
 
 void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE source)
 {
+#if (ENABLE_SM83_SST == YES)
 	if (ROM_TYPE == ROM::TEST_SST)
 	{
 		auto index = pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.cycles.indexer;
@@ -9467,6 +9483,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 		pGBc_memory->GBcRawMemory[address] = data;
 	}
 	else
+#endif
 	{
 		// Refer : https://discord.com/channels/465585922579103744/465586075830845475/1063495906441302016
 		if (ENABLED)

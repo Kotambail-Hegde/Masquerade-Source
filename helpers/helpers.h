@@ -144,6 +144,11 @@
 #include <miniz.h>
 #pragma endregion MINIZ_INCLUDES
 
+#pragma region RAPIDJSON_INCLUDES
+#include "rapidjson/document.h"
+#include "rapidjson/filereadstream.h"
+#pragma endregion RAPIDJSON_INCLUDES
+
 #pragma region MACROS
 #ifndef FALSE
 #define FALSE										0
@@ -361,7 +366,7 @@
 #ifdef __EMSCRIPTEN__
 // Use JavaScript alert as pause on Emscripten (simplest no-SDL way)
 #define PAUSE do { \
-    emscripten_run_script("alert('Press OK to continue...');"); \
+    emscripten_run_script("alert('Press OK to CONTINUE...');"); \
 } while(0)
 
 #elif defined(_WIN32) || defined(_WIN64)
@@ -369,13 +374,13 @@
 
 #elif defined(__GNUC__)
 #define PAUSE do { \
-    printf("Press Enter to continue...\n"); \
+    printf("Press Enter to CONTINUE...\n"); \
     fflush(stdout); \
     getchar(); \
 } while(0)
 #else
 #define PAUSE do { \
-    printf("Press any key to continue...\n"); \
+    printf("Press any key to CONTINUE...\n"); \
 } while(0)
 #endif
 #define RETURN										return 
@@ -590,6 +595,13 @@
 #define SE_THEME_BLACK								2
 //
 #define THEME_CUSTOM								3
+
+//
+#define ENABLE_I8080_SST							NO
+#define ENABLE_Z80_SST								NO
+#define ENABLE_SM83_SST								NO
+#define ENABLE_R2A03_SST							NO
+#define ENABLE_ARM7TDMI_SST							NO
 #pragma endregion MACROS
 
 #ifndef byte
@@ -675,7 +687,7 @@ inline std::string StripAnsiColors(const std::string & input)
 				++i;
 			}
 			// Skip the 'm' too
-			continue;
+			CONTINUE;
 		}
 		output += input[i];
 	}
@@ -923,8 +935,8 @@ inline std::string toUpper(const std::string& str)
 inline std::filesystem::path getexepath()
 {
 #ifdef __EMSCRIPTEN__
-	// No executable path in WASM; return empty or fixed string
-	return {};
+	// No executable path in WASM; RETURN empty or fixed string
+	RETURN {};
 #elif defined(_WIN32) || defined(_WIN64)
 	wchar_t path[MAX_PATH] = { 0 };
 	GetModuleFileNameW(NULL, path, MAX_PATH);
@@ -1166,12 +1178,12 @@ inline uint64_t signExtend64(uint64_t v, int currentNumberOfBits)
 	if (v & (1ull << (currentNumberOfBits - 1)))
 	{
 		// Sign bit is set then fill upper bits with 1s
-		return v | (~0ull << currentNumberOfBits);
+		RETURN v | (~0ull << currentNumberOfBits);
 	}
 	else
 	{
 		// Sign bit not set then already correct
-		return v;
+		RETURN v;
 	}
 }
 
@@ -1179,11 +1191,11 @@ inline uint32_t signExtend32(uint32_t v, int currentNumberOfBits)
 {
 	if (v & (1u << (currentNumberOfBits - 1))) // if sign bit is set
 	{
-		return v | (~0u << currentNumberOfBits); // extend with 1s
+		RETURN v | (~0u << currentNumberOfBits); // extend with 1s
 	}
 	else
 	{
-		return v; // positive, no change
+		RETURN v; // positive, no change
 	}
 }
 
@@ -1231,9 +1243,9 @@ inline uint32_t ctz32_portable(uint32_t x)
 #if defined(_MSC_VER)
 	unsigned long idx;
 	_BitScanForward(&idx, x);
-	return idx;
+	RETURN idx;
 #else
-	return __builtin_ctz(x);
+	RETURN __builtin_ctz(x);
 #endif
 }
 
@@ -1289,7 +1301,7 @@ inline bool extract_zip(const std::filesystem::path& zip_path, const std::filesy
 	if (!mz_zip_reader_init_file(&zip_archive, zip_path.string().c_str(), 0))
 	{
 		FATAL("Failed to open ZIP archive: %s", zip_path.string().c_str());
-		return false;
+		RETURN false;
 	}
 
 	int num_files = static_cast<int>(mz_zip_reader_get_num_files(&zip_archive));
@@ -1297,7 +1309,7 @@ inline bool extract_zip(const std::filesystem::path& zip_path, const std::filesy
 	{
 		mz_zip_archive_file_stat file_stat;
 		if (!mz_zip_reader_file_stat(&zip_archive, i, &file_stat))
-			continue;
+			CONTINUE;
 
 		std::filesystem::path out_file = dest_dir / file_stat.m_filename;
 		if (file_stat.m_is_directory)
@@ -1315,7 +1327,7 @@ inline bool extract_zip(const std::filesystem::path& zip_path, const std::filesy
 	}
 
 	mz_zip_reader_end(&zip_archive);
-	return true;
+	RETURN true;
 }
 #else
 // NOTE: Sync to persistant FS needs to be done outside this function
@@ -2035,7 +2047,7 @@ inline void stripBlock(std::string& source, const std::string& startTag, const s
 	while (start != std::string::npos)
 	{
 		size_t end = source.find(endTag, start);
-		if (end == std::string::npos) break;
+		if (end == std::string::npos) BREAK;
 
 		// Erase from start of #if to end of #else line
 		source.erase(start, end + endTag.length() - start);
@@ -2194,11 +2206,11 @@ inline int EstimateConvertedOutputBytes(
 	}
 	else
 	{
-		return -1; // Unsupported input format
+		RETURN -1; // Unsupported input format
 	}
 	int inputFrameSize = inputSampleSize * inputChannels;
 
-	if (inputFrameSize == 0) return -1;
+	if (inputFrameSize == 0) RETURN -1;
 
 	int inputFrames = inputBytes / inputFrameSize;
 
@@ -2214,11 +2226,11 @@ inline int EstimateConvertedOutputBytes(
 	}
 	else
 	{
-		return -1; // Unsupported output format
+		RETURN -1; // Unsupported output format
 	}
 
 	int outputFrameSize = outputSampleSize * outputChannels;
-	return outputFrames * outputFrameSize;
+	RETURN outputFrames * outputFrameSize;
 }
 
 inline int CalculateMaxSafeBufferSize(SDL_AudioDeviceID device, float duration_seconds) 
@@ -2227,7 +2239,7 @@ inline int CalculateMaxSafeBufferSize(SDL_AudioDeviceID device, float duration_s
 	if (SDL_GetAudioDeviceFormat(device, &outputSpec, NULL) < 0)
 	{
 		SDL_Log("Failed to get output device format: %s", SDL_GetError());
-		return -1;
+		RETURN -1;
 	}
 
 	int bytes_per_sample = SDL_AUDIO_BITSIZE(outputSpec.format) / 8;
@@ -2236,13 +2248,13 @@ inline int CalculateMaxSafeBufferSize(SDL_AudioDeviceID device, float duration_s
 	if (!SDL_AUDIO_ISFLOAT(outputSpec.format) && !SDL_AUDIO_ISSIGNED(outputSpec.format))
 	{
 		SDL_Log("Unsupported format: 0x%X", outputSpec.format);
-		return -1;
+		RETURN -1;
 	}
 
 	int bytes_per_frame = bytes_per_sample * outputSpec.channels;
 	int max_safe_bytes = (int)(outputSpec.freq * duration_seconds * bytes_per_frame);
 
-	return max_safe_bytes;
+	RETURN max_safe_bytes;
 }
 #endif
 
@@ -2325,7 +2337,7 @@ public:
 			hash[i * 4 + 3] = static_cast<uint8_t>((m_h[i]) & 0xFF);
 		}
 
-		return hash;
+		RETURN hash;
 	}
 
 	static std::string toHexString(const std::array<uint8_t, 20>& digest)
@@ -2334,7 +2346,7 @@ public:
 		ss << std::hex << std::setfill('0');
 		for (uint8_t b : digest)
 			ss << std::setw(2) << static_cast<int>(b);
-		return ss.str();
+		RETURN ss.str();
 	}
 
 private:
@@ -2395,7 +2407,7 @@ private:
 
 	static uint32_t leftrotate(uint32_t value, uint32_t bits)
 	{
-		return (value << bits) | (value >> (32 - bits));
+		RETURN (value << bits) | (value >> (32 - bits));
 	}
 
 private:
