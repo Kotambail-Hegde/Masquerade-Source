@@ -302,7 +302,7 @@
 
 #define CPSR_FLAG(F, C)									(F == 1 ? C:"-")
 
-#define loadPipeline									//fetchAndDecode
+#define loadPipeline									dummy
 #define reloadPipeline									fetchAndDecode
 #define initializeSerialClockSpeed						processSerialClockSpeedBit
 #define performOverFlowCheck							getUpdatedFrequency
