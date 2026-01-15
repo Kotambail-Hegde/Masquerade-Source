@@ -34,6 +34,7 @@
 #pragma region INCLUDES
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <bitset>
 #include <chrono>
 #include <codecvt>
@@ -143,6 +144,11 @@
 #pragma region MINIZ_INCLUDES
 #include <miniz.h>
 #pragma endregion MINIZ_INCLUDES
+
+#pragma region RAPIDJSON_INCLUDES
+#include "rapidjson/document.h"
+#include "rapidjson/filereadstream.h"
+#pragma endregion RAPIDJSON_INCLUDES
 
 #pragma region MACROS
 #ifndef FALSE
@@ -361,7 +367,7 @@
 #ifdef __EMSCRIPTEN__
 // Use JavaScript alert as pause on Emscripten (simplest no-SDL way)
 #define PAUSE do { \
-    emscripten_run_script("alert('Press OK to continue...');"); \
+    emscripten_run_script("alert('Press OK to CONTINUE...');"); \
 } while(0)
 
 #elif defined(_WIN32) || defined(_WIN64)
@@ -369,13 +375,13 @@
 
 #elif defined(__GNUC__)
 #define PAUSE do { \
-    printf("Press Enter to continue...\n"); \
+    printf("Press Enter to CONTINUE...\n"); \
     fflush(stdout); \
     getchar(); \
 } while(0)
 #else
 #define PAUSE do { \
-    printf("Press any key to continue...\n"); \
+    printf("Press any key to CONTINUE...\n"); \
 } while(0)
 #endif
 #define RETURN										return 
@@ -582,6 +588,28 @@
 #define MASQ_LIKELY									[[likely]]
 #endif
 
+// Cross-platform packing macros
+#if defined(_MSC_VER)
+#define PACK_BEGIN __pragma(pack(push, 1))
+#define PACK_END   __pragma(pack(pop))
+#elif defined(__GNUC__) || defined(__clang__)
+#if defined(__EMSCRIPTEN__)
+	// Emscripten/Wasm doesn't support ms_struct
+#define PACK_BEGIN _Pragma("pack(push, 1)")
+#define PACK_END   _Pragma("pack(pop)")
+#else
+#define PACK_BEGIN \
+            _Pragma("pack(push, 1)") \
+            _Pragma("ms_struct on")
+#define PACK_END \
+            _Pragma("ms_struct off") \
+            _Pragma("pop")
+#endif
+#else
+#define PACK_BEGIN
+#define PACK_END
+#endif
+
 // Themes
 #define ENABLED_IMGUI_DEFAULT_THEME					NO
 // Below 3 themes are ported from SkyEmu!
@@ -590,6 +618,13 @@
 #define SE_THEME_BLACK								2
 //
 #define THEME_CUSTOM								3
+
+//
+#define ENABLE_I8080_SST							NO
+#define ENABLE_Z80_SST								NO
+#define ENABLE_SM83_SST								NO
+#define ENABLE_R2A03_SST							NO
+#define ENABLE_ARM7TDMI_SST							NO
 #pragma endregion MACROS
 
 #ifndef byte
@@ -658,7 +693,14 @@ extern float emuWindowY;
 extern float emuWindowMaxX;
 extern float emuWindowMaxY;
 
-inline std::string StripAnsiColors(const std::string & input)
+// Use a template or a variadic sink to accept the parameter
+template<typename... T>
+MASQ_INLINE void dummy(T...)
+{
+	// Optimized away completely by Emscripten/Clang -O3
+}
+
+MASQ_INLINE std::string StripAnsiColors(const std::string & input)
 {
 	std::string output;
 	output.reserve(input.size());
@@ -675,7 +717,7 @@ inline std::string StripAnsiColors(const std::string & input)
 				++i;
 			}
 			// Skip the 'm' too
-			continue;
+			CONTINUE;
 		}
 		output += input[i];
 	}
@@ -774,7 +816,7 @@ inline void LogToImGui(const char* fmt, ...)
 }
 
 // === Call this right after ImGui is initialized ===
-inline void FlushEarlyLogsToImGui()
+MASQ_INLINE void FlushEarlyLogsToImGui()
 {
 	std::lock_guard<std::mutex> lock(preImGuiLogMutex);
 	for (const auto& line : preImGuiLogBuffer)
@@ -826,21 +868,21 @@ inline void logger(const char* fmt, ...)
 }
 
 #ifndef __EMSCRIPTEN__
-inline std::wstring to_wstring(const std::string& stringToConvert)
+MASQ_INLINE std::wstring to_wstring(const std::string& stringToConvert)
 {
 	std::wstring wideString =
 		std::wstring_convert<std::codecvt_utf8<wchar_t>>().from_bytes(stringToConvert);
 	RETURN wideString;
 }
 
-inline bool doesFileExist(const std::string& name)
+MASQ_INLINE bool doesFileExist(const std::string& name)
 {
 	struct stat buffer;
 	RETURN(stat(name.c_str(), &buffer) == 0);
 }
 #endif
 
-inline void blocking_delay_ms(int ms)
+MASQ_INLINE void blocking_delay_ms(int ms)
 {
 	auto start = std::chrono::steady_clock::now();
 	while (std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -851,7 +893,7 @@ inline void blocking_delay_ms(int ms)
 	}
 }
 
-inline void ifNoDirectoryThenCreate(std::string directory)
+MASQ_INLINE void ifNoDirectoryThenCreate(std::string directory)
 {
 	// check if directory mentioned by "directory" exists, if not we need to explicitly create it
 	if (!std::filesystem::is_directory(directory) || !std::filesystem::exists(directory))
@@ -860,7 +902,7 @@ inline void ifNoDirectoryThenCreate(std::string directory)
 	}
 }
 
-inline bool to_bool(std::string str)
+MASQ_INLINE bool to_bool(std::string str)
 {
 	std::transform(str.begin(), str.end(), str.begin(), ::tolower);
 	std::istringstream is(str);
@@ -869,7 +911,7 @@ inline bool to_bool(std::string str)
 	RETURN b;
 }
 
-inline uint8_t countSetBits(int32_t number)
+MASQ_INLINE uint8_t countSetBits(int32_t number)
 {
 	const uint8_t nibble_to_bits[16]
 		= { 0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4 };
@@ -887,24 +929,24 @@ inline uint8_t countSetBits(int32_t number)
 	RETURN nibble_to_bits[nibble] + countSetBits(number >> 4);
 }
 
-inline bool isOddParity(int32_t number)
+MASQ_INLINE bool isOddParity(int32_t number)
 {
 	RETURN(bool)(countSetBits(number) % 2);
 }
 
 // bit position starts from 0 to n - 1....
 
-inline uint8_t getBit(uint32_t byte, uint8_t position)
+MASQ_INLINE uint8_t getBit(uint32_t byte, uint8_t position)
 {
 	RETURN(byte >> position) & 1;
 }
 
-inline std::bitset<8> toBinary(int n)
+MASQ_INLINE std::bitset<8> toBinary(int n)
 {
 	RETURN std::bitset<8>(n);
 }
 
-inline std::string hex(uint32_t n, uint8_t d)
+MASQ_INLINE std::string hex(uint32_t n, uint8_t d)
 {
 	std::string s(d, '0');
 	for (int i = d - 1; i >= 0; i--, n >>= 4)
@@ -912,7 +954,7 @@ inline std::string hex(uint32_t n, uint8_t d)
 	RETURN s;
 };
 
-inline std::string toUpper(const std::string& str)
+MASQ_INLINE std::string toUpper(const std::string& str)
 {
 	std::string result = str;
 	std::transform(result.begin(), result.end(), result.begin(),
@@ -920,11 +962,11 @@ inline std::string toUpper(const std::string& str)
 	RETURN result;
 }
 
-inline std::filesystem::path getexepath()
+MASQ_INLINE std::filesystem::path getexepath()
 {
 #ifdef __EMSCRIPTEN__
-	// No executable path in WASM; return empty or fixed string
-	return {};
+	// No executable path in WASM; RETURN empty or fixed string
+	RETURN {};
 #elif defined(_WIN32) || defined(_WIN64)
 	wchar_t path[MAX_PATH] = { 0 };
 	GetModuleFileNameW(NULL, path, MAX_PATH);
@@ -939,7 +981,7 @@ inline std::filesystem::path getexepath()
 #endif
 }
 
-inline int fast_positive_mod(const int input, const int ceil)
+MASQ_INLINE int fast_positive_mod(const int input, const int ceil)
 {
 	// apply the modulo operator only when needed
 	// (i.e. when the input is greater than the ceiling)
@@ -949,7 +991,7 @@ inline int fast_positive_mod(const int input, const int ceil)
 
 // For frequency of substring
 
-inline void computeLPSArray(std::string pattern, size_t M, int lps[])
+MASQ_INLINE void computeLPSArray(std::string pattern, size_t M, int lps[])
 {
 
 	// Length of the previous longest
@@ -990,7 +1032,7 @@ inline void computeLPSArray(std::string pattern, size_t M, int lps[])
 	}
 }
 
-inline int KMPSearch(std::string pattern, std::string original)
+MASQ_INLINE int KMPSearch(std::string pattern, std::string original)
 {
 	size_t M = pattern.length();
 	size_t N = original.length();
@@ -1050,7 +1092,7 @@ inline int KMPSearch(std::string pattern, std::string original)
 	RETURN res;
 }
 
-inline void int8ToDouble(int8_t* input, double* output, int length)
+MASQ_INLINE void int8ToDouble(int8_t* input, double* output, int length)
 {
 	int i;
 
@@ -1060,7 +1102,7 @@ inline void int8ToDouble(int8_t* input, double* output, int length)
 	}
 }
 
-inline void doubleToInt8(double* input, int8_t* output, int length)
+MASQ_INLINE void doubleToInt8(double* input, int8_t* output, int length)
 {
 	int i;
 
@@ -1080,7 +1122,7 @@ inline void doubleToInt8(double* input, int8_t* output, int length)
 	}
 }
 
-inline void int16ToDouble(int16_t* input, double* output, int length)
+MASQ_INLINE void int16ToDouble(int16_t* input, double* output, int length)
 {
 	int i;
 
@@ -1090,7 +1132,7 @@ inline void int16ToDouble(int16_t* input, double* output, int length)
 	}
 }
 
-inline void doubleToInt16(double* input, int16_t* output, int length)
+MASQ_INLINE void doubleToInt16(double* input, int16_t* output, int length)
 {
 	int i;
 
@@ -1110,7 +1152,7 @@ inline void doubleToInt16(double* input, int16_t* output, int length)
 	}
 }
 
-inline void int32ToDouble(int32_t* input, double* output, int length)
+MASQ_INLINE void int32ToDouble(int32_t* input, double* output, int length)
 {
 	int i;
 
@@ -1120,7 +1162,7 @@ inline void int32ToDouble(int32_t* input, double* output, int length)
 	}
 }
 
-inline void doubleToInt32(double* input, int32_t* output, int length)
+MASQ_INLINE void doubleToInt32(double* input, int32_t* output, int length)
 {
 	int i;
 
@@ -1140,7 +1182,7 @@ inline void doubleToInt32(double* input, int32_t* output, int length)
 	}
 }
 
-inline void int64ToDouble(int64_t* input, double* output, int length)
+MASQ_INLINE void int64ToDouble(int64_t* input, double* output, int length)
 {
 	int i;
 
@@ -1150,7 +1192,7 @@ inline void int64ToDouble(int64_t* input, double* output, int length)
 	}
 }
 
-inline void doubleToInt64(double* input, int64_t* output, int length)
+MASQ_INLINE void doubleToInt64(double* input, int64_t* output, int length)
 {
 	int i;
 
@@ -1161,34 +1203,34 @@ inline void doubleToInt64(double* input, int64_t* output, int length)
 	}
 }
 
-inline uint64_t signExtend64(uint64_t v, int currentNumberOfBits)
+MASQ_INLINE uint64_t signExtend64(uint64_t v, int currentNumberOfBits)
 {
 	if (v & (1ull << (currentNumberOfBits - 1)))
 	{
 		// Sign bit is set then fill upper bits with 1s
-		return v | (~0ull << currentNumberOfBits);
+		RETURN v | (~0ull << currentNumberOfBits);
 	}
 	else
 	{
 		// Sign bit not set then already correct
-		return v;
+		RETURN v;
 	}
 }
 
-inline uint32_t signExtend32(uint32_t v, int currentNumberOfBits)
+MASQ_INLINE uint32_t signExtend32(uint32_t v, int currentNumberOfBits)
 {
 	if (v & (1u << (currentNumberOfBits - 1))) // if sign bit is set
 	{
-		return v | (~0u << currentNumberOfBits); // extend with 1s
+		RETURN v | (~0u << currentNumberOfBits); // extend with 1s
 	}
 	else
 	{
-		return v; // positive, no change
+		RETURN v; // positive, no change
 	}
 }
 
 template <typename T>
-inline std::string to_string_with_precision(const T a_value, const int n = 6)
+MASQ_INLINE std::string to_string_with_precision(const T a_value, const int n = 6)
 {
 	std::ostringstream out;
 	out.precision(n);
@@ -1196,7 +1238,7 @@ inline std::string to_string_with_precision(const T a_value, const int n = 6)
 	RETURN std::move(out).str();
 }
 
-inline int fopen_portable(FILE** file, const char* filename, const char* mode)
+MASQ_INLINE int fopen_portable(FILE** file, const char* filename, const char* mode)
 {
 #ifdef _MSC_VER
 	RETURN fopen_s(file, filename, mode);
@@ -1206,7 +1248,7 @@ inline int fopen_portable(FILE** file, const char* filename, const char* mode)
 #endif
 }
 
-inline int memcpy_portable(void* dest, size_t destSize, const void* src, size_t count)
+MASQ_INLINE int memcpy_portable(void* dest, size_t destSize, const void* src, size_t count)
 {
 #if defined(_MSC_VER)
 	// Use secure version on MSVC
@@ -1226,14 +1268,14 @@ inline int memcpy_portable(void* dest, size_t destSize, const void* src, size_t 
 #endif
 }
 
-inline uint32_t ctz32_portable(uint32_t x)
+MASQ_INLINE uint32_t ctz32_portable(uint32_t x)
 {
 #if defined(_MSC_VER)
 	unsigned long idx;
 	_BitScanForward(&idx, x);
-	return idx;
+	RETURN idx;
 #else
-	return __builtin_ctz(x);
+	RETURN __builtin_ctz(x);
 #endif
 }
 
@@ -1241,7 +1283,7 @@ inline uint32_t ctz32_portable(uint32_t x)
 // Extract ZIP using miniz
 // -----------------------
 #ifndef __EMSCRIPTEN__
-inline void extract_all_to_current_dir(const char* zip_path)
+MASQ_INLINE void extract_all_to_current_dir(const char* zip_path)
 {
 	mz_zip_archive zip;
 	memset(&zip, 0, sizeof(zip));
@@ -1281,7 +1323,7 @@ inline void extract_all_to_current_dir(const char* zip_path)
 	mz_zip_reader_end(&zip);
 }
 
-inline bool extract_zip(const std::filesystem::path& zip_path, const std::filesystem::path& dest_dir)
+MASQ_INLINE bool extract_zip(const std::filesystem::path& zip_path, const std::filesystem::path& dest_dir)
 {
 	mz_zip_archive zip_archive;
 	memset(&zip_archive, 0, sizeof(zip_archive));
@@ -1289,7 +1331,7 @@ inline bool extract_zip(const std::filesystem::path& zip_path, const std::filesy
 	if (!mz_zip_reader_init_file(&zip_archive, zip_path.string().c_str(), 0))
 	{
 		FATAL("Failed to open ZIP archive: %s", zip_path.string().c_str());
-		return false;
+		RETURN false;
 	}
 
 	int num_files = static_cast<int>(mz_zip_reader_get_num_files(&zip_archive));
@@ -1297,7 +1339,7 @@ inline bool extract_zip(const std::filesystem::path& zip_path, const std::filesy
 	{
 		mz_zip_archive_file_stat file_stat;
 		if (!mz_zip_reader_file_stat(&zip_archive, i, &file_stat))
-			continue;
+			CONTINUE;
 
 		std::filesystem::path out_file = dest_dir / file_stat.m_filename;
 		if (file_stat.m_is_directory)
@@ -1315,11 +1357,11 @@ inline bool extract_zip(const std::filesystem::path& zip_path, const std::filesy
 	}
 
 	mz_zip_reader_end(&zip_archive);
-	return true;
+	RETURN true;
 }
 #else
 // NOTE: Sync to persistant FS needs to be done outside this function
-inline int extract_all_to_persistent_dir(const char* zip_path, std::vector<std::string>& out_paths)
+MASQ_INLINE int extract_all_to_persistent_dir(const char* zip_path, std::vector<std::string>& out_paths)
 {
 	mz_zip_archive zip;
 	memset(&zip, 0, sizeof(zip));
@@ -1368,7 +1410,7 @@ inline int extract_all_to_persistent_dir(const char* zip_path, std::vector<std::
 }
 #endif
 
-inline std::string get_extension(const std::string& filename)
+MASQ_INLINE std::string get_extension(const std::string& filename)
 {
 	size_t dot_pos = filename.find_last_of('.');
 	if (dot_pos == std::string::npos || dot_pos == 0)
@@ -1564,32 +1606,32 @@ BLUE(0, 0, 255), DARK_BLUE(0, 0, 128), VERY_DARK_BLUE(0, 0, 64),
 MAGENTA(255, 0, 255), DARK_MAGENTA(128, 0, 128), VERY_DARK_MAGENTA(64, 0, 64),
 WHITE(255, 255, 255), BLACK(0, 0, 0), BLANK(0, 0, 0, 0);
 
-inline Pixel::Pixel()
+MASQ_INLINE Pixel::Pixel()
 {
 	r = 0; g = 0; b = 0; a = 0xFF;
 }
 
-inline Pixel::Pixel(uint8_t red, uint8_t green, uint8_t blue, uint8_t alpha)
+MASQ_INLINE Pixel::Pixel(uint8_t red, uint8_t green, uint8_t blue, uint8_t alpha)
 {
 	n = red | (green << 8) | (blue << 16) | (alpha << 24);
 }
 
-inline Pixel::Pixel(uint32_t p)
+MASQ_INLINE Pixel::Pixel(uint32_t p)
 {
 	n = p;
 }
 
-inline bool Pixel::operator==(const Pixel& p) const
+MASQ_INLINE bool Pixel::operator==(const Pixel& p) const
 {
 	RETURN n == p.n;
 }
 
-inline bool Pixel::operator!=(const Pixel& p) const
+MASQ_INLINE bool Pixel::operator!=(const Pixel& p) const
 {
 	RETURN n != p.n;
 }
 
-inline Pixel Pixel::operator * (const float i) const
+MASQ_INLINE Pixel Pixel::operator * (const float i) const
 {
 	float fR = std::min(255.0f, std::max(0.0f, float(r) * i));
 	float fG = std::min(255.0f, std::max(0.0f, float(g) * i));
@@ -1597,7 +1639,7 @@ inline Pixel Pixel::operator * (const float i) const
 	RETURN Pixel(uint8_t(fR), uint8_t(fG), uint8_t(fB), a);
 }
 
-inline Pixel Pixel::operator / (const float i) const
+MASQ_INLINE Pixel Pixel::operator / (const float i) const
 {
 	float fR = std::min(255.0f, std::max(0.0f, float(r) / i));
 	float fG = std::min(255.0f, std::max(0.0f, float(g) / i));
@@ -1605,7 +1647,7 @@ inline Pixel Pixel::operator / (const float i) const
 	RETURN Pixel(uint8_t(fR), uint8_t(fG), uint8_t(fB), a);
 }
 
-inline Pixel  Pixel::operator + (const Pixel& p) const
+MASQ_INLINE Pixel  Pixel::operator + (const Pixel& p) const
 {
 	uint8_t nR = uint8_t(std::min(255, std::max(0, int(r) + int(p.r))));
 	uint8_t nG = uint8_t(std::min(255, std::max(0, int(g) + int(p.g))));
@@ -1613,7 +1655,7 @@ inline Pixel  Pixel::operator + (const Pixel& p) const
 	RETURN Pixel(nR, nG, nB, a);
 }
 
-inline Pixel  Pixel::operator - (const Pixel& p) const
+MASQ_INLINE Pixel  Pixel::operator - (const Pixel& p) const
 {
 	uint8_t nR = uint8_t(std::min(255, std::max(0, int(r) - int(p.r))));
 	uint8_t nG = uint8_t(std::min(255, std::max(0, int(g) - int(p.g))));
@@ -1621,7 +1663,7 @@ inline Pixel  Pixel::operator - (const Pixel& p) const
 	RETURN Pixel(nR, nG, nB, a);
 }
 
-inline Pixel Pixel::operator * (const Pixel& p) const
+MASQ_INLINE Pixel Pixel::operator * (const Pixel& p) const
 {
 	uint8_t nR = uint8_t(std::min(255.0f, std::max(0.0f, float(r) * float(p.r) / 255.0f)));
 	uint8_t nG = uint8_t(std::min(255.0f, std::max(0.0f, float(g) * float(p.g) / 255.0f)));
@@ -1630,7 +1672,7 @@ inline Pixel Pixel::operator * (const Pixel& p) const
 	RETURN Pixel(nR, nG, nB, nA);
 }
 
-inline Pixel Pixel::inv() const
+MASQ_INLINE Pixel Pixel::inv() const
 {
 	uint8_t nR = uint8_t(std::min(255, std::max(0, 255 - int(r))));
 	uint8_t nG = uint8_t(std::min(255, std::max(0, 255 - int(g))));
@@ -1760,7 +1802,7 @@ extern double bufferForFIR[2048];
 
 //
 
-inline void createLUTForCRC()
+MASQ_INLINE void createLUTForCRC()
 {
 	unsigned long POLYNOMIAL = 0xEDB88320;
 	unsigned long remainder;
@@ -1781,7 +1823,7 @@ inline void createLUTForCRC()
 	while (0 != ++b);
 }
 
-inline unsigned long genCRC(uint8_t* p, size_t n)
+MASQ_INLINE unsigned long genCRC(uint8_t* p, size_t n)
 {
 	unsigned long crc = 0xfffffffful;
 	size_t i;
@@ -1790,7 +1832,7 @@ inline unsigned long genCRC(uint8_t* p, size_t n)
 	RETURN(~crc);
 }
 
-inline std::string getUniqueGameID(uint8_t* in, size_t length)
+MASQ_INLINE std::string getUniqueGameID(uint8_t* in, size_t length)
 {
 	unsigned long crc = ZERO;
 
@@ -1804,21 +1846,21 @@ inline std::string getUniqueGameID(uint8_t* in, size_t length)
 	RETURN gameID;
 }
 
-inline std::string getSaveFileName(uint8_t* in, uint64_t length)
+MASQ_INLINE std::string getSaveFileName(uint8_t* in, uint64_t length)
 {
 	std::string saveFile = getUniqueGameID(in, length);
 	saveFile += ".battery.sram";
 	RETURN saveFile;
 }
 
-inline std::string getRTCSaveName(uint8_t* in, uint64_t length)
+MASQ_INLINE std::string getRTCSaveName(uint8_t* in, uint64_t length)
 {
 	std::string rtcSave = getUniqueGameID(in, length);
 	rtcSave += ".battery.rtc";
 	RETURN rtcSave;
 }
 
-inline std::string getSaveStateName(uint8_t* in, uint64_t length)
+MASQ_INLINE std::string getSaveStateName(uint8_t* in, uint64_t length)
 {
 	std::string saveFile = getUniqueGameID(in, length);
 	saveFile += ".state";
@@ -1827,12 +1869,12 @@ inline std::string getSaveStateName(uint8_t* in, uint64_t length)
 
 //
 
-inline void firFilterInit(void)
+MASQ_INLINE void firFilterInit(void)
 {
 	memset(bufferForFIR, ZERO, sizeof(bufferForFIR));
 }
 
-inline void firFilter(const double* coeffs, double* input, double* output, int length, int filterLength)
+MASQ_INLINE void firFilter(const double* coeffs, double* input, double* output, int length, int filterLength)
 {
 	double acc;     // accumulator for MACs
 	const double* coeffp; // pointer to coefficients
@@ -1864,7 +1906,7 @@ inline void firFilter(const double* coeffs, double* input, double* output, int l
 
 //
 
-inline void getMouseRelPosIfDocked(float* xpos, float* ypos, uint32_t emuScreenWidth, uint32_t emuScreenHeight)
+MASQ_INLINE void getMouseRelPosIfDocked(float* xpos, float* ypos, uint32_t emuScreenWidth, uint32_t emuScreenHeight)
 {
 	static const float upperborder = 8;
 	static const float otherborder = 8;
@@ -1887,7 +1929,7 @@ inline void getMouseRelPosIfDocked(float* xpos, float* ypos, uint32_t emuScreenW
 }
 
 template <typename T>
-inline void printQ(std::queue<T> q) {
+MASQ_INLINE void printQ(std::queue<T> q) {
 	std::cout << "Queue: ";
 	while (!q.empty())
 	{
@@ -1898,7 +1940,7 @@ inline void printQ(std::queue<T> q) {
 }
 
 // Function to write a deque to a file
-inline void writeDequeToFile(const std::deque<std::string>& myDeque, const std::string& filename) {
+MASQ_INLINE void writeDequeToFile(const std::deque<std::string>& myDeque, const std::string& filename) {
 	std::ofstream outputFile(filename);
 	if (outputFile.is_open())
 	{
@@ -1915,7 +1957,7 @@ inline void writeDequeToFile(const std::deque<std::string>& myDeque, const std::
 }
 
 // Function to read a deque from a file
-inline std::deque<std::string> readDequeFromFile(const std::string& filename) {
+MASQ_INLINE std::deque<std::string> readDequeFromFile(const std::string& filename) {
 	std::deque<std::string> myDeque;
 	std::ifstream inputFile(filename);
 	if (inputFile.is_open())
@@ -2014,12 +2056,12 @@ const std::string defaultBlendFragmentShaderSrc =
 "    FragColor = vec4(texColor.rgb, texColor.a * u_Alpha);\n"
 "}\n";
 
-inline void GLClearError()
+MASQ_INLINE void GLClearError()
 {
 	while (glGetError() != GL_NO_ERROR);
 }
 
-inline FLAG GLLogCall(const char* function, const char* file, int line)
+MASQ_INLINE FLAG GLLogCall(const char* function, const char* file, int line)
 {
 	while (GLenum error = glGetError())
 	{
@@ -2029,13 +2071,13 @@ inline FLAG GLLogCall(const char* function, const char* file, int line)
 	RETURN SUCCESS;
 }
 
-inline void stripBlock(std::string& source, const std::string& startTag, const std::string& endTag)
+MASQ_INLINE void stripBlock(std::string& source, const std::string& startTag, const std::string& endTag)
 {
 	size_t start = source.find(startTag);
 	while (start != std::string::npos)
 	{
 		size_t end = source.find(endTag, start);
-		if (end == std::string::npos) break;
+		if (end == std::string::npos) BREAK;
 
 		// Erase from start of #if to end of #else line
 		source.erase(start, end + endTag.length() - start);
@@ -2045,7 +2087,7 @@ inline void stripBlock(std::string& source, const std::string& startTag, const s
 	}
 }
 
-inline shaderProgramSource_t parseShader(const std::string& filepath)
+MASQ_INLINE shaderProgramSource_t parseShader(const std::string& filepath)
 {
 	std::string vertex;
 	std::string fragment;
@@ -2125,7 +2167,7 @@ inline shaderProgramSource_t parseShader(const std::string& filepath)
 	RETURN{ vertex, fragment };
 }
 
-inline uint32_t compileShader(uint32_t type, const std::string& source)
+MASQ_INLINE uint32_t compileShader(uint32_t type, const std::string& source)
 {
 	uint32_t id = glCreateShader(type);
 	const char* src = source.c_str();
@@ -2149,7 +2191,7 @@ inline uint32_t compileShader(uint32_t type, const std::string& source)
 	RETURN id;
 }
 
-inline uint32_t createShader(const std::string& vertexShader, const std::string& fragmentShader)
+MASQ_INLINE uint32_t createShader(const std::string& vertexShader, const std::string& fragmentShader)
 {
 	uint32_t program = glCreateProgram();
 	uint32_t vs = compileShader(GL_VERTEX_SHADER, vertexShader);
@@ -2177,7 +2219,7 @@ inline uint32_t createShader(const std::string& vertexShader, const std::string&
 #endif
 
 #if DEACTIVATED
-inline int EstimateConvertedOutputBytes(
+MASQ_INLINE int EstimateConvertedOutputBytes(
 	int inputBytes,
 	int inputRate,
 	SDL_AudioFormat inputFormat,
@@ -2194,11 +2236,11 @@ inline int EstimateConvertedOutputBytes(
 	}
 	else
 	{
-		return -1; // Unsupported input format
+		RETURN -1; // Unsupported input format
 	}
 	int inputFrameSize = inputSampleSize * inputChannels;
 
-	if (inputFrameSize == 0) return -1;
+	if (inputFrameSize == 0) RETURN -1;
 
 	int inputFrames = inputBytes / inputFrameSize;
 
@@ -2214,20 +2256,20 @@ inline int EstimateConvertedOutputBytes(
 	}
 	else
 	{
-		return -1; // Unsupported output format
+		RETURN -1; // Unsupported output format
 	}
 
 	int outputFrameSize = outputSampleSize * outputChannels;
-	return outputFrames * outputFrameSize;
+	RETURN outputFrames * outputFrameSize;
 }
 
-inline int CalculateMaxSafeBufferSize(SDL_AudioDeviceID device, float duration_seconds) 
+MASQ_INLINE int CalculateMaxSafeBufferSize(SDL_AudioDeviceID device, float duration_seconds) 
 {
 	SDL_AudioSpec outputSpec;
 	if (SDL_GetAudioDeviceFormat(device, &outputSpec, NULL) < 0)
 	{
 		SDL_Log("Failed to get output device format: %s", SDL_GetError());
-		return -1;
+		RETURN -1;
 	}
 
 	int bytes_per_sample = SDL_AUDIO_BITSIZE(outputSpec.format) / 8;
@@ -2236,18 +2278,18 @@ inline int CalculateMaxSafeBufferSize(SDL_AudioDeviceID device, float duration_s
 	if (!SDL_AUDIO_ISFLOAT(outputSpec.format) && !SDL_AUDIO_ISSIGNED(outputSpec.format))
 	{
 		SDL_Log("Unsupported format: 0x%X", outputSpec.format);
-		return -1;
+		RETURN -1;
 	}
 
 	int bytes_per_frame = bytes_per_sample * outputSpec.channels;
 	int max_safe_bytes = (int)(outputSpec.freq * duration_seconds * bytes_per_frame);
 
-	return max_safe_bytes;
+	RETURN max_safe_bytes;
 }
 #endif
 
 extern ROM ROM_TYPE;
-inline FLAG isCLI()
+MASQ_INLINE FLAG isCLI()
 {
 	FLAG modeCLI = ((ROM_TYPE == ROM::TEST_ROM_COM)
 		|| (ROM_TYPE == ROM::TEST_ROM_CIM)
@@ -2325,7 +2367,7 @@ public:
 			hash[i * 4 + 3] = static_cast<uint8_t>((m_h[i]) & 0xFF);
 		}
 
-		return hash;
+		RETURN hash;
 	}
 
 	static std::string toHexString(const std::array<uint8_t, 20>& digest)
@@ -2334,7 +2376,7 @@ public:
 		ss << std::hex << std::setfill('0');
 		for (uint8_t b : digest)
 			ss << std::setw(2) << static_cast<int>(b);
-		return ss.str();
+		RETURN ss.str();
 	}
 
 private:
@@ -2395,7 +2437,7 @@ private:
 
 	static uint32_t leftrotate(uint32_t value, uint32_t bits)
 	{
-		return (value << bits) | (value >> (32 - bits));
+		RETURN (value << bits) | (value >> (32 - bits));
 	}
 
 private:

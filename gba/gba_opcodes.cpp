@@ -52,6 +52,7 @@
 #define SOFTWARE_INTERRUPT_SWI_SVC_HANDLER				0x00000008
 #define UNDEFINED_MASK									0x0E000010
 #define UNDEFINED_INSTRUCTION							0x06000010
+#define UNDEFINED_HANDLER								0x00000004
 #define SINGLE_DATA_TRANSFER_MASK						0x0C000000
 #define SINGLE_DATA_TRANSFER_INSTRUCTION				0x04000000
 #define SINGLE_DATA_SWAP_MASK							0x0F800FF0
@@ -59,9 +60,9 @@
 #define MULTIPLY_AND_MULTIPLY_ACCUMULATE_MASK			0x0F8000F0
 #define MULTIPLY_INSTRUCTION							0x00000090
 #define MULTIPLY_ACCUMULATE_INSTRUCTION					0x00800090
-#define HALF_WORD_DATA_TRANSFER_REGISTER_MASK			0x0E400F90
+#define HALF_WORD_DATA_TRANSFER_REGISTER_MASK			0x0E4000F0
 #define HALF_WORD_DATA_TRANSFER_REGISTER_INSTRUCTION	0x00000090
-#define HALF_WORD_DATA_TRANSFER_IMMEDIATE_MASK			0x0E400090
+#define HALF_WORD_DATA_TRANSFER_IMMEDIATE_MASK			0x0E4000F0
 #define HALF_WORD_DATA_TRANSFER_IMMEDIATE_INSTRUCTION	0x00400090
 #define MRS_MASK										0x0FBF0000
 #define MRS_INSTRUCTION									0x010F0000
@@ -71,186 +72,118 @@
 #define DATA_PROCESSING_INSTRUCTION						0x00000000
 #pragma endregion ARM7TDMI_SPECIFIC_MACROS
 
-GBA_WORD GBA_t::performShiftOperation(bool updateFlag, SHIFT_TYPE shiftType, uint32_t shiftAmount, uint32_t dataToBeShifted, bool quirkEnabled)
+//TODO: As per SST (and hence as per NBA), looks like the first non-instruction memory access is always non-sequential, even if the address is within the sequential 'distance' of previous memory transaction
+// Also, looks like transition from read -> write or write -> read is always a non-sequential as well
+// Not all of this implemented yet...
+
+GBA_WORD GBA_t::performShiftOperation(
+	FLAG updateFlag,
+	SHIFT_TYPE shiftType,
+	uint32_t shiftAmount,
+	uint32_t dataToBeShifted,
+	FLAG quirkEnabled
+)
 {
-	uint32_t originalData = dataToBeShifted;
-
-	if (shiftAmount == ZERO)
-	{
-		if (quirkEnabled == DISABLED)
-		{
-			RETURN dataToBeShifted;
-		}
-		else
-		{
-			switch (shiftType)
-			{
-			case SHIFT_TYPE::LSL:
-			{
-				RETURN dataToBeShifted;
-			}
-			case SHIFT_TYPE::LSR:
-			case SHIFT_TYPE::ASR:
-			{
-				shiftAmount = THIRTYTWO;
-				BREAK;
-			}
-			case SHIFT_TYPE::ROR:
-			{
-				BYTE oldC = pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit;
-
-				if (updateFlag)
-				{
-					uint32_t carryBit = GETBIT(ZERO, originalData);
-					pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = (carryBit == ZERO ? ZERO : ONE);
-				}
-
-				dataToBeShifted = ((oldC << THIRTYONE) | (originalData >> ONE));
-				RETURN dataToBeShifted;
-			}
-			default:
-			{
-				FATAL("Unknown Shift Type (shift amount = 0)");
-				RETURN dataToBeShifted;
-			}
-			}
-		}
-	}
+	// Capture state
+	uint32_t operand = dataToBeShifted;
+	uint32_t amount = shiftAmount & 0xFF;
+	int carry = pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit;
 
 	switch (shiftType)
 	{
 	case SHIFT_TYPE::LSL:
 	{
-		if (shiftAmount < THIRTYTWO)
+		// LSL #0 (Reg or Imm) does not affect flags or data
+		if (amount != 0)
 		{
+			const uint32_t adj_amount = std::min<uint32_t>(amount, 33);
 			if (updateFlag)
 			{
-				uint32_t bitToCheckForCarryFlag = THIRTYTWO - shiftAmount;
-				uint32_t carryBit = GETBIT(bitToCheckForCarryFlag, originalData);
-				pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = (carryBit == ZERO ? ZERO : ONE);
+				carry = (uint32_t)((uint64_t)operand << (adj_amount - 1)) >> 31;
 			}
-			dataToBeShifted = originalData << shiftAmount;
-			RETURN dataToBeShifted;
+			operand = (uint32_t)((uint64_t)operand << adj_amount);
 		}
-		else
-		{
-			if (updateFlag)
-			{
-				if (shiftAmount == THIRTYTWO)
-				{
-					uint32_t carryBit = GETBIT(ZERO, originalData);
-					pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = (carryBit == ZERO ? ZERO : ONE);
-				}
-				else
-				{
-					pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = ZERO;
-				}
-			}
-			dataToBeShifted = ZERO;
-			RETURN dataToBeShifted;
-		}
+		BREAK;
 	}
+
 	case SHIFT_TYPE::LSR:
 	{
-		if (shiftAmount < THIRTYTWO)
+		// LSR #0 Immediate is encoded as LSR #32
+		if (quirkEnabled && amount == 0) amount = 32;
+
+		if (amount != 0)
 		{
+			const uint32_t adj_amount = std::min<uint32_t>(amount, 33);
 			if (updateFlag)
 			{
-				uint32_t bitToCheckForCarryFlag = shiftAmount - ONE;
-				uint32_t carryBit = GETBIT(bitToCheckForCarryFlag, originalData);
-				pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = (carryBit == ZERO ? ZERO : ONE);
+				carry = ((uint64_t)operand >> (adj_amount - 1)) & 1;
 			}
-			dataToBeShifted = originalData >> shiftAmount;
-			RETURN dataToBeShifted;
+			operand = (uint32_t)((uint64_t)operand >> adj_amount);
 		}
-		else
-		{
-			if (updateFlag)
-			{
-				if (shiftAmount == THIRTYTWO)
-				{
-					uint32_t carryBit = GETBIT(THIRTYONE, originalData);
-					pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = (carryBit == ZERO ? ZERO : ONE);
-				}
-				else
-				{
-					pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = ZERO;
-				}
-			}
-			dataToBeShifted = ZERO;
-			RETURN dataToBeShifted;
-		}
+		BREAK;
 	}
+
 	case SHIFT_TYPE::ASR:
 	{
-		if (shiftAmount < THIRTYTWO)
-		{
-			if (updateFlag)
-			{
-				uint32_t bitToCheckForCarryFlag = shiftAmount - ONE;
-				uint32_t carryBit = GETBIT(bitToCheckForCarryFlag, originalData);
-				pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = (carryBit == ZERO ? ZERO : ONE);
-			}
+		// ASR #0 Immediate is encoded as ASR #32
+		if (quirkEnabled && amount == 0) amount = 32;
 
-			int32_t signedData = originalData;
-			signedData >>= shiftAmount; // Shifting signed data results in sign extention
-			dataToBeShifted = signedData;
-			RETURN dataToBeShifted;
-		}
-		else
+		if (amount != 0)
 		{
+			const uint32_t adj_amount = std::min<uint32_t>(amount, 33);
 			if (updateFlag)
 			{
-				uint32_t carryBit = GETBIT(THIRTYONE, originalData);
-				pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = (carryBit == ZERO ? ZERO : ONE);
+				// Cast to signed 64-bit to ensure sign bit is preserved in carry calculation
+				carry = ((int64_t)(int32_t)operand >> (adj_amount - 1)) & 1;
 			}
-			int32_t signedData = originalData;
-			signedData >>= THIRTYONE; // Filled with bit 31
-			dataToBeShifted = signedData;
-			RETURN dataToBeShifted;
+			operand = (uint32_t)((int64_t)(int32_t)operand >> adj_amount);
 		}
+		BREAK;
 	}
+
 	case SHIFT_TYPE::ROR:
 	{
-		if (shiftAmount == THIRTYTWO)
+		if (quirkEnabled && amount == 0)
 		{
-			if (updateFlag)
-			{
-				uint32_t carryBit = GETBIT(THIRTYONE, originalData);
-				pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = (carryBit == ZERO ? ZERO : ONE);
-			}
-			RETURN originalData;
+			// RRX Logic: (Carry << 31) | (Data >> 1)
+			uint32_t oldC = carry;
+			if (updateFlag) carry = operand & 1;
+			operand = (oldC << 31) | (operand >> 1);
 		}
-		else
+		else if (amount != 0)
 		{
-			while (shiftAmount > THIRTYTWO)
+			// ROR #32, 64, etc. results in Carry = Bit 31, Data unchanged
+			uint32_t norm_amount = amount & 31;
+			if (norm_amount == 0)
 			{
-				shiftAmount -= THIRTYTWO;
+				if (updateFlag) carry = operand >> 31;
 			}
-
-			if (updateFlag)
+			else
 			{
-				uint32_t bitToCheckForCarryFlag = shiftAmount - ONE;
-				uint32_t carryBit = GETBIT(bitToCheckForCarryFlag, originalData);
-				pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = (carryBit == ZERO ? ZERO : ONE);
+				operand = (operand >> norm_amount) | (operand << (32 - norm_amount));
+				if (updateFlag) carry = operand >> 31;
 			}
-
-			dataToBeShifted = (originalData >> shiftAmount) | (originalData << (((shiftAmount) * (-ONE)) & 0x1F));
-			RETURN dataToBeShifted;
 		}
+		BREAK;
 	}
+
 	default:
+		BREAK;
+	}
+
+	// Apply the carry update only if requested
+	if (updateFlag)
 	{
-		FATAL("Unknown Shift Type");
-		RETURN dataToBeShifted;
+		pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = (carry & 1);
 	}
-	}
+
+	RETURN operand;
 }
 
 // Thumb Instructions
-bool GBA_t::ThumbSoftwareInterrupt()
+FLAG GBA_t::ThumbSoftwareInterrupt()
 {
-	bool isThisTheInstruction = NO;
+	FLAG isThisTheInstruction = NO;
 
 	uint16_t strippedOpCode = ((static_cast<GBA_HALFWORD>(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode)) & THUMB_SOFTWARE_INTERRUPT_MASK);
 
@@ -278,20 +211,22 @@ bool GBA_t::ThumbSoftwareInterrupt()
 
 		// Update the PC
 		cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)PC, getARMState(), SOFTWARE_INTERRUPT_SWI_SVC_HANDLER);
+		reloadPipeline(pGBA_registers->pc);
 		isThisTheInstruction = YES;
 	}
 
 	RETURN isThisTheInstruction;
 }
 
-bool GBA_t::UnconditionalBranch()
+FLAG GBA_t::UnconditionalBranch()
 {
-	bool isThisTheInstruction = NO;
+	FLAG isThisTheInstruction = NO;
 
 	uint16_t strippedOpCode = ((static_cast<GBA_HALFWORD>(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode)) & UNCONDITIONAL_BRANCH_MASK);
 	if (strippedOpCode == UNCONDITIONAL_BRANCH_INSTRUCTION)
 	{
-		uint32_t offset = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.UNCONDITIONAL_BRANCH.offset;
+		auto UB = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.UNCONDITIONAL_BRANCH;
+		uint32_t offset = UB.offset;
 		int32_t soffset = signExtend32(offset, ELEVEN);
 		soffset <<= ONE; // multiply by 2
 
@@ -299,6 +234,7 @@ bool GBA_t::UnconditionalBranch()
 		pc += (soffset);
 		pc |= ONE; // For thumb mode
 		cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)PC, getARMState(), pc);
+		reloadPipeline(pGBA_registers->pc);
 
 		isThisTheInstruction = YES;
 	}
@@ -306,16 +242,17 @@ bool GBA_t::UnconditionalBranch()
 	RETURN isThisTheInstruction;
 }
 
-bool GBA_t::ConditionalBranch()
+FLAG GBA_t::ConditionalBranch()
 {
-	bool isThisTheInstruction = NO;
+	FLAG isThisTheInstruction = NO;
 
 	uint16_t strippedOpCode = ((static_cast<GBA_HALFWORD>(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode)) & CONDITIONAL_BRANCH_MASK);
 	if (strippedOpCode == CONDITIONAL_BRANCH_INSTRUCTION)
 	{
-		if (didConditionalCheckPass(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.CONDITIONAL_BRANCH.cond, pGBA_cpuInstance->registers.cpsr.psrMemory))
+		auto CB = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.CONDITIONAL_BRANCH;
+		if (didConditionalCheckPass(CB.cond, pGBA_cpuInstance->registers.cpsr.psrMemory))
 		{
-			uint32_t offset = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.CONDITIONAL_BRANCH.soffset;
+			uint32_t offset = CB.soffset;
 			int32_t soffset = signExtend32(offset, EIGHT);
 			soffset <<= ONE; // multiply by 2
 
@@ -323,6 +260,7 @@ bool GBA_t::ConditionalBranch()
 			pc += (soffset);
 			pc |= ONE; // For thumb mode
 			cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)PC, getARMState(), pc);
+			reloadPipeline(pGBA_registers->pc);
 		}
 		else
 		{
@@ -337,22 +275,27 @@ bool GBA_t::ConditionalBranch()
 	RETURN isThisTheInstruction;
 }
 
-bool GBA_t::MultipleLoadStore()
+FLAG GBA_t::MultipleLoadStore()
 {
-	bool isThisTheInstruction = NO;
+	FLAG isThisTheInstruction = NO;
 
 	uint16_t strippedOpCode = ((static_cast<GBA_HALFWORD>(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode)) & MULTIPLE_LOAD_STORE_MASK);
 	if (strippedOpCode == MULTIPLE_LOAD_STORE_INSTRUCTION)
 	{
+		auto MLS = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.MULTIPLE_LOAD_STORE;
+
 		// Increment the PC
 		pGBA_cpuInstance->registers.pc += TWO;
 		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFE;
 
-		uint32_t registerList = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.MULTIPLE_LOAD_STORE.rlist;
-		uint32_t rb = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.MULTIPLE_LOAD_STORE.rb;
-		bool l = (bool)pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.MULTIPLE_LOAD_STORE.l;
+		uint32_t registerList = MLS.rlist;
+		uint32_t rb = MLS.rb; // only 3 bits, so not PC
+		FLAG l = (FLAG)MLS.l;
 
 		uint32_t address = cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rb);
+
+		CPUTODO("As per SST(and hence as per NBA), the first transaction here is always non - sequential even if the address accessed is within the \"distance\" of a sequential access");
+		pGBA_memory->setNextMemoryAccessType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
 
 		if (registerList == ZERO)
 		{
@@ -362,6 +305,7 @@ bool GBA_t::MultipleLoadStore()
 			{
 				auto memory2register = readRawMemory<GBA_WORD>(address, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU);
 				cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)PC, getARMState(), memory2register);
+				reloadPipeline(pGBA_registers->pc);
 			}
 			else
 			{
@@ -412,14 +356,13 @@ bool GBA_t::MultipleLoadStore()
 				// If rb is not part of register list, then perform writeback
 				if (~registerList & (1 << rb))
 				{
-					CPUTODO("Find proper source for code snippet at line %d in file %s", __LINE__, __FILE__);
 					cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rb, getARMState(), address);
 				}
 			}
 			else
 			{
 				uint32_t register2memory = ZERO;
-				bool firstTransfer = YES;
+				FLAG firstTransfer = YES;
 
 				uint32_t new_base = address
 #if defined(_MSC_VER)
@@ -475,15 +418,17 @@ bool GBA_t::MultipleLoadStore()
 	RETURN isThisTheInstruction;
 }
 
-bool GBA_t::LongBranchWithLink()
+FLAG GBA_t::LongBranchWithLink()
 {
-	bool isThisTheInstruction = NO;
+	FLAG isThisTheInstruction = NO;
 
 	uint16_t strippedOpCode = ((static_cast<GBA_HALFWORD>(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode)) & LONG_BRANCH_WITH_LINK_MASK);
 	if (strippedOpCode == LONG_BRANCH_WITH_LINK_INSTRUCTION)
 	{
-		uint32_t offset = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.LONG_BRANCH_WITH_LINK.offset;
-		bool h = (bool)pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.LONG_BRANCH_WITH_LINK.h;
+		auto LBL = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.LONG_BRANCH_WITH_LINK;
+
+		uint32_t offset = LBL.offset;
+		FLAG h = (FLAG)LBL.h;
 
 		if (h == YES)
 		{
@@ -496,6 +441,7 @@ bool GBA_t::LongBranchWithLink()
 			uint32_t newPC = oldLR + offset;
 			newPC &= 0xFFFFFFFE;
 			cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)PC, getARMState(), newPC);
+			reloadPipeline(pGBA_registers->pc);
 		}
 		else
 		{
@@ -517,15 +463,17 @@ bool GBA_t::LongBranchWithLink()
 	RETURN isThisTheInstruction;
 }
 
-bool GBA_t::AddOffsetToStackPointer()
+FLAG GBA_t::AddOffsetToStackPointer()
 {
-	bool isThisTheInstruction = NO;
+	FLAG isThisTheInstruction = NO;
 
 	uint16_t strippedOpCode = ((static_cast<GBA_HALFWORD>(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode)) & OFFSET_TO_STACK_POINTER_MASK);
 	if (strippedOpCode == OFFSET_TO_STACK_POINTER_INSTRUCTION)
 	{
-		uint32_t offset = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.ADD_OFFSET_TO_STACK_POINTER.sword7;
-		bool s = (bool)pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.ADD_OFFSET_TO_STACK_POINTER.s;
+		auto AOSP = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.ADD_OFFSET_TO_STACK_POINTER;
+
+		uint32_t offset = AOSP.sword7;
+		FLAG s = (FLAG)AOSP.s;
 
 		auto sp = cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)SP);
 
@@ -548,20 +496,25 @@ bool GBA_t::AddOffsetToStackPointer()
 	RETURN isThisTheInstruction;
 }
 
-bool GBA_t::PushPopRegisters()
+FLAG GBA_t::PushPopRegisters()
 {
-	bool isThisTheInstruction = NO;
+	FLAG isThisTheInstruction = NO;
 
 	uint16_t strippedOpCode = ((static_cast<GBA_HALFWORD>(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode)) & PUSH_POP_REGISTERS_MASK);
 	if (strippedOpCode == PUSH_POP_REGISTERS_INSTRUCTION)
 	{
+		auto PPR = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.PUSH_POP_REGISTERS;
+
 		// Increment the PC
 		pGBA_cpuInstance->registers.pc += TWO;
 		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFE;
 
-		uint32_t registerList = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.PUSH_POP_REGISTERS.rlist;
-		bool l = (bool)pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.PUSH_POP_REGISTERS.l;
-		bool r = (bool)pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.PUSH_POP_REGISTERS.r;
+		uint32_t registerList = PPR.rlist;
+		FLAG l = (FLAG)PPR.l;
+		FLAG r = (FLAG)PPR.r;
+
+		CPUTODO("As per SST(and hence as per NBA), the first transaction here is always non - sequential even if the address accessed is within the \"distance\" of a sequential access");
+		pGBA_memory->setNextMemoryAccessType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
 
 		// The instructions in this group allow registers 0 - 7 and optionally LR to be pushed onto
 		// the stack, and registers 0 - 7 and optionally PC to be popped off the stack.
@@ -592,27 +545,24 @@ bool GBA_t::PushPopRegisters()
 			{
 				// POP to PC from [SP]
 
-				// Get SP
-				auto sp = cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)SP);
 				// Get [SP]
-				auto popedData = readRawMemory<GBA_WORD>(sp, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU);
+				auto popedData = readRawMemory<GBA_WORD>(cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)SP), MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU);
 				// Set [SP] to PC
 				cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)PC, getARMState(), popedData);
+				reloadPipeline(pGBA_registers->pc);
 				// Increment SP (but this should behave as though all registers were poped, so increment 16*4 times)
-				cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)PC, getARMState(), sp + 0x40);
+				cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)SP, getARMState(), cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)SP) + 0x40);
 			}
 			else
 			{
 				// PUSH PC to [SP]
 
-				// Get SP
-				auto sp = cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)SP);
 				// Decrement SP (but this should behave as though all registers were poped, so decrement 16*4 times)
-				cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)PC, getARMState(), sp - 0x40);
+				cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)SP, getARMState(), cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)SP) - 0x40);
 				// Get PC (PC pointing towards fetch stage ?)
 				auto pc = cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)PC);
 				// write PC to [SP]
-				writeRawMemory<GBA_WORD>(sp, pc, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU);
+				writeRawMemory<GBA_WORD>(cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)SP), pc, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU);
 			}
 		}
 		else
@@ -641,11 +591,12 @@ bool GBA_t::PushPopRegisters()
 				if (r == SET)
 				{
 					GBA_WORD memoryToRegister = readRawMemory<GBA_WORD>(baseAddr, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU);
+					// update PC
+					cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)PC, getARMState(), (memoryToRegister & ~ONE));
 					// update SP
 					cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)SP, getARMState(), baseAddr + sizeof(GBA_WORD));
 					cpuIdleCycles();
-					// update PC
-					cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)PC, getARMState(), memoryToRegister);
+					reloadPipeline(pGBA_registers->pc);
 				}
 				else
 				{
@@ -705,17 +656,19 @@ bool GBA_t::PushPopRegisters()
 	RETURN isThisTheInstruction;
 }
 
-bool GBA_t::LoadStoreHalfword()
+FLAG GBA_t::LoadStoreHalfword()
 {
-	bool isThisTheInstruction = NO;
+	FLAG isThisTheInstruction = NO;
 
 	uint16_t strippedOpCode = ((static_cast<GBA_HALFWORD>(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode)) & LOAD_STORE_HALFWORD_MASK);
 	if (strippedOpCode == LOAD_STORE_HALFWORD_INSTRUCTION)
 	{
-		uint32_t offset = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.LOAD_STORE_HALFWORD.offset;
-		uint32_t rb = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.LOAD_STORE_HALFWORD.rb;
-		uint32_t rd = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.LOAD_STORE_HALFWORD.rd;
-		bool l = (bool)pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.LOAD_STORE_HALFWORD.l;
+		auto LSHW = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.LOAD_STORE_HALFWORD;
+
+		uint32_t offset = LSHW.offset;
+		uint32_t rb = LSHW.rb; // only 3 bits, so cannot be PC
+		uint32_t rd = LSHW.rd; // only 3 bits, so cannot be PC
+		FLAG l = (FLAG)LSHW.l;
 
 		uint32_t address = cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rb) + (offset << ONE);
 
@@ -749,16 +702,18 @@ bool GBA_t::LoadStoreHalfword()
 	RETURN isThisTheInstruction;
 }
 
-bool GBA_t::SPRelativeLoadStore()
+FLAG GBA_t::SPRelativeLoadStore()
 {
-	bool isThisTheInstruction = NO;
+	FLAG isThisTheInstruction = NO;
 
 	uint16_t strippedOpCode = ((static_cast<GBA_HALFWORD>(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode)) & SP_RELATIVE_LOAD_STORE_MASK);
 	if (strippedOpCode == SP_RELATIVE_LOAD_STORE_INSTRUCTION)
 	{
-		uint32_t offset = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.SP_RELATIVE_LOAD_STORE.word8;
-		uint32_t rd = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.SP_RELATIVE_LOAD_STORE.rd;
-		bool l = (bool)pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.SP_RELATIVE_LOAD_STORE.l;
+		auto SPRL = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.SP_RELATIVE_LOAD_STORE;
+
+		uint32_t offset = SPRL.word8;
+		uint32_t rd = SPRL.rd; // only 3 bits, so cannot be PC
+		FLAG l = (FLAG)SPRL.l;
 
 		auto sp = cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)SP);
 		uint32_t relativeAddr = sp + (offset << TWO);
@@ -767,9 +722,11 @@ bool GBA_t::SPRelativeLoadStore()
 		pGBA_cpuInstance->registers.pc += TWO;
 		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFE;
 
+		CPUTODO("As per SST(and hence as per NBA), the  transaction here is always non - sequential even if the address accessed is within the \"distance\" of a sequential access");
+
 		if (l == YES)
 		{
-			GBA_WORD dataToBeWritten = readRawMemory<GBA_WORD>(relativeAddr, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU);
+			GBA_WORD dataToBeWritten = readRawMemory<GBA_WORD>(relativeAddr, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
 
 			// Refer : http://problemkaputt.de/gbatek-arm-cpu-memory-alignments.htm
 			dataToBeWritten = performShiftOperation(
@@ -785,7 +742,7 @@ bool GBA_t::SPRelativeLoadStore()
 		else
 		{
 			GBA_WORD dataToBeWritten = cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd);
-			writeRawMemory<GBA_WORD>(relativeAddr, dataToBeWritten, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU);
+			writeRawMemory<GBA_WORD>(relativeAddr, dataToBeWritten, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
 		}
 
 		isThisTheInstruction = YES;
@@ -794,19 +751,21 @@ bool GBA_t::SPRelativeLoadStore()
 	RETURN isThisTheInstruction;
 }
 
-bool GBA_t::LoadAddress()
+FLAG GBA_t::LoadAddress()
 {
-	bool isThisTheInstruction = NO;
+	FLAG isThisTheInstruction = NO;
 
 	uint16_t strippedOpCode = ((static_cast<GBA_HALFWORD>(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode)) & LOAD_ADDRESS_MASK);
 	if (strippedOpCode == LOAD_ADDRESS_INSTRUCTION)
 	{
+		auto LDA = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.LOAD_ADDRESS;
+
 		isThisTheInstruction = YES;
 
-		GBA_HALFWORD rd = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.LOAD_ADDRESS.rd;
+		GBA_HALFWORD rd = LDA.rd; // only 3 bits, so cannot be PC
 		// uOffset should be 10-bit with [1:0] set to zero, so left shift (Refer to 5.12.1 of https://www.dwedit.org/files/ARM7TDMI.pdf)
-		GBA_HALFWORD uOffset = (pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.LOAD_ADDRESS.word8 << TWO);
-		GBA_HALFWORD subOpCode = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.LOAD_ADDRESS.spOrPc;
+		GBA_HALFWORD uOffset = (LDA.word8 << TWO);
+		GBA_HALFWORD subOpCode = LDA.spOrPc;
 
 		if (subOpCode == RESET) // PC
 		{
@@ -833,18 +792,20 @@ bool GBA_t::LoadAddress()
 	RETURN isThisTheInstruction;
 }
 
-bool GBA_t::LoadStoreWithImmediateOffset()
+FLAG GBA_t::LoadStoreWithImmediateOffset()
 {
-	bool isThisTheInstruction = NO;
+	FLAG isThisTheInstruction = NO;
 
 	uint16_t strippedOpCode = ((static_cast<GBA_HALFWORD>(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode)) & LOAD_STORE_IMMEDIATE_OFFSET_MASK);
 	if (strippedOpCode == LOAD_STORE_IMMEDIATE_OFFSET_INSTRUCTION)
 	{
-		uint32_t offset = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.LOAD_STORE_IO.offset;
-		uint32_t rb = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.LOAD_STORE_IO.rb;
-		uint32_t rd = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.LOAD_STORE_IO.rd;
-		bool l = (bool)pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.LOAD_STORE_IO.l;
-		bool b = (bool)pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.LOAD_STORE_IO.b;
+		auto LSIO = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.LOAD_STORE_IO;
+
+		uint32_t offset = LSIO.offset;
+		uint32_t rb = LSIO.rb; // only 3 bits, so not PC
+		uint32_t rd = LSIO.rd; // only 3 bits, so not PC
+		FLAG l = (FLAG)LSIO.l;
+		FLAG b = (FLAG)LSIO.b;
 
 		// Increment the PC
 		pGBA_cpuInstance->registers.pc += TWO;
@@ -854,17 +815,19 @@ bool GBA_t::LoadStoreWithImmediateOffset()
 
 		uint32_t address = cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rb) + offset;
 
+		CPUTODO("As per SST(and hence as per NBA), the  transaction here is always non - sequential even if the address accessed is within the \"distance\" of a sequential access");
+
 		if (l == YES)
 		{
 			if (b == YES)
 			{
-				GBA_WORD dataToBeWritten = readRawMemory<BYTE>(address, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::CPU);
+				GBA_WORD dataToBeWritten = readRawMemory<BYTE>(address, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
 				cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd, getARMState(), dataToBeWritten);
 				cpuIdleCycles();
 			}
 			else
 			{
-				GBA_WORD dataToBeWritten = readRawMemory<GBA_WORD>(address, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU);
+				GBA_WORD dataToBeWritten = readRawMemory<GBA_WORD>(address, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
 				// Refer "INFORMATION_001" for the reason to perform ROR below
 				dataToBeWritten = performShiftOperation(
 					NO
@@ -882,11 +845,11 @@ bool GBA_t::LoadStoreWithImmediateOffset()
 			GBA_WORD dataToBeWritten = cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd);
 			if (b == YES)
 			{
-				writeRawMemory<BYTE>(address, static_cast<BYTE>(dataToBeWritten), MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::CPU);
+				writeRawMemory<BYTE>(address, static_cast<BYTE>(dataToBeWritten), MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
 			}
 			else
 			{
-				writeRawMemory<GBA_WORD>(address, dataToBeWritten, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU);
+				writeRawMemory<GBA_WORD>(address, dataToBeWritten, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
 			}
 		}
 
@@ -896,18 +859,20 @@ bool GBA_t::LoadStoreWithImmediateOffset()
 	RETURN isThisTheInstruction;
 }
 
-bool GBA_t::LoadStoreWithRegisterOffset()
+FLAG GBA_t::LoadStoreWithRegisterOffset()
 {
-	bool isThisTheInstruction = NO;
+	FLAG isThisTheInstruction = NO;
 
 	uint16_t strippedOpCode = ((static_cast<GBA_HALFWORD>(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode)) & LOAD_STORE_REGISTER_OFFSET_MASK);
 	if (strippedOpCode == LOAD_STORE_REGISTER_OFFSET_INSTRUCTION)
 	{
-		uint32_t ro = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.LOAD_STORE_RO.ro;
-		uint32_t rb = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.LOAD_STORE_RO.rb;
-		uint32_t rd = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.LOAD_STORE_RO.rd;
-		bool l = (bool)pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.LOAD_STORE_RO.l;
-		bool b = (bool)pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.LOAD_STORE_RO.b;
+		auto LSRO = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.LOAD_STORE_RO;
+
+		uint32_t ro = LSRO.ro; // only 3 bits, so not PC
+		uint32_t rb = LSRO.rb; // only 3 bits, so not PC
+		uint32_t rd = LSRO.rd; // only 3 bits, so not PC
+		FLAG l = (FLAG)LSRO.l;
+		FLAG b = (FLAG)LSRO.b;
 
 		uint32_t address = cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rb) + cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)ro);
 
@@ -915,17 +880,19 @@ bool GBA_t::LoadStoreWithRegisterOffset()
 		pGBA_cpuInstance->registers.pc += TWO;
 		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFE;
 
+		CPUTODO("As per SST(and hence as per NBA), the  transaction here is always non - sequential even if the address accessed is within the \"distance\" of a sequential access");
+
 		if (l == YES)
 		{
 			if (b == YES)
 			{
-				GBA_WORD dataToBeWritten = readRawMemory<BYTE>(address, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::CPU);
+				GBA_WORD dataToBeWritten = readRawMemory<BYTE>(address, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
 				cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd, getARMState(), dataToBeWritten);
 				cpuIdleCycles();
 			}
 			else
 			{
-				GBA_WORD dataToBeWritten = readRawMemory<GBA_WORD>(address, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU);
+				GBA_WORD dataToBeWritten = readRawMemory<GBA_WORD>(address, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
 				// Refer "INFORMATION_001" for the reason to perform ROR below
 				dataToBeWritten = performShiftOperation(
 					NO
@@ -943,11 +910,11 @@ bool GBA_t::LoadStoreWithRegisterOffset()
 			GBA_WORD dataToBeWritten = cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd);
 			if (b == YES)
 			{
-				writeRawMemory<BYTE>(address, static_cast<BYTE>(dataToBeWritten), MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::CPU);
+				writeRawMemory<BYTE>(address, static_cast<BYTE>(dataToBeWritten), MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
 			}
 			else
 			{
-				writeRawMemory<GBA_WORD>(address, dataToBeWritten, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU);
+				writeRawMemory<GBA_WORD>(address, dataToBeWritten, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
 			}
 		}
 
@@ -957,35 +924,39 @@ bool GBA_t::LoadStoreWithRegisterOffset()
 	RETURN isThisTheInstruction;
 }
 
-bool GBA_t::LoadStoreSignExtendedByteHalfword()
+FLAG GBA_t::LoadStoreSignExtendedByteHalfword()
 {
-	bool isThisTheInstruction = NO;
+	FLAG isThisTheInstruction = NO;
 
 	uint16_t strippedOpCode = ((static_cast<GBA_HALFWORD>(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode)) & LOAD_STORE_SIGN_EXT_BYTE_HALFWORD_MASK);
 	if (strippedOpCode == LOAD_STORE_SIGN_EXT_BYTE_HALFWORD_INSTRUCTION)
 	{
-		uint32_t ro = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.LOAD_STORE_SIGNED_BYTE_HALFWORD.ro;
-		uint32_t rb = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.LOAD_STORE_SIGNED_BYTE_HALFWORD.rb;
-		uint32_t rd = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.LOAD_STORE_SIGNED_BYTE_HALFWORD.rd;
-		uint32_t opcode = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.LOAD_STORE_SIGNED_BYTE_HALFWORD.opcode;
+		auto LSSEBH = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.LOAD_STORE_SIGNED_BYTE_HALFWORD;
+
+		uint32_t ro = LSSEBH.ro; // only 3 bits, so not PC
+		uint32_t rb = LSSEBH.rb; // only 3 bits, so not PC
+		uint32_t rd = LSSEBH.rd; // only 3 bits, so not PC
+		uint32_t opcode = LSSEBH.opcode;
 
 		uint32_t address = cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rb) + cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)ro);
 
 		// Increment the PC
 		pGBA_cpuInstance->registers.pc += TWO;
 		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFE;
+
+		CPUTODO("As per SST(and hence as per NBA), the  transaction here is always non - sequential even if the address accessed is within the \"distance\" of a sequential access");
 
 		switch (opcode)
 		{
 		case ZERO:
 		{
 			GBA_HALFWORD dataToBeWritten = cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd);
-			writeRawMemory<GBA_HALFWORD>(address, (GBA_HALFWORD)dataToBeWritten, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::CPU);
+			writeRawMemory<GBA_HALFWORD>(address, (GBA_HALFWORD)dataToBeWritten, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
 			BREAK;
 		}
 		case ONE:
 		{
-			GBA_WORD dataToBeWritten = readRawMemory<BYTE>(address, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::CPU);
+			GBA_WORD dataToBeWritten = readRawMemory<BYTE>(address, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
 			dataToBeWritten = signExtend32(dataToBeWritten, EIGHT);
 			cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd, getARMState(), dataToBeWritten);
 			cpuIdleCycles();
@@ -993,7 +964,7 @@ bool GBA_t::LoadStoreSignExtendedByteHalfword()
 		}
 		case TWO:
 		{
-			GBA_WORD dataToBeWritten = readRawMemory<GBA_HALFWORD>(address, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::CPU);
+			GBA_WORD dataToBeWritten = readRawMemory<GBA_HALFWORD>(address, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
 			// Refer "INFORMATION_001" for the reason to perform ROR below
 			dataToBeWritten = performShiftOperation(
 				NO
@@ -1012,15 +983,21 @@ bool GBA_t::LoadStoreSignExtendedByteHalfword()
 			// If address is halfword aligned, then bit 15 is sign bit, so [sssssssssssssssssddddddddddddddd] where s is sign bit and d is valid data 
 			if ((address & 0x01) == ZERO)
 			{
-				dataToBeWritten = readRawMemory<GBA_HALFWORD>(address, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::CPU);
+				dataToBeWritten = readRawMemory<GBA_HALFWORD>(address, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
 				dataToBeWritten = signExtend32(dataToBeWritten, SIXTEEN);
 			}
 			// If address is not halfword aligned, then bit 7 is sign bit, so [sssssssssssssssssssssssssddddddd] where s is sign bit and d is valid data
 			// Refer "INFORMATION_001" (especially the part which talks about signed data) for the reason why bit 7 is sign extended instead of bit 15 when the address is not 16 bit aligned
 			else
 			{
+				CPUTODO("The enabled code is needed by SST but this is a deviation from NBA master implementation supposedly from which the SSTs were generated");
+#if (ENABLED)
+				dataToBeWritten = readRawMemory<GBA_HALFWORD>(address, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
+				dataToBeWritten = signExtend32(((dataToBeWritten >> EIGHT) & 0xFF), EIGHT);
+#else
 				dataToBeWritten = readRawMemory<BYTE>(address, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::CPU);
 				dataToBeWritten = signExtend32(dataToBeWritten, EIGHT);
+#endif
 			}
 			cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd, getARMState(), dataToBeWritten);
 			cpuIdleCycles();
@@ -1038,15 +1015,17 @@ bool GBA_t::LoadStoreSignExtendedByteHalfword()
 	RETURN isThisTheInstruction;
 }
 
-bool GBA_t::PCRelativeLoad()
+FLAG GBA_t::PCRelativeLoad()
 {
-	bool isThisTheInstruction = NO;
+	FLAG isThisTheInstruction = NO;
 
 	uint16_t strippedOpCode = ((static_cast<GBA_HALFWORD>(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode)) & PC_RELATIVE_LOAD_MASK);
 	if (strippedOpCode == PC_RELATIVE_LOAD_INSTRUCTION)
 	{
-		uint32_t offset = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.PC_RELATIVE_LOAD.word8;
-		uint32_t rd = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.PC_RELATIVE_LOAD.rd;
+		auto PCRL = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.PC_RELATIVE_LOAD;
+
+		uint32_t offset = PCRL.word8;
+		uint32_t rd = PCRL.rd; // only 3 bits, so not PC
 
 		auto pc = cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)PC);
 
@@ -1061,7 +1040,8 @@ bool GBA_t::PCRelativeLoad()
 		pGBA_cpuInstance->registers.pc += TWO;
 		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFE;
 
-		uint32_t dataToBeWritten = readRawMemory<GBA_WORD>(relativeAddr, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU);
+		// Forcing non-sequential as even if we are doing 32 bit read, this is a thumb instruction, so sequential check should be with byte or half-word offsets and not word offsets in getMemoryAccessCycles
+		uint32_t dataToBeWritten = readRawMemory<GBA_WORD>(relativeAddr, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
 		cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd, getARMState(), dataToBeWritten);
 
 		cpuIdleCycles();
@@ -1072,20 +1052,22 @@ bool GBA_t::PCRelativeLoad()
 	RETURN isThisTheInstruction;
 }
 
-bool GBA_t::HiRegisterOperationsBranchExchange()
+FLAG GBA_t::HiRegisterOperationsBranchExchange()
 {
-	bool isThisTheInstruction = NO;
+	FLAG isThisTheInstruction = NO;
 
 	uint16_t strippedOpCode = ((static_cast<GBA_HALFWORD>(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode)) & HI_REGISTER_OP_OR_BRANCH_EXCHANGE_MASK);
 	if (strippedOpCode == HI_REGISTER_OP_OR_BRANCH_EXCHANGE_INSTRUCTION)
 	{
+		auto HROBE = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.HIGH_REGISTER_OPERATIONS;
+
 		isThisTheInstruction = YES;
 
-		GBA_HALFWORD rdhd = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.HIGH_REGISTER_OPERATIONS.rdhd;
-		GBA_HALFWORD rshs = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.HIGH_REGISTER_OPERATIONS.rshs;
-		GBA_HALFWORD isHd = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.HIGH_REGISTER_OPERATIONS.h1;
-		GBA_HALFWORD isHs = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.HIGH_REGISTER_OPERATIONS.h2;
-		GBA_HALFWORD subOpCode = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.HIGH_REGISTER_OPERATIONS.opcode;
+		GBA_HALFWORD rdhd = HROBE.rdhd;
+		GBA_HALFWORD rshs = HROBE.rshs;
+		GBA_HALFWORD isHd = HROBE.h1;
+		GBA_HALFWORD isHs = HROBE.h2;
+		GBA_HALFWORD subOpCode = HROBE.opcode;
 
 		if ((isHs == RESET && isHd == RESET) && ((subOpCode == 0x00) || (subOpCode == 0x01) || (subOpCode == 0x02)))
 		{
@@ -1117,6 +1099,10 @@ bool GBA_t::HiRegisterOperationsBranchExchange()
 				// Increment the PC
 				pGBA_cpuInstance->registers.pc += TWO;
 				pGBA_cpuInstance->registers.pc &= 0xFFFFFFFE;
+			}
+			else
+			{
+				reloadPipeline(pGBA_registers->pc);
 			}
 
 			BREAK;
@@ -1163,6 +1149,10 @@ bool GBA_t::HiRegisterOperationsBranchExchange()
 				pGBA_cpuInstance->registers.pc += TWO;
 				pGBA_cpuInstance->registers.pc &= 0xFFFFFFFE;
 			}
+			else
+			{
+				reloadPipeline(pGBA_registers->pc);
+			}
 
 			BREAK;
 		}
@@ -1170,7 +1160,7 @@ bool GBA_t::HiRegisterOperationsBranchExchange()
 		{
 			if (isHd != RESET)
 			{
-				FATAL("isHd != 0 when subOpCode == BX");
+				CPUWARN("isHd != 0 when subOpCode == BX");
 			}
 
 			GBA_WORD actualRs = ((isHs == ONE) ? (rshs + EIGHT) : (rshs));
@@ -1182,11 +1172,13 @@ bool GBA_t::HiRegisterOperationsBranchExchange()
 
 				setARMState(STATE_TYPE::ST_ARM);
 				cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)PC, getARMState(), rsData);
+				reloadPipeline(pGBA_registers->pc);
 			}
 			// If bit 0 is 1, then we remain in thumb
 			else
 			{
 				cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)PC, getARMState(), rsData);
+				reloadPipeline(pGBA_registers->pc);
 			}
 
 			BREAK;
@@ -1201,16 +1193,18 @@ bool GBA_t::HiRegisterOperationsBranchExchange()
 	RETURN isThisTheInstruction;
 }
 
-bool GBA_t::ALUOperations()
+FLAG GBA_t::ALUOperations()
 {
-	bool isThisTheInstruction = NO;
+	FLAG isThisTheInstruction = NO;
 
 	uint16_t strippedOpCode = ((static_cast<GBA_HALFWORD>(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode)) & ALU_OPERATIONS_MASK);
 	if (strippedOpCode == ALU_OPERATIONS_INSTRUCTION)
 	{
-		uint32_t rd = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.ALU_OPERATIONS.rd;
-		uint32_t rs = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.ALU_OPERATIONS.rs;
-		uint32_t subOpCode = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.ALU_OPERATIONS.opcode;
+		auto ALU = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.ALU_OPERATIONS;
+
+		uint32_t rd = ALU.rd; // only 3 bits, so not PC
+		uint32_t rs = ALU.rs; // only 3 bits, so not PC
+		uint32_t subOpCode = ALU.opcode;
 
 		GBA_WORD op1 = cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd);
 		GBA_WORD op2 = cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rs);
@@ -1336,7 +1330,7 @@ bool GBA_t::ALUOperations()
 			subOpCodeResult = ZERO - op2;
 			pGBA_cpuInstance->registers.cpsr.psrFields.psrZeroBit = ((subOpCodeResult == ZERO) ? ONE : ZERO);
 			pGBA_cpuInstance->registers.cpsr.psrFields.psrNegativeBit = ((subOpCodeResult >> THIRTYONE) ? ONE : ZERO);
-			pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = ((op1 >= op2) ? ONE : ZERO);
+			pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = ((ZERO >= op2) ? ONE : ZERO);
 			pGBA_cpuInstance->registers.cpsr.psrFields.psrOverflowBit = ((((op1 ^ op2) & (op1 ^ subOpCodeResult)) >> THIRTYONE) ? ONE : ZERO);
 			cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd, getARMState(), subOpCodeResult);
 			BREAK;
@@ -1373,7 +1367,7 @@ bool GBA_t::ALUOperations()
 			// op1 -> dest
 			// op2 -> src
 
-			bool full = TickMultiply(YES, op1);
+			FLAG full = TickMultiply(YES, op1);
 			subOpCodeResult = op1 * op2;
 			pGBA_cpuInstance->registers.cpsr.psrFields.psrZeroBit = ((subOpCodeResult == ZERO) ? ONE : ZERO);
 			pGBA_cpuInstance->registers.cpsr.psrFields.psrNegativeBit = ((subOpCodeResult >> THIRTYONE) ? ONE : ZERO);
@@ -1417,18 +1411,20 @@ bool GBA_t::ALUOperations()
 	RETURN isThisTheInstruction;
 }
 
-bool GBA_t::MoveCompareAddSubtractImmediate()
+FLAG GBA_t::MoveCompareAddSubtractImmediate()
 {
-	bool isThisTheInstruction = NO;
+	FLAG isThisTheInstruction = NO;
 
 	uint16_t strippedOpCode = ((static_cast<GBA_HALFWORD>(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode)) & MOV_CMP_ADD_SUB_IMMEDIATE_MASK);
 	if (strippedOpCode == MOV_CMP_ADD_SUB_IMMEDIATE_INSTRUCTION)
 	{
+		auto MCASI = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.MOVE_COMPARE_ADD_SUBTRACT_IMMEDIATE;
+
 		isThisTheInstruction = YES;
 
-		GBA_HALFWORD rd = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.MOVE_COMPARE_ADD_SUBTRACT_IMMEDIATE.rd;
-		GBA_HALFWORD uOffset = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.MOVE_COMPARE_ADD_SUBTRACT_IMMEDIATE.offset;
-		GBA_HALFWORD subOpCode = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.MOVE_COMPARE_ADD_SUBTRACT_IMMEDIATE.opcode;
+		GBA_HALFWORD rd = MCASI.rd; // only 3 bits, so not PC
+		GBA_HALFWORD uOffset = MCASI.offset;
+		GBA_HALFWORD subOpCode = MCASI.opcode;
 
 		switch (subOpCode)
 		{
@@ -1497,19 +1493,21 @@ bool GBA_t::MoveCompareAddSubtractImmediate()
 	RETURN isThisTheInstruction;
 }
 
-bool GBA_t::AddSubtract()
+FLAG GBA_t::AddSubtract()
 {
-	bool isThisTheInstruction = NO;
+	FLAG isThisTheInstruction = NO;
 
 	uint16_t strippedOpCode = ((static_cast<GBA_HALFWORD>(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode)) & ADD_SUBTRACT_MASK);
 	if (strippedOpCode == ADD_SUBTRACT_INSTRUCTION)
 	{
-		uint32_t subOpcode = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.ADD_SUBTRACT.op;
-		uint32_t rn_or_offset = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.ADD_SUBTRACT.rn_or_offset;
-		uint32_t rd = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.ADD_SUBTRACT.rd;
-		uint32_t rs = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.ADD_SUBTRACT.rs;
+		auto AS = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.ADD_SUBTRACT;
 
-		bool i = (bool)(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.ADD_SUBTRACT.i);
+		uint32_t subOpcode = AS.op;
+		uint32_t rn_or_offset = AS.rn_or_offset;
+		uint32_t rd = AS.rd; // only 3 bits, so not PC
+		uint32_t rs = AS.rs; // only 3 bits, so not PC
+
+		FLAG i = (FLAG)(AS.i);
 
 		uint32_t op1 = cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rs));
 
@@ -1570,17 +1568,19 @@ bool GBA_t::AddSubtract()
 	RETURN isThisTheInstruction;
 }
 
-bool GBA_t::MoveShiftedRegister()
+FLAG GBA_t::MoveShiftedRegister()
 {
-	bool isThisTheInstruction = NO;
+	FLAG isThisTheInstruction = NO;
 
 	uint16_t strippedOpCode = ((static_cast<GBA_HALFWORD>(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode)) & MOVE_SHIFTED_REGISTER_MASK);
 	if (strippedOpCode == MOVE_SHIFTED_REGISTER_INSTRUCTION)
 	{
-		uint32_t subOpcode = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.MOVE_SHIFTED_REGISTER.opcode;
-		uint32_t offset = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.MOVE_SHIFTED_REGISTER.offset;
-		uint32_t rd = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.MOVE_SHIFTED_REGISTER.rd;
-		uint32_t rs = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.MOVE_SHIFTED_REGISTER.rs;
+		auto MSR = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.thumb.MOVE_SHIFTED_REGISTER;
+
+		uint32_t subOpcode = MSR.opcode;
+		uint32_t offset = MSR.offset;
+		uint32_t rd = MSR.rd; // only 3 bits, so not PC
+		uint32_t rs = MSR.rs; // only 3 bits, so not PC
 
 		GBA_WORD dataAfterShifting = ZERO;
 		SHIFT_TYPE shiftType = SHIFT_TYPE::LSL;
@@ -1632,25 +1632,29 @@ bool GBA_t::MoveShiftedRegister()
 }
 
 // ARM Instructions
-bool GBA_t::BranchAndBranchExchange()
+FLAG GBA_t::BranchAndBranchExchange()
 {
-	bool isThisTheInstruction = NO;
+	FLAG isThisTheInstruction = NO;
 
 	// Branch and Branch Exchange
 	uint32_t strippedOpCode = (pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode & BRANCH_AND_BRANCH_EXCHANGE_MASK);
+
+	auto BBE = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.BRANCH_EXCHANGE;
+	GBA_WORD rawOpCode = BBE.opcode;
+
 	if (strippedOpCode == BRANCH_AND_BRANCH_EXCHANGE_INSTRUCTION)
 	{
 		isThisTheInstruction = YES;
 
 		uint32_t rn = 0x00;
 		uint32_t newPC = 0x00;
-		if ((pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode & 0xF0) == 0x10)
+		if (rawOpCode == 0x01)
 		{
-			rn = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.BRANCH_EXCHANGE.rn;
+			rn = BBE.rn;
 			newPC = cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rn));
 
 			// check if we need to transition to thumb state
-			bool isThumb = (bool)(newPC & 0x01);
+			FLAG isThumb = (FLAG)(newPC & 0x01);
 
 			if (isThumb)
 			{
@@ -1658,19 +1662,21 @@ bool GBA_t::BranchAndBranchExchange()
 				setARMState(STATE_TYPE::ST_THUMB);
 				newPC &= 0xFFFFFFFE;
 				cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)PC, getARMState(), newPC);
+				reloadPipeline(pGBA_registers->pc);
 			}
 			else
 			{
 				setARMState(STATE_TYPE::ST_ARM);
 				newPC &= 0xFFFFFFFC;
 				cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)PC, getARMState(), newPC);
+				reloadPipeline(pGBA_registers->pc);
 			}
 		}
-		else if ((pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode & 0xF0) == 0x20)
+		else if (rawOpCode == 0x02)
 		{
 			FATAL("Branch and Branch Exchange; TBD");
 		}
-		else if ((pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode & 0xF0) == 0x30)
+		else if (rawOpCode == 0x03)
 		{
 			FATAL("Branch and Branch Exchange; TBD");
 		}
@@ -1682,26 +1688,28 @@ bool GBA_t::BranchAndBranchExchange()
 	RETURN isThisTheInstruction;
 }
 
-bool GBA_t::BlockDataTransfer()
+FLAG GBA_t::BlockDataTransfer()
 {
-	bool isThisTheInstruction = NO;
+	FLAG isThisTheInstruction = NO;
 
 	// Block Data Transfer
 	uint32_t strippedOpCode = (pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode & BLOCK_DATA_TRANSFER_MASK);
 	if (strippedOpCode == BLOCK_DATA_TRANSFER_INSTRUCTION)
 	{
+		auto BDT = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.BLOCK_DATA_TRANSFER;
+
 		isThisTheInstruction = YES;
 		OP_MODE_TYPE originalOpMode = getARMMode(); // when S bit is set; keep a copy of the original operating mode so that we can revert to it once the opcode processing is done
 
-		uint32_t rn = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.BLOCK_DATA_TRANSFER.rn;
+		uint32_t rn = BDT.rn;
 		uint32_t old_base = cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rn));
 		uint32_t address = old_base;	// "address" will be properly reinitialized w.r.t "u" field and will also be used as incrementor
 		uint32_t new_base = old_base;
 
-		bool p = (bool)(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.BLOCK_DATA_TRANSFER.p);
-		bool u = (bool)(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.BLOCK_DATA_TRANSFER.u);
-		bool s = (bool)(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.BLOCK_DATA_TRANSFER.s);
-		bool w = (bool)(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.BLOCK_DATA_TRANSFER.w);
+		FLAG p = (FLAG)(BDT.p);
+		FLAG u = (FLAG)(BDT.u);
+		FLAG s = (FLAG)(BDT.s);
+		FLAG w = (FLAG)(BDT.w);
 
 		// Refer 4.11.5 of https://www.dwedit.org/files/ARM7TDMI.pdf
 		if (rn == PC)
@@ -1710,8 +1718,10 @@ bool GBA_t::BlockDataTransfer()
 			CPUWARN(" Block Data Transfer; rn = PC");
 		}
 
-		uint32_t registerList = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.BLOCK_DATA_TRANSFER.rlist;
+		uint32_t registerList = BDT.rlist;
 		uint32_t numberOfRegisters = ZERO;
+
+		FLAG transfer_pc = registerList & (1 << PC);
 
 #if defined(_MSC_VER)
 		numberOfRegisters = __popcnt(registerList);  // MSVC intrinsic for 32-bit
@@ -1736,6 +1746,7 @@ bool GBA_t::BlockDataTransfer()
 
 			// Only PC is loaded or stored as mentioned above
 			registerList = (1 << PC);
+			transfer_pc = YES;
 
 			// As mentioned above [base register] = [base register] + / -40h(ARMv4 - v5) (40h = 64 i.e. all 16 registers)
 			// i.e. [base register] = [base register] +/- (4 * 16)
@@ -1782,21 +1793,24 @@ bool GBA_t::BlockDataTransfer()
 		pGBA_cpuInstance->registers.pc += FOUR;
 		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFC;
 
-		if (pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.BLOCK_DATA_TRANSFER.l)
-		{
-			cpuIdleCycles();
+		const FLAG switch_mode = (s == YES) && (!BDT.l || !transfer_pc) && originalOpMode != OP_MODE_TYPE::OP_USR && originalOpMode != OP_MODE_TYPE::OP_SYS;
 
+		CPUTODO("As per SST(and hence as per NBA), the first transaction here is always non - sequential even if the address accessed is within the \"distance\" of a sequential access. Maybe because this is a Instruction and non-Instruction type mem access boundary?");
+		pGBA_memory->setNextMemoryAccessType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
+
+		if (BDT.l)
+		{
 			// Refer 4.11.4 of https://www.dwedit.org/files/ARM7TDMI.pdf (3rd condition)
 			// R15 not in list and S bit set (User bank transfer)
 			// For both LDM and STM instructions, the User bank registers are transferred rather than the register bank corresponding to the current mode.
 			// Hence, we switch to USR mode just before the register loading begins
-			if (s == YES && (((registerList >> PC) & 0x01) == ZERO))
+			if (switch_mode)
 			{
 				setARMMode(OP_MODE_TYPE::OP_USR);
 			}
 
 			uint32_t memory2register = ZERO;
-			bool firstTransfer = YES;
+			FLAG firstTransfer = YES;
 
 			for (uint8_t rt = (uint8_t)REGISTER_TYPE::RT_0; rt <= (uint8_t)REGISTER_TYPE::RT_15; rt++) // looping from lower to higher registers
 			{
@@ -1804,17 +1818,16 @@ bool GBA_t::BlockDataTransfer()
 				{
 					address += nonZeroIfPreIncrement;
 
+					// read from memory
+					memory2register = readRawMemory<GBA_WORD>(address, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU);
+
 					// NOTE: Writebacks happens at 2nd cycles of the instruction
 					// Even before the first loop is completed, if write back is enabled, base register is updated
 					// So, if rb is part of the list, then in further loops, rb will be updated and hence the writeback is overriden
 					if (w == YES && firstTransfer == YES)
 					{
-						CPUTODO("Find proper source for code snippet at line %d in file %s", __LINE__, __FILE__);
 						cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rn, getARMState(), new_base);
 					}
-
-					// read from memory
-					memory2register = readRawMemory<GBA_WORD>(address, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU);
 
 					// write to register
 					cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rt, getARMState(), memory2register);
@@ -1833,13 +1846,13 @@ bool GBA_t::BlockDataTransfer()
 			// R15 not in list and S bit set (User bank transfer)
 			// For both LDM and STM instructions, the User bank registers are transferred rather than the register bank corresponding to the current mode.
 			// Hence, we switch to USR mode just before the register transfer begins
-			if (s == YES)
+			if (switch_mode)
 			{
 				setARMMode(OP_MODE_TYPE::OP_USR);
 			}
 
 			uint32_t register2memory = ZERO;
-			bool firstTransfer = YES;
+			FLAG firstTransfer = YES;
 
 			for (uint8_t rt = (uint8_t)REGISTER_TYPE::RT_0; rt <= (uint8_t)REGISTER_TYPE::RT_15; rt++)	// looping from lower to higher registers
 			{
@@ -1878,7 +1891,9 @@ bool GBA_t::BlockDataTransfer()
 			}
 		}
 
-		if (pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.BLOCK_DATA_TRANSFER.l)
+		FLAG pipelineFlushed = NO;
+
+		if (BDT.l)
 		{
 			cpuIdleCycles();
 
@@ -1886,17 +1901,30 @@ bool GBA_t::BlockDataTransfer()
 			// LDM with R15 in transfer list and S bit set (Mode changes)
 			// If the instruction is a LDM then SPSR_<mode> is transferred to CPSR at the same time as R15 is loaded.
 			// At this point, all registers including R15 is loaded, so we can transfer SPSR_<mode> to CPSR
-			if ((s == YES) && (((registerList >> PC) & 0x01) == ONE))
+
+			if (transfer_pc)
 			{
-				psr_t spsr;
-				spsr.psrMemory = cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)SPSR);
-				setARMMode((OP_MODE_TYPE)spsr.psrFields.psrModeBits); // NOTE: Need to change the mode to whatever SPSR is indicating before CPSR is modified (else, we go to UNKNOWN ARM Mode)
-				cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)CPSR, getARMState(), spsr.psrMemory);
+				if (s == YES)
+				{
+					psr_t spsr;
+					spsr.psrMemory = cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)SPSR);
+					setARMMode((OP_MODE_TYPE)spsr.psrFields.psrModeBits); // NOTE: Need to change the mode to whatever SPSR is indicating before CPSR is modified (else, we go to UNKNOWN ARM Mode)
+					cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)CPSR, getARMState(), spsr.psrMemory);
+				}
+
+				pipelineFlushed = YES;
 			}
 		}
 
+		// AFTER both LDM and STM paths:
+		CPUTODO("NBA doesnt do flush for STM but SST needs it; so figure out which is correct?");
+		if ((w == YES && rn == PC) || pipelineFlushed)
+		{
+			reloadPipeline(pGBA_registers->pc);
+		}
+
 		// After conditions mentioned in 4.11.4 of https://www.dwedit.org/files/ARM7TDMI.pdf is met, we revert back to original mode
-		if (s == YES)
+		if (switch_mode == YES)
 		{
 			setARMMode(originalOpMode); // revert back to original mode!
 		}
@@ -1904,20 +1932,22 @@ bool GBA_t::BlockDataTransfer()
 	RETURN isThisTheInstruction;
 }
 
-bool GBA_t::BranchAndBranchLink()
+FLAG GBA_t::BranchAndBranchLink()
 {
-	bool isThisTheInstruction = NO;
+	FLAG isThisTheInstruction = NO;
 
 	// Branch and Branch with Link
 	uint32_t strippedOpCode = (pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode & BRANCH_AND_BRANCH_WITH_LINK_MASK);
 	if (strippedOpCode == BRANCH_INSTRUCTION || strippedOpCode == BRANCH_WITH_LINK_INSTRUCTION)
 	{
+		auto B = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.BRANCH;
+
 		isThisTheInstruction = YES;
-		bool isNegative = NO;
+		FLAG isNegative = NO;
 		uint32_t uOffset = ZERO;
 		int32_t iOffset = ZERO;
 
-		uOffset = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.BRANCH.offset;
+		uOffset = B.offset;
 		isNegative = (((uOffset & 0x800000) > ZERO) ? YES : NO);	// if offset is a 24-bit signed value
 
 		if (isNegative)
@@ -1929,7 +1959,7 @@ bool GBA_t::BranchAndBranchLink()
 
 		iOffset = isNegative ? -ONE * (int32_t)uOffset : (int32_t)uOffset;
 
-		if (pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.BRANCH.link)
+		if (B.link)
 		{
 			// PC points to fetch stage, i.e PC+8 after BL instruction
 			// we have to save the immediate next instruction to BL, hence we store PC-4
@@ -1940,20 +1970,23 @@ bool GBA_t::BranchAndBranchLink()
 		pc += (iOffset);
 		pc &= 0xFFFFFFFC;
 		cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)PC, getARMState(), pc);
+		reloadPipeline(pGBA_registers->pc);
 	}
 	RETURN isThisTheInstruction;
 }
 
-bool GBA_t::SoftwareInterrupt()
+FLAG GBA_t::SoftwareInterrupt()
 {
-	bool isThisTheInstruction = NO;
+	FLAG isThisTheInstruction = NO;
 
 	// Software Interrupt
 	uint32_t strippedOpCode = (pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode & SOFTWARE_INTERRUPT_MASK);
 	if (strippedOpCode == SOFTWARE_INTERRUPT_INSTRUCTION)
 	{
+		auto SWI = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.SOFTWARE_INTERRUPT;
+
 		isThisTheInstruction = YES;
-		if (pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.SOFTWARE_INTERRUPT.opcode == 0x0F)
+		if (SWI.opcode == 0x0F)
 		{
 			// Need to go to supervisor mode
 			// Save the pc in lr_svc
@@ -1975,13 +2008,14 @@ bool GBA_t::SoftwareInterrupt()
 			cpuSetRegister(REGISTER_BANK_TYPE::RB_SVC, (REGISTER_TYPE)SPSR, getARMState(), currentCPSR.psrMemory);
 
 			// Display the SWI comment
-			uint32_t comment = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.SOFTWARE_INTERRUPT.comment >> SIXTEEN;
+			uint32_t comment = SWI.comment >> SIXTEEN;
 			CPUEVENT("Adjusted PC: 0x%08X: SWI: 0x%2X [%s]", pcToStoreInLR, comment, SWI_NAMES[comment].c_str());
 
 			// Update the PC
 			cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)PC, getARMState(), SOFTWARE_INTERRUPT_SWI_SVC_HANDLER);
+			reloadPipeline(pGBA_registers->pc);
 		}
-		else if (pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.SOFTWARE_INTERRUPT.opcode == 0x01)
+		else if (SWI.opcode == 0x01)
 		{
 			FATAL(" Software Interrupt; TBD");
 		}
@@ -1993,9 +2027,9 @@ bool GBA_t::SoftwareInterrupt()
 	RETURN isThisTheInstruction;
 }
 
-bool GBA_t::Undefined()
+FLAG GBA_t::Undefined()
 {
-	bool isThisTheInstruction = NO;
+	FLAG isThisTheInstruction = NO;
 
 	// Undefined
 	uint32_t strippedOpCode = (pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode & UNDEFINED_MASK);
@@ -2005,39 +2039,60 @@ bool GBA_t::Undefined()
 
 		FATAL("Undefined");
 
-		// Increment the PC
-		pGBA_cpuInstance->registers.pc += FOUR;
-		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFC;
+		// Need to go to supervisor mode
+		// Save the pc in lr_svc
+		// Save the cpsr contents to svc_spsr
+		psr_t currentCPSR;
+		currentCPSR.psrMemory = cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)CPSR);
 
-		cpuIdleCycles();
+		// Now, since the cpsr is saved in svc_spsr, modify the current status of cpsr
+		setARMMode(OP_MODE_TYPE::OP_UND);
+		setARMState(STATE_TYPE::ST_ARM);
+		// Disable the irq
+		pGBA_registers->cpsr.psrFields.psrIRQDisBit = ONE;
+
+		// PC points to fetch stage, i.e PC+8 after UND instruction
+		// We have to save the immediate next instruction to BL, hence we store PC-4 in ARM mode
+		uint32_t pcToStoreInLR = pGBA_cpuInstance->registers.pc - FOUR;
+		cpuSetRegister(REGISTER_BANK_TYPE::RB_UND, (REGISTER_TYPE)LR, getARMState(), pcToStoreInLR);
+		// Save SPSR as we will change ARM Mode
+		cpuSetRegister(REGISTER_BANK_TYPE::RB_UND, (REGISTER_TYPE)SPSR, getARMState(), currentCPSR.psrMemory);
+
+		CPUEVENT("Adjusted PC: 0x%08X: UND", pcToStoreInLR);
+
+		// Update the PC
+		cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)PC, getARMState(), UNDEFINED_HANDLER);
+		reloadPipeline(pGBA_registers->pc);
 	}
 	RETURN isThisTheInstruction;
 }
 
-bool GBA_t::SingleDataTransfer()
+FLAG GBA_t::SingleDataTransfer()
 {
-	bool isThisTheInstruction = NO;
+	FLAG isThisTheInstruction = NO;
 
 	// Single Data Transfer : http://problemkaputt.de/gbatek.htm#armopcodesmemorysingleDataTransferldrstrpld
 	uint32_t strippedOpCode = (pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode & SINGLE_DATA_TRANSFER_MASK);
 	if (strippedOpCode == SINGLE_DATA_TRANSFER_INSTRUCTION)
 	{
-		isThisTheInstruction = YES;
-		uint32_t uOffset = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.SINGLE_DATA_TRANSFER.offset;
-		uint32_t rd = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.SINGLE_DATA_TRANSFER.rd;
-		uint32_t rn = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.SINGLE_DATA_TRANSFER.rn;
+		auto SDT = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.SINGLE_DATA_TRANSFER;
 
-		bool i = (bool)(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.SINGLE_DATA_TRANSFER.i);
-		bool p = (bool)(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.SINGLE_DATA_TRANSFER.p);
-		bool u = (bool)(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.SINGLE_DATA_TRANSFER.u);
-		bool b = (bool)(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.SINGLE_DATA_TRANSFER.b);
-		bool w = (bool)(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.SINGLE_DATA_TRANSFER.w);
+		isThisTheInstruction = YES;
+		uint32_t uOffset = SDT.offset;
+		uint32_t rd = SDT.rd;
+		uint32_t rn = SDT.rn;
+
+		FLAG i = (FLAG)(SDT.i);
+		FLAG p = (FLAG)(SDT.p);
+		FLAG u = (FLAG)(SDT.u);
+		FLAG b = (FLAG)(SDT.b);
+		FLAG w = (FLAG)(SDT.w);
 
 		uint32_t address = cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rn));
 
 		if (w == YES && rn == PC)
 		{
-			FATAL("Single Data Transfer; w == 1 && rn == PC");
+			CPUWARN("Single Data Transfer; w == 1 && rn == PC");
 		}
 
 		if (p == NO) // post-increment
@@ -2066,12 +2121,12 @@ bool GBA_t::SingleDataTransfer()
 
 			if (offset_when_i_is_set.rm == PC)	// http://problemkaputt.de/gbatek.htm#armopcodesmemorysingleDataTransferldrstrpld
 			{
-				FATAL("Single Data Transfer; rm = PC");
+				WARN("Single Data Transfer; rm = PC");
 			}
 
 			if (offset_when_i_is_set.reg_op != ZERO)	// http://problemkaputt.de/gbatek.htm#armopcodesmemorysingleDataTransferldrstrpld
 			{
-				FATAL(" Single Data Transfee; reg_op != 0");
+				WARN(" Single Data Transfer; reg_op != 0");
 			}
 
 			uEffectiveOffset = performShiftOperation(
@@ -2102,7 +2157,9 @@ bool GBA_t::SingleDataTransfer()
 			address += uEffectiveOffset; // adding offset before the memory read/write operation
 		}
 
-		if (pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.SINGLE_DATA_TRANSFER.l == RESET) // contents loaded from memory to registers
+		CPUTODO("As per SST(and hence as per NBA), the transactions here is always non - sequential even if the address accessed is within the \"distance\" of a sequential access");
+
+		if (SDT.l == RESET) // STORE: contents loaded from register to memory
 		{
 			uint32_t register2memory = cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rd));
 
@@ -2110,69 +2167,81 @@ bool GBA_t::SingleDataTransfer()
 
 			if (b == YES)
 			{
-				writeRawMemory<BYTE>(address, register2memory, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::CPU);
+				writeRawMemory<BYTE>(address, register2memory, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
 			}
 			else
 			{
-				writeRawMemory<GBA_WORD>(address, register2memory, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU);
+				writeRawMemory<GBA_WORD>(address, register2memory, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
 			}
-		}
 
-		if (w == YES)
-		{
-			auto writeBackAddress = address;
-			if (p == NO) // post-increment
+			if (w == YES)
 			{
-				writeBackAddress += uEffectiveOffset; // adding offset after the memory read/write operation
+				cpuSetRegister(getCurrentlyValidRegisterBank()
+					, (REGISTER_TYPE)rn
+					, getARMState()
+					, cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rn)) + uEffectiveOffset);
 			}
-
-			cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rn, getARMState(), writeBackAddress);
 		}
 
-		if (pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.SINGLE_DATA_TRANSFER.l == SET) // contents loaded from memory to registers
+		if (SDT.l == SET) // LOAD: contents loaded from memory to registers
 		{
 			GBA_WORD memory2register = ZERO;
 
 			if (b == YES)
 			{
-				memory2register = readRawMemory<BYTE>(address, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::CPU);
+				memory2register = readRawMemory<BYTE>(address, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
 			}
 			else
 			{
-				memory2register = readRawMemory<GBA_WORD>(address, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU);
+				memory2register = readRawMemory<GBA_WORD>(address, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
 
 				// Refer "INFORMATION_001" for the reason to perform ROR below
-				memory2register = performShiftOperation(
-					NO
-					, SHIFT_TYPE::ROR
-					, ((address & THREE) << THREE)
-					, memory2register
-					, DISABLED
-				);
+				GBA_WORD shift = (address & THREE) << THREE;
+				if (shift)
+				{
+					memory2register = (memory2register >> shift) | (memory2register << (THIRTYTWO - shift));
+				}
 			}
 
-			cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd, getARMState(), memory2register);
+			if (w == YES)
+			{
+				cpuSetRegister(getCurrentlyValidRegisterBank()
+					, (REGISTER_TYPE)rn
+					, getARMState()
+					, cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rn)) + uEffectiveOffset);
+			}
 
 			cpuIdleCycles();
+
+			cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd, getARMState(), memory2register);
+		}
+
+		// AFTER both LDM and STM paths:
+		CPUTODO("NBA doesnt do flush for STM but SST needs it; so figure out which is correct?");
+		if (((SDT.l == SET) && (rd == PC)) || ((w == YES) && (rn == PC)))
+		{
+			reloadPipeline(pGBA_registers->pc);
 		}
 	}
 	RETURN isThisTheInstruction;
 }
 
-bool GBA_t::SingleDataSwap()
+FLAG GBA_t::SingleDataSwap()
 {
-	bool isThisTheInstruction = NO;
+	FLAG isThisTheInstruction = NO;
 
 	// Single Data Swap
 	uint32_t strippedOpCode = (pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode & SINGLE_DATA_SWAP_MASK);
 	if (strippedOpCode == SINGLE_DATA_SWAP_INSTRUCTION)
 	{
-		isThisTheInstruction = YES;
-		uint32_t rm = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.SINGLE_DATA_SWAP.rm;
-		uint32_t rd = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.SINGLE_DATA_SWAP.rd;
-		uint32_t rn = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.SINGLE_DATA_SWAP.rn;
+		auto SDS = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.SINGLE_DATA_SWAP;
 
-		bool b = (bool)(GETBIT(TWENTYTWO, pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode));
+		isThisTheInstruction = YES;
+		uint32_t rm = SDS.rm; // src
+		uint32_t rd = SDS.rd; // dest
+		uint32_t rn = SDS.rn; // base
+
+		FLAG b = (FLAG)(SDS.b);
 
 		// Increment the PC
 		pGBA_cpuInstance->registers.pc += FOUR;
@@ -2180,63 +2249,69 @@ bool GBA_t::SingleDataSwap()
 
 		if (rn == PC || rd == PC || rm == PC)
 		{
-			FATAL(" Single Data Swap; rn == PC || rd == PC || rm == PC");
+			CPUWARN(" Single Data Swap; rn == PC || rd == PC || rm == PC");
 		}
 
 		uint32_t swapAddress = cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rn);
 		uint32_t sourceRegisterContent = cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rm);
 
+		CPUTODO("As per SST(and hence as per NBA), the transactions here is always non - sequential even if the address accessed is within the \"distance\" of a sequential access");
+
 		if (b == YES)
 		{
-			BYTE swapAddrContent = readRawMemory<BYTE>(swapAddress, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::CPU);
-			// Setting LOCK to YES (Source NBA)
-			CPUTODO("Find a source for need of LOCK during memory write in SingleDataSwap at %d in %s", __LINE__, __FILE__);
-			writeRawMemory<BYTE>(swapAddress, static_cast<BYTE>(sourceRegisterContent), MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::AUTOMATIC, YES);
-
-			cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd, getARMState(), swapAddrContent);
+			BYTE swapAddrContent = readRawMemory<BYTE>(swapAddress, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
+			// Setting LOCK to YES (Source SST)
+			writeRawMemory<BYTE>(swapAddress, static_cast<BYTE>(sourceRegisterContent), MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE, YES);
 
 			cpuIdleCycles();
+
+			cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd, getARMState(), swapAddrContent);
 		}
 		else
 		{
-			GBA_WORD swapAddrContent = readRawMemory<GBA_WORD>(swapAddress, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU);
+			GBA_WORD swapAddrContent = readRawMemory<GBA_WORD>(swapAddress, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
 			// Refer "INFORMATION_001" for the reason to perform ROR below
-			swapAddrContent = performShiftOperation(
-				NO
-				, SHIFT_TYPE::ROR
-				, ((swapAddress & THREE) << THREE)
-				, swapAddrContent
-				, DISABLED
-			);
 
-			// Setting LOCK to YES (Source NBA)
-			CPUTODO("Find a source for need of LOCK during memory write in SingleDataSwap at %d in %s", __LINE__, __FILE__);
-			writeRawMemory<GBA_WORD>(swapAddress, sourceRegisterContent, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::AUTOMATIC, YES);
+			GBA_WORD shift = (swapAddress & THREE) << THREE;
+			if (shift)
+			{
+				swapAddrContent = (swapAddrContent >> shift) | (swapAddrContent << (THIRTYTWO - shift));
+			}
 
-			cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd, getARMState(), swapAddrContent);
+			// Setting LOCK to YES (Source SST)
+			writeRawMemory<GBA_WORD>(swapAddress, sourceRegisterContent, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE, YES);
 
 			cpuIdleCycles();
+
+			cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd, getARMState(), swapAddrContent);
+		}
+
+		if (rd == PC)
+		{
+			reloadPipeline(pGBA_registers->pc);
 		}
 	}
 	RETURN isThisTheInstruction;
 }
 
-bool GBA_t::MultiplyAndMultiplyAccumulate()
+FLAG GBA_t::MultiplyAndMultiplyAccumulate()
 {
-	bool isThisTheInstruction = NO;
+	FLAG isThisTheInstruction = NO;
 
 	// Multiply And Multiply Accumulate
 	uint32_t strippedOpCode = (pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode & MULTIPLY_AND_MULTIPLY_ACCUMULATE_MASK);
 
 	if (strippedOpCode == MULTIPLY_INSTRUCTION)
 	{
+		auto MMA = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.MULTIPLY;
+
 		isThisTheInstruction = YES;
-		uint32_t rm = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.MULTIPLY.rm;
-		uint32_t rs = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.MULTIPLY.rs;
-		uint32_t rd = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.MULTIPLY.rd;
-		uint32_t rn = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.MULTIPLY.rn;
-		bool s = (bool)(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.MULTIPLY.s);
-		bool a = (bool)(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.MULTIPLY.a);
+		uint32_t rm = MMA.rm;
+		uint32_t rs = MMA.rs;
+		uint32_t rd = MMA.rd;
+		uint32_t rn = MMA.rn;
+		FLAG s = (FLAG)(MMA.s);
+		FLAG a = (FLAG)(MMA.a);
 
 		// Increment the PC
 		pGBA_cpuInstance->registers.pc += FOUR;
@@ -2254,7 +2329,7 @@ bool GBA_t::MultiplyAndMultiplyAccumulate()
 
 		if (rm == PC || rs == PC || rd == PC || rn == PC)
 		{
-			FATAL("Multiply and Multiply Accumulate; rn == PC || rs == PC || rd == PC || rm == PC");
+			CPUWARN("Multiply and Multiply Accumulate; rn == PC || rs == PC || rd == PC || rm == PC");
 		}
 
 		op1 = cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rm));
@@ -2262,12 +2337,12 @@ bool GBA_t::MultiplyAndMultiplyAccumulate()
 
 		result = op1 * op2;
 
-		bool full = TickMultiply(YES, op2);
+		FLAG full = TickMultiply(YES, op2);
 
 		if (a == YES)
 		{
 			accum = cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rn));
-			result += accum;
+			result = (result + accum) & 0xFFFFFFFF; // wrap to 32-bit exactly like NBA
 			cpuIdleCycles();
 		}
 
@@ -2288,18 +2363,25 @@ bool GBA_t::MultiplyAndMultiplyAccumulate()
 		}
 
 		cpuSetRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rd), getARMState(), result);
+
+		if (rd == PC)
+		{
+			reloadPipeline(pGBA_registers->pc);
+		}
 	}
 
-	if (strippedOpCode == MULTIPLY_ACCUMULATE_INSTRUCTION)
+	else if (strippedOpCode == MULTIPLY_ACCUMULATE_INSTRUCTION)
 	{
+		auto ML = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.MULTIPLY_LONG;
+
 		isThisTheInstruction = YES;
-		uint32_t rm = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.MULTIPLY_LONG.rm;
-		uint32_t rs = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.MULTIPLY_LONG.rs;
-		uint32_t rdHi = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.MULTIPLY_LONG.rdhi;
-		uint32_t rdLo = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.MULTIPLY_LONG.rdlo;
-		bool s = (bool)(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.MULTIPLY_LONG.s);
-		bool a = (bool)(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.MULTIPLY_LONG.a);
-		bool u = (bool)(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.MULTIPLY_LONG.u);
+		uint32_t rm = ML.rm; // op1
+		uint32_t rs = ML.rs; // op2
+		uint32_t rdLo = ML.rdlo; // dst_lo
+		uint32_t rdHi = ML.rdhi; // dst_hi
+		FLAG s = (FLAG)(ML.s);
+		FLAG a = (FLAG)(ML.a);
+		FLAG u = (FLAG)(ML.u);
 
 		// Increment the PC
 		pGBA_cpuInstance->registers.pc += FOUR;
@@ -2308,56 +2390,59 @@ bool GBA_t::MultiplyAndMultiplyAccumulate()
 		uint32_t op1 = ZERO;
 		uint32_t op2 = ZERO;
 		uint64_t result = ZERO;
-		uint32_t accum_lo = ZERO;
-		uint32_t accum_hi = ZERO;
 
 		if (rdHi == rm || rdLo == rm || rdHi == rdLo)
 		{
-			FATAL("Multiply and Multiply Accumulate; rdHi == rm || rdLo == rm || rdHi == rdLo");
+			CPUWARN("Multiply and Multiply Accumulate; rdHi == rm || rdLo == rm || rdHi == rdLo");
 		}
 
 		if (rm == PC || rs == PC || rdHi == PC || rdLo == PC)
 		{
-			FATAL("Multiply and Multiply Accumulate; rm == PC || rs == PC || rdHi == PC || rdLo == PC");
+			CPUWARN("Multiply and Multiply Accumulate; rm == PC || rs == PC || rdHi == PC || rdLo == PC");
 		}
 
-		op1 = cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rm));
-		op2 = cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rs));
+		op1 = cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rm)); // lhs
+		op2 = cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rs)); // rhs
 
 		if (u == YES)
 		{
-			result = (int64_t)(int32_t)op1 * (int64_t)(int32_t)op2;
+			result = (int64_t)((int32_t)op1) * (int64_t)((int32_t)op2);
 		}
 		else
 		{
-			result = (uint64_t)op1 * (uint64_t)op2;
+			result = (int64_t)((uint64_t)op1 * (uint64_t)op2);
 		}
 
-		bool full = TickMultiply(u, op2);
+		// Now call TickMultiply, using the final multiplier
+		FLAG full = TickMultiply(u, op2);
 		cpuIdleCycles();
 
+		uint32_t accum_lo = ZERO;
+		uint32_t accum_hi = ZERO;
 		if (a == YES)
 		{
-			accum_hi = cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rdHi));
 			accum_lo = cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rdLo));
-			uint64_t value = (uint64_t)accum_hi << 32 | accum_lo;
-			result += value;
+			accum_hi = cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rdHi));
+			uint64_t value = accum_hi;
+			value <<= THIRTYTWO;
+			value |= accum_lo;
 
+			result += value;
 			cpuIdleCycles();
 		}
 
-		uint32_t result_hi = result >> 32;
+		uint32_t result_hi = result >> THIRTYTWO;
 
 		if (s == YES)
 		{
-			pGBA_cpuInstance->registers.cpsr.psrFields.psrZeroBit = ((result == ZERO) ? ONE : ZERO);
 			pGBA_cpuInstance->registers.cpsr.psrFields.psrNegativeBit = (result_hi >> THIRTYONE);
+			pGBA_cpuInstance->registers.cpsr.psrFields.psrZeroBit = ((result == ZERO) ? ONE : ZERO);
 
 			// Carry flag logic for long multiply
 			if (full)
 			{
 				pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit =
-					MultiplyCarryHi(u == YES, op1, op2, accum_hi) ? ONE : ZERO;
+					MultiplyCarryHi(u, op1, op2, accum_hi) ? ONE : ZERO;
 			}
 			else
 			{
@@ -2366,38 +2451,45 @@ bool GBA_t::MultiplyAndMultiplyAccumulate()
 			}
 		}
 
-		cpuSetRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rdHi), getARMState(), result_hi);
+		// This is to avoid pipeline reload happening twice
 		cpuSetRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rdLo), getARMState(), (uint32_t)(result & 0xFFFFFFFF));
+		cpuSetRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rdHi), getARMState(), result_hi);
+
+		// This is to avoid pipeline reload happening twice
+		if (rdLo == PC || rdHi == PC)
+		{
+			reloadPipeline(pGBA_registers->pc);
+		}
 	}
 
 	RETURN isThisTheInstruction;
 }
 
-bool GBA_t::HalfWordDataTransfer()
+FLAG GBA_t::HalfWordDataTransfer()
 {
-	bool isThisTheInstruction = NO;
+	FLAG isThisTheInstruction = NO;
 
 	auto ROTATE_RIGHT = [&](uint32_t value, uint32_t amount)
 		{
 			amount &= THIRTYONE;
-			RETURN(value >> amount) | (value << ((-ONE * amount) & THIRTYONE));
+			RETURN (value >> amount) | (value << ((-ONE * amount) & THIRTYONE));
 		};
 
-	auto HALF_WORD_DATA_TRANSFER = [&](uint32_t uOffset, uint32_t rn, uint32_t rd, bool p, bool u, bool w, bool l, bool s, bool h)
+	auto HALF_WORD_DATA_TRANSFER = [&](uint32_t uOffset, uint32_t rn, uint32_t rd, FLAG p, FLAG u, FLAG w, FLAG l, FLAG s, FLAG h)
 		{
 			if (p == NO && w == YES)
 			{
-				FATAL("Half-Word Data Transfer; p == 0 && w == 1");
+				CPUWARN("Half-Word Data Transfer; p == 0 && w == 1");
 			}
 
 			if (w == YES && rn == PC)
 			{
-				FATAL("Half-Word Data Transfer; w == 1 && rn == PC");
+				CPUWARN("Half-Word Data Transfer; w == 1 && rn == PC");
 			}
 
 			if (s == NO && h == NO)	// https://www.gregorygaines.com/blog/decoding-the-arm7tdmi-instruction-set-game-boy-advance/
 			{
-				FATAL("Half-Word Data Transfer; s == 0 && h == 0");
+				CPUWARN("Half-Word Data Transfer; s == 0 && h == 0");
 			}
 
 			if (p == NO) // post-increment
@@ -2423,36 +2515,38 @@ bool GBA_t::HalfWordDataTransfer()
 				address += uEffectiveOffset; // adding offset before the memory read/write operation
 			}
 
+			CPUTODO("As per SST(and hence as per NBA), the transactions here is always non - sequential even if the address accessed is within the \"distance\" of a sequential access");
+
 			if (l == NO)
 			{
 				if (s == NO && h == YES) // STRH: Store unsigned halfword (zero extended)
 				{
 					uint32_t register2memory = cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rd));
+					writeRawMemory<GBA_HALFWORD>(address, register2memory, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
 
-					if (rd == PC)
+					if (w == YES)
 					{
-						CPUWARN("Half-Word Data Transfer (STRH with rd == PC); Special Behaviour");
-						register2memory += FOUR; // reason already mentioned in BLOCK_DATA_TRANSFER
+						cpuSetRegister(getCurrentlyValidRegisterBank()
+							, (REGISTER_TYPE)rn
+							, getARMState()
+							, cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rn)) + uEffectiveOffset);
 					}
+				}
+				else if (s == YES)
+				{
+					// For GBA, these don't write to memory, but they DO perform writeback and an idle cycle
+					cpuIdleCycles();
 
-					writeRawMemory<GBA_HALFWORD>(address, register2memory, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::CPU);
+					if (w == YES)
+					{
+						cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rn, getARMState(),
+							cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rn)) + uEffectiveOffset);
+					}
 				}
 				else
 				{
 					WARN("Half-Word Data Transfer; Invalid s and h combination");
 				}
-			}
-
-			if (w == YES)
-			{
-				auto writeBackAddress = address;
-				// post increment makes sense only if write back is enabled, otherwise who's gonna see the post increment...
-				if (p == NO) // post-increment
-				{
-					writeBackAddress += uEffectiveOffset; // adding offset after the memory read/write operation
-				}
-
-				cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rn, getARMState(), writeBackAddress);
 			}
 
 			if (l == YES)
@@ -2461,101 +2555,149 @@ bool GBA_t::HalfWordDataTransfer()
 
 				if (s == NO && h == YES) // LDRH: Load unsigned halfword (zero extended)
 				{
-					uint16_t value = readRawMemory<GBA_HALFWORD>(address, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::CPU);
+					uint16_t value = readRawMemory<GBA_HALFWORD>(address, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
 					// Refer "INFORMATION_001" for the reason to perform ROR below
 					memory2register = ROTATE_RIGHT(value, (address & 0x01) << THREE);
+
+					if (w == YES)
+					{
+						cpuSetRegister(getCurrentlyValidRegisterBank()
+							, (REGISTER_TYPE)rn
+							, getARMState()
+							, cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rn)) + uEffectiveOffset);
+					}
+
+					cpuIdleCycles();
+
+					cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd, getARMState(), memory2register);
 				}
 				else if (s == YES && h == NO) //LDRSB: Load signed byte (sign extended)
 				{
-					uint32_t value = readRawMemory<BYTE>(address, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::CPU);
+					uint32_t value = readRawMemory<BYTE>(address, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
 					memory2register = signExtend32(value, EIGHT);
+
+					if (w == YES)
+					{
+						cpuSetRegister(getCurrentlyValidRegisterBank()
+							, (REGISTER_TYPE)rn
+							, getARMState()
+							, cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rn)) + uEffectiveOffset);
+					}
+
+					cpuIdleCycles();
+
+					cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd, getARMState(), memory2register);
 				}
 				else if (s == YES && h == YES) // LDRSH: Load signed halfword (sign extended)
 				{
 					if (address & 0x01)
 					{
 						// Refer "INFORMATION_001" (especially the part which talks about signed data) for the reason why bit 7 is sign extended instead of bit 15 when the address is not 16 bit aligned
-						uint32_t value = readRawMemory<BYTE>(address, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::CPU);
+						CPUTODO("The enabled code is needed by SST but this is a deviation from NBA master implementation supposedly from which the SSTs were generated");
+#if (ENABLED)
+						uint32_t value = readRawMemory<GBA_HALFWORD>(address, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
+						memory2register = signExtend32(((value >> EIGHT) & 0xFF), EIGHT);
+#else
+						uint32_t value = readRawMemory<BYTE>(address, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
 						memory2register = signExtend32(value, EIGHT);
+#endif
 					}
 					else
 					{
-						uint32_t value = readRawMemory<GBA_HALFWORD>(address, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::CPU);
+						uint32_t value = readRawMemory<GBA_HALFWORD>(address, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
 						memory2register = signExtend32(value, SIXTEEN);
 					}
+
+					if (w == YES)
+					{
+						cpuSetRegister(getCurrentlyValidRegisterBank()
+							, (REGISTER_TYPE)rn
+							, getARMState()
+							, cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rn)) + uEffectiveOffset);
+					}
+
+					cpuIdleCycles();
+
+					cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd, getARMState(), memory2register);
 				}
+			}
 
-				cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd, getARMState(), memory2register);
-
-				cpuIdleCycles();
+			// AFTER both LDM and STM paths:
+			CPUTODO("NBA doesnt do flush for STM but SST needs it; so figure out which is correct?");
+			if (((l == SET) && (rd == PC)) || ((w == YES) && (rn == PC)))
+			{
+				reloadPipeline(pGBA_registers->pc);
 			}
 		};
 
-	uint32_t strippedOpCode1 = (pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode & HALF_WORD_DATA_TRANSFER_REGISTER_MASK);
-	uint32_t strippedOpCode2 = (pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode & HALF_WORD_DATA_TRANSFER_IMMEDIATE_MASK);
+	uint32_t rawOpCode = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode;
 
-	// Half Word Data Transfer (Register) 
-	if (strippedOpCode1 == HALF_WORD_DATA_TRANSFER_REGISTER_INSTRUCTION)
+	// 1. NBA Gatekeeper (The reason it doesn't fall through to Data Processing)
+	if ((rawOpCode & 0x90) != 0x90)
 	{
-		isThisTheInstruction = YES;
-
-		uint32_t rd = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.HALFWORD_DATATRANSFER_RO.rd;
-		uint32_t rn = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.HALFWORD_DATATRANSFER_RO.rn;
-		uint32_t rm = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.HALFWORD_DATATRANSFER_RO.rm;
-
-		if (rm == PC)
-		{
-			FATAL("Half-Word Data Transfer; rm == PC");
-		}
-
-		uint32_t uOffset = cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rm);
-
-		bool p = (bool)(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.HALFWORD_DATATRANSFER_RO.p);
-		bool u = (bool)(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.HALFWORD_DATATRANSFER_RO.u);
-		bool w = (bool)(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.HALFWORD_DATATRANSFER_RO.w);
-		bool l = (bool)(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.HALFWORD_DATATRANSFER_RO.l);
-		bool s = (bool)(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.HALFWORD_DATATRANSFER_RO.s);
-		bool h = (bool)(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.HALFWORD_DATATRANSFER_RO.h);
-
-		HALF_WORD_DATA_TRANSFER(uOffset, rn, rd, p, u, w, l, s, h);
+		RETURN NO;
 	}
-	// Half Word Data Transfer (Immediate) 
-	else if (strippedOpCode2 == HALF_WORD_DATA_TRANSFER_IMMEDIATE_INSTRUCTION)
+
+	// 2. Reject Multiply/Swap
+	uint32_t sh_bits = (rawOpCode >> 5) & 0x3;
+	if (sh_bits == 0)
+	{
+		RETURN NO;
+	}
+
+	// 3. Identification using your broad masks
+	uint32_t commonSignature = (rawOpCode & 0x0E000090);
+
+	// This signature matches both Register and Immediate because it ignores the bit 22 toggle
+	if (commonSignature == 0x00000090)
 	{
 		isThisTheInstruction = YES;
 
-		uint32_t rd = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.HALFWORD_DATATRANSFER_IO.rd;
-		uint32_t rn = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.HALFWORD_DATATRANSFER_IO.rn;
-		uint32_t uOffset = ((pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.HALFWORD_DATATRANSFER_IO.offset_high << FOUR) | (pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.HALFWORD_DATATRANSFER_IO.offset_low));
+		// Bit 22 is the NBA method to distinguish Register vs Immediate
+		FLAG isImmediate = (rawOpCode >> 22) & 1;
 
-		bool p = (bool)(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.HALFWORD_DATATRANSFER_IO.p);
-		bool u = (bool)(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.HALFWORD_DATATRANSFER_IO.u);
-		bool w = (bool)(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.HALFWORD_DATATRANSFER_IO.w);
-		bool l = (bool)(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.HALFWORD_DATATRANSFER_IO.l);
-		bool s = (bool)(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.HALFWORD_DATATRANSFER_IO.s);
-		bool h = (bool)(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.HALFWORD_DATATRANSFER_IO.h);
+		if (!isImmediate) // REGISTER TYPE
+		{
+			auto HWTR = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.HALFWORD_DATATRANSFER_RO;
+			uint32_t rd = HWTR.rd;
+			uint32_t rn = HWTR.rn;
+			uint32_t rm = HWTR.rm;
+			if (rm == PC)
+			{
+				WARN("Half-Word Data Transfer; rm == PC");
+			}
 
-		HALF_WORD_DATA_TRANSFER(uOffset, rn, rd, p, u, w, l, s, h);
+			uint32_t uOffset = cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rm);
+			HALF_WORD_DATA_TRANSFER(uOffset, rn, rd, HWTR.p, HWTR.u, HWTR.w, HWTR.l, HWTR.s, HWTR.h);
+		}
+		else // IMMEDIATE TYPE
+		{
+			auto HWTI = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.HALFWORD_DATATRANSFER_IO;
+			uint32_t uOffset = ((HWTI.offset_high << FOUR) | (HWTI.offset_low));
+			HALF_WORD_DATA_TRANSFER(uOffset, HWTI.rn, HWTI.rd, HWTI.p, HWTI.u, HWTI.w, HWTI.l, HWTI.s, HWTI.h);
+		}
 	}
 
 	RETURN isThisTheInstruction;
 }
 
-bool GBA_t::psrTransfer()
+FLAG GBA_t::psrTransfer()
 {
-	bool isThisTheInstruction = NO;
+	FLAG isThisTheInstruction = NO;
 
 	uint32_t strippedOpCode1 = (pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode & MRS_MASK);
 	uint32_t strippedOpCode2 = (pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode & MSR_MASK);
 
-	uint32_t uOperand2 = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.DATA_PROCESSING.operand2;
-	uint32_t rd = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.DATA_PROCESSING.rd;
-	uint32_t rn = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.DATA_PROCESSING.rn;
-	uint32_t subOpCode = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.DATA_PROCESSING.opcode;
+	auto DP = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.DATA_PROCESSING;
 
-	bool i = (bool)(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.DATA_PROCESSING.immediate);
+	uint32_t uOperand2 = DP.operand2;
+	uint32_t rd = DP.rd;
+	uint32_t rn = DP.rn;
+	uint32_t subOpCode = DP.opcode;
 
-	bool isSPSR = (bool)(GETBIT(TWENTYTWO, pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode));
+	FLAG i = (FLAG)(DP.immediate);
+
+	FLAG isSPSR = (FLAG)(GETBIT(TWENTYTWO, pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode));
 
 	if (strippedOpCode1 == MRS_INSTRUCTION) // Move CPSR or SPSR to another register
 	{
@@ -2571,6 +2713,9 @@ bool GBA_t::psrTransfer()
 			psr.psrMemory = ((isSPSR == YES) ? cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)SPSR) : cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)CPSR));
 			cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd, getARMState(), psr.psrMemory);
 		}
+
+		// Intentionally not checking for pipeline reload
+		// For PSR, even if rd = PC, pipeline reloading should not occur as per SST. Confirmed via NBA as well
 
 		// Increment the PC
 		pGBA_cpuInstance->registers.pc += FOUR;
@@ -2682,28 +2827,30 @@ bool GBA_t::psrTransfer()
 	RETURN isThisTheInstruction;
 }
 
-bool GBA_t::DataProcessing()
+FLAG GBA_t::DataProcessing()
 {
-	bool isThisTheInstruction = NO;
+	FLAG isThisTheInstruction = NO;
 
 	// Data Processing
 	uint32_t strippedOpCode = (pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode & DATA_PROCESSING_MASK);
 	if (strippedOpCode == DATA_PROCESSING_INSTRUCTION)
 	{
-		isThisTheInstruction = YES;
-		uint32_t uOperand2 = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.DATA_PROCESSING.operand2;
-		uint32_t rd = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.DATA_PROCESSING.rd;
-		uint32_t rn = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.DATA_PROCESSING.rn;
-		uint32_t subOpCode = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.DATA_PROCESSING.opcode;
+		auto DP = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.DATA_PROCESSING;
 
-		bool i = (bool)(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.DATA_PROCESSING.immediate);
-		bool s = (bool)(pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.DATA_PROCESSING.s);
+		isThisTheInstruction = YES;
+		uint32_t uOperand2 = DP.operand2;
+		uint32_t rd = DP.rd;
+		uint32_t rn = DP.rn;
+		uint32_t subOpCode = DP.opcode;
+
+		FLAG i = (FLAG)(DP.immediate);
+		FLAG s = (FLAG)(DP.s);
 
 		// NOTE: This is most probably needed because, if this is not there... assume a case where subOpCode is ADC
 		// The shift operation may change the C flag and original intent of ADC, if it was to detect C flag is not possible as C got modified by shift operation
 		// Hence, we save the original C value to be used by subOpCodes
 		uint32_t cOriginal = pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit;
-		bool sOriginal = (bool)(GETBIT(TWENTY, pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode));
+		FLAG sOriginal = (FLAG)(DP.s);
 
 		// Refer to 4.5.1 of https://www.dwedit.org/files/ARM7TDMI.pdf
 		if (rd == PC && s == SET)
@@ -2772,9 +2919,11 @@ bool GBA_t::DataProcessing()
 			{
 				op2 = (preshiftedOperand2 >> shiftAmount) | (preshiftedOperand2 << ((-ONE * shiftAmount) & 0x1F));
 
-				if (s == YES)
+				//if (s == YES)
 				{
-					uint32_t carryBit = GETBIT(THIRTYONE, op2);
+					// If shift is 0, carry is unchanged. 
+					// If shift > 0, carry is the last bit rotated out.
+					uint32_t carryBit = (preshiftedOperand2 >> (shiftAmount - 1)) & 1;
 					pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = (carryBit == ZERO ? ZERO : ONE);
 				}
 			}
@@ -2789,12 +2938,12 @@ bool GBA_t::DataProcessing()
 			GBA_WORD shiftAmount = ZERO;
 			GBA_WORD dataToBeShifted = ZERO;
 
-			if (operand2.op2ShiftReg.r == ONE) // shift amount determined by rs register
+			if (operand2.op2ShiftReg.r == SET) // shift amount determined by rs register
 			{
 				if (operand2.op2ShiftRegType2.rs == PC)
 				{
 					// NOTE: armwrestler.gba exercises this condition for v5 testing
-					FATAL("Data Processing; rs == PC");
+					CPUWARN("Data Processing; rs == PC");
 				}
 
 				shiftAmount = cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)operand2.op2ShiftRegType2.rs));
@@ -2803,7 +2952,7 @@ bool GBA_t::DataProcessing()
 				/*
 				* Using R15 (PC):
 				* When using R15 as Destination (Rd), note below CPSR description and Execution time description.
-				* When using R15 as operand (Rm or Rn), the returned value depends on the instruction: PC+12 if I=0,R=1 (shift by register), otherwise PC+8 (shift by immediate).
+				* When using R15 as operand (Rm or Rn), the RETURNed value depends on the instruction: PC+12 if I=0,R=1 (shift by register), otherwise PC+8 (shift by immediate).
 				*
 				* The above statement is handled as follows in our code
 				* Instead of blindly incrementing the op1 or dataToBeShifted by 4 whenever rn or rm is PC
@@ -2820,7 +2969,7 @@ bool GBA_t::DataProcessing()
 
 				dataToBeShifted = cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)operand2.op2ShiftRegType2.rm));
 
-				op2 = performShiftOperation(s, typeOfShift, shiftAmount, dataToBeShifted, DISABLED);
+				op2 = performShiftOperation(YES, typeOfShift, shiftAmount, dataToBeShifted, DISABLED);
 			}
 			else // shift amount determined by shift amount field
 			{
@@ -2828,7 +2977,7 @@ bool GBA_t::DataProcessing()
 
 				shiftAmount = operand2.op2ShiftRegType1.shiftAmount;
 
-				op2 = performShiftOperation(s, typeOfShift, shiftAmount, dataToBeShifted, ENABLED);
+				op2 = performShiftOperation(YES, typeOfShift, shiftAmount, dataToBeShifted, ENABLED);
 			}
 
 		}
@@ -2846,6 +2995,10 @@ bool GBA_t::DataProcessing()
 				pGBA_cpuInstance->registers.cpsr.psrFields.psrZeroBit = ((subOpCodeResult == ZERO) ? ONE : ZERO);
 				pGBA_cpuInstance->registers.cpsr.psrFields.psrNegativeBit = ((subOpCodeResult >> THIRTYONE) ? ONE : ZERO);
 			}
+			else
+			{
+				pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = cOriginal;
+			}
 			validValueToSet = &subOpCodeResult;
 			BREAK;
 		}
@@ -2856,6 +3009,10 @@ bool GBA_t::DataProcessing()
 			{
 				pGBA_cpuInstance->registers.cpsr.psrFields.psrZeroBit = ((subOpCodeResult == ZERO) ? ONE : ZERO);
 				pGBA_cpuInstance->registers.cpsr.psrFields.psrNegativeBit = ((subOpCodeResult >> THIRTYONE) ? ONE : ZERO);
+			}
+			else
+			{
+				pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = cOriginal;
 			}
 			validValueToSet = &subOpCodeResult;
 			BREAK;
@@ -2870,6 +3027,10 @@ bool GBA_t::DataProcessing()
 				pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = ((op1 >= op2) ? ONE : ZERO);
 				pGBA_cpuInstance->registers.cpsr.psrFields.psrOverflowBit = ((((op1 ^ op2) & (op1 ^ subOpCodeResult)) >> THIRTYONE) ? ONE : ZERO);
 			}
+			else
+			{
+				pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = cOriginal;
+			}
 			validValueToSet = &subOpCodeResult;
 			BREAK;
 		}
@@ -2882,6 +3043,10 @@ bool GBA_t::DataProcessing()
 				pGBA_cpuInstance->registers.cpsr.psrFields.psrNegativeBit = ((subOpCodeResult >> THIRTYONE) ? ONE : ZERO);
 				pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = ((op2 >= op1) ? ONE : ZERO);
 				pGBA_cpuInstance->registers.cpsr.psrFields.psrOverflowBit = ((((op2 ^ op1) & (op2 ^ subOpCodeResult)) >> THIRTYONE) ? ONE : ZERO);
+			}
+			else
+			{
+				pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = cOriginal;
 			}
 			validValueToSet = &subOpCodeResult;
 			BREAK;
@@ -2896,6 +3061,10 @@ bool GBA_t::DataProcessing()
 				uint64_t result = (uint64_t)op1 + (uint64_t)op2;
 				pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = ((result > 0xFFFFFFFF) ? ONE : ZERO);
 				pGBA_cpuInstance->registers.cpsr.psrFields.psrOverflowBit = ((((op2 ^ subOpCodeResult) & (~(op1 ^ op2))) >> THIRTYONE) ? ONE : ZERO);
+			}
+			else
+			{
+				pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = cOriginal;
 			}
 			validValueToSet = &subOpCodeResult;
 			BREAK;
@@ -2912,6 +3081,10 @@ bool GBA_t::DataProcessing()
 				pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = ((subOpCodeResult64 > 0xFFFFFFFF) ? ONE : ZERO);
 				pGBA_cpuInstance->registers.cpsr.psrFields.psrOverflowBit = ((((op2 ^ subOpCodeResult) & (~(op1 ^ op2))) >> THIRTYONE) ? ONE : ZERO);
 			}
+			else
+			{
+				pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = cOriginal;
+			}
 			validValueToSet = &subOpCodeResult;
 			BREAK;
 		}
@@ -2927,6 +3100,10 @@ bool GBA_t::DataProcessing()
 				pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = ((op1 >= temp) ? ONE : ZERO);
 				pGBA_cpuInstance->registers.cpsr.psrFields.psrOverflowBit = ((((op1 ^ op2) & (op1 ^ subOpCodeResult)) >> THIRTYONE) ? ONE : ZERO);
 			}
+			else
+			{
+				pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = cOriginal;
+			}
 			validValueToSet = &subOpCodeResult;
 			BREAK;
 		}
@@ -2941,6 +3118,10 @@ bool GBA_t::DataProcessing()
 				pGBA_cpuInstance->registers.cpsr.psrFields.psrNegativeBit = ((subOpCodeResult >> THIRTYONE) ? ONE : ZERO);
 				pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = ((op2 >= temp) ? ONE : ZERO);
 				pGBA_cpuInstance->registers.cpsr.psrFields.psrOverflowBit = ((((op2 ^ op1) & (op2 ^ subOpCodeResult)) >> THIRTYONE) ? ONE : ZERO);
+			}
+			else
+			{
+				pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = cOriginal;
 			}
 			validValueToSet = &subOpCodeResult;
 			BREAK;
@@ -3014,6 +3195,10 @@ bool GBA_t::DataProcessing()
 				pGBA_cpuInstance->registers.cpsr.psrFields.psrZeroBit = ((subOpCodeResult == ZERO) ? ONE : ZERO);
 				pGBA_cpuInstance->registers.cpsr.psrFields.psrNegativeBit = ((subOpCodeResult >> THIRTYONE) ? ONE : ZERO);
 			}
+			else
+			{
+				pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = cOriginal;
+			}
 			validValueToSet = &subOpCodeResult;
 			BREAK;
 		}
@@ -3024,6 +3209,10 @@ bool GBA_t::DataProcessing()
 			{
 				pGBA_cpuInstance->registers.cpsr.psrFields.psrZeroBit = ((subOpCodeResult == ZERO) ? ONE : ZERO);
 				pGBA_cpuInstance->registers.cpsr.psrFields.psrNegativeBit = ((subOpCodeResult >> THIRTYONE) ? ONE : ZERO);
+			}
+			else
+			{
+				pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = cOriginal;
 			}
 			validValueToSet = &subOpCodeResult;
 			BREAK;
@@ -3036,6 +3225,10 @@ bool GBA_t::DataProcessing()
 				pGBA_cpuInstance->registers.cpsr.psrFields.psrZeroBit = ((subOpCodeResult == ZERO) ? ONE : ZERO);
 				pGBA_cpuInstance->registers.cpsr.psrFields.psrNegativeBit = ((subOpCodeResult >> THIRTYONE) ? ONE : ZERO);
 			}
+			else
+			{
+				pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = cOriginal;
+			}
 			validValueToSet = &subOpCodeResult;
 			BREAK;
 		}
@@ -3046,6 +3239,10 @@ bool GBA_t::DataProcessing()
 			{
 				pGBA_cpuInstance->registers.cpsr.psrFields.psrZeroBit = ((subOpCodeResult == ZERO) ? ONE : ZERO);
 				pGBA_cpuInstance->registers.cpsr.psrFields.psrNegativeBit = ((subOpCodeResult >> THIRTYONE) ? ONE : ZERO);
+			}
+			else
+			{
+				pGBA_cpuInstance->registers.cpsr.psrFields.psrCarryBorrowExtBit = cOriginal;
 			}
 			validValueToSet = &subOpCodeResult;
 			BREAK;
@@ -3061,7 +3258,7 @@ bool GBA_t::DataProcessing()
 			// http://problemkaputt.de/gbatek.htm#armopcodesmemorysingleDataTransferldrstrpld
 			if (getARMMode() == OP_MODE_TYPE::OP_USR)
 			{
-				FATAL("Data Processing (ARM Mode = USR); TBD");
+				CPUWARN("Data Processing (ARM Mode = USR); TBD");
 			}
 
 			psr_t spsr = { ZERO };
@@ -3079,16 +3276,19 @@ bool GBA_t::DataProcessing()
 		{
 			// NOTE: We will not reach this point if the sub opcode was TST/TEQ/CMP/CMN
 			cpuSetRegister(getRegisterBankFromOperatingMode(getARMMode()), (REGISTER_TYPE)rd, getARMState(), *validValueToSet);
+			if (rd == PC)
+			{
+				reloadPipeline(pGBA_registers->pc);
+			}
 		}
 
-		// The possible cases where PC is not modified at all even at this point (i.e. end of the execution of current opcode)
+		// The possible cases where PC is not modified at all at this point (i.e. end of the execution of current opcode)
 		if (
-			(validValueToSet == NULL) // In this case, rd was not set at all. Hence, even if rd == PC, PC would not be modified. So, PC needs to increment
+			((validValueToSet == NULL) && ((i == YES) || ((i == NO) && (operand2.op2ShiftReg.r == RESET))))
 			||
-			((rd != PC) && ((i == YES) || ((i == NO) && (operand2.op2ShiftReg.r == ZERO)))) // In this case, rd probably was set, but rd != PC AND i = 1 and r = 1, so PC is not modified at all as of now. So, PC needs to increment
+			((rd != PC) && ((i == YES) || ((i == NO) && (operand2.op2ShiftReg.r == RESET))))
 			)
 		{
-			// Increment the PC
 			pGBA_cpuInstance->registers.pc += FOUR;
 			pGBA_cpuInstance->registers.pc &= 0xFFFFFFFC;
 		}

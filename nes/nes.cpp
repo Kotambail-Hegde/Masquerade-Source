@@ -143,7 +143,12 @@ NES_t::NES_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 		INFO("Running in sst Cpu Test Mode!");
 		_JSON_LOCATION = rom[ONE];
 
+#if (ENABLE_R2A03_SST == YES)
 		ROM_TYPE = ROM::TEST_SST;
+#else
+		FATAL("SSTs are not supported in this build");
+		RETURN;
+#endif
 	}
 	else
 	{
@@ -218,7 +223,11 @@ void NES_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void*
 {
 	uint8_t indexToCheck = 0;
 
-	if (!rom[indexToCheck].empty() || (ROM_TYPE == ROM::TEST_SST))
+#if (ENABLE_R2A03_SST == YES)
+	if (!rom[indexToCheck].empty() || ROM_TYPE == ROM::TEST_SST)
+#else
+	if (!rom[indexToCheck].empty())
+#endif
 	{
 		if (!initializeEmulator())
 		{
@@ -1373,6 +1382,7 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 	pNES_instance->NES_state.emulatorStatus.memoryAccessType.previousCPUAccessType = pNES_instance->NES_state.emulatorStatus.memoryAccessType.currentCPUAccessType;
 	pNES_instance->NES_state.emulatorStatus.memoryAccessType.currentCPUAccessType = TYPE_OF_MEMORY_ACCESS::CPU_READ;
 
+#if (ENABLE_R2A03_SST == YES)
 	if (ROM_TYPE == ROM::TEST_SST)
 	{
 
@@ -1387,6 +1397,7 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 		RETURN data;
 	}
 	else
+#endif
 	{
 		if (source == MEMORY_ACCESS_SOURCE::CPU || source == MEMORY_ACCESS_SOURCE::DMA || source == MEMORY_ACCESS_SOURCE::DEBUG_PORT)
 		{
@@ -2029,6 +2040,7 @@ void NES_t::writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 	pNES_instance->NES_state.emulatorStatus.memoryAccessType.previousCPUAccessType = pNES_instance->NES_state.emulatorStatus.memoryAccessType.currentCPUAccessType;
 	pNES_instance->NES_state.emulatorStatus.memoryAccessType.currentCPUAccessType = TYPE_OF_MEMORY_ACCESS::CPU_WRITE;
 
+#if (ENABLE_R2A03_SST == YES)
 	if (ROM_TYPE == ROM::TEST_SST)
 	{
 
@@ -2041,6 +2053,7 @@ void NES_t::writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 		pNES_cpuMemory->NESRawMemory[address] = data;
 	}
 	else
+#endif
 	{ 
 		if (source == MEMORY_ACCESS_SOURCE::CPU || source == MEMORY_ACCESS_SOURCE::DMA || source == MEMORY_ACCESS_SOURCE::DEBUG_PORT)
 		{
@@ -5317,6 +5330,7 @@ bool NES_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 {
 	pNES_instance->NES_state.display.wasVblankJustTriggerred = NO;
 
+#if (ENABLE_R2A03_SST == YES)
 	if (ROM_TYPE == ROM::TEST_SST)
 	{
 		static FLAG SST_DEBUG_PRINT = NO;
@@ -5556,6 +5570,7 @@ bool NES_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 		}
 	}
 	else
+#endif
 	{
 		processSOC();
 

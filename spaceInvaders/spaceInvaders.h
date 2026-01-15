@@ -16,15 +16,9 @@
 #pragma endregion INCLUDES
 
 #pragma region MACROS
-#define I8080_IN_SST_MODE									NO
 #define SPACE_INVADERS_FPS									60.0f
 #define EMULATED_AUDIO_SAMPLING_RATE_FOR_SPACEINVADERS		48000.0f
 #define SPACE_INVADERS_AUDIO_AS_STATIC_BUFFERS				(NO)
-
-#ifdef _MSC_VER  
-#define __packed  
-#pragma pack(1)  
-#endif
 #pragma endregion MACROS
 
 #pragma region CORE
@@ -47,6 +41,10 @@ public:
 private:
 
 	boost::property_tree::ptree pt;
+
+private:
+
+	uint8_t const SST_ROMS = TWO;
 
 private:
 
@@ -103,9 +101,8 @@ private:
 		NONE
 	};
 
+PACK_BEGIN
 private:
-
-#pragma pack(push, 1)
 
 	typedef struct
 	{
@@ -451,7 +448,7 @@ private:
 	flagFields_t* pSi_flags = nullptr;			// for readability
 	io_t* pSi_io = nullptr;						// for readability
 
-#pragma pack(pop)
+PACK_END
 
 private:
 

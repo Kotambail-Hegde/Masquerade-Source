@@ -13,12 +13,6 @@
 
 #pragma region MACROS
 #define GAME_OF_LIFE_FPS						60
-
-#ifdef _MSC_VER  
-#define __packed  
-#pragma pack(1)  
-#endif
-
 #pragma endregion MACROS
 
 #pragma region CORE
@@ -47,9 +41,9 @@ private:
 #pragma endregion INFRASTRUCTURE_DECLARATIONS
 
 #pragma region GOL_DECLARATIONS
-private:
 
-#pragma pack(push, 1)
+PACK_BEGIN
+private:
 
 	typedef struct
 	{
@@ -142,7 +136,7 @@ private:
 	std::shared_ptr < absolute_gol_instance_t> pAbsolute_gol_instance;
 	gol_instance_t* pGol_instance;		// for readability
 
-#pragma pack(pop)
+PACK_END
 
 private:
 

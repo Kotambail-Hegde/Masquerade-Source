@@ -21,11 +21,6 @@
 #define AUDIO_BUFFER_SIZE_FOR_GB_GBC					(CEIL((EMULATED_AUDIO_SAMPLING_RATE_FOR_GB_GBC / GB_GBC_FPS)))
 #endif
 #define PIXEL_FIFO_SIZE_FOR_GB_GBC						(SIXTEEN)
-
-#ifdef _MSC_VER  
-#define __packed  
-#pragma pack(1)  
-#endif
 #pragma endregion MACROS
 
 #pragma region CORE
@@ -111,7 +106,7 @@ private:
 
 private:
 
-#pragma pack(push, 1)
+PACK_BEGIN
 
 	typedef struct
 	{
@@ -1988,7 +1983,7 @@ private:
 	emulatorStatus_t* pGBc_emuStatus = nullptr;			// for readability
 	display_t* pGBc_display = nullptr;			// for readability
 
-#pragma pack(pop)
+PACK_END
 
 private:
 
@@ -2014,8 +2009,8 @@ private:
 #pragma endregion EMULATION_DECLARATIONS
 
 #pragma region BESS
+PACK_BEGIN
 private:
-#pragma pack(push, 1)
 	// BESS specifications
 	// Refer to https://github.com/LIJI32/SameBoy/blob/master/BESS.md
 
@@ -2148,7 +2143,7 @@ private:
 
 	};
 
-#pragma pack(pop)
+PACK_END
 #pragma endregion BESS
 
 #pragma region INFRASTRUCTURE_METHOD_DECLARATION

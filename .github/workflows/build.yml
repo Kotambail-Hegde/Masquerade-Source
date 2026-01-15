@@ -60,6 +60,7 @@ jobs:
             external/imgui
             external/miniz
             external/stb
+            external/rapidjson
             external/boost
             external/SDL
             external/nativefiledialog-extended
@@ -111,6 +112,11 @@ jobs:
           # --- stb
           if (-not (Test-Path "stb/stb")) {
               git clone https://github.com/nothings/stb.git --depth 1 stb/stb
+          }
+
+          # --- rapidjson
+          if (-not (Test-Path "rapidjson")) {
+              git clone https://github.com/Tencent/rapidjson.git --depth 1 rapidjson
           }
 
           # --- SDL
@@ -211,6 +217,7 @@ jobs:
           echo "IMGUI_ROOT=$env:GITHUB_WORKSPACE\external\imgui" >> $env:GITHUB_ENV
           echo "MINIZ_ROOT=$env:GITHUB_WORKSPACE\external\miniz" >> $env:GITHUB_ENV
           echo "STB_ROOT=$env:GITHUB_WORKSPACE\external\stb" >> $env:GITHUB_ENV
+          echo "RAPID_JSON_ROOT=$env:GITHUB_WORKSPACE\external\rapidjson" >> $env:GITHUB_ENV
           echo "BOOST_ROOT=$env:GITHUB_WORKSPACE\external\boost" >> $env:GITHUB_ENV
           echo "SDL3_ROOT=$env:GITHUB_WORKSPACE\external\SDL\build" >> $env:GITHUB_ENV
           echo "NFD_ROOT=$env:GITHUB_WORKSPACE\external\nativefiledialog-extended" >> $env:GITHUB_ENV
@@ -225,6 +232,7 @@ jobs:
                 -DIMGUI_ROOT=%IMGUI_ROOT% ^
                 -DMINIZ_ROOT=%MINIZ_ROOT% ^
                 -DSTB_ROOT=%STB_ROOT% ^
+                -DRAPID_JSON_ROOT=%RAPID_JSON_ROOT% ^
                 -DBOOST_ROOT=%BOOST_ROOT% ^
                 -DSDL3_ROOT=%SDL3_ROOT% ^
                 -DNFD_ROOT=%NFD_ROOT% ^
@@ -273,6 +281,7 @@ jobs:
             external/imgui
             external/miniz
             external/stb
+            external/rapidjson
             external/boost
             external/SDL
             external/nativefiledialog-extended
@@ -321,6 +330,10 @@ jobs:
 
           if [ ! -d "stb/stb" ]; then
             git clone --depth 1 https://github.com/nothings/stb.git stb/stb
+          fi
+
+          if [ ! -d "rapidjson" ]; then
+            git clone --depth 1 https://github.com/Tencent/rapidjson.git rapidjson
           fi
 
           if [ ! -d "boost" ]; then
@@ -384,6 +397,7 @@ jobs:
           echo "IMGUI_ROOT=$GITHUB_WORKSPACE/external/imgui" >> $GITHUB_ENV
           echo "MINIZ_ROOT=$GITHUB_WORKSPACE/external/miniz" >> $GITHUB_ENV
           echo "STB_ROOT=$GITHUB_WORKSPACE/external/stb" >> $GITHUB_ENV
+          echo "RAPID_JSON_ROOT=$GITHUB_WORKSPACE/external/rapidjson" >> $GITHUB_ENV
           echo "BOOST_ROOT=$GITHUB_WORKSPACE/external/boost" >> $GITHUB_ENV
           echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL/build" >> $GITHUB_ENV
           echo "NFD_ROOT=$GITHUB_WORKSPACE/external/nativefiledialog-extended" >> $GITHUB_ENV
@@ -397,6 +411,7 @@ jobs:
                 -DIMGUI_ROOT=$IMGUI_ROOT \
                 -DMINIZ_ROOT=$MINIZ_ROOT \
                 -DSTB_ROOT=$STB_ROOT \
+                -DRAPID_JSON_ROOT=$RAPID_JSON_ROOT \
                 -DBOOST_ROOT=$BOOST_ROOT \
                 -DSDL3_ROOT=$SDL3_ROOT \
                 -DNFD_ROOT=$NFD_ROOT \
@@ -436,6 +451,7 @@ jobs:
                 external/SDL
                 external/emscripten-browser-file
                 external/boost
+                external/rapidjson
               key: emscripten-external-all-v3-${{ hashFiles('.github/workflows/*.yml') }}
               restore-keys: |
                 emscripten-external-all-v3-
@@ -503,6 +519,10 @@ jobs:
                 git clone --depth 1 https://github.com/nothings/stb.git stb/stb
               fi
 
+              if [ ! -d "rapidjson" ]; then
+                git clone --depth 1 https://github.com/Tencent/rapidjson.git rapidjson
+              fi
+
               if [ ! -d "SDL" ]; then
                 git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL
               fi
@@ -517,6 +537,7 @@ jobs:
               echo "IMGUI_ROOT=$GITHUB_WORKSPACE/external/imgui" >> $GITHUB_ENV
               echo "MINIZ_ROOT=$GITHUB_WORKSPACE/external/miniz" >> $GITHUB_ENV
               echo "STB_ROOT=$GITHUB_WORKSPACE/external/stb" >> $GITHUB_ENV
+              echo "RAPID_JSON_ROOT=$GITHUB_WORKSPACE/external/rapidjson" >> $GITHUB_ENV
               echo "EFB_ROOT=$GITHUB_WORKSPACE/external/emscripten-browser-file" >> $GITHUB_ENV
               echo "BOOST_ROOT=$GITHUB_WORKSPACE/external/boost" >> $GITHUB_ENV
               echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL-install/emscripten" >> $GITHUB_ENV
@@ -576,6 +597,7 @@ jobs:
                 -DIMGUI_ROOT=$IMGUI_ROOT \
                 -DMINIZ_ROOT=$MINIZ_ROOT \
                 -DSTB_ROOT=$STB_ROOT \
+                -DRAPID_JSON_ROOT=$RAPID_JSON_ROOT \
                 -DEFB_ROOT=$EFB_ROOT \
                 -DBOOST_ROOT=$BOOST_ROOT \
                 -S . -B build

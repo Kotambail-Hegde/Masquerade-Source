@@ -14,3 +14,6 @@ set(STB_ROOT "/home/kotambail_hegde/Workspace/Softwares")
 
 # Emscripten Browser File Library
 set(EFB_ROOT "/home/kotambail_hegde/Workspace/Softwares/Emscripten/emscripten-browser-file")
+
+# Rapid JSON
+set(EFB_ROOT "/home/kotambail_hegde/Workspace/Softwares/RapidJSON/rapidjson")

@@ -302,13 +302,14 @@
 
 #define CPSR_FLAG(F, C)									(F == 1 ? C:"-")
 
-#define loadPipeline									fetchAndDecode
+#define loadPipeline									dummy
+#define reloadPipeline									fetchAndDecode
 #define initializeSerialClockSpeed						processSerialClockSpeedBit
 #define performOverFlowCheck							getUpdatedFrequency
 
-#ifdef _MSC_VER  
-#define __packed  
-#pragma pack(1)  
+#if (ENABLE_ARM7TDMI_SST == NO)
+#define readRawMemory									readRawMemoryInternal
+#define writeRawMemory									writeRawMemoryInternal
 #endif
 #pragma endregion MACROS
 
@@ -374,8 +375,8 @@ private:
 		OP_FIQ = SEVENTEEN,		// 17
 		OP_IRQ = EIGHTEEN,		// 18
 		OP_SVC = NINETEEN,		// 19
-		OP_ABT = TWENTYTHREE,	// TWO3
-		OP_UND = TWENTYSEVEN,	// TWO7
+		OP_ABT = TWENTYTHREE,	// 23
+		OP_UND = TWENTYSEVEN,	// 27
 		OP_SYS = THIRTYONE,		// 31
 		OP_TOTAL = SEVEN,		// TOTAL = 7
 		OP_NONE = THIRTYTWO
@@ -685,9 +686,8 @@ private:
 	// Used only for logging purpose
 	std::string disassembled = "Disassembly Unsupported";
 
+PACK_BEGIN
 private:
-
-#pragma pack(push, 1)
 
 	// Structure of CPSR and SPSRs
 
@@ -1157,7 +1157,8 @@ private:
 		CPU,
 		PPU,
 		APU,
-		DMA
+		DMA,
+		CPU_INSTRUCTION_FETCH // Needed for prefetcher
 	};
 
 	enum class GBA_INTERRUPT
@@ -3125,7 +3126,7 @@ private:
 		mOamAttributes_t mOamAttributes;				// 0x07000000 - 0x070003FF
 		// 0x07000400 - 0x7FFFFFFF						Not used
 		mGamePakRom_t mGamePakRom;						// 0x08000000 - 0x0DFFFFFF
-		mGamePakBackup_t mGamePakBackup;				// 0x0E000000 - 0x0E00FFFF (x n banks)
+		mGamePakBackup_t mGamePakBackup;				// 0x0E000000 - 0x0E00FFFF
 	} mGBAMemoryMap_t;
 
 	typedef struct
@@ -3233,6 +3234,46 @@ private:
 		loggerInterface_t loggerInterface;
 	} debugger_t;
 
+	enum class ARM7TDMI_Opcode : uint8_t
+	{
+		// Thumb
+		ThumbSoftwareInterrupt,
+		UnconditionalBranch,
+		ConditionalBranch,
+		MultipleLoadStore,
+		LongBranchWithLink,
+		AddOffsetToStackPointer,
+		PushPopRegisters,
+		LoadStoreHalfword,
+		SPRelativeLoadStore,
+		LoadAddress,
+		LoadStoreWithImmediateOffset,
+		LoadStoreWithRegisterOffset,
+		LoadStoreSignExtendedByteHalfword,
+		PCRelativeLoad,
+		HiRegisterOperationsBranchExchange,
+		ALUOperations,
+		MoveCompareAddSubtractImmediate,
+		AddSubtract,
+		MoveShiftedRegister,
+
+		// ARM
+		BranchAndBranchExchange,
+		BlockDataTransfer,
+		BranchAndBranchLink,
+		SoftwareInterrupt,
+		Undefined,
+		SingleDataTransfer,
+		SingleDataSwap,
+		MultiplyAndMultiplyAccumulate,
+		HalfWordDataTransfer,
+		PSRTransfer,
+		DataProcessing,
+
+		UNKNOWN
+	};
+
+
 	typedef struct
 	{
 		FLAG isBiosExecutionDone;
@@ -3242,6 +3283,7 @@ private:
 		ticks_t ticks;
 		backup_t backup;
 		debugger_t debugger;
+		ARM7TDMI_Opcode lastOpcode;
 	} emulatorStatus_t;
 
 private:
@@ -3642,12 +3684,22 @@ private:
 		BYTE pad;
 	} aboutRom_t;
 
-	typedef struct
+	template<std::size_t BaseSize>
+	struct padded_to_power_of_2 {
+		static constexpr std::size_t padding_size = std::bit_ceil(BaseSize) - BaseSize;
+		[[no_unique_address]] std::byte padding[padding_size > 0 ? padding_size : 1];
+	};
+
+	struct absolute_GBA_state_t
 	{
 		GBA_instance_t GBA_instance;
 		aboutRom_t aboutRom;
-		BYTE padding[103200000 - (sizeof(GBA_instance_t) + sizeof(aboutRom_t))];
-	} absolute_GBA_state_t;
+
+		[[no_unique_address]]
+		padded_to_power_of_2<sizeof(GBA_instance_t) + sizeof(aboutRom_t)> _pad;
+	};
+
+	static_assert(std::has_single_bit(sizeof(absolute_GBA_state_t)));
 
 	union absolute_GBA_instance_t
 	{
@@ -3695,7 +3747,87 @@ private:
 
 	uint64_t repSkyLogIttr = RESET;
 
-#pragma pack(pop)
+#if (ENABLE_ARM7TDMI_SST == YES)
+	// SST
+	struct ARM7TDMI_SST_t
+	{
+		struct internal_t
+		{ 
+			int64_t kind;
+			int64_t size;
+			int64_t addr;
+			int64_t data;
+			int64_t cycle;
+			int64_t access;
+			FLAG isValid;
+		} ;
+
+		struct Transaction {
+			uint32_t kind, size, addr, data, cycle, access;
+			bool used = false;
+		};
+
+		std::vector<Transaction> transactions;
+
+		struct internal_t internal[THIRTY];
+		uint8_t index;
+
+		MASQ_INLINE void SST_Reset()
+		{
+			*this = {};
+		}
+
+		MASQ_INLINE void SST_SetAccessType(MEMORY_ACCESS_TYPE type)
+		{
+			if (type == MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE)
+			{
+				internal[index].access |= ARM7TDMI_SST_t::Nonsequential;
+			}
+			else if (type == MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE)
+			{
+				internal[index].access |= ARM7TDMI_SST_t::Sequential;
+			}
+		}
+
+		MASQ_INLINE void SST_SetAccessType(MEMORY_ACCESS_SOURCE source)
+		{
+			if (source == MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH)
+			{
+				internal[index].access |= ARM7TDMI_SST_t::Code;
+			}
+			else if (source == MEMORY_ACCESS_SOURCE::DMA)
+			{
+				internal[index].access |= ARM7TDMI_SST_t::Dma;
+			}
+		}
+
+		MASQ_INLINE int64_t SST_FindDataByAddress(uint32_t address)
+		{
+			for (auto& t : transactions)
+			{
+				if (!t.used && t.addr == address)
+				{
+					t.used = YES;
+					RETURN static_cast<int64_t>(t.data);
+				}
+			}
+
+			RETURN INVALID;
+		}
+
+		enum Access
+		{
+			Nonsequential = 0,
+			Sequential = 1,
+			Code = 2,
+			Dma = 4, 
+			Lock = 8 
+		};
+	};
+
+	struct ARM7TDMI_SST_t sst;
+#endif
+PACK_END
 
 private:
 
@@ -3878,25 +4010,32 @@ private:
 				// Lookup offset (no branch)
 				const GBA_WORD offset = ACCESS_WIDTH_OFFSETS[TO_UINT8(mAccessWidth)];
 
-		// GamePak ROM 128KB boundary check
-		const FLAG isGamePakROM = (currentRegion >= 0x08) && (currentRegion <= 0x0D);
-		const FLAG is128KBoundary = (mCurrentAddress & 0x1FFFF) == ZERO;
+				// GamePak ROM 128KB boundary check
+				const FLAG isGamePakROM = (currentRegion >= 0x08) && (currentRegion <= 0x0D);
+				const FLAG is128KBoundary = (mCurrentAddress & 0x1FFFF) == ZERO;
 
-		if (isGamePakROM && is128KBoundary) MASQ_UNLIKELY
-		{
-			mType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
-		}
-		else MASQ_LIKELY
-		{
-			// Normal sequential check
-			mType = (mCurrentAddress == previousAddr + offset)
-				? MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE
-				: MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
-		}
-	}
+				if (isGamePakROM && is128KBoundary) MASQ_UNLIKELY
+				{
+					mType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
+				}
+				else MASQ_LIKELY
+				{
+					// Normal sequential check
+					mType = (mCurrentAddress == previousAddr + offset)
+						? MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE
+						: MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
+				}
+			}
 		}
 
-			// Lookup cycles from table
+#if (ENABLE_ARM7TDMI_SST == YES)
+		if (ROM_TYPE == ROM::TEST_SST) MASQ_UNLIKELY
+		{
+			sst.SST_SetAccessType(mType);
+		}
+#endif
+
+		// Lookup cycles from table
 		uint32_t nCycles;
 
 		if (currentRegion < TO_UINT8(MEMORY_REGIONS::TOTAL_MEMORY_REGIONS) &&
@@ -4052,11 +4191,11 @@ private:
 
 	// NOTE: For memory mirrors, refer http://problemkaputt.de/gbatek-gba-unpredictable-things.htm
 	template <typename T>
-	T readRawMemory(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType = MEMORY_ACCESS_TYPE::AUTOMATIC, FLAG LOCK = NO)
+	T readRawMemoryInternal(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType = MEMORY_ACCESS_TYPE::AUTOMATIC, FLAG LOCK = NO)
 	{
 		INC64 dmaCyclesInThisRun = RESET; // Currently there is no use for this, but using this to cache the count before the reset
 
-		if ((IsAnyDMARunning() == YES) && (source == MEMORY_ACCESS_SOURCE::CPU) && (LOCK == NO))
+		if ((IsAnyDMARunning() == YES) && (source == MEMORY_ACCESS_SOURCE::CPU || source == MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH) && (LOCK == NO))
 		{
 			dmaTick();	
 			dmaCyclesInThisRun = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.dmaCounter;
@@ -4080,7 +4219,7 @@ private:
 			}
 		}
 
-		if (source == MEMORY_ACCESS_SOURCE::CPU)
+		if (source == MEMORY_ACCESS_SOURCE::CPU || source == MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH)
 		{
 			TODO("Support for FORCED_BLANK needs to be added at line %d of file %s", __LINE__, __FILE__);
 #if (DISABLED)
@@ -4115,6 +4254,27 @@ private:
 			}
 #endif
 			uint32_t cpuTicks = getMemoryAccessCycles(address, accessWidth, source, accessType);
+#if (ENABLE_ARM7TDMI_SST == YES)
+			if (ROM_TYPE == ROM::TEST_SST) MASQ_UNLIKELY
+			{
+				// If this SST entry is already active, keep incrementing it
+				if (sst.internal[sst.index].cycle != 0)
+				{
+					sst.internal[sst.index].cycle += ONE;
+				}
+			// First cycle of this SST entry
+			else if (sst.index != RESET)
+			{
+				sst.internal[sst.index].cycle =
+					sst.internal[sst.index - 1].cycle + ONE;
+			}
+			// Very first SST entry
+			else
+			{
+				sst.internal[sst.index].cycle = ONE;
+			}
+			}
+#endif
 			while (cpuTicks)
 			{
 				cpuTick();
@@ -4184,7 +4344,7 @@ private:
 				pGBA_instance->GBA_state.gbaMemory.previouslyLatchedBiosData
 					= pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mSystemRom.mSystemRom32bit[(address - SYSTEM_ROM_START_ADDRESS) / FOUR];
 			}
-			RETURN((T)(pGBA_instance->GBA_state.gbaMemory.previouslyLatchedBiosData >> shift));
+			RETURN ((T)(pGBA_instance->GBA_state.gbaMemory.previouslyLatchedBiosData >> shift));
 		}
 		else if (IF_ADDRESS_WITHIN(address, SYSTEM_ROM_UNUSED_START_ADDRESS, SYSTEM_ROM_UNUSED_END_ADDRESS))
 		{
@@ -4446,7 +4606,7 @@ private:
 				else if (accessWidth == MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT)
 				{
 					// Refer : http://problemkaputt.de/gbatek-gba-unpredictable-things.htm
-					RETURN (GBA_WORD)((GBA_WORD)pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakBackup.mGamePakSram.mExtSram8bit[address] * 0x01010101);
+					RETURN(GBA_WORD)((GBA_WORD)pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakBackup.mGamePakSram.mExtSram8bit[address] * 0x01010101);
 				}
 				BREAK;
 			}
@@ -4507,7 +4667,7 @@ private:
 	void writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType = MEMORY_ACCESS_TYPE::AUTOMATIC);
 
 	template <typename T>
-	void writeRawMemory(uint32_t address, T data, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType = MEMORY_ACCESS_TYPE::AUTOMATIC, FLAG LOCK = NO)
+	void writeRawMemoryInternal(uint32_t address, T data, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType = MEMORY_ACCESS_TYPE::AUTOMATIC, FLAG LOCK = NO)
 	{
 		INC64 dmaCyclesInThisRun = RESET; // Currently there is no use for this, but using this to cache the count before the reset
 
@@ -4516,7 +4676,7 @@ private:
 			FATAL("PPU or APU writing to memory!");
 		}
 
-		if ((IsAnyDMARunning() == YES) && (source == MEMORY_ACCESS_SOURCE::CPU) && (LOCK == NO))
+		if ((IsAnyDMARunning() == YES) && (source == MEMORY_ACCESS_SOURCE::CPU || source == MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH) && (LOCK == NO))
 		{
 			dmaTick();
 			dmaCyclesInThisRun = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.dmaCounter;
@@ -4539,7 +4699,7 @@ private:
 			}
 		}
 
-		if (source == MEMORY_ACCESS_SOURCE::CPU)
+		if (source == MEMORY_ACCESS_SOURCE::CPU || source == MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH)
 		{
 			TODO("Support for FORCED_BLANK needs to be added at line %d of file %s", __LINE__, __FILE__);
 #if (DISABLED)
@@ -4577,6 +4737,27 @@ private:
 			}
 #endif
 			uint32_t cpuTicks = getMemoryAccessCycles(address, accessWidth, source, accessType);
+#if (ENABLE_ARM7TDMI_SST == YES)
+			if (ROM_TYPE == ROM::TEST_SST) MASQ_UNLIKELY
+			{
+				// If this SST entry is already active, keep incrementing it
+				if (sst.internal[sst.index].cycle != 0)
+				{
+					sst.internal[sst.index].cycle += ONE;
+				}
+				// First cycle of this SST entry
+				else if (sst.index != RESET)
+				{
+					sst.internal[sst.index].cycle =
+						sst.internal[sst.index - 1].cycle + ONE;
+				}
+				// Very first SST entry
+				else
+				{
+					sst.internal[sst.index].cycle = ONE;
+				}
+			}
+#endif
 			while (cpuTicks)
 			{
 				cpuTick();
@@ -4989,6 +5170,72 @@ private:
 		WARN("Trying to write to invalid memory : 0x%08X", address);
 	}
 
+#if (ENABLE_ARM7TDMI_SST == YES)
+	template <typename T>
+	MASQ_INLINE T readRawMemory(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType = MEMORY_ACCESS_TYPE::AUTOMATIC, FLAG LOCK = NO)
+	{
+		T data = readRawMemoryInternal<T>(address, accessWidth, source, accessType, LOCK);
+
+		if (ROM_TYPE == ROM::TEST_SST && (source == MEMORY_ACCESS_SOURCE::CPU || source == MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH)) MASQ_UNLIKELY
+		{
+			sst.internal[sst.index].size = sizeof(T);
+			sst.SST_SetAccessType(source);
+			if (LOCK) MASQ_UNLIKELY
+			{
+				sst.internal[sst.index].access |= ARM7TDMI_SST_t::Lock;
+			}
+			if (source == MEMORY_ACCESS_SOURCE::CPU)
+			{
+				sst.internal[sst.index].kind = ONE;
+			}
+			else if (source == MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH)
+			{
+				sst.internal[sst.index].kind = ZERO;
+			}
+			else
+			{
+				FATAL("SST: Unknown source for memory read");
+			}
+			auto result = sst.SST_FindDataByAddress(address);
+			if (result != INVALID)
+			{
+				sst.internal[sst.index].data = TO_UINT32(result);
+			}
+			else
+			{
+				sst.internal[sst.index].data = address;
+			}
+			sst.internal[sst.index].addr = address;
+			data = TO_UINT32(sst.internal[sst.index].data);
+
+			sst.index++;
+		}
+
+		RETURN data;
+	}
+
+	template <typename T>
+	MASQ_INLINE void writeRawMemory(uint32_t address, T data, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType = MEMORY_ACCESS_TYPE::AUTOMATIC, FLAG LOCK = NO)
+	{
+		writeRawMemoryInternal<T>(address, data, accessWidth, source, accessType, LOCK);
+
+		if (ROM_TYPE == ROM::TEST_SST && (source == MEMORY_ACCESS_SOURCE::CPU || source == MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH)) MASQ_UNLIKELY
+		{
+			sst.internal[sst.index].data = data;
+			sst.SST_FindDataByAddress(address); // Calling this just to mark the used flag for this transaction
+			sst.internal[sst.index].addr = address;
+			sst.internal[sst.index].size = sizeof(T);
+			sst.SST_SetAccessType(source);
+			if (LOCK) MASQ_UNLIKELY
+			{
+				sst.internal[sst.index].access |= ARM7TDMI_SST_t::Lock;
+			}
+			sst.internal[sst.index].kind = TWO;
+			sst.index++;
+		}
+	}
+#endif
+
 private:
 
 	bool processSOC();
@@ -4999,36 +5246,21 @@ private:
 
 	void fetchAndDecode(uint32_t newPC);
 
-	MASQ_INLINE bool TickMultiply(FLAG isSigned, uint64_t multiplier)
-	{
+	MASQ_INLINE bool TickMultiply(FLAG isSigned, uint64_t multiplier) {
 		uint32_t mask = 0xFFFFFF00;
-		bool full = false;
-
 		cpuIdleCycles();
-
 		while (TRUE)
 		{
 			multiplier &= mask;
-
-			if (multiplier == ZERO)
-			{
-				BREAK;
-			}
-
+			if (multiplier == ZERO) BREAK;
 			if (isSigned == YES)
 			{
-				if (multiplier == mask)
-				{
-					BREAK;
-				}
+				if (multiplier == mask) BREAK;
 			}
-
 			mask <<= EIGHT;
-			full = true;
 			cpuIdleCycles();
 		}
-
-		RETURN full;
+		RETURN(mask == 0);
 	}
 
 	MASQ_INLINE bool MultiplyCarrySimple(uint32_t multiplier)
@@ -5159,59 +5391,59 @@ private:
 		{
 		case CPSR_CONDITION_CODE::CPSR_EQ_SetZ:
 		{
-			RETURN((currentCPSR.psrFields.psrZeroBit == SET) ? YES : NO);
+			RETURN ((currentCPSR.psrFields.psrZeroBit == SET) ? YES : NO);
 		}
 		case CPSR_CONDITION_CODE::CPSR_NE_ClearZ:
 		{
-			RETURN((currentCPSR.psrFields.psrZeroBit == RESET) ? YES : NO);
+			RETURN ((currentCPSR.psrFields.psrZeroBit == RESET) ? YES : NO);
 		}
 		case CPSR_CONDITION_CODE::CPSR_CS_SetC:
 		{
-			RETURN((currentCPSR.psrFields.psrCarryBorrowExtBit == SET) ? YES : NO);
+			RETURN ((currentCPSR.psrFields.psrCarryBorrowExtBit == SET) ? YES : NO);
 		}
 		case CPSR_CONDITION_CODE::CPSR_CS_ClearC:
 		{
-			RETURN((currentCPSR.psrFields.psrCarryBorrowExtBit == RESET) ? YES : NO);
+			RETURN ((currentCPSR.psrFields.psrCarryBorrowExtBit == RESET) ? YES : NO);
 		}
 		case CPSR_CONDITION_CODE::CPSR_MI_SetN:
 		{
-			RETURN((currentCPSR.psrFields.psrNegativeBit == SET) ? YES : NO);
+			RETURN ((currentCPSR.psrFields.psrNegativeBit == SET) ? YES : NO);
 		}
 		case CPSR_CONDITION_CODE::CPSR_PL_ClearN:
 		{
-			RETURN((currentCPSR.psrFields.psrNegativeBit == RESET) ? YES : NO);;
+			RETURN ((currentCPSR.psrFields.psrNegativeBit == RESET) ? YES : NO);;
 		}
 		case CPSR_CONDITION_CODE::CPSR_VS_SetV:
 		{
-			RETURN((currentCPSR.psrFields.psrOverflowBit == SET) ? YES : NO);
+			RETURN ((currentCPSR.psrFields.psrOverflowBit == SET) ? YES : NO);
 		}
 		case CPSR_CONDITION_CODE::CPSR_VC_ClearV:
 		{
-			RETURN((currentCPSR.psrFields.psrOverflowBit == RESET) ? YES : NO);
+			RETURN ((currentCPSR.psrFields.psrOverflowBit == RESET) ? YES : NO);
 		}
 		case CPSR_CONDITION_CODE::CPSR_HI_SetC_AND_ClearZ:
 		{
-			RETURN(((currentCPSR.psrFields.psrCarryBorrowExtBit == SET) && (currentCPSR.psrFields.psrZeroBit == RESET)) ? YES : NO);
+			RETURN (((currentCPSR.psrFields.psrCarryBorrowExtBit == SET) && (currentCPSR.psrFields.psrZeroBit == RESET)) ? YES : NO);
 		}
 		case CPSR_CONDITION_CODE::CPSR_LS_ClearC_OR_SetZ:
 		{
-			RETURN(((currentCPSR.psrFields.psrCarryBorrowExtBit == RESET) || (currentCPSR.psrFields.psrZeroBit == SET)) ? YES : NO);
+			RETURN (((currentCPSR.psrFields.psrCarryBorrowExtBit == RESET) || (currentCPSR.psrFields.psrZeroBit == SET)) ? YES : NO);
 		}
 		case CPSR_CONDITION_CODE::CPSR_GE_NEqualsV:
 		{
-			RETURN(((currentCPSR.psrFields.psrNegativeBit == currentCPSR.psrFields.psrOverflowBit)) ? YES : NO);
+			RETURN (((currentCPSR.psrFields.psrNegativeBit == currentCPSR.psrFields.psrOverflowBit)) ? YES : NO);
 		}
 		case CPSR_CONDITION_CODE::CPSR_LT_NNotEqualsV:
 		{
-			RETURN(((currentCPSR.psrFields.psrNegativeBit != currentCPSR.psrFields.psrOverflowBit)) ? YES : NO);
+			RETURN (((currentCPSR.psrFields.psrNegativeBit != currentCPSR.psrFields.psrOverflowBit)) ? YES : NO);
 		}
 		case CPSR_CONDITION_CODE::CPSR_CS_ClearZ_AND_NEqualsV:
 		{
-			RETURN(((currentCPSR.psrFields.psrZeroBit == RESET) && ((currentCPSR.psrFields.psrNegativeBit == currentCPSR.psrFields.psrOverflowBit))) ? YES : NO);
+			RETURN (((currentCPSR.psrFields.psrZeroBit == RESET) && ((currentCPSR.psrFields.psrNegativeBit == currentCPSR.psrFields.psrOverflowBit))) ? YES : NO);
 		}
 		case CPSR_CONDITION_CODE::CPSR_CS_SetZ_OR_NNotEqualsV:
 		{
-			RETURN(((currentCPSR.psrFields.psrZeroBit == SET) || ((currentCPSR.psrFields.psrNegativeBit != currentCPSR.psrFields.psrOverflowBit))) ? YES : NO);
+			RETURN (((currentCPSR.psrFields.psrZeroBit == SET) || ((currentCPSR.psrFields.psrNegativeBit != currentCPSR.psrFields.psrOverflowBit))) ? YES : NO);
 		}
 		case CPSR_CONDITION_CODE::CPSR_AL_IgnoreConditions:
 		{
@@ -5310,7 +5542,12 @@ private:
 			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter++;
 		}
 
-		syncOtherGBAModuleTicks();
+#if (ENABLE_ARM7TDMI_SST == YES)
+		if (ROM_TYPE != ROM::TEST_SST) MASQ_UNLIKELY
+#endif
+		{
+			syncOtherGBAModuleTicks();
+		}
 	}
 
 	MASQ_INLINE void syncOtherGBAModuleTicks()
@@ -5422,8 +5659,7 @@ private:
 		}
 	}
 
-	MASQ_INLINE void timerCommonProcessing(TIMER timerID, uint16_t reloadValueIfOverflow,
-		mTIMERnCNT_HHalfWord_t* CNTH, INC64 timerCycles)
+	MASQ_INLINE void timerCommonProcessing(TIMER timerID, uint16_t reloadValueIfOverflow, mTIMERnCNT_HHalfWord_t* CNTH, INC64 timerCycles)
 	{
 		const uint8_t timerIdx = TO_UINT(timerID);
 		auto& timerState = pGBA_instance->GBA_state.timer[timerIdx];
@@ -6146,7 +6382,7 @@ private:
 					y2 = getScreenHeight();
 				}
 
-				RETURN(x >= x1 && x <= x2) && (y >= y1 && y <= y2);
+				RETURN (x >= x1 && x <= x2) && (y >= y1 && y <= y2);
 			};
 
 		auto isWin0 = [&](uint32_t x, uint32_t y)

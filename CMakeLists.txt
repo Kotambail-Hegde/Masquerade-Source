@@ -72,6 +72,7 @@ elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows" AND IS_GITHUB_ACTIONS)
     file(TO_CMAKE_PATH "${IMGUI_ROOT}" IMGUI_ROOT)
     file(TO_CMAKE_PATH "${MINIZ_ROOT}" MINIZ_ROOT)
     file(TO_CMAKE_PATH "${STB_ROOT}" STB_ROOT)
+    file(TO_CMAKE_PATH "${RAPID_JSON_ROOT}" RAPID_JSON_ROOT)
     file(TO_CMAKE_PATH "${SDL3_ROOT}" SDL3_ROOT)
     file(TO_CMAKE_PATH "${NFD_ROOT}" NFD_ROOT)
     # Boost
@@ -116,6 +117,9 @@ endif()
 if(DEFINED STB_ROOT)
     file(TO_CMAKE_PATH "${STB_ROOT}" STB_ROOT)
 endif()
+if(DEFINED RAPID_JSON_ROOT)
+    file(TO_CMAKE_PATH "${RAPID_JSON_ROOT}" RAPID_JSON_ROOT)
+endif()
 if(DEFINED EFB_ROOT)
     file(TO_CMAKE_PATH "${EFB_ROOT}" EFB_ROOT)
 endif()
@@ -129,15 +133,17 @@ set(IMGUI_EXAMPLES_LIBS_DIR "${IMGUI_ROOT}/examples/libs")
 set(MINIZ_DIR "${MINIZ_ROOT}")
 # STB
 set(STB_INCLUDE_DIR "${STB_ROOT}/stb")
+# RapidJSON
+set(RAPID_JSON_INCLUDE_DIR "${RAPID_JSON_ROOT}/include")
 if (EMSCRIPTEN)
 # Emscripten Browser File Library
 set(EFB_INCLUDE_DIR "${EFB_ROOT}")
 endif()
 
-# --- Set language standards
+# --- Set language standards (C++23 globally)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # --- Dependencies
@@ -222,6 +228,11 @@ set(THIRD_PARTY_HEADERS_STB
     "${STB_INCLUDE_DIR}/stb_image.h"
 )
 
+set(THIRD_PARTY_HEADERS_RAPID_JSON
+    "${RAPID_JSON_INCLUDE_DIR}/rapidjson/document.h"
+    "${RAPID_JSON_INCLUDE_DIR}/rapidjson/filereadstream.h"
+)
+
 if (EMSCRIPTEN)
 set(THIRD_PARTY_HEADERS_EFB
     "${EFB_INCLUDE_DIR}/emscripten_browser_file.h"
@@ -234,6 +245,7 @@ set(THIRD_PARTY_HEADERS
     ${THIRD_PARTY_HEADERS_MINIZ}
     ${THIRD_PARTY_HEADERS_NFD}
     ${THIRD_PARTY_HEADERS_STB}
+    ${THIRD_PARTY_HEADERS_RAPID_JSON}
 )
 
 if (EMSCRIPTEN)
@@ -357,31 +369,32 @@ set(SOURCES
 add_executable(${PROJECT_NAME} ${SOURCES})
 
 # --- IDE groupings for Visual Studio / CLion
-source_group("Headers"                      FILES ${PROJECT_HEADERS})
-if (NOT EMSCRIPTEN)
-source_group("Headers\\Third-party\\GLAD"   FILES ${THIRD_PARTY_HEADERS_GLAD})
-endif()
-source_group("Headers\\Third-party\\IMGUI"  FILES ${THIRD_PARTY_HEADERS_IMGUI})
-source_group("Headers\\Third-party\\MINIZ"  FILES ${THIRD_PARTY_HEADERS_MINIZ})
-source_group("Headers\\Third-party\\NFD"    FILES ${THIRD_PARTY_HEADERS_NFD})
-source_group("Headers\\Third-party\\STB"    FILES ${THIRD_PARTY_HEADERS_STB})
+source_group("Headers"                              FILES ${PROJECT_HEADERS})
+if (NOT EMSCRIPTEN) 
+source_group("Headers\\Third-party\\GLAD"           FILES ${THIRD_PARTY_HEADERS_GLAD})
+endif() 
+source_group("Headers\\Third-party\\IMGUI"          FILES ${THIRD_PARTY_HEADERS_IMGUI})
+source_group("Headers\\Third-party\\MINIZ"          FILES ${THIRD_PARTY_HEADERS_MINIZ})
+source_group("Headers\\Third-party\\NFD"            FILES ${THIRD_PARTY_HEADERS_NFD})
+source_group("Headers\\Third-party\\STB"            FILES ${THIRD_PARTY_HEADERS_STB})
+source_group("Headers\\Third-party\\RAPID_JSON"     FILES ${THIRD_PARTY_HEADERS_RAPID_JSON})
 if (EMSCRIPTEN)
-source_group("Headers\\Third-party\\EFB"    FILES ${THIRD_PARTY_HEADERS_EFB})
-endif()
-source_group("Sources\\Core"                FILES ${CORE_SOURCES})
-source_group("Sources\\Game Of Life"        FILES ${GOL_SOURCES})
-source_group("Sources\\Chip8"               FILES ${CHIP8_SOURCES})
-source_group("Sources\\Space Invaders"      FILES ${SI_SOURCES})
-source_group("Sources\\PacMan"              FILES ${PACMAN_SOURCES})
-source_group("Sources\\NES"                 FILES ${NES_SOURCES})
-source_group("Sources\\GBC"                 FILES ${GBC_SOURCES})
-source_group("Sources\\GBA"                 FILES ${GBA_SOURCES})
-source_group("Sources\\Cheats"              FILES ${CHEATS_SOURCES})
-if (NOT EMSCRIPTEN)
-source_group("Sources\\Third-party\\Glad"   FILES ${GLAD_SOURCES})
-endif()
-source_group("Sources\\Third-party\\Miniz"  FILES ${MINIZ_SOURCES})
-source_group("Sources\\Third-party\\ImGui"  FILES ${IMGUI_SOURCES})
+source_group("Headers\\Third-party\\EFB"            FILES ${THIRD_PARTY_HEADERS_EFB})
+endif()     
+source_group("Sources\\Core"                        FILES ${CORE_SOURCES})
+source_group("Sources\\Game Of Life"                FILES ${GOL_SOURCES})
+source_group("Sources\\Chip8"                       FILES ${CHIP8_SOURCES})
+source_group("Sources\\Space Invaders"              FILES ${SI_SOURCES})
+source_group("Sources\\PacMan"                      FILES ${PACMAN_SOURCES})
+source_group("Sources\\NES"                         FILES ${NES_SOURCES})
+source_group("Sources\\GBC"                         FILES ${GBC_SOURCES})
+source_group("Sources\\GBA"                         FILES ${GBA_SOURCES})
+source_group("Sources\\Cheats"                      FILES ${CHEATS_SOURCES})
+if (NOT EMSCRIPTEN)     
+source_group("Sources\\Third-party\\Glad"           FILES ${GLAD_SOURCES})
+endif()     
+source_group("Sources\\Third-party\\Miniz"          FILES ${MINIZ_SOURCES})
+source_group("Sources\\Third-party\\ImGui"          FILES ${IMGUI_SOURCES})
 
 # --- Setup target directories
 set_target_properties(${PROJECT_NAME}
@@ -397,47 +410,82 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
 
     if (EMSCRIPTEN)
         message(STATUS "Using Emscripten (Clang-based)")
-        #target_compile_options(${PROJECT_NAME} PRIVATE
-        #    "-std=c++20"
-        #    #"-gsource-map"
-        #    #"-O0"
-        #)
+        # Force MSVC-compatible behavior
+        target_compile_options(${PROJECT_NAME} PRIVATE
+            -mms-bitfields           # MS-style bitfield layout
+            -fsigned-char            # char is signed
+            -fno-strict-aliasing     # Allow type punning
+            -fwrapv                  # Signed overflow wraps
+            #-fno-strict-overflow     # Don't assume overflow is UB
+        )
     else()
         message(STATUS "Using native Clang")
-        #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++20")
+        # Force MSVC-compatible behavior + warnings
+        target_compile_options(${PROJECT_NAME} PRIVATE
+            -mms-bitfields           # MS-style bitfield layout
+            -fsigned-char            # char is signed
+            -fno-strict-aliasing     # Allow type punning
+            -fwrapv                  # Signed overflow wraps
+            -fno-strict-overflow     # Don't assume overflow is UB
+            -Wall                    # All warnings
+            -Wextra                  # Extra warnings
+            -Wpedantic               # Pedantic warnings
+            -Wconversion             # Implicit conversions
+            -Wsign-conversion        # Sign conversions
+            -Wcast-align             # Alignment casts
+        )
     endif()
 
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++20")
+    message(STATUS "GNU compiler detected")
+    
+    # Force MSVC-compatible behavior + warnings
+    target_compile_options(${PROJECT_NAME} PRIVATE
+        -mms-bitfields           # MS-style bitfield layout
+        -fsigned-char            # char is signed
+        -fno-strict-aliasing     # Allow type punning
+        -fwrapv                  # Signed overflow wraps
+        -fno-strict-overflow     # Don't assume overflow is UB
+        -Wall                    # All warnings
+        -Wextra                  # Extra warnings
+        -Wpedantic               # Pedantic warnings
+        -Wconversion             # Implicit conversions
+        -Wsign-conversion        # Sign conversions
+        -Wcast-align             # Alignment casts
+    )
 
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
+    # Intel compiler compatibility
+    message(STATUS "Intel compiler detected")
 
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+    message(STATUS "MSVC")
     # Match manual Visual Studio project settings
     target_compile_options(${PROJECT_NAME} PRIVATE
         $<$<CONFIG:Debug>:/W4 /RTC1>
         $<$<CONFIG:Release>:
-            /GL              # Whole program optimization
-            /O2              # Maximum speed
-            /Ot              # Favor fast code
-            /Oi              # Intrinsic functions
-            /Oy              # Omit frame pointers
-            /Ob2             # Inline expansion - any suitable
-            /GS-             # Buffer security check disabled
-            /fp:fast         # Fast floating-point model
-            /arch:AVX2       # AVX2 vectorization
-            /Qpar            # Auto-parallelization
-            /W3              # Warning level 3
-            /WX              # Treat warnings as errors
-            /sdl-            # Disable SDL checks
-            /Zc:__cplusplus  # Correct __cplusplus macro
+            /GL                 # Whole program optimization
+            /O2                 # Maximum speed
+            /Ot                 # Favor fast code
+            /Oi                 # Intrinsic functions
+            /Oy                 # Omit frame pointers
+            /Ob2                # Inline expansion - any suitable
+            /GS-                # Buffer security check disabled
+            /GT                 # Enable Fiber-Safe Optimizations
+            /GF                 # Enable String Pooling
+            /fp:fast            # Fast floating-point model
+            /arch:AVX2          # AVX2 vectorization
+            /Qpar               # Auto-parallelization
+            /W3                 # Warning level 3
+            /WX                 # Treat warnings as errors
+            /sdl-               # Disable SDL checks
+            /Zc:__cplusplus     # Correct __cplusplus macro
+            /Zc:inline          # Remove unreferenced functions/data
+            /favor:INTEL64      # Optimize for 64-bit architecture
+            /DNDEBUG            # Ensure all asserts are gone
+            /fp:except-         # Disable Floating Point Exceptions
+            /MP                 # Multi Processor Compilation
         >
-    )
-    
-    # Use C++23 (matching stdcpplatest)
-    set_target_properties(${PROJECT_NAME} PROPERTIES
-        CXX_STANDARD 23
-        CXX_STANDARD_REQUIRED ON
     )
 endif()
 
@@ -474,6 +522,7 @@ target_include_directories(${PROJECT_NAME} PUBLIC
     "${IMGUI_MISC_CPP_DIR}"
     "${IMGUI_EXAMPLES_LIBS_DIR}"
     "${STB_INCLUDE_DIR}"
+    "${RAPID_JSON_INCLUDE_DIR}"
     "${SDL3_INCLUDE_DIR}"
     "${MINIZ_DIR}"
 )
@@ -493,6 +542,7 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         set_target_properties(${PROJECT_NAME} PROPERTIES SUFFIX ".html")
         target_link_libraries(${PROJECT_NAME} PRIVATE "${SDL3_LIB_PATH}")
         target_link_options(${PROJECT_NAME} PRIVATE
+            "-std=c++23"               # Explicitly force C++23 in the linker/compiler
             "-sUSE_SDL=3"
             "-sFORCE_FILESYSTEM=1"
             "-lidbfs.js"
@@ -505,35 +555,27 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
             "-sALLOW_MEMORY_GROWTH=1"
             "-sDISABLE_EXCEPTION_CATCHING=0"
             "-sNO_EXIT_RUNTIME=1" 
-            #"-sASYNCIFY"
-            #"-sASYNCIFY=1"
-            #"-sASYNCIFY_ONLY=['main','savePersistentFS','mountPersistentFS']"
-            #"-sASYNCIFY_IMPORTS=['emscripten_asm_const_int']"
             "-sASSERTIONS=0"
             "-sSAFE_HEAP=0"
             "-sSTACK_SIZE=256MB"
             "-sSTACK_OVERFLOW_CHECK=0"
-            "-sUSE_GLFW=0"  # If you're using SDL and want to avoid GLFW linkage
-            "-sINITIAL_MEMORY=512MB"  # Helps avoid page faults up front
-            "-sEXPORTED_RUNTIME_METHODS=[ccall]" # Needed for Emscripten Browser File Library
-            "-sEXPORTED_FUNCTIONS=[_main,_malloc,_free]" # Needed for Emscripten Browser File Library
-            "--shell-file=${CMAKE_SOURCE_DIR}/shell_minimal.html"  # Optional custom HTML shell
+            "-sUSE_GLFW=0"
+            "-sINITIAL_MEMORY=512MB"
+            "-sEXPORTED_RUNTIME_METHODS=[ccall]"
+            "-sEXPORTED_FUNCTIONS=[_main,_malloc,_free]"
+            "--shell-file=${CMAKE_SOURCE_DIR}/shell_minimal.html"
             "--preload-file=${CMAKE_SOURCE_DIR}/assets@/assets"
-            #"-gsource-map"
-            #"-Os"
             "-O3"
             "-flto"
             "-msimd128"
             "-fno-math-errno"
             "-fno-rtti"
-            #"-sSINGLE_FILE=1"
         )
     else()
         message(STATUS "Using native Clang")
         target_link_libraries(${PROJECT_NAME} PRIVATE
             nfd::nfd
             SDL3::SDL3
-            # SDL3::SDL3-static
         )
     endif()
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -562,8 +604,8 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
             target_link_libraries(${PROJECT_NAME} PRIVATE
                 nfd::nfd
                 SDL3::SDL3
-                OpenGL::GLES3  # Use GLES3 instead of GL
-                EGL           # Required for OpenGL ES
+                OpenGL::GLES3
+                EGL
                 pthread
                 dl
                 m
@@ -573,7 +615,7 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
             target_link_libraries(${PROJECT_NAME} PRIVATE
                 nfd::nfd
                 SDL3::SDL3
-                GL            # Desktop OpenGL for x86/x64
+                GL
                 pthread
                 dl
                 m
@@ -586,15 +628,16 @@ elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
     target_link_libraries(${PROJECT_NAME} LINK_PUBLIC ${PYTHON_LIBRARIES})
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     message(STATUS "MSVC")
-        target_link_libraries(${PROJECT_NAME} PRIVATE
+    target_link_libraries(${PROJECT_NAME} PRIVATE
         nfd::nfd
-        # SDL3::SDL3-static
         "${SDL3_IMPLIB}"
     )
     target_link_options(${PROJECT_NAME} PRIVATE
-        $<$<CONFIG:Release>:/INCREMENTAL:NO>          # Disable incremental linking (required for PGO)
-        $<$<CONFIG:Release>:/LTCG:PGOPTIMIZE>         # Optimize using profile
-        $<$<CONFIG:Release>:/USEPROFILE>              # Enable profile-guided optimization
+        $<$<CONFIG:Release>:/INCREMENTAL:NO>
+        $<$<CONFIG:Release>:/LTCG:PGOPTIMIZE>
+        $<$<CONFIG:Release>:/USEPROFILE>
+        $<$<CONFIG:Release>:/OPT:REF>
+        $<$<CONFIG:Release>:/OPT:ICF>
         $<$<CONFIG:Release>:/PGD:${CMAKE_SOURCE_DIR}/assets/internal/pgo/masquerade.pgd>
     )
     target_compile_definitions(${PROJECT_NAME} PRIVATE SDL_MAIN_HANDLED __STDC_FORMAT_MACROS)

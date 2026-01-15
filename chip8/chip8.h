@@ -19,11 +19,6 @@
 #define CHIP8_FPS										(60.0)
 #define EMULATED_AUDIO_SAMPLING_RATE_FOR_CHIP8			(48000.0)
 #define AUDIO_BUFFER_SIZE_FOR_XO_CHIP					(CEIL((EMULATED_AUDIO_SAMPLING_RATE_FOR_CHIP8 / CHIP8_FPS)))
-
-#ifdef _MSC_VER  
-#define __packed  
-#pragma pack(1)  
-#endif
 #pragma endregion MACROS
 
 #pragma region CORE
@@ -77,9 +72,9 @@ private:
 #pragma endregion INFRASTRUCTURE_DECLARATIONS
 
 #pragma region CHIP8_DECLARATIONS
-private:
 
-#pragma pack(push, 1)
+PACK_BEGIN
+private:
 
 	typedef struct
 	{
@@ -346,7 +341,7 @@ private:
 	quirks_t* pChip8_quirks;		// for readability
 	io_t* pChip8_io;		// for readability
 
-#pragma pack(pop)
+PACK_END
 
 private:
 

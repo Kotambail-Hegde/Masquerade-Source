@@ -21,11 +21,6 @@
 #else
 #define AUDIO_BUFFER_SIZE_FOR_PACMAN					(CEIL((EMULATED_AUDIO_SAMPLING_RATE_FOR_PACMAN / PACMAN_FPS)))
 #endif
-
-#ifdef _MSC_VER  
-#define __packed  
-#pragma pack(1)  
-#endif
 #pragma endregion MACROS
 
 #pragma region CORE
@@ -120,9 +115,8 @@ private:
 		RT_M_NONE
 	};
 
+PACK_BEGIN
 private:
-
-#pragma pack(push, 1)
 
 	typedef struct
 	{
@@ -673,7 +667,7 @@ private:
 	IN0Memory_t* pIN0Memory = nullptr;						// for readability
 	IN1Memory_t* pIN1Memory = nullptr;						// for readability
 
-#pragma pack(pop)
+PACK_END
 
 private:
 
