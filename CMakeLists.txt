@@ -416,7 +416,7 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
             -fsigned-char            # char is signed
             -fno-strict-aliasing     # Allow type punning
             -fwrapv                  # Signed overflow wraps
-            -fno-strict-overflow     # Don't assume overflow is UB
+            #-fno-strict-overflow     # Don't assume overflow is UB
         )
     else()
         message(STATUS "Using native Clang")
@@ -542,6 +542,7 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         set_target_properties(${PROJECT_NAME} PROPERTIES SUFFIX ".html")
         target_link_libraries(${PROJECT_NAME} PRIVATE "${SDL3_LIB_PATH}")
         target_link_options(${PROJECT_NAME} PRIVATE
+            "-std=c++23"               # Explicitly force C++23 in the linker/compiler
             "-sUSE_SDL=3"
             "-sFORCE_FILESYSTEM=1"
             "-lidbfs.js"
