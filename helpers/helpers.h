@@ -589,17 +589,21 @@
 
 // Cross-platform packing macros
 #if defined(_MSC_VER)
-#define PACK_BEGIN \
-        __pragma(pack(push, 1))
-#define PACK_END \
-        __pragma(pack(pop))
+#define PACK_BEGIN __pragma(pack(push, 1))
+#define PACK_END   __pragma(pack(pop))
 #elif defined(__GNUC__) || defined(__clang__)
+#if defined(__EMSCRIPTEN__)
+	// Emscripten/Wasm doesn't support ms_struct
+#define PACK_BEGIN _Pragma("pack(push, 1)")
+#define PACK_END   _Pragma("pack(pop)")
+#else
 #define PACK_BEGIN \
-        _Pragma("pack(push, 1)") \
-        _Pragma("ms_struct on")
+            _Pragma("pack(push, 1)") \
+            _Pragma("ms_struct on")
 #define PACK_END \
-        _Pragma("ms_struct off") \
-        _Pragma("pack(pop)")
+            _Pragma("ms_struct off") \
+            _Pragma("pop")
+#endif
 #else
 #define PACK_BEGIN
 #define PACK_END
