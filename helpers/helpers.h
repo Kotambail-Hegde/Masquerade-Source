@@ -569,7 +569,7 @@
 #if defined(_MSC_VER)
 #define MASQ_INLINE									__forceinline
 #elif defined(__GNUC__) || defined(__clang__)
-#define MASQ_INLINE __attribute__((always_MASQ_INLINE))	inline
+#define MASQ_INLINE __attribute__((always_inline))	inline
 #else
 #define MASQ_INLINE									inline
 #endif
