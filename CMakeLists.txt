@@ -412,7 +412,6 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         message(STATUS "Using Emscripten (Clang-based)")
         # Force MSVC-compatible behavior
         target_compile_options(${PROJECT_NAME} PRIVATE
-            -std=c++2b               # Explicitly force C++23 in the linker/compiler
             -mms-bitfields           # MS-style bitfield layout
             -fsigned-char            # char is signed
             -fno-strict-aliasing     # Allow type punning

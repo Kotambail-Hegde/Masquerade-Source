@@ -793,7 +793,7 @@ extern std::vector<std::string> preImGuiLogBuffer;
 extern std::mutex preImGuiLogMutex;
 
 // === Logging Function ===
-MASQ_INLINE void LogToImGui(const char* fmt, ...)
+inline void LogToImGui(const char* fmt, ...)
 {
 	va_list args;
 	va_start(args, fmt);
@@ -842,7 +842,7 @@ enum class UI_MODE_STATUS
 #endif
 
 // === Logger Entry Point ===
-MASQ_INLINE void logger(const char* fmt, ...)
+inline void logger(const char* fmt, ...)
 {
 	va_list args;
 	va_start(args, fmt);
