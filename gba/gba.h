@@ -311,11 +311,6 @@
 #define readRawMemory									readRawMemoryInternal
 #define writeRawMemory									writeRawMemoryInternal
 #endif
-
-#ifdef _MSC_VER  
-#define __packed  
-#pragma pack(1)  
-#endif
 #pragma endregion MACROS
 
 #pragma region CORE
@@ -691,9 +686,8 @@ private:
 	// Used only for logging purpose
 	std::string disassembled = "Disassembly Unsupported";
 
+PACK_BEGIN
 private:
-
-#pragma pack(push, 1)
 
 	// Structure of CPSR and SPSRs
 
@@ -3833,8 +3827,7 @@ private:
 
 	struct ARM7TDMI_SST_t sst;
 #endif
-
-#pragma pack(pop)
+PACK_END
 
 private:
 

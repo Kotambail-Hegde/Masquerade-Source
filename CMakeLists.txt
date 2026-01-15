@@ -140,10 +140,10 @@ if (EMSCRIPTEN)
 set(EFB_INCLUDE_DIR "${EFB_ROOT}")
 endif()
 
-# --- Set language standards
+# --- Set language standards (C++23 globally)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # --- Dependencies
@@ -410,22 +410,56 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
 
     if (EMSCRIPTEN)
         message(STATUS "Using Emscripten (Clang-based)")
-        #target_compile_options(${PROJECT_NAME} PRIVATE
-        #    "-std=c++20"
-        #    #"-gsource-map"
-        #    #"-O0"
-        #)
+        # Force MSVC-compatible behavior
+        target_compile_options(${PROJECT_NAME} PRIVATE
+            -mms-bitfields           # MS-style bitfield layout
+            -fsigned-char            # char is signed
+            -fno-strict-aliasing     # Allow type punning
+            -fwrapv                  # Signed overflow wraps
+            -fno-strict-overflow     # Don't assume overflow is UB
+        )
     else()
         message(STATUS "Using native Clang")
-        #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++20")
+        # Force MSVC-compatible behavior + warnings
+        target_compile_options(${PROJECT_NAME} PRIVATE
+            -mms-bitfields           # MS-style bitfield layout
+            -fsigned-char            # char is signed
+            -fno-strict-aliasing     # Allow type punning
+            -fwrapv                  # Signed overflow wraps
+            -fno-strict-overflow     # Don't assume overflow is UB
+            -Wall                    # All warnings
+            -Wextra                  # Extra warnings
+            -Wpedantic               # Pedantic warnings
+            -Wconversion             # Implicit conversions
+            -Wsign-conversion        # Sign conversions
+            -Wcast-align             # Alignment casts
+        )
     endif()
 
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++20")
+    message(STATUS "GNU compiler detected")
+    
+    # Force MSVC-compatible behavior + warnings
+    target_compile_options(${PROJECT_NAME} PRIVATE
+        -mms-bitfields           # MS-style bitfield layout
+        -fsigned-char            # char is signed
+        -fno-strict-aliasing     # Allow type punning
+        -fwrapv                  # Signed overflow wraps
+        -fno-strict-overflow     # Don't assume overflow is UB
+        -Wall                    # All warnings
+        -Wextra                  # Extra warnings
+        -Wpedantic               # Pedantic warnings
+        -Wconversion             # Implicit conversions
+        -Wsign-conversion        # Sign conversions
+        -Wcast-align             # Alignment casts
+    )
 
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
+    # Intel compiler compatibility
+    message(STATUS "Intel compiler detected")
 
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+    message(STATUS "MSVC")
     # Match manual Visual Studio project settings
     target_compile_options(${PROJECT_NAME} PRIVATE
         $<$<CONFIG:Debug>:/W4 /RTC1>
@@ -452,12 +486,6 @@ elseif (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
             /fp:except-         # Disable Floating Point Exceptions
             /MP                 # Multi Processor Compilation
         >
-    )
-    
-    # Use C++23 (matching stdcpplatest)
-    set_target_properties(${PROJECT_NAME} PROPERTIES
-        CXX_STANDARD 23
-        CXX_STANDARD_REQUIRED ON
     )
 endif()
 
@@ -526,35 +554,27 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
             "-sALLOW_MEMORY_GROWTH=1"
             "-sDISABLE_EXCEPTION_CATCHING=0"
             "-sNO_EXIT_RUNTIME=1" 
-            #"-sASYNCIFY"
-            #"-sASYNCIFY=1"
-            #"-sASYNCIFY_ONLY=['main','savePersistentFS','mountPersistentFS']"
-            #"-sASYNCIFY_IMPORTS=['emscripten_asm_const_int']"
             "-sASSERTIONS=0"
             "-sSAFE_HEAP=0"
             "-sSTACK_SIZE=256MB"
             "-sSTACK_OVERFLOW_CHECK=0"
-            "-sUSE_GLFW=0"  # If you're using SDL and want to avoid GLFW linkage
-            "-sINITIAL_MEMORY=512MB"  # Helps avoid page faults up front
-            "-sEXPORTED_RUNTIME_METHODS=[ccall]" # Needed for Emscripten Browser File Library
-            "-sEXPORTED_FUNCTIONS=[_main,_malloc,_free]" # Needed for Emscripten Browser File Library
-            "--shell-file=${CMAKE_SOURCE_DIR}/shell_minimal.html"  # Optional custom HTML shell
+            "-sUSE_GLFW=0"
+            "-sINITIAL_MEMORY=512MB"
+            "-sEXPORTED_RUNTIME_METHODS=[ccall]"
+            "-sEXPORTED_FUNCTIONS=[_main,_malloc,_free]"
+            "--shell-file=${CMAKE_SOURCE_DIR}/shell_minimal.html"
             "--preload-file=${CMAKE_SOURCE_DIR}/assets@/assets"
-            #"-gsource-map"
-            #"-Os"
             "-O3"
             "-flto"
             "-msimd128"
             "-fno-math-errno"
             "-fno-rtti"
-            #"-sSINGLE_FILE=1"
         )
     else()
         message(STATUS "Using native Clang")
         target_link_libraries(${PROJECT_NAME} PRIVATE
             nfd::nfd
             SDL3::SDL3
-            # SDL3::SDL3-static
         )
     endif()
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -583,8 +603,8 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
             target_link_libraries(${PROJECT_NAME} PRIVATE
                 nfd::nfd
                 SDL3::SDL3
-                OpenGL::GLES3  # Use GLES3 instead of GL
-                EGL           # Required for OpenGL ES
+                OpenGL::GLES3
+                EGL
                 pthread
                 dl
                 m
@@ -594,7 +614,7 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
             target_link_libraries(${PROJECT_NAME} PRIVATE
                 nfd::nfd
                 SDL3::SDL3
-                GL            # Desktop OpenGL for x86/x64
+                GL
                 pthread
                 dl
                 m
@@ -607,17 +627,16 @@ elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
     target_link_libraries(${PROJECT_NAME} LINK_PUBLIC ${PYTHON_LIBRARIES})
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     message(STATUS "MSVC")
-        target_link_libraries(${PROJECT_NAME} PRIVATE
+    target_link_libraries(${PROJECT_NAME} PRIVATE
         nfd::nfd
-        # SDL3::SDL3-static
         "${SDL3_IMPLIB}"
     )
     target_link_options(${PROJECT_NAME} PRIVATE
-        $<$<CONFIG:Release>:/INCREMENTAL:NO>            # Disable incremental linking (required for PGO)
-        $<$<CONFIG:Release>:/LTCG:PGOPTIMIZE>           # Optimize using profile
-        $<$<CONFIG:Release>:/USEPROFILE>                # Enable profile-guided optimization
-        $<$<CONFIG:Release>:/OPT:REF>                   # Eliminate unreferenced functions (Crucial for speed)
-        $<$<CONFIG:Release>:/OPT:ICF>                   # Fold identical COMDATs
+        $<$<CONFIG:Release>:/INCREMENTAL:NO>
+        $<$<CONFIG:Release>:/LTCG:PGOPTIMIZE>
+        $<$<CONFIG:Release>:/USEPROFILE>
+        $<$<CONFIG:Release>:/OPT:REF>
+        $<$<CONFIG:Release>:/OPT:ICF>
         $<$<CONFIG:Release>:/PGD:${CMAKE_SOURCE_DIR}/assets/internal/pgo/masquerade.pgd>
     )
     target_compile_definitions(${PROJECT_NAME} PRIVATE SDL_MAIN_HANDLED __STDC_FORMAT_MACROS)

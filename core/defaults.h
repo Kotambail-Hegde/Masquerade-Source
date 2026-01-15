@@ -8,10 +8,6 @@
 #pragma endregion INCLUDES
 
 #pragma region MACROS
-#ifdef _MSC_VER  
-#define __packed  
-#pragma pack(1)  
-#endif
 #pragma endregion MACROS
 
 #pragma region CORE

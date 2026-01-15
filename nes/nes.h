@@ -114,11 +114,6 @@
 #define NES_LAST_SCANLINE_PER_FRAME						(239)
 
 #define NES_IRQ_SRC_NONE								(RESET)
-
-#ifdef _MSC_VER  
-#define __packed  
-#pragma pack(1)  
-#endif
 #pragma endregion MACROS
 
 #pragma region CORE
@@ -165,7 +160,7 @@ private:
 
 #pragma region RP2C02_DECLARATIONS
 
-#pragma pack(push, 1)
+PACK_BEGIN
 private:
 
 	enum class NAMETABLE_MIRROR
@@ -1299,7 +1294,7 @@ private:
 	NES_instance_t* pNES_instance = nullptr;			// for readability
 	iNES_t* pINES = nullptr;							// for readability
 
-#pragma pack(pop)
+PACK_END
 
 private:
 
