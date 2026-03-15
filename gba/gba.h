@@ -486,9 +486,9 @@ private:
 
 	enum MEMORY_ACCESS_WIDTH : uint8_t
 	{
-		EIGHT_BIT,
-		SIXTEEN_BIT,
-		THIRTYTWO_BIT,
+		EIGHT_BIT = ZERO,
+		SIXTEEN_BIT = ONE,
+		THIRTYTWO_BIT = TWO,
 		TOTAL_ACCESS_WIDTH_POSSIBLE
 	};
 
@@ -3143,8 +3143,10 @@ private:
 		}mBankedWAVERAM;
 		GBA_WORD previouslyAccessedMemory;
 		GBA_WORD previouslyLatchedBiosData;
+		MEMORY_ACCESS_WIDTH previousAccessWidth;
 		MEMORY_ACCESS_TYPE getPreviousMemoryAccessType;
 		MEMORY_ACCESS_TYPE setNextMemoryAccessType;
+		MEMORY_ACCESS_TYPE setNextPipelineAccessType;
 	} gbaMemory_t;
 
 private:
@@ -3232,6 +3234,8 @@ private:
 		MAP64 callTrace;
 		GBA_HALFWORD agbReturn;
 		loggerInterface_t loggerInterface;
+		FLAG logStart;
+		FLAG logEnd;
 	} debugger_t;
 
 	enum class ARM7TDMI_Opcode : uint8_t
@@ -3973,6 +3977,22 @@ private:
 
 	uint32_t cpuReadRegister(REGISTER_BANK_TYPE rb, REGISTER_TYPE rt);
 
+	MASQ_INLINE FLAG gamePAKBoundaryCheck(MEMORY_ACCESS_TYPE& mType, GBA_WORD mCurrentAddress)
+	{
+		// GamePak ROM 128KB boundary check
+		const uint32_t currentRegion = mCurrentAddress >> TWENTYFOUR;
+		const FLAG isGamePakROM = (currentRegion >= 0x08) && (currentRegion <= 0x0D);
+		const FLAG is128KBoundary = (mCurrentAddress & 0x1FFFF) == ZERO;
+
+		if (isGamePakROM && is128KBoundary)
+		{
+			mType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
+			RETURN YES;
+		}
+
+		RETURN NO;
+	}
+
 	MASQ_INLINE uint32_t getMemoryAccessCycles(GBA_WORD mCurrentAddress,
 		MEMORY_ACCESS_WIDTH mAccessWidth,
 		MEMORY_ACCESS_SOURCE mSource,
@@ -3986,47 +4006,45 @@ private:
 
 		MEMORY_ACCESS_TYPE mType;
 
-		// Handle override (rare)
-		if (pGBA_memory->setNextMemoryAccessType != MEMORY_ACCESS_TYPE::AUTOMATIC) MASQ_UNLIKELY
+		// Handle explicit access type
+		if (accessType != MEMORY_ACCESS_TYPE::AUTOMATIC) MASQ_LIKELY
+		{
+			mType = accessType;
+		}
+		// Handle override (very rare)
+		else if (pGBA_memory->setNextMemoryAccessType != MEMORY_ACCESS_TYPE::AUTOMATIC) MASQ_UNLIKELY
 		{
 			mType = pGBA_memory->setNextMemoryAccessType;
 			pGBA_memory->setNextMemoryAccessType = MEMORY_ACCESS_TYPE::AUTOMATIC;
 		}
-			// Handle explicit access type
-		else if (accessType != MEMORY_ACCESS_TYPE::AUTOMATIC) MASQ_LIKELY
+		// Automatic determination
+		else MASQ_UNLIKELY
 		{
-			mType = accessType;
-		}
-			// Automatic determination
-		else MASQ_LIKELY
-		{
+			FATAL("Unused access type detection");
+
+			CPUTODO("Should we really enforce NS for any region change or just for ROM?");
+#if DEACTIVATED
 			// Different region check (inlined)
 			if (currentRegion != previousRegion) MASQ_UNLIKELY
 			{
 				mType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
 			}
 			else MASQ_LIKELY
-			{
+#endif
+			{				
 				// Lookup offset (no branch)
-				const GBA_WORD offset = ACCESS_WIDTH_OFFSETS[TO_UINT8(mAccessWidth)];
+				const GBA_WORD offset = ACCESS_WIDTH_OFFSETS[TO_UINT8(pGBA_memory->previousAccessWidth)];
 
-				// GamePak ROM 128KB boundary check
-				const FLAG isGamePakROM = (currentRegion >= 0x08) && (currentRegion <= 0x0D);
-				const FLAG is128KBoundary = (mCurrentAddress & 0x1FFFF) == ZERO;
-
-				if (isGamePakROM && is128KBoundary) MASQ_UNLIKELY
-				{
-					mType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
-				}
-				else MASQ_LIKELY
-				{
-					// Normal sequential check
-					mType = (mCurrentAddress == previousAddr + offset)
-						? MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE
-						: MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
-				}
+				// Normal sequential check
+				mType = (mCurrentAddress == previousAddr + offset)
+					? MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE
+					: MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
 			}
 		}
+
+		// GamePak ROM 128KB boundary check
+		// Refer https://discord.com/channels/465585922579103744/465586361731121162/1269412483735486484
+		(MASQ_IGNORE)gamePAKBoundaryCheck(mType, mCurrentAddress);
 
 #if (ENABLE_ARM7TDMI_SST == YES)
 		if (ROM_TYPE == ROM::TEST_SST) MASQ_UNLIKELY
@@ -4049,8 +4067,9 @@ private:
 			nCycles = ONE;  // Invalid memory
 		}
 
-			// Update state for next call
+		// Update state for next call
 		pGBA_instance->GBA_state.gbaMemory.previouslyAccessedMemory = mCurrentAddress;
+		pGBA_memory->previousAccessWidth = mAccessWidth;
 		pGBA_memory->getPreviousMemoryAccessType = mType;
 
 		RETURN nCycles;
@@ -4187,11 +4206,11 @@ private:
 		}
 	}
 
-	GBA_HALFWORD readIO(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType = MEMORY_ACCESS_TYPE::AUTOMATIC);
+	GBA_HALFWORD readIO(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType);
 
 	// NOTE: For memory mirrors, refer http://problemkaputt.de/gbatek-gba-unpredictable-things.htm
 	template <typename T>
-	T readRawMemoryInternal(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType = MEMORY_ACCESS_TYPE::AUTOMATIC, FLAG LOCK = NO)
+	T readRawMemoryInternal(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType, FLAG LOCK = NO)
 	{
 		INC64 dmaCyclesInThisRun = RESET; // Currently there is no use for this, but using this to cache the count before the reset
 
@@ -4389,7 +4408,7 @@ private:
 		}
 		else if (IF_ADDRESS_WITHIN(address, IO_START_ADDRESS, IO_4000302 + ONE))
 		{
-			if (accessWidth == MEMORY_ACCESS_WIDTH::EIGHT_BIT)
+			if (accessWidth == MEMORY_ACCESS_WIDTH::EIGHT_BIT) MASQ_UNLIKELY
 			{
 				if ((address & 0x01) == ZERO)
 				{
@@ -4400,21 +4419,22 @@ private:
 					RETURN (BYTE)(readIO((address & (~ONE)), accessWidth, source, accessType) >> EIGHT);
 				}
 			}
-			else if (accessWidth == MEMORY_ACCESS_WIDTH::SIXTEEN_BIT)
+			else if (accessWidth == MEMORY_ACCESS_WIDTH::SIXTEEN_BIT) MASQ_LIKELY
 			{
-				if ((address & 0x01) == ZERO)
+				if ((address & 0x01) == ZERO) MASQ_LIKELY
 				{
 					RETURN static_cast<T>(readIO(address, accessWidth, source, accessType));
 				}
 				else
 				{
-					BYTE byte0 = (BYTE)(readIO((address & (~ONE)), accessWidth, source, accessType) >> EIGHT);
-					address += TWO;
+					address &= ~ONE;  // Align first: 0x4000001 -> 0x4000000
+					BYTE byte0 = (BYTE)(readIO(address, accessWidth, source, accessType) >> EIGHT);
+					address += TWO;  // Now aligned: 0x4000002
 					BYTE byte1 = (BYTE)readIO(address, accessWidth, source, accessType);
 					RETURN static_cast<T>(byte0 | (byte1 << EIGHT));
 				}
 			}
-			else if (accessWidth == MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT)
+			else if (accessWidth == MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT) MASQ_UNLIKELY
 			{
 				if (((address & 0x03) == ZERO) || ((address & 0x03) == TWO))
 				{
@@ -4424,19 +4444,21 @@ private:
 				}
 				else if (((address & 0x03) == ONE) || ((address & 0x03) == THREE))
 				{
-					BYTE byte0 = (BYTE)(readIO((address & (~ONE)), accessWidth, source, accessType) >> EIGHT);
-					address = (address & (~ONE)) + TWO;
-					GBA_HALFWORD word1 = readIO(address, accessWidth, source, accessType);
-					GBA_HALFWORD byte1 = (BYTE)(word1 & 0x00FF);
-					GBA_HALFWORD byte2 = (BYTE)(word1 >> EIGHT);
+					address &= ~ONE;  // Align first
+					BYTE byte0 = (BYTE)(readIO(address, accessWidth, source, accessType) >> EIGHT);
 					address += TWO;
-					GBA_HALFWORD byte3 = (BYTE)(readIO(address, accessWidth, source, accessType) & 0x00FF);
-					long value =
+					GBA_HALFWORD word1 = readIO(address, accessWidth, source, accessType);
+					BYTE byte1 = (BYTE)(word1 & 0x00FF);
+					BYTE byte2 = (BYTE)(word1 >> EIGHT);
+					address += TWO;
+					BYTE byte3 = (BYTE)(readIO(address, accessWidth, source, accessType) & 0x00FF);
+
+					GBA_WORD value =
 						((byte0 & 0xFF) << 0) |
 						((byte1 & 0xFF) << 8) |
 						((byte2 & 0xFF) << 16) |
-						((long)(byte3 & 0xFF) << 24);
-					RETURN (GBA_WORD)value;
+						((byte3 & 0xFF) << 24);
+					RETURN value;
 				}
 			}
 
@@ -4664,10 +4686,10 @@ private:
 		RETURN readOpenBus<T>(address, accessWidth, source, accessType);
 	}
 
-	void writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType = MEMORY_ACCESS_TYPE::AUTOMATIC);
+	void writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType);
 
 	template <typename T>
-	void writeRawMemoryInternal(uint32_t address, T data, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType = MEMORY_ACCESS_TYPE::AUTOMATIC, FLAG LOCK = NO)
+	void writeRawMemoryInternal(uint32_t address, T data, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType, FLAG LOCK = NO)
 	{
 		INC64 dmaCyclesInThisRun = RESET; // Currently there is no use for this, but using this to cache the count before the reset
 
@@ -4858,7 +4880,7 @@ private:
 		}
 		else if (IF_ADDRESS_WITHIN(address, IO_START_ADDRESS, IO_4000302 + ONE))
 		{
-			if (accessWidth == MEMORY_ACCESS_WIDTH::EIGHT_BIT)
+			if (accessWidth == MEMORY_ACCESS_WIDTH::EIGHT_BIT) MASQ_UNLIKELY
 			{
 				data = (BYTE)data;
 				GBA_HALFWORD currentWord = readIO((address & (~ONE)), accessWidth, MEMORY_ACCESS_SOURCE::HOST, accessType);
@@ -4873,25 +4895,25 @@ private:
 				}
 				writeIO((address & (~ONE)), newWord, accessWidth, source, accessType);
 			}
-			else if (accessWidth == MEMORY_ACCESS_WIDTH::SIXTEEN_BIT)
+			else if (accessWidth == MEMORY_ACCESS_WIDTH::SIXTEEN_BIT) MASQ_LIKELY 
 			{
 				data = (GBA_HALFWORD)data;
-				if ((address & 0x01) == ZERO)
+				if ((address & 0x01) == ZERO) MASQ_LIKELY
 				{
 					writeIO(address, data, accessWidth, source, accessType);
 				}
-				else
+				else MASQ_UNLIKELY
 				{
 					address &= ~ONE;
 					GBA_HALFWORD currentLWord = readIO(address, accessWidth, MEMORY_ACCESS_SOURCE::HOST, accessType);
-					GBA_HALFWORD currentHWord = readIO(address + ONE, accessWidth, MEMORY_ACCESS_SOURCE::HOST, accessType);
+					GBA_HALFWORD currentHWord = readIO(address + TWO, accessWidth, MEMORY_ACCESS_SOURCE::HOST, accessType);
 					GBA_HALFWORD newLWord = ((currentLWord & 0x00FF) | ((data & 0x00FF) << EIGHT));
 					GBA_HALFWORD newHWord = (((data & 0xFF00) >> EIGHT) | (currentHWord & 0xFF00));
 					writeIO(address, newLWord, accessWidth, source, accessType);
 					writeIO(address + TWO, newHWord, accessWidth, source, accessType);
 				}
 			}
-			else if (accessWidth == MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT)
+			else if (accessWidth == MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT) MASQ_UNLIKELY
 			{
 				data = static_cast<GBA_WORD>(data);
 				if (((address & 0x03) == ZERO) || ((address & 0x03) == TWO))
@@ -4903,21 +4925,21 @@ private:
 				{
 					address &= ~ONE;
 					GBA_HALFWORD currentLWord = readIO(address, accessWidth, MEMORY_ACCESS_SOURCE::HOST, accessType);
-					GBA_HALFWORD currentHWord = readIO(address + ONE, accessWidth, MEMORY_ACCESS_SOURCE::HOST, accessType);
+					GBA_HALFWORD currentHWord = readIO(address + TWO, accessWidth, MEMORY_ACCESS_SOURCE::HOST, accessType);
 					GBA_WORD newLWord = ((currentLWord & 0x00FF) | ((static_cast<GBA_WORD>(data) & 0x000000FF) << EIGHT));
 					GBA_WORD newHWord = (((static_cast<GBA_WORD>(data) & 0x0000FF00) >> EIGHT) | (currentHWord & 0x0000FF00));
 					writeIO(address, static_cast<GBA_HALFWORD>(newLWord), accessWidth, source, accessType);
-					writeIO(address + ONE, static_cast<GBA_HALFWORD>(newHWord), accessWidth, source, accessType);
+					writeIO(address + TWO, static_cast<GBA_HALFWORD>(newHWord), accessWidth, source, accessType);
 
 					address += TWO;
 					address &= ~ONE;
 
 					currentLWord = readIO(address, accessWidth, MEMORY_ACCESS_SOURCE::HOST, accessType);
-					currentHWord = readIO(address + ONE, accessWidth, MEMORY_ACCESS_SOURCE::HOST, accessType);
+					currentHWord = readIO(address + TWO, accessWidth, MEMORY_ACCESS_SOURCE::HOST, accessType);
 					newLWord = ((currentLWord & 0x000000FF) | (((static_cast<GBA_WORD>(data) >> SIXTEEN) & 0x000000FF) << EIGHT));
 					newHWord = ((((static_cast<GBA_WORD>(data) >> SIXTEEN) & 0x0000FF00) >> EIGHT) | (currentHWord & 0x0000FF00));
 					writeIO(address, static_cast<GBA_HALFWORD>(newLWord), accessWidth, source, accessType);
-					writeIO(address + ONE, static_cast<GBA_HALFWORD>(newHWord), accessWidth, source, accessType);
+					writeIO(address + TWO, static_cast<GBA_HALFWORD>(newHWord), accessWidth, source, accessType);
 				}
 			}
 
@@ -6794,7 +6816,7 @@ private:
 					{
 						addressInPaletteRAM += 0x200;
 					}
-					GBA_HALFWORD paletteData = readRawMemory<GBA_HALFWORD>(addressInPaletteRAM, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+					GBA_HALFWORD paletteData = readRawMemory<GBA_HALFWORD>(addressInPaletteRAM, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
 					pGBA_display->colorForBlending[ZERO].raw = paletteData;
 				}
 				// Mode 3 or Mode 5
@@ -6843,7 +6865,7 @@ private:
 						{
 							addressInPaletteRAM += 0x200;
 						}
-						GBA_HALFWORD paletteData = readRawMemory<GBA_HALFWORD>(addressInPaletteRAM, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+						GBA_HALFWORD paletteData = readRawMemory<GBA_HALFWORD>(addressInPaletteRAM, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
 						pGBA_display->colorForBlending[ONE].raw = paletteData;
 					}
 					// Mode 3
@@ -6875,7 +6897,7 @@ private:
 								{
 									addressInPaletteRAM += 0x200;
 								}
-								GBA_HALFWORD paletteData = readRawMemory<GBA_HALFWORD>(addressInPaletteRAM, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+								GBA_HALFWORD paletteData = readRawMemory<GBA_HALFWORD>(addressInPaletteRAM, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
 								pGBA_display->colorForBlending[ONE].raw = paletteData;
 							}
 							// Mode 3 or Mode 5
@@ -6996,7 +7018,7 @@ private:
 
 		GBA_WORD oamAddress = OAM_START_ADDRESS + (oamID << THREE);
 		mOamAttr01Word_t oamAttributes01 = { ZERO };
-		oamAttributes01.raw = readRawMemory<GBA_WORD>(oamAddress, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::PPU);
+		oamAttributes01.raw = readRawMemory<GBA_WORD>(oamAddress, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
 
 		objCache.ObjAttribute.mOamAttr01Word.raw = oamAttributes01.raw;
 		objCache.spriteYScreenCoordinate = oamAttributes01.mOamAttr0HalfWord.mOamAttr0Fields.Y_COORDINATE;
@@ -7096,7 +7118,7 @@ private:
 
 		GBA_WORD oamAddress = OAM_START_ADDRESS + (oamID << THREE) + FOUR;
 		mOamAttr23Word_t oamAttributes23 = { ZERO };
-		oamAttributes23.mOamAttr2HalfWord.mOamAttr2HalfWord = readRawMemory<GBA_HALFWORD>(oamAddress, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+		oamAttributes23.mOamAttr2HalfWord.mOamAttr2HalfWord = readRawMemory<GBA_HALFWORD>(oamAddress, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
 
 		renderCache.ObjAttribute.mOamAttr23Word.raw = oamAttributes23.raw;
 
@@ -7156,7 +7178,7 @@ private:
 
 		auto& renderCache = pGBA_display->objCache[TO_UINT(OBJECT_STAGE::OBJECT_RENDER_STAGE)];
 		GBA_WORD oamAddress = OAM_START_ADDRESS + (renderCache.ObjAttribute.mOamAttr01Word.mOamAttr1HalfWord.ROT_SCALE_EN.ROT_SCALE_PARAM_SEL << FIVE) + SIX;
-		renderCache.affine.pa = readRawMemory<GBA_HALFWORD>(oamAddress, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+		renderCache.affine.pa = readRawMemory<GBA_HALFWORD>(oamAddress, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
 
 	}
 
@@ -7168,7 +7190,7 @@ private:
 		// Refer to MODE2_PA_OBJ_CYCLE for info on the below equation
 		auto& renderCache = pGBA_display->objCache[TO_UINT(OBJECT_STAGE::OBJECT_RENDER_STAGE)];
 		GBA_WORD oamAddress = OAM_START_ADDRESS + (renderCache.ObjAttribute.mOamAttr01Word.mOamAttr1HalfWord.ROT_SCALE_EN.ROT_SCALE_PARAM_SEL << FIVE) + FOURTEEN;
-		renderCache.affine.pb = readRawMemory<GBA_HALFWORD>(oamAddress, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+		renderCache.affine.pb = readRawMemory<GBA_HALFWORD>(oamAddress, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
 
 	}
 
@@ -7180,7 +7202,7 @@ private:
 		// Refer to MODE2_PA_OBJ_CYCLE for info on the below equation
 		auto& renderCache = pGBA_display->objCache[TO_UINT(OBJECT_STAGE::OBJECT_RENDER_STAGE)];
 		GBA_WORD oamAddress = OAM_START_ADDRESS + (renderCache.ObjAttribute.mOamAttr01Word.mOamAttr1HalfWord.ROT_SCALE_EN.ROT_SCALE_PARAM_SEL << FIVE) + TWENTYTWO;
-		renderCache.affine.pc = readRawMemory<GBA_HALFWORD>(oamAddress, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+		renderCache.affine.pc = readRawMemory<GBA_HALFWORD>(oamAddress, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
 
 	}
 
@@ -7192,7 +7214,7 @@ private:
 		// Refer to MODE2_PA_OBJ_CYCLE for info on the below equation
 		auto& renderCache = pGBA_display->objCache[TO_UINT(OBJECT_STAGE::OBJECT_RENDER_STAGE)];
 		GBA_WORD oamAddress = OAM_START_ADDRESS + (renderCache.ObjAttribute.mOamAttr01Word.mOamAttr1HalfWord.ROT_SCALE_EN.ROT_SCALE_PARAM_SEL << FIVE) + THIRTY;
-		renderCache.affine.pd = readRawMemory<GBA_HALFWORD>(oamAddress, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+		renderCache.affine.pd = readRawMemory<GBA_HALFWORD>(oamAddress, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
 
 	}
 
@@ -7461,7 +7483,7 @@ private:
 						// so "withinTileOffset" is halved
 						+(withinTileOffset >> ONE);
 
-					BYTE pixelColorNumberFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);
+					BYTE pixelColorNumberFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
 
 					// In 4bpp mode, only 4 bits out of pixelColorData represents actual color for pixel, other 4 bits are for the adjascent pixels
 					// As mentioned in http://problemkaputt.de/gbatek-lcd-vram-character-data.htm
@@ -7514,7 +7536,7 @@ private:
 						+ (actualTileID << eachIndexReferences32BytesInShifts)
 						+ withinTileOffset;
 
-					BYTE pixelColorNumberFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);
+					BYTE pixelColorNumberFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
 
 					// Note: Palette is of 16 bytes, so palette index is 0, when tile data is 0 and palette index is 1, when tile data is 1
 					paletteIndex = pixelColorNumberFromTileData << ONE;
@@ -7761,7 +7783,7 @@ private:
 		// Refer: https://www.coranac.com/tonc/text/regbg.htm
 		if (addressInTileMapArea < (VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
 		{
-			pGBA_display->bgCache[bgID].tileDescriptor.raw = readRawMemory<GBA_HALFWORD>(addressInTileMapArea, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+			pGBA_display->bgCache[bgID].tileDescriptor.raw = readRawMemory<GBA_HALFWORD>(addressInTileMapArea, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
 		}
 		else
 		{
@@ -7830,7 +7852,7 @@ private:
 			// Refer: https://www.coranac.com/tonc/text/regbg.htm
 			if (addressInTileDataArea < (VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
 			{
-				pixelColorNumberFor2PixelsFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);
+				pixelColorNumberFor2PixelsFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
 			}
 			else
 			{
@@ -7867,7 +7889,7 @@ private:
 			// Refer: https://www.coranac.com/tonc/text/regbg.htm
 			if (addressInTileDataArea < (VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
 			{
-				pixelColorNumberFor1PixelFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);
+				pixelColorNumberFor1PixelFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
 			}
 			else
 			{
@@ -8008,7 +8030,7 @@ private:
 		// Refer: https://www.coranac.com/tonc/text/regbg.htm
 		if (addressInTileMapArea < (VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
 		{
-			pGBA_display->bgCache[bgID].tileDescriptor.raw = readRawMemory<GBA_HALFWORD>(addressInTileMapArea, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+			pGBA_display->bgCache[bgID].tileDescriptor.raw = readRawMemory<GBA_HALFWORD>(addressInTileMapArea, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
 		}
 		else
 		{
@@ -8071,7 +8093,7 @@ private:
 			// Refer: https://www.coranac.com/tonc/text/regbg.htm
 			if (addressInTileDataArea < (VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
 			{
-				pixelColorNumberFor2PixelsFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);
+				pixelColorNumberFor2PixelsFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
 			}
 			else
 			{
@@ -8109,7 +8131,7 @@ private:
 			// Refer: https://www.coranac.com/tonc/text/regbg.htm
 			if (addressInTileDataArea < (VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
 			{
-				pixelColorNumberFor1PixelFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);
+				pixelColorNumberFor1PixelFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
 			}
 			else
 			{
@@ -8359,7 +8381,7 @@ private:
 		// Refer: https://www.coranac.com/tonc/text/regbg.htm
 		if (addressInTileMapArea < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
 		{
-			pGBA_display->bgCache[bgID].tileDescriptor.raw = readRawMemory<GBA_HALFWORD>(addressInTileMapArea, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+			pGBA_display->bgCache[bgID].tileDescriptor.raw = readRawMemory<GBA_HALFWORD>(addressInTileMapArea, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
 		}
 		else
 		{
@@ -8495,7 +8517,7 @@ private:
 			// Refer: https://www.coranac.com/tonc/text/regbg.htm
 			if (addressInTileDataArea < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
 			{
-				pGBA_display->bgCache[bgID].pixelColorNumberFor4PixelsFromTileData = readRawMemory<GBA_HALFWORD>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+				pGBA_display->bgCache[bgID].pixelColorNumberFor4PixelsFromTileData = readRawMemory<GBA_HALFWORD>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
 			}
 			else
 			{
@@ -8521,7 +8543,7 @@ private:
 			// Refer: https://www.coranac.com/tonc/text/regbg.htm
 			if (addressInTileDataArea < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
 			{
-				pGBA_display->bgCache[bgID].pixelColorNumberFor2PixelsFromTileData = readRawMemory<GBA_HALFWORD>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+				pGBA_display->bgCache[bgID].pixelColorNumberFor2PixelsFromTileData = readRawMemory<GBA_HALFWORD>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
 			}
 			else
 			{
@@ -8652,7 +8674,7 @@ private:
 		// Refer: https://www.coranac.com/tonc/text/regbg.htm
 		if (addressInTileMapArea < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
 		{
-			pGBA_display->bgCache[bgID].tileDescriptor.raw = readRawMemory<GBA_HALFWORD>(addressInTileMapArea, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+			pGBA_display->bgCache[bgID].tileDescriptor.raw = readRawMemory<GBA_HALFWORD>(addressInTileMapArea, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
 		}
 		else
 		{
@@ -8758,7 +8780,7 @@ private:
 			// Refer: https://www.coranac.com/tonc/text/regbg.htm
 			if (addressInTileDataArea < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
 			{
-				pGBA_display->bgCache[bgID].pixelColorNumberFor4PixelsFromTileData = readRawMemory<GBA_HALFWORD>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+				pGBA_display->bgCache[bgID].pixelColorNumberFor4PixelsFromTileData = readRawMemory<GBA_HALFWORD>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
 			}
 			else
 			{
@@ -8784,7 +8806,7 @@ private:
 			// Refer: https://www.coranac.com/tonc/text/regbg.htm
 			if (addressInTileDataArea < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
 			{
-				pGBA_display->bgCache[bgID].pixelColorNumberFor2PixelsFromTileData = readRawMemory<GBA_HALFWORD>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+				pGBA_display->bgCache[bgID].pixelColorNumberFor2PixelsFromTileData = readRawMemory<GBA_HALFWORD>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
 			}
 			else
 			{
@@ -8846,11 +8868,11 @@ private:
 		// Refer: https://www.coranac.com/tonc/text/regbg.htm
 		if (addressInTileMapArea < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
 		{
-			pGBA_display->bgCache[BG2].fetchedTileID = readRawMemory<BYTE>(addressInTileMapArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);
+			pGBA_display->bgCache[BG2].fetchedTileID = readRawMemory<BYTE>(addressInTileMapArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
 		}
 		else
 		{
-			pGBA_display->bgCache[BG2].fetchedTileID = readRawMemory<BYTE>(addressInTileMapArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);
+			pGBA_display->bgCache[BG2].fetchedTileID = readRawMemory<BYTE>(addressInTileMapArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
 			PPUTODO("As per NBA, this is set to some latched value");
 		}
 
@@ -8907,7 +8929,7 @@ private:
 		// Refer: https://www.coranac.com/tonc/text/regbg.htm
 		if (addressInTileDataArea < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
 		{
-			pixelColorNumberFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);
+			pixelColorNumberFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
 		}
 		else
 		{
@@ -9565,7 +9587,7 @@ private:
 		// Refer: https://www.coranac.com/tonc/text/regbg.htm
 		if (addressInTileMapArea < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
 		{
-			pGBA_display->bgCache[bgID].fetchedTileID = readRawMemory<BYTE>(addressInTileMapArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);;
+			pGBA_display->bgCache[bgID].fetchedTileID = readRawMemory<BYTE>(addressInTileMapArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);;
 		}
 		else
 		{
@@ -9627,7 +9649,7 @@ private:
 		// Refer: https://www.coranac.com/tonc/text/regbg.htm
 		if (addressInTileDataArea < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
 		{
-			pixelColorNumberFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);
+			pixelColorNumberFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
 		}
 		else
 		{
@@ -9869,7 +9891,7 @@ private:
 			// Refer: https://www.coranac.com/tonc/text/regbg.htm
 			if (vramAddress < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
 			{
-				colorFor1Pixel = readRawMemory<GBA_HALFWORD>(vramAddress, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+				colorFor1Pixel = readRawMemory<GBA_HALFWORD>(vramAddress, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
 
 			}
 			else
@@ -9980,7 +10002,7 @@ private:
 			// Refer: https://www.coranac.com/tonc/text/regbg.htm
 			if (vramAddress < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
 			{
-				pixelColorNumberFromTileData = readRawMemory<BYTE>(vramAddress, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU);
+				pixelColorNumberFromTileData = readRawMemory<BYTE>(vramAddress, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
 
 			}
 			else
@@ -10097,7 +10119,7 @@ private:
 			// Refer: https://www.coranac.com/tonc/text/regbg.htm
 			if (vramAddress < static_cast<GBA_WORD>(VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
 			{
-				colorFor1Pixel = readRawMemory<GBA_HALFWORD>(vramAddress, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU);
+				colorFor1Pixel = readRawMemory<GBA_HALFWORD>(vramAddress, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
 
 			}
 			else

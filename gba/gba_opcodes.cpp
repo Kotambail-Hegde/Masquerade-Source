@@ -267,6 +267,9 @@ FLAG GBA_t::ConditionalBranch()
 			// Increment the PC
 			pGBA_cpuInstance->registers.pc += TWO;
 			pGBA_cpuInstance->registers.pc &= 0xFFFFFFFE;
+
+			// Non-memory instruction, so pipeline access should remain sequential w.r.t previous memory access which should be pipeline access
+			pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE;
 		}
 
 		isThisTheInstruction = YES;
@@ -288,6 +291,9 @@ FLAG GBA_t::MultipleLoadStore()
 		pGBA_cpuInstance->registers.pc += TWO;
 		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFE;
 
+		// Memory instruction, so next pipeline access is non-sequential
+		pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
+
 		uint32_t registerList = MLS.rlist;
 		uint32_t rb = MLS.rb; // only 3 bits, so not PC
 		FLAG l = (FLAG)MLS.l;
@@ -295,7 +301,6 @@ FLAG GBA_t::MultipleLoadStore()
 		uint32_t address = cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rb);
 
 		CPUTODO("As per SST(and hence as per NBA), the first transaction here is always non - sequential even if the address accessed is within the \"distance\" of a sequential access");
-		pGBA_memory->setNextMemoryAccessType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
 
 		if (registerList == ZERO)
 		{
@@ -303,7 +308,7 @@ FLAG GBA_t::MultipleLoadStore()
 
 			if (l == YES)
 			{
-				auto memory2register = readRawMemory<GBA_WORD>(address, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU);
+				auto memory2register = readRawMemory<GBA_WORD>(address, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
 				cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)PC, getARMState(), memory2register);
 				reloadPipeline(pGBA_registers->pc);
 			}
@@ -311,7 +316,7 @@ FLAG GBA_t::MultipleLoadStore()
 			{
 				auto pc = cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)PC);
 				// write PC to [SP]
-				writeRawMemory<GBA_WORD>(address, pc, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU);
+				writeRawMemory<GBA_WORD>(address, pc, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
 			}
 
 			// Increment rb (but this should behave as though all registers were loaded/stored, so increment 16*4 times)
@@ -319,6 +324,8 @@ FLAG GBA_t::MultipleLoadStore()
 		}
 		else
 		{
+			MEMORY_ACCESS_TYPE access_type = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
+
 			// NOTE: Lowest register maps to lowest address
 
 			if (l == YES)
@@ -330,7 +337,9 @@ FLAG GBA_t::MultipleLoadStore()
 					if ((registerList >> rt) & 0x01) // if "rt" is part of register list
 					{
 						// read from memory
-						memory2register = readRawMemory<GBA_WORD>(address, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU);
+						memory2register = readRawMemory<GBA_WORD>(address, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU, access_type);
+
+						access_type = MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE;
 
 						// Even before the first loop is completed, if write back is enabled, base register is updated
 						// so, if rb is part of the list, then in further loops, rb will be updated and hence the writeback is overriden
@@ -382,7 +391,9 @@ FLAG GBA_t::MultipleLoadStore()
 						register2memory = cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rt);
 
 						// write to memory
-						writeRawMemory<GBA_WORD>(address, register2memory, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU);
+						writeRawMemory<GBA_WORD>(address, register2memory, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU, access_type);
+
+						access_type = MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE;
 
 						// NOTE:
 						// As mentioned in http://problemkaputt.de/gbatek-thumb-opcodes-memory-multiple-load-store-push-pop-and-ldm-stm.htm
@@ -455,6 +466,9 @@ FLAG GBA_t::LongBranchWithLink()
 			// Increment the PC
 			pGBA_cpuInstance->registers.pc += TWO;
 			pGBA_cpuInstance->registers.pc &= 0xFFFFFFFE;
+
+			// Non-memory instruction, so pipeline access should remain sequential w.r.t previous memory access which should be pipeline access
+			pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE;
 		}
 
 		isThisTheInstruction = YES;
@@ -490,6 +504,9 @@ FLAG GBA_t::AddOffsetToStackPointer()
 		pGBA_cpuInstance->registers.pc += TWO;
 		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFE;
 
+		// Non-memory instruction, so pipeline access should remain sequential w.r.t previous memory access which should be pipeline access
+		pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE;
+
 		isThisTheInstruction = YES;
 	}
 
@@ -509,12 +526,14 @@ FLAG GBA_t::PushPopRegisters()
 		pGBA_cpuInstance->registers.pc += TWO;
 		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFE;
 
+		// Memory instruction, so next pipeline access is non-sequential
+		pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
+
 		uint32_t registerList = PPR.rlist;
 		FLAG l = (FLAG)PPR.l;
 		FLAG r = (FLAG)PPR.r;
 
-		CPUTODO("As per SST(and hence as per NBA), the first transaction here is always non - sequential even if the address accessed is within the \"distance\" of a sequential access");
-		pGBA_memory->setNextMemoryAccessType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
+		CPUTODO("As per SST (and hence as per NBA), the first transaction here is always non - sequential even if the address accessed is within the \"distance\" of a sequential access");
 
 		// The instructions in this group allow registers 0 - 7 and optionally LR to be pushed onto
 		// the stack, and registers 0 - 7 and optionally PC to be popped off the stack.
@@ -546,7 +565,7 @@ FLAG GBA_t::PushPopRegisters()
 				// POP to PC from [SP]
 
 				// Get [SP]
-				auto popedData = readRawMemory<GBA_WORD>(cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)SP), MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU);
+				auto popedData = readRawMemory<GBA_WORD>(cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)SP), MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
 				// Set [SP] to PC
 				cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)PC, getARMState(), popedData);
 				reloadPipeline(pGBA_registers->pc);
@@ -562,11 +581,14 @@ FLAG GBA_t::PushPopRegisters()
 				// Get PC (PC pointing towards fetch stage ?)
 				auto pc = cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)PC);
 				// write PC to [SP]
-				writeRawMemory<GBA_WORD>(cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)SP), pc, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU);
+				writeRawMemory<GBA_WORD>(cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)SP), pc, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
 			}
 		}
 		else
 		{
+
+			MEMORY_ACCESS_TYPE access_type = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
+
 			// POP
 			if (l == YES)
 			{
@@ -578,7 +600,10 @@ FLAG GBA_t::PushPopRegisters()
 					if ((registerList >> rt) & 0x01) // if "rt" is part of register list
 					{
 						// get [SP]
-						GBA_WORD memoryToRegister = readRawMemory<GBA_WORD>(baseAddr, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU);
+						GBA_WORD memoryToRegister = readRawMemory<GBA_WORD>(baseAddr, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU, access_type);
+						
+						access_type = MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE;
+						
 						// set [SP] to rt
 						cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rt, getARMState(), memoryToRegister);
 						// increment sp
@@ -590,7 +615,7 @@ FLAG GBA_t::PushPopRegisters()
 				// Handle PC
 				if (r == SET)
 				{
-					GBA_WORD memoryToRegister = readRawMemory<GBA_WORD>(baseAddr, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU);
+					GBA_WORD memoryToRegister = readRawMemory<GBA_WORD>(baseAddr, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU, access_type);
 					// update PC
 					cpuSetRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)PC, getARMState(), (memoryToRegister & ~ONE));
 					// update SP
@@ -636,7 +661,10 @@ FLAG GBA_t::PushPopRegisters()
 					if ((registerList >> rt) & 0x01) // if "rt" is part of register list
 					{
 						GBA_WORD registerToMemory = cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rt);
-						writeRawMemory<GBA_WORD>(baseAddr, registerToMemory, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU);
+						writeRawMemory<GBA_WORD>(baseAddr, registerToMemory, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU, access_type);
+
+						access_type = MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE;
+
 						baseAddr += sizeof(GBA_WORD);
 					}
 				}
@@ -645,7 +673,7 @@ FLAG GBA_t::PushPopRegisters()
 				if (r == SET)
 				{
 					GBA_WORD registerToMemory = cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)LR);
-					writeRawMemory<GBA_WORD>(baseAddr, registerToMemory, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU);
+					writeRawMemory<GBA_WORD>(baseAddr, registerToMemory, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU, access_type);
 				}
 			}
 		}
@@ -676,9 +704,12 @@ FLAG GBA_t::LoadStoreHalfword()
 		pGBA_cpuInstance->registers.pc += TWO;
 		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFE;
 
+		// Memory instruction, so next pipeline access is non-sequential
+		pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
+
 		if (l == YES)
 		{
-			GBA_WORD dataToBeWritten = readRawMemory<GBA_HALFWORD>(address, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::CPU);
+			GBA_WORD dataToBeWritten = readRawMemory<GBA_HALFWORD>(address, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
 			// Refer "INFORMATION_001" for the reason to perform ROR below
 			dataToBeWritten = performShiftOperation(
 				NO
@@ -693,7 +724,7 @@ FLAG GBA_t::LoadStoreHalfword()
 		else
 		{
 			GBA_WORD dataToBeWritten = cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rd);
-			writeRawMemory<GBA_HALFWORD>(address, static_cast<GBA_HALFWORD>(dataToBeWritten), MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::CPU);
+			writeRawMemory<GBA_HALFWORD>(address, static_cast<GBA_HALFWORD>(dataToBeWritten), MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::CPU, MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE);
 		}
 
 		isThisTheInstruction = YES;
@@ -721,6 +752,9 @@ FLAG GBA_t::SPRelativeLoadStore()
 		// Increment the PC
 		pGBA_cpuInstance->registers.pc += TWO;
 		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFE;
+
+		// Memory instruction, so next pipeline access is non-sequential
+		pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
 
 		CPUTODO("As per SST(and hence as per NBA), the  transaction here is always non - sequential even if the address accessed is within the \"distance\" of a sequential access");
 
@@ -787,6 +821,9 @@ FLAG GBA_t::LoadAddress()
 		// Increment the PC
 		pGBA_cpuInstance->registers.pc += TWO;
 		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFE;
+
+		// Non-memory instruction, so pipeline access should remain sequential w.r.t previous memory access which should be pipeline access
+		pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE;
 	}
 
 	RETURN isThisTheInstruction;
@@ -810,6 +847,9 @@ FLAG GBA_t::LoadStoreWithImmediateOffset()
 		// Increment the PC
 		pGBA_cpuInstance->registers.pc += TWO;
 		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFE;
+
+		// Memory instruction, so next pipeline access is non-sequential
+		pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
 
 		offset = ((b == YES) ? offset : (offset << TWO));
 
@@ -880,6 +920,9 @@ FLAG GBA_t::LoadStoreWithRegisterOffset()
 		pGBA_cpuInstance->registers.pc += TWO;
 		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFE;
 
+		// Memory instruction, so next pipeline access is non-sequential
+		pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
+
 		CPUTODO("As per SST(and hence as per NBA), the  transaction here is always non - sequential even if the address accessed is within the \"distance\" of a sequential access");
 
 		if (l == YES)
@@ -943,6 +986,9 @@ FLAG GBA_t::LoadStoreSignExtendedByteHalfword()
 		// Increment the PC
 		pGBA_cpuInstance->registers.pc += TWO;
 		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFE;
+
+		// Memory instruction, so next pipeline access is non-sequential
+		pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
 
 		CPUTODO("As per SST(and hence as per NBA), the  transaction here is always non - sequential even if the address accessed is within the \"distance\" of a sequential access");
 
@@ -1046,6 +1092,10 @@ FLAG GBA_t::PCRelativeLoad()
 
 		cpuIdleCycles();
 
+		// Next access after internal cycle is always non-sequential
+		// Ref: https://discord.com/channels/465585922579103744/465586361731121162/1269384605136322571
+		pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
+
 		isThisTheInstruction = YES;
 	}
 
@@ -1099,6 +1149,9 @@ FLAG GBA_t::HiRegisterOperationsBranchExchange()
 				// Increment the PC
 				pGBA_cpuInstance->registers.pc += TWO;
 				pGBA_cpuInstance->registers.pc &= 0xFFFFFFFE;
+
+				// Non-memory instruction, so pipeline access should remain sequential w.r.t previous memory access which should be pipeline access
+				pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE;
 			}
 			else
 			{
@@ -1126,6 +1179,9 @@ FLAG GBA_t::HiRegisterOperationsBranchExchange()
 			pGBA_cpuInstance->registers.pc += TWO;
 			pGBA_cpuInstance->registers.pc &= 0xFFFFFFFE;
 
+			// Non-memory instruction, so pipeline access should remain sequential w.r.t previous memory access which should be pipeline access
+			pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE;
+
 			BREAK;
 		}
 		case 0x02: // MOV
@@ -1148,6 +1204,9 @@ FLAG GBA_t::HiRegisterOperationsBranchExchange()
 				// Increment the PC
 				pGBA_cpuInstance->registers.pc += TWO;
 				pGBA_cpuInstance->registers.pc &= 0xFFFFFFFE;
+
+				// Non-memory instruction, so pipeline access should remain sequential w.r.t previous memory access which should be pipeline access
+				pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE;
 			}
 			else
 			{
@@ -1214,6 +1273,9 @@ FLAG GBA_t::ALUOperations()
 		pGBA_cpuInstance->registers.pc += TWO;
 		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFE;
 
+		// Non-memory instruction, so pipeline access should remain sequential w.r.t previous memory access which should be pipeline access
+		pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE;
+
 		GBA_WORD cOriginal = pGBA_registers->cpsr.psrFields.psrCarryBorrowExtBit;
 
 		switch ((ALU_SUBCODES)subOpCode)
@@ -1237,6 +1299,9 @@ FLAG GBA_t::ALUOperations()
 		case ALU_SUBCODES::ALU_LSL:
 		{
 			cpuIdleCycles();
+			// Next access after internal cycle is always non-sequential
+			// Ref: https://discord.com/channels/465585922579103744/465586361731121162/1269384605136322571
+			pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
 			subOpCodeResult = performShiftOperation(
 				YES
 				, SHIFT_TYPE::LSL
@@ -1252,6 +1317,9 @@ FLAG GBA_t::ALUOperations()
 		case ALU_SUBCODES::ALU_LSR:
 		{
 			cpuIdleCycles();
+			// Next access after internal cycle is always non-sequential
+			// Ref: https://discord.com/channels/465585922579103744/465586361731121162/1269384605136322571
+			pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
 			subOpCodeResult = performShiftOperation(
 				YES
 				, SHIFT_TYPE::LSR
@@ -1267,6 +1335,9 @@ FLAG GBA_t::ALUOperations()
 		case ALU_SUBCODES::ALU_ASR:
 		{
 			cpuIdleCycles();
+			// Next access after internal cycle is always non-sequential
+			// Ref: https://discord.com/channels/465585922579103744/465586361731121162/1269384605136322571
+			pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
 			subOpCodeResult = performShiftOperation(
 				YES
 				, SHIFT_TYPE::ASR
@@ -1306,6 +1377,9 @@ FLAG GBA_t::ALUOperations()
 		case ALU_SUBCODES::ALU_ROR:
 		{
 			cpuIdleCycles();
+			// Next access after internal cycle is always non-sequential
+			// Ref: https://discord.com/channels/465585922579103744/465586361731121162/1269384605136322571
+			pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
 			subOpCodeResult = performShiftOperation(
 				YES
 				, SHIFT_TYPE::ROR
@@ -1368,6 +1442,9 @@ FLAG GBA_t::ALUOperations()
 			// op2 -> src
 
 			FLAG full = TickMultiply(YES, op1);
+			// Next access after internal cycle is always non-sequential
+			// Ref: https://discord.com/channels/465585922579103744/465586361731121162/1269384605136322571
+			pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
 			subOpCodeResult = op1 * op2;
 			pGBA_cpuInstance->registers.cpsr.psrFields.psrZeroBit = ((subOpCodeResult == ZERO) ? ONE : ZERO);
 			pGBA_cpuInstance->registers.cpsr.psrFields.psrNegativeBit = ((subOpCodeResult >> THIRTYONE) ? ONE : ZERO);
@@ -1488,6 +1565,9 @@ FLAG GBA_t::MoveCompareAddSubtractImmediate()
 		// Increment the PC
 		pGBA_cpuInstance->registers.pc += TWO;
 		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFE;
+
+		// Non-memory instruction, so pipeline access should remain sequential w.r.t previous memory access which should be pipeline access
+		pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE;
 	}
 
 	RETURN isThisTheInstruction;
@@ -1562,6 +1642,9 @@ FLAG GBA_t::AddSubtract()
 		pGBA_cpuInstance->registers.pc += TWO;
 		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFE;
 
+		// Non-memory instruction, so pipeline access should remain sequential w.r.t previous memory access which should be pipeline access
+		pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE;
+
 		isThisTheInstruction = YES;
 	}
 
@@ -1624,6 +1707,9 @@ FLAG GBA_t::MoveShiftedRegister()
 		// Increment the PC
 		pGBA_cpuInstance->registers.pc += TWO;
 		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFE;
+
+		// Non-memory instruction, so pipeline access should remain sequential w.r.t previous memory access which should be pipeline access
+		pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE;
 
 		isThisTheInstruction = YES;
 	}
@@ -1793,10 +1879,14 @@ FLAG GBA_t::BlockDataTransfer()
 		pGBA_cpuInstance->registers.pc += FOUR;
 		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFC;
 
+		// Memory instruction, so next pipeline access is non-sequential
+		pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
+
 		const FLAG switch_mode = (s == YES) && (!BDT.l || !transfer_pc) && originalOpMode != OP_MODE_TYPE::OP_USR && originalOpMode != OP_MODE_TYPE::OP_SYS;
 
 		CPUTODO("As per SST(and hence as per NBA), the first transaction here is always non - sequential even if the address accessed is within the \"distance\" of a sequential access. Maybe because this is a Instruction and non-Instruction type mem access boundary?");
-		pGBA_memory->setNextMemoryAccessType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
+
+		MEMORY_ACCESS_TYPE access_type = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
 
 		if (BDT.l)
 		{
@@ -1819,7 +1909,9 @@ FLAG GBA_t::BlockDataTransfer()
 					address += nonZeroIfPreIncrement;
 
 					// read from memory
-					memory2register = readRawMemory<GBA_WORD>(address, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU);
+					memory2register = readRawMemory<GBA_WORD>(address, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU, access_type);
+
+					access_type = MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE;
 
 					// NOTE: Writebacks happens at 2nd cycles of the instruction
 					// Even before the first loop is completed, if write back is enabled, base register is updated
@@ -1869,8 +1961,10 @@ FLAG GBA_t::BlockDataTransfer()
 					register2memory = cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)rt);
 
 					// write to memory
-					writeRawMemory<GBA_WORD>(address, register2memory, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU);
+					writeRawMemory<GBA_WORD>(address, register2memory, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU, access_type);
 					address += nonZeroIfPostIncrement;
+
+					access_type = MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE;
 
 					// NOTE:
 					// Also mentioned in ARM DOC
@@ -2147,6 +2241,9 @@ FLAG GBA_t::SingleDataTransfer()
 		pGBA_cpuInstance->registers.pc += FOUR;
 		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFC;
 
+		// Memory instruction, so next pipeline access is non-sequential
+		pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
+
 		if (u == NO) // subtract from base, hence changing the sign
 		{
 			uEffectiveOffset = -uEffectiveOffset;
@@ -2247,6 +2344,9 @@ FLAG GBA_t::SingleDataSwap()
 		pGBA_cpuInstance->registers.pc += FOUR;
 		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFC;
 
+		// Memory instruction, so next pipeline access is non-sequential
+		pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
+
 		if (rn == PC || rd == PC || rm == PC)
 		{
 			CPUWARN(" Single Data Swap; rn == PC || rd == PC || rm == PC");
@@ -2339,6 +2439,10 @@ FLAG GBA_t::MultiplyAndMultiplyAccumulate()
 
 		FLAG full = TickMultiply(YES, op2);
 
+		// Next access after internal cycle is always non-sequential
+		// Ref: https://discord.com/channels/465585922579103744/465586361731121162/1269384605136322571
+		pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
+
 		if (a == YES)
 		{
 			accum = cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)rn));
@@ -2415,6 +2519,11 @@ FLAG GBA_t::MultiplyAndMultiplyAccumulate()
 
 		// Now call TickMultiply, using the final multiplier
 		FLAG full = TickMultiply(u, op2);
+
+		// Next access after internal cycle is always non-sequential
+		// Ref: https://discord.com/channels/465585922579103744/465586361731121162/1269384605136322571
+		pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
+
 		cpuIdleCycles();
 
 		uint32_t accum_lo = ZERO;
@@ -2504,6 +2613,9 @@ FLAG GBA_t::HalfWordDataTransfer()
 			// Increment the PC
 			pGBA_cpuInstance->registers.pc += FOUR;
 			pGBA_cpuInstance->registers.pc &= 0xFFFFFFFC;
+
+			// Memory instruction, so next pipeline access is non-sequential
+			pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
 
 			if (u == NO) // subtract from base, hence changing the sign
 			{
@@ -2824,6 +2936,9 @@ FLAG GBA_t::psrTransfer()
 		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFC;
 	}
 
+	// Non-memory instruction, so pipeline access should remain sequential w.r.t previous memory access which should be pipeline access
+	pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE;
+
 	RETURN isThisTheInstruction;
 }
 
@@ -2836,6 +2951,9 @@ FLAG GBA_t::DataProcessing()
 	if (strippedOpCode == DATA_PROCESSING_INSTRUCTION)
 	{
 		auto DP = pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.DATA_PROCESSING;
+
+		// Non-memory instruction, so pipeline access should remain sequential w.r.t previous memory access which should be pipeline access
+		pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE;
 
 		isThisTheInstruction = YES;
 		uint32_t uOperand2 = DP.operand2;
@@ -2966,6 +3084,10 @@ FLAG GBA_t::DataProcessing()
 				pGBA_cpuInstance->registers.pc &= 0xFFFFFFFC;
 
 				cpuIdleCycles();
+
+				// Next access after internal cycle is always non-sequential
+				// Ref: https://discord.com/channels/465585922579103744/465586361731121162/1269384605136322571
+				pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
 
 				dataToBeShifted = cpuReadRegister(getCurrentlyValidRegisterBank(), ((REGISTER_TYPE)operand2.op2ShiftRegType2.rm));
 

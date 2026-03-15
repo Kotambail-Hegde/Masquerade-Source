@@ -124,9 +124,9 @@ jobs:
               git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL
           }
 
-          # --- NativeFileDialog-Extended
+          # --- NativeFileDialog-Extended (with submodules for cross-platform protocol support)
           if (-not (Test-Path "nativefiledialog-extended")) {
-              git clone https://github.com/btzy/nativefiledialog-extended.git --depth 1
+              git clone https://github.com/btzy/nativefiledialog-extended.git --depth 1 --recurse-submodules --shallow-submodules
           }
 
           # --- Boost source
@@ -285,9 +285,10 @@ jobs:
             external/boost
             external/SDL
             external/nativefiledialog-extended
-          key: linux-external-all-v1-${{ hashFiles('.github/workflows/*.yml') }}
+          # Bumped to v2 to force re-clone NFD with --recurse-submodules
+          key: linux-external-all-v2-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: |
-            linux-external-all-v1-
+            linux-external-all-v2-
 
       # --- Clone all dependencies
       - name: Clone all dependencies
@@ -347,8 +348,10 @@ jobs:
             git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL
           fi
 
+          # --- NativeFileDialog-Extended (with submodules for Wayland protocol support)
           if [ ! -d "nativefiledialog-extended" ]; then
-            git clone https://github.com/btzy/nativefiledialog-extended.git --depth 1
+            git clone https://github.com/btzy/nativefiledialog-extended.git \
+              --depth 1 --recurse-submodules --shallow-submodules
           fi
 
       # --- Build Boost
@@ -632,3 +635,4 @@ jobs:
               github_token: ${{ secrets.GITHUB_TOKEN }}
               publish_dir: ./pages
               force_orphan: true
+              

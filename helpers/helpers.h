@@ -565,6 +565,7 @@
 #define MASQ_FLOAT64								9
 
 #define MASQ_UNUSED(x)								TODO("TODO: Unused variable \"" #x "\"\n")
+#define MASQ_IGNORE									void
 
 #if defined(_MSC_VER)
 #define MASQ_INLINE									__forceinline
