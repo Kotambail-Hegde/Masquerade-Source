@@ -79,13 +79,10 @@ jobs:
           git checkout "$BRANCH"
           echo "✅ Checked out $BRANCH"
 
-          cd src
-          # Fetch master — the bump commit is in master's history after auto-merge.
-          # We can't fetch the SHA directly (GitHub rejects non-tip SHA fetches),
-          # but after fetching master the commit is locally available.
+          cd src/Masquerade-Source
           git fetch origin master
-          git checkout ${{ steps.source.outputs.sha }}
-          cd ..
+          git checkout origin/master
+          cd ../..
 
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -120,10 +117,10 @@ jobs:
           git checkout -b "$BRANCH"
           echo "✅ Created branch $BRANCH"
 
-          cd src
+          cd src/Masquerade-Source
           git fetch origin master
-          git checkout ${{ steps.source.outputs.sha }}
-          cd ..
+          git checkout origin/master
+          cd ../..
 
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
