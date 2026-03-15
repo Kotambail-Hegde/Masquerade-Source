@@ -94,16 +94,22 @@ jobs:
       - name: '[Release flow] Set SUCCESS status to unblock Emulator PR'
         if: github.event.inputs.triggered_by_release == 'true'
         run: |
+          # Set SUCCESS on the new submodule commit (HEAD after our push)
           EMULATOR_SHA=$(cd emulator-repo && git rev-parse HEAD)
-          curl -s -X POST \
-            -H "Authorization: Bearer ${{ secrets.EMULATOR_REPO_PAT }}" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/${{ env.EMULATOR_REPO }}/statuses/$EMULATOR_SHA \
-            -d "{
-              \"state\": \"success\",
-              \"context\": \"submodule-update\",
-              \"description\": \"src/ submodule updated to ${{ steps.version.outputs.value }} — ready to merge\"
-            }"
+          # Also get the parent commit (the original release commit that had PENDING)
+          EMULATOR_PARENT_SHA=$(cd emulator-repo && git rev-parse HEAD~1)
+
+          for SHA in "$EMULATOR_SHA" "$EMULATOR_PARENT_SHA"; do
+            curl -s -X POST \
+              -H "Authorization: Bearer ${{ secrets.EMULATOR_REPO_PAT }}" \
+              -H "Accept: application/vnd.github+json" \
+              https://api.github.com/repos/${{ env.EMULATOR_REPO }}/statuses/$SHA \
+              -d "{
+                \"state\": \"success\",
+                \"context\": \"submodule-update\",
+                \"description\": \"src/ submodule updated to ${{ steps.version.outputs.value }} — ready to merge\"
+              }"
+          done
           echo "✅ Emulator PR merge button unblocked"
 
       # ── STANDALONE PATH (workflow_dispatch) ───────────────────────────────
