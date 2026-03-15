@@ -666,8 +666,8 @@ jobs:
 
           # ── Windows ───────────────────────────────────────────────────────
           if [ "${{ github.event.inputs.release_windows }}" = "true" ]; then
-            # Copy all build output files directly — no wiping, preserves existing files
-            cp -r ../artifacts/windows/. windows/
+            # Copy from Release/ subfolder directly to flatten the MSVC output structure
+            cp -r ../artifacts/windows/Release/. windows/
             # Strip bundled assets and replace with clean copy
             WIN_ASSETS=$(find windows -type d -name "assets" | head -1)
             if [ -n "$WIN_ASSETS" ]; then
