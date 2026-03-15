@@ -49,6 +49,8 @@ PROTOTYPE-0152 								: Design philosophy used is DP3 and implementation uses I
 * masquerade (P0052)/gameboy advance		-> Pokemon Emerald ingame save fails (passes few times at the start, then it fails continously)
 * masquerade (P0052)/masquerade-qa			-> Create automated gba tests
 
+* masquerade (P0052)						-> Implement SNES
+
 * masquerade (P0152)						-> Implement
 
 * masquerade (P0152)						-> Android Support

@@ -3192,6 +3192,7 @@ void GBA_t::cpuIdleCycles()
 	// Next access after internal cycle is always non-sequential
 	// Ref: https://discord.com/channels/465585922579103744/465586361731121162/1269384605136322571
 	pGBA_memory->setNextMemoryAccessType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
+	pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
 }
 
 void GBA_t::fetchAndDecode(uint32_t newPC)
@@ -3214,6 +3215,8 @@ void GBA_t::fetchAndDecode(uint32_t newPC)
 		pGBA_cpuInstance->pipeline.fetchStageOpCode.opCode.rawOpCode = readRawMemory<GBA_HALFWORD>(pGBA_cpuInstance->registers.pc, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH, MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE);
 		pGBA_cpuInstance->registers.pc += TWO;
 		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFE;
+
+		pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE;
 
 		// Note: We still don't have the valid instruction in "executeStageOpCode"... for this, we need one more cycle i.e. Stage 3
 		// We don't do Stage 3 here because by default, one cycle is always executed as part of of "runCPUPipeline"... so this can be considered Stage 3
@@ -3242,6 +3245,8 @@ void GBA_t::fetchAndDecode(uint32_t newPC)
 		pGBA_cpuInstance->pipeline.fetchStageOpCode.opCode.rawOpCode = readRawMemory<GBA_WORD>(pGBA_cpuInstance->registers.pc, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH, MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE);
 		pGBA_cpuInstance->registers.pc += FOUR;
 		pGBA_cpuInstance->registers.pc &= 0xFFFFFFFC;
+
+		pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE;
 
 		// Note: We still don't have the valid instruction in "executeStageOpCode"... for this, we need one more cycle i.e. Stage 3
 		// We don't do Stage 3 here because by default, one cycle is always executed as part of of "runCPUPipeline"... so this can be considered Stage 3
@@ -3325,7 +3330,8 @@ void GBA_t::runCPUPipeline()
 		pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode = pGBA_cpuInstance->pipeline.decodeStageOpCode.opCode.rawOpCode;
 		pGBA_cpuInstance->pipeline.decodeStageOpCode.opCode.rawOpCode = pGBA_cpuInstance->pipeline.fetchStageOpCode.opCode.rawOpCode;
 		// NOTE: PC always point to fetchStageOpCode
-		pGBA_cpuInstance->pipeline.fetchStageOpCode.opCode.rawOpCode = readRawMemory<GBA_HALFWORD>(pGBA_cpuInstance->registers.pc, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH, MEMORY_ACCESS_TYPE::AUTOMATIC);
+		pGBA_cpuInstance->pipeline.fetchStageOpCode.opCode.rawOpCode = readRawMemory<GBA_HALFWORD>(pGBA_cpuInstance->registers.pc, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH, pGBA_memory->setNextPipelineAccessType);
+		pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::AUTOMATIC;
 
 		uint32_t extension1 = TO_UINT32(11 - OP_MODE_NAMES[currentCPSR.psrFields.psrModeBits].length());
 		DISASSEMBLY("[THUMB] [%s] %*c 0x%08X : [0x%04X]     [%-23s]", OP_MODE_NAMES[currentCPSR.psrFields.psrModeBits].c_str(), extension1, ' ', (GBA_WORD)(pGBA_cpuInstance->registers.pc - FOUR), pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode, disassembled.c_str());
@@ -3457,7 +3463,8 @@ void GBA_t::runCPUPipeline()
 		pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode = pGBA_cpuInstance->pipeline.decodeStageOpCode.opCode.rawOpCode;
 		pGBA_cpuInstance->pipeline.decodeStageOpCode.opCode.rawOpCode = pGBA_cpuInstance->pipeline.fetchStageOpCode.opCode.rawOpCode;
 		// NOTE: PC always point to fetchStageOpCode
-		pGBA_cpuInstance->pipeline.fetchStageOpCode.opCode.rawOpCode = readRawMemory<GBA_WORD>(pGBA_cpuInstance->registers.pc, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH, MEMORY_ACCESS_TYPE::AUTOMATIC);
+		pGBA_cpuInstance->pipeline.fetchStageOpCode.opCode.rawOpCode = readRawMemory<GBA_WORD>(pGBA_cpuInstance->registers.pc, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH, pGBA_memory->setNextPipelineAccessType);
+		pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::AUTOMATIC;
 
 		uint32_t extension1 = TO_UINT32(11 - OP_MODE_NAMES[currentCPSR.psrFields.psrModeBits].length());
 		DISASSEMBLY("[ARM]   [%s] %*c 0x%08X : [0x%08X] [%-23s]", OP_MODE_NAMES[currentCPSR.psrFields.psrModeBits].c_str(), extension1, ' ', (GBA_WORD)(pGBA_cpuInstance->registers.pc - EIGHT), pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode, disassembled.c_str());
@@ -3543,6 +3550,8 @@ void GBA_t::runCPUPipeline()
 			CPUINFO("Skipping instruction because condition %d was not met.", pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.arm.cond);
 			pGBA_cpuInstance->registers.pc += FOUR;
 			pGBA_cpuInstance->registers.pc &= 0xFFFFFFFC;
+
+			pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE;
 		}
 	}
 	else
@@ -3722,6 +3731,19 @@ FLAG GBA_t::handleInterruptsIfApplicable()
 		// Make sure Halt if cleared (It will be cleared...but just making sure)
 
 		pGBA_cpuInstance->haltCntState = HALT_CONTROLLER::RUN;
+
+		// Prefetch the next instruction, even though this is not used, we still do it for timing
+
+		if (getARMState() == STATE_TYPE::ST_THUMB)
+		{
+			(void)readRawMemory<GBA_HALFWORD>(cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)PC) & ~ONE, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH, pGBA_memory->setNextPipelineAccessType);
+		}
+		else
+		{
+			(void)readRawMemory<GBA_WORD>(cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)PC) & ~THREE, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH, pGBA_memory->setNextPipelineAccessType);
+		}
+
+		pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::AUTOMATIC;
 
 		// Save CPSR to SPSR.IRQ
 
@@ -5719,7 +5741,8 @@ FLAG GBA_t::initializeEmulator()
 	// Initialize few memory variables
 
 	pGBA_memory->previouslyAccessedMemory = RESET;
-	pGBA_memory->setNextMemoryAccessType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
+	pGBA_memory->setNextMemoryAccessType = MEMORY_ACCESS_TYPE::AUTOMATIC;
+	pGBA_memory->setNextPipelineAccessType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
 
 	// Initialize memory
 
