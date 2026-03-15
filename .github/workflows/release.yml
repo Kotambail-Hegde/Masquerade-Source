@@ -636,16 +636,11 @@ jobs:
         working-directory: emulator-repo
         run: |
 
-          # ── Helper: strip bundled assets from a dir, then place clean ones ──
-          # Usage: place_assets <assets_dest_path>
-          # e.g.  place_assets windows/Release/assets
-          #       place_assets linux/assets
+          # ── Helper: overlay clean assets without wiping (preserves placeholders) ──
           place_assets() {
             local DEST="$1"
-            # Step 1: wipe whatever the build bundled (may contain bios etc.)
-            rm -rf "$DEST"
             mkdir -p "$DEST"
-            # Step 2: copy clean assets with legal exclusions
+            # Overlay only — no rm -rf so placeholder files are preserved
             rsync -a \
               --exclude='gb/bios/*.bin' \
               --exclude='gbc/bios/*.bin' \
@@ -653,28 +648,37 @@ jobs:
               --exclude='saves/' \
               --exclude='spaceInvaders/audio/' \
               --exclude='c8/db/chip-8-database/' \
+              --exclude='internal/cheats.txt' \
               ../artifacts/assets/. "$DEST/"
-            echo "✅ Clean assets placed into $DEST"
+            echo "✅ Clean assets overlaid into $DEST"
           }
 
-          # ── Hosting — always updated (only replace masquerade files, keep index.html etc.) ──
+          # ── Hosting — only replace masquerade files, keep index.html etc. ──
           cp ../artifacts/emscripten/masquerade.data  hosting/
           cp ../artifacts/emscripten/masquerade.html  hosting/
           cp ../artifacts/emscripten/masquerade.js    hosting/
           cp ../artifacts/emscripten/masquerade.wasm  hosting/
           echo "✅ Hosting placed"
 
+          # ── LICENSE.md → Emulator repo root ──────────────────────────────
+          if [ -f "../artifacts/windows/Release/LICENSE.md" ]; then
+            cp ../artifacts/windows/Release/LICENSE.md ./LICENSE.md
+            echo "✅ LICENSE.md placed at repo root"
+          fi
+
           # ── Windows ───────────────────────────────────────────────────────
           if [ "${{ github.event.inputs.release_windows }}" = "true" ]; then
-            # Copy from Release/ subfolder directly to flatten the MSVC output structure
-            cp -r ../artifacts/windows/Release/. windows/
-            # Strip bundled assets and replace with clean copy
-            WIN_ASSETS=$(find windows -type d -name "assets" | head -1)
+            # Copy from Release/ subfolder, excluding pgc/pgd/LICENSE files
+            rsync -a \
+              --exclude='*.pgc' \
+              --exclude='*.pgd' \
+              --exclude='LICENSE.md' \
+              --exclude='assets/' \
+              ../artifacts/windows/Release/. windows/
+            # Overlay clean assets (no wipe)
+            WIN_ASSETS=$(find ../artifacts/windows/Release -type d -name "assets" | head -1)
             if [ -n "$WIN_ASSETS" ]; then
-              place_assets "$WIN_ASSETS"
-            else
-              WIN_BIN_DIR=$(find windows -name "masquerade.exe" -printf '%h\n' | head -1)
-              place_assets "${WIN_BIN_DIR:-windows}/assets"
+              place_assets windows/assets
             fi
             echo "✅ Windows artifacts placed"
           else
@@ -683,14 +687,16 @@ jobs:
 
           # ── Linux ─────────────────────────────────────────────────────────
           if [ "${{ github.event.inputs.release_linux }}" = "true" ]; then
-            cp -r ../artifacts/linux/. linux/
+            rsync -a \
+              --exclude='assets/' \
+              ../artifacts/linux/. linux/
             place_assets linux/assets
             echo "✅ Linux artifacts placed"
           else
             echo "⏭️  Linux not selected for this release"
           fi
 
-          # ── Emscripten — only replace masquerade files, keep others ───────
+          # ── Emscripten — only replace masquerade files ────────────────────
           if [ "${{ github.event.inputs.release_emscripten }}" = "true" ]; then
             cp ../artifacts/emscripten/masquerade.data  emscripten/
             cp ../artifacts/emscripten/masquerade.html  emscripten/
@@ -710,7 +716,7 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add hosting/
+          git add hosting/ LICENSE.md
           [ "${{ github.event.inputs.release_windows }}" = "true" ]    && git add windows/
           [ "${{ github.event.inputs.release_linux }}" = "true" ]      && git add linux/
           [ "${{ github.event.inputs.release_emscripten }}" = "true" ] && git add emscripten/
