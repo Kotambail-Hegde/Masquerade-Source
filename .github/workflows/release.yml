@@ -76,11 +76,18 @@ jobs:
           git commit -m "chore: bump VERSION to ${{ github.event.inputs.version }}"
           git push origin "${{ steps.branch.outputs.name }}"
 
+      - name: Debug assets folder
+        run: |
+          echo "Working directory: $PWD"
+          echo "Assets folder contents:"
+          ls -la assets/ || echo "❌ assets/ not found at $PWD/assets"
+
       - name: Upload assets
         uses: actions/upload-artifact@v4
         with:
           name: assets
           path: assets/
+          if-no-files-found: error
 
       - name: Open PR #1 in Masquerade-Source
         env:
@@ -567,10 +574,14 @@ jobs:
 
       - name: Place artifacts
         run: |
-          # Assets — always updated
-          rm -rf assets/*
-          cp -r artifacts/assets/. assets/
-          echo "✅ Assets placed"
+          # Assets — always updated (if present in source)
+          if [ -d "artifacts/assets" ] && [ "$(ls -A artifacts/assets)" ]; then
+            rm -rf assets/*
+            cp -r artifacts/assets/. assets/
+            echo "✅ Assets placed"
+          else
+            echo "⚠️  No assets artifact found — skipping (assets/ may be empty in Masquerade-Source)"
+          fi
 
           # Hosting — always updated
           rm -rf hosting/*
