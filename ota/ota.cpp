@@ -242,6 +242,114 @@ std::string https_get(const std::string& host, const std::string& target)
 }
 
 // ==========================================================
+// Download GitHub ZIP (streaming, redirect-safe, no body
+// limit overflow)
+// ==========================================================
+inline std::string download_github_zip(const std::string& zip_url, int hops = 0)
+{
+    if (!openssl_dlls_present())
+    {
+        INFO("Skipping GitHub download: OpenSSL not available.");
+        RETURN{};
+    }
+    if (hops > 5)
+    {
+        FATAL("Too many redirects (>5). Aborting.");
+        RETURN{};
+    }
+
+    try
+    {
+        // Parse URL
+        std::regex re(R"(https?://([^/:]+)(/.*)?)");
+        std::smatch match;
+        if (!std::regex_match(zip_url, match, re))
+        {
+            FATAL("Invalid ZIP URL: %s", zip_url.c_str());
+            RETURN{};
+        }
+
+        std::string host = match[1].str();
+        std::string target = match[2].length() ? match[2].str() : "/";
+
+        net::io_context ioc;
+        ssl::context ctx(ssl::context::sslv23_client);
+        ctx.set_default_verify_paths();
+        ssl::stream<beast::tcp_stream> stream(ioc, ctx);
+
+        // Resolve and connect
+        net::ip::tcp::resolver resolver(ioc);
+        beast::get_lowest_layer(stream).connect(resolver.resolve(host, "443"));
+
+        // SSL handshake
+        stream.handshake(ssl::stream_base::client);
+
+        // Send GET request
+        http::request<http::string_body> req{ http::verb::get, target, 11 };
+        req.set(http::field::host, host);
+        req.set(http::field::user_agent, user_agent);
+        http::write(stream, req);
+
+        // Read headers only first — avoids body-limit overflow on redirect
+        beast::flat_buffer buffer;
+        http::response_parser<http::dynamic_body> parser;
+        parser.body_limit((std::numeric_limits<std::uint64_t>::max)());
+        http::read_header(stream, buffer, parser);
+
+        int status = parser.get().result_int();
+
+        // Handle redirects without touching the body
+        if (status == 301 || status == 302 || status == 307 || status == 308)
+        {
+            std::string loc(parser.get()[http::field::location]);
+            INFO("Redirect (%d) -> %s", status, loc.c_str());
+            beast::error_code ec;
+            stream.shutdown(ec);
+            RETURN download_github_zip(loc, hops + 1);
+        }
+
+        if (status != 200)
+        {
+            FATAL("GitHub download failed: HTTP %d", status);
+            RETURN{};
+        }
+
+        // Stream body in chunks directly into result string
+        std::string data;
+        beast::error_code ec;
+
+        while (!parser.is_done())
+        {
+            http::read_some(stream, buffer, parser, ec);
+
+            auto body_data = parser.get().body().data();
+            for (const auto& b : body_data)
+                data.append(static_cast<const char*>(b.data()), b.size());
+            parser.get().body().consume(beast::buffer_bytes(body_data));
+
+            if (ec)
+            {
+                if (ec == net::error::eof || ec == beast::error::timeout)
+                    break;
+                FATAL("Body read error: %s", ec.message().c_str());
+                RETURN{};
+            }
+        }
+
+        beast::error_code sec;
+        stream.shutdown(sec);
+
+        INFO("Downloaded %zu bytes from GitHub", data.size());
+        RETURN data;
+    }
+    catch (const std::exception& e)
+    {
+        FATAL("GitHub download exception: %s", e.what());
+        RETURN{};
+    }
+}
+
+// ==========================================================
 // ota_t class
 // ==========================================================
 ota_t::ota_t() {
@@ -297,93 +405,6 @@ bool ota_t::checkForUpdates(boost::property_tree::ptree& pt)
     {
         FATAL("OTA check failed: %s", e.what());
         RETURN FAILURE;
-    }
-}
-
-// ==========================================================
-// Download GitHub ZIP (with configurable body limit)
-// ==========================================================
-inline std::string download_github_zip(const std::string& zip_url)
-{
-    if (!openssl_dlls_present())
-    {
-        INFO("Skipping GitHub download: OpenSSL not available.");
-        RETURN{};
-    }
-
-    try
-    {
-        // Parse URL
-        std::regex re(R"(https://([^/]+)(/.*))");
-        std::smatch match;
-        if (!std::regex_match(zip_url, match, re))
-        {
-            FATAL("Invalid ZIP URL: %s", zip_url.c_str());
-            RETURN{};
-        }
-
-        std::string host = match[1];
-        std::string target = match[2];
-
-        net::io_context ioc;
-        ssl::context ctx(ssl::context::sslv23_client);
-        ctx.set_default_verify_paths();
-        ssl::stream<beast::tcp_stream> stream(ioc, ctx);
-
-        // Resolve host
-        net::ip::tcp::resolver resolver(ioc);
-        auto const results = resolver.resolve(host, "https");
-        beast::get_lowest_layer(stream).connect(results);
-
-        // SSL handshake
-        stream.handshake(ssl::stream_base::client);
-
-        // Send GET request
-        http::request<http::string_body> req{ http::verb::get, target, 11 };
-        req.set(http::field::host, host);
-        req.set(http::field::user_agent, user_agent);
-        req.set(http::field::accept, "application/vnd.github.v3+json");
-
-        http::write(stream, req);
-
-        // Receive response with NO BODY SIZE LIMIT
-        beast::flat_buffer buffer;
-        http::response<http::dynamic_body> res;
-
-        // Create parser with unlimited body size
-        http::response_parser<http::dynamic_body> parser;
-        parser.body_limit((std::numeric_limits<std::uint64_t>::max)()); // Remove size limit
-
-        http::read(stream, buffer, parser);
-        res = parser.get();
-
-        // Handle redirect
-        if (res.result_int() == 302 || res.result_int() == 301)
-        {
-            std::string loc(res[http::field::location]);
-            INFO("Redirecting to: %s", loc.c_str());
-            stream.shutdown();
-            RETURN download_github_zip(loc); // recursive
-        }
-
-        if (res.result() != http::status::ok)
-        {
-            FATAL("GitHub download failed: HTTP %d", res.result_int());
-            RETURN{};
-        }
-
-        // Extract body
-        auto body = res.body();
-        std::string data(beast::buffers_to_string(body.data()));
-        INFO("Downloaded %zu bytes from GitHub", data.size());
-
-        stream.shutdown();
-        RETURN data;
-    }
-    catch (const std::exception& e)
-    {
-        FATAL("GitHub download exception: %s", e.what());
-        RETURN{};
     }
 }
 
