@@ -729,3 +729,54 @@ jobs:
             --subject "Release $VERSION: bump VERSION macro" \
             --body "Auto-merged by release workflow after all builds passed and Emulator PR was created."
           echo "✅ Source PR #$PR_NUMBER merged"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CLEANUP  —  runs only if any job failed or was cancelled
+# Closes the Source bump-version PR and deletes the release branch so there
+# is no leftover noise from a failed release attempt.
+# ─────────────────────────────────────────────────────────────────────────────
+  cleanup_on_failure:
+    name: Cleanup Source PR and branch on failure
+    needs: [bump_version, build_windows, build_linux, build_emscripten, release]
+    if: failure() || cancelled()
+    runs-on: ubuntu-latest
+    env:
+      BRANCH: release/${{ github.event.inputs.version }}
+
+    steps:
+      - name: Close Source PR
+        env:
+          GH_TOKEN: ${{ secrets.EMULATOR_REPO_PAT }}
+        run: |
+          PR_NUMBER=$(gh pr list \
+            --repo "Kotambail-Hegde/Masquerade-Source" \
+            --head "$BRANCH" \
+            --state open \
+            --json number \
+            --jq '.[0].number')
+
+          if [ -n "$PR_NUMBER" ] && [ "$PR_NUMBER" != "null" ]; then
+            gh pr close "$PR_NUMBER" \
+              --repo "Kotambail-Hegde/Masquerade-Source" \
+              --comment "❌ Auto-closed: release workflow failed or was cancelled. Branch \`$BRANCH\` will also be deleted."
+            echo "✅ Source PR #$PR_NUMBER closed"
+          else
+            echo "ℹ️  No open Source PR found for $BRANCH — nothing to close"
+          fi
+
+      - name: Delete Source release branch
+        env:
+          GH_TOKEN: ${{ secrets.EMULATOR_REPO_PAT }}
+        run: |
+          if gh api \
+            -H "Accept: application/vnd.github+json" \
+            /repos/Kotambail-Hegde/Masquerade-Source/git/ref/heads/$BRANCH \
+            > /dev/null 2>&1; then
+            gh api \
+              --method DELETE \
+              -H "Accept: application/vnd.github+json" \
+              /repos/Kotambail-Hegde/Masquerade-Source/git/refs/heads/$BRANCH
+            echo "✅ Branch $BRANCH deleted from Masquerade-Source"
+          else
+            echo "ℹ️  Branch $BRANCH not found — nothing to delete"
+          fi
