@@ -1,6 +1,6 @@
 # Masquerade Emulator
 
-© 2017–2025 Saurabh S. Hegde  
+© 2017–2026 Saurabh S. Hegde  
 Homepage: https://github.com/Kotambail-Hegde/Masquerade-Emulator
 
 ---
@@ -36,7 +36,7 @@ However, this project uses several open-source libraries, each of which is gover
 ```
 The MIT License (MIT)
 
-Copyright (c) 2014-2025 Omar Cornut
+Copyright (c) 2014-2026 Omar Cornut
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
