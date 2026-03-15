@@ -657,22 +657,22 @@ jobs:
             echo "✅ Clean assets placed into $DEST"
           }
 
-          # ── Hosting — always updated (no assets) ─────────────────────────
-          rm -rf hosting/*
-          cp -r ../artifacts/emscripten/. hosting/
+          # ── Hosting — always updated (only replace masquerade files, keep index.html etc.) ──
+          cp ../artifacts/emscripten/masquerade.data  hosting/
+          cp ../artifacts/emscripten/masquerade.html  hosting/
+          cp ../artifacts/emscripten/masquerade.js    hosting/
+          cp ../artifacts/emscripten/masquerade.wasm  hosting/
           echo "✅ Hosting placed"
 
           # ── Windows ───────────────────────────────────────────────────────
           if [ "${{ github.event.inputs.release_windows }}" = "true" ]; then
-            rm -rf windows/*
+            # Copy all build output files directly — no wiping, preserves existing files
             cp -r ../artifacts/windows/. windows/
-            # Windows build output lands in a Release/ subfolder
-            # Find the assets folder inside it and replace with clean copy
+            # Strip bundled assets and replace with clean copy
             WIN_ASSETS=$(find windows -type d -name "assets" | head -1)
             if [ -n "$WIN_ASSETS" ]; then
               place_assets "$WIN_ASSETS"
             else
-              # No bundled assets folder found — create one alongside the binary
               WIN_BIN_DIR=$(find windows -name "masquerade.exe" -printf '%h\n' | head -1)
               place_assets "${WIN_BIN_DIR:-windows}/assets"
             fi
@@ -683,20 +683,20 @@ jobs:
 
           # ── Linux ─────────────────────────────────────────────────────────
           if [ "${{ github.event.inputs.release_linux }}" = "true" ]; then
-            rm -rf linux/*
             cp -r ../artifacts/linux/. linux/
-            # Linux build output has assets/ alongside the binary at root level
             place_assets linux/assets
             echo "✅ Linux artifacts placed"
           else
             echo "⏭️  Linux not selected for this release"
           fi
 
-          # ── Emscripten — no assets (web build is self-contained) ──────────
+          # ── Emscripten — only replace masquerade files, keep others ───────
           if [ "${{ github.event.inputs.release_emscripten }}" = "true" ]; then
-            rm -rf emscripten/*
-            cp -r ../artifacts/emscripten/. emscripten/
-            echo "✅ Emscripten artifacts placed (no assets)"
+            cp ../artifacts/emscripten/masquerade.data  emscripten/
+            cp ../artifacts/emscripten/masquerade.html  emscripten/
+            cp ../artifacts/emscripten/masquerade.js    emscripten/
+            cp ../artifacts/emscripten/masquerade.wasm  emscripten/
+            echo "✅ Emscripten artifacts placed"
           else
             echo "⏭️  Emscripten not selected for this release"
           fi
