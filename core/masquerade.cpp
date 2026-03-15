@@ -3175,7 +3175,7 @@ public:
 										ImGui::SameLine();
 										ImGui::TextLinkOpenURL("Releases", "https://github.com/Kotambail-Hegde/Masquerade-Emulator/releases");
 										ImGui::Separator();
-										ImGui::Text("(c) 2017-2025 Saurabh S Hegde");
+										ImGui::Text("(c) 2017-2026 Saurabh S Hegde");
 										ImGui::Text("For licensing, refer to");
 										ImGui::SameLine();
 										ImGui::TextLinkOpenURL("License", "https://github.com/Kotambail-Hegde/Masquerade-Emulator/blob/main/LICENSE.md");
