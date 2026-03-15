@@ -1,21 +1,19 @@
 name: Update Submodule in Masquerade-Emulator
 
 on:
-  # Auto-fires when Source PR is merged to master (helpers.h changed)
-  # This is the release flow path — release branch already exists in Emulator
-  push:
-    branches:
-      - master
-    paths:
-      - 'helpers/helpers.h'
-
-  # Standalone manual trigger — always creates a new branch + PR
+  # Triggered explicitly by release.yml after Source PR is auto-merged,
+  # or manually for standalone submodule updates.
   workflow_dispatch:
     inputs:
       version:
         description: 'Version to update submodule for (e.g. 0.7009). Leave empty to auto-detect from helpers.h'
         required: false
         type: string
+      triggered_by_release:
+        description: 'Set to true when triggered by release.yml (uses release branch, sets status)'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -36,23 +34,8 @@ jobs:
           token: ${{ secrets.EMULATOR_REPO_PAT }}
           fetch-depth: 0
 
-      # Guard: skip entirely if this push was triggered by a revert commit.
-      # Without this, cleanup_on_failure's revert touches helpers.h → re-triggers
-      # this workflow → fails → triggers another revert → infinite loop.
-      - name: Skip if triggered by a revert commit
-        if: github.event_name == 'push'
-        run: |
-          COMMIT_MSG=$(git log -1 --format=%s)
-          echo "Last commit: $COMMIT_MSG"
-          if echo "$COMMIT_MSG" | grep -qi "^revert"; then
-            echo "⏭️  Revert commit detected — skipping to avoid recursive trigger"
-            echo "SKIP=true" >> $GITHUB_ENV
-          else
-            echo "SKIP=false" >> $GITHUB_ENV
-          fi
-
       - name: Resolve version
-        if: env.SKIP != 'true'
+
         id: version
         run: |
           if [ -n "${{ github.event.inputs.version }}" ]; then
@@ -65,13 +48,13 @@ jobs:
           echo "value=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Capture Source master HEAD SHA
-        if: env.SKIP != 'true'
+
         id: source
         run: echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
 
       # ── Checkout Masquerade-Emulator ──────────────────────────────────────
       - name: Checkout Masquerade-Emulator
-        if: env.SKIP != 'true'
+
         uses: actions/checkout@v4
         with:
           repository: ${{ env.EMULATOR_REPO }}
@@ -80,9 +63,9 @@ jobs:
           submodules: recursive
           path: emulator-repo
 
-      # ── RELEASE FLOW PATH (push to master) ────────────────────────────────
+      # ── RELEASE FLOW PATH ─────────────────────────────────────────────────
       - name: '[Release flow] Checkout existing release branch and update submodule'
-        if: env.SKIP != 'true' && github.event_name == 'push'
+        if: github.event.inputs.triggered_by_release == 'true'
         working-directory: emulator-repo
         run: |
           BRANCH="release/${{ steps.version.outputs.value }}"
@@ -109,7 +92,7 @@ jobs:
           echo "✅ Submodule updated on $BRANCH"
 
       - name: '[Release flow] Set SUCCESS status to unblock Emulator PR'
-        if: env.SKIP != 'true' && github.event_name == 'push'
+        if: github.event.inputs.triggered_by_release == 'true'
         run: |
           EMULATOR_SHA=$(cd emulator-repo && git rev-parse HEAD)
           curl -s -X POST \
@@ -125,7 +108,7 @@ jobs:
 
       # ── STANDALONE PATH (workflow_dispatch) ───────────────────────────────
       - name: '[Standalone] Create new branch and update submodule'
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event.inputs.triggered_by_release != 'true'
         working-directory: emulator-repo
         run: |
           BRANCH="submodule-update/${{ steps.version.outputs.value }}-$(date +%Y%m%d%H%M%S)"
@@ -147,7 +130,7 @@ jobs:
           echo "✅ Submodule update pushed to $BRANCH"
 
       - name: '[Standalone] Open PR in Masquerade-Emulator'
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event.inputs.triggered_by_release != 'true'
         env:
           GH_TOKEN: ${{ secrets.EMULATOR_REPO_PAT }}
         run: |
@@ -176,7 +159,7 @@ jobs:
   cleanup_on_failure:
     name: Revert Source bump and clean Emulator on failure
     needs: update_submodule
-    if: failure() && github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'Revert')
+    if: failure() && github.event.inputs.triggered_by_release == 'true'
     runs-on: ubuntu-latest
     env:
       EMULATOR_REPO: Kotambail-Hegde/Masquerade-Emulator

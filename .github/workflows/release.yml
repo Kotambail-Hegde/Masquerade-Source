@@ -784,6 +784,16 @@ jobs:
             /repos/Kotambail-Hegde/Masquerade-Source/git/refs/heads/$BRANCH
           echo "✅ Source branch $BRANCH deleted"
 
+      - name: Trigger update-submodule workflow
+        env:
+          GH_TOKEN: ${{ secrets.EMULATOR_REPO_PAT }}
+        run: |
+          gh workflow run update-submodule.yml \
+            --repo "Kotambail-Hegde/Masquerade-Source" \
+            --field version=$VERSION \
+            --field triggered_by_release=true
+          echo "✅ update-submodule.yml triggered for $VERSION"
+
 # ─────────────────────────────────────────────────────────────────────────────
 # CLEANUP  —  runs only if any job failed or was cancelled
 # Closes the Source bump-version PR and deletes the release branch so there
