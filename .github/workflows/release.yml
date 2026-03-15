@@ -14,11 +14,45 @@ permissions:
   id-token: write
 
 # ─────────────────────────────────────────────────────────────────────────────
-# WINDOWS BUILD
+# BUMP VERSION  —  patches helpers/helpers.h before any build starts
 # ─────────────────────────────────────────────────────────────────────────────
 jobs:
+  bump_version:
+    name: Bump VERSION macro in helpers.h
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Masquerade-Source
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.EMULATOR_REPO_PAT }}
+          fetch-depth: 0
+
+      - name: Update VERSION macro
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          FILE="helpers/helpers.h"
+
+          # Replace the existing VERSION macro value with the new one.
+          # Handles any float already there, e.g. 0.7008 → 0.7009
+          sed -i "s|#define VERSION\s\+static_cast<float>([0-9.]\+)|#define VERSION                                     static_cast<float>(${VERSION})|" "$FILE"
+
+          echo "--- Updated line ---"
+          grep "define VERSION" "$FILE"
+
+      - name: Commit and push updated helpers.h
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add helpers/helpers.h
+          git commit -m "chore: bump VERSION to ${{ github.event.inputs.version }}"
+          git push origin master
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WINDOWS BUILD
+# ─────────────────────────────────────────────────────────────────────────────
   build_windows:
     name: Build Windows (MSVC)
+    needs: bump_version
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -169,6 +203,7 @@ jobs:
 # ─────────────────────────────────────────────────────────────────────────────
   build_linux:
     name: Build Linux (Ninja)
+    needs: bump_version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -287,6 +322,7 @@ jobs:
 # ─────────────────────────────────────────────────────────────────────────────
   build_emscripten:
     name: Build Emscripten (Web)
+    needs: bump_version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
