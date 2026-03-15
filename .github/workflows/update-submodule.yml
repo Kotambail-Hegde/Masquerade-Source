@@ -43,7 +43,7 @@ jobs:
             VERSION="${{ github.event.inputs.version }}"
             echo "Using manually provided version: $VERSION"
           else
-            VERSION=$(grep -oP '(?<=#define VERSION\s{0,50}static_cast<float>\()[0-9.]+' helpers/helpers.h)
+            VERSION=$(sed -n 's/.*#define VERSION[[:space:]]*static_cast<float>(\([0-9.]*\)).*/\1/p' helpers/helpers.h)
             echo "Auto-detected version from helpers.h: $VERSION"
           fi
           echo "value=$VERSION" >> $GITHUB_OUTPUT
