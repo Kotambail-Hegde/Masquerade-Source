@@ -114,7 +114,6 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         working-directory: emulator-repo
         run: |
-          # Use a unique branch name with timestamp to avoid collisions
           BRANCH="submodule-update/${{ steps.version.outputs.value }}-$(date +%Y%m%d%H%M%S)"
           echo "STANDALONE_BRANCH=$BRANCH" >> $GITHUB_ENV
 
@@ -151,3 +150,101 @@ jobs:
             --base main \
             --head "${{ env.STANDALONE_BRANCH }}"
           echo "✅ PR opened"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CLEANUP ON FAILURE  —  release flow only (push trigger)
+# If submodule update fails after the Source bump was already merged:
+#   1. Revert the version bump commit on Source master
+#   2. Delete the Emulator release branch
+#   3. Delete the Emulator tag (if created)
+#   4. Delete the Source tag (if created)
+# This leaves both repos clean so the release can be re-triggered.
+# ─────────────────────────────────────────────────────────────────────────────
+  cleanup_on_failure:
+    name: Revert Source bump and clean Emulator on failure
+    needs: update_submodule
+    if: failure() && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    env:
+      EMULATOR_REPO: Kotambail-Hegde/Masquerade-Emulator
+
+    steps:
+      - name: Checkout Masquerade-Source master
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.EMULATOR_REPO_PAT }}
+          fetch-depth: 0
+
+      - name: Resolve version from helpers.h
+        id: version
+        run: |
+          VERSION=$(sed -n 's/.*#define VERSION[[:space:]]*static_cast<float>(\([0-9.]*\)).*/\1/p' helpers/helpers.h)
+          echo "value=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version to revert: $VERSION"
+
+      - name: Revert version bump commit on Source master
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Find the most recent commit that touched helpers.h
+          BUMP_SHA=$(git log --oneline --diff-filter=M -- helpers/helpers.h | head -1 | awk '{print $1}')
+          echo "Reverting commit: $BUMP_SHA"
+
+          git revert --no-edit "$BUMP_SHA"
+          git push origin master
+          echo "✅ Version bump reverted on Source master"
+
+      - name: Delete Emulator release branch
+        env:
+          GH_TOKEN: ${{ secrets.EMULATOR_REPO_PAT }}
+        run: |
+          BRANCH="release/${{ steps.version.outputs.value }}"
+          if gh api \
+            -H "Accept: application/vnd.github+json" \
+            /repos/${{ env.EMULATOR_REPO }}/git/ref/heads/$BRANCH \
+            > /dev/null 2>&1; then
+            gh api \
+              --method DELETE \
+              -H "Accept: application/vnd.github+json" \
+              /repos/${{ env.EMULATOR_REPO }}/git/refs/heads/$BRANCH
+            echo "✅ Emulator branch $BRANCH deleted"
+          else
+            echo "ℹ️  Emulator branch $BRANCH not found — skipping"
+          fi
+
+      - name: Delete Emulator tag
+        env:
+          GH_TOKEN: ${{ secrets.EMULATOR_REPO_PAT }}
+        run: |
+          TAG="${{ steps.version.outputs.value }}"
+          if gh api \
+            -H "Accept: application/vnd.github+json" \
+            /repos/${{ env.EMULATOR_REPO }}/git/ref/tags/$TAG \
+            > /dev/null 2>&1; then
+            gh api \
+              --method DELETE \
+              -H "Accept: application/vnd.github+json" \
+              /repos/${{ env.EMULATOR_REPO }}/git/refs/tags/$TAG
+            echo "✅ Emulator tag $TAG deleted"
+          else
+            echo "ℹ️  Emulator tag $TAG not found — skipping"
+          fi
+
+      - name: Delete Source tag
+        env:
+          GH_TOKEN: ${{ secrets.EMULATOR_REPO_PAT }}
+        run: |
+          TAG="${{ steps.version.outputs.value }}"
+          if gh api \
+            -H "Accept: application/vnd.github+json" \
+            /repos/Kotambail-Hegde/Masquerade-Source/git/ref/tags/$TAG \
+            > /dev/null 2>&1; then
+            gh api \
+              --method DELETE \
+              -H "Accept: application/vnd.github+json" \
+              /repos/Kotambail-Hegde/Masquerade-Source/git/refs/tags/$TAG
+            echo "✅ Source tag $TAG deleted"
+          else
+            echo "ℹ️  Source tag $TAG not found — skipping"
+          fi
