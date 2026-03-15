@@ -80,7 +80,9 @@ jobs:
           echo "✅ Checked out $BRANCH"
 
           cd src
-          git fetch origin
+          # Fetch the specific commit SHA explicitly — a plain 'git fetch origin'
+          # only fetches branch tips and may not include the exact SHA we need
+          git fetch origin ${{ steps.source.outputs.sha }}
           git checkout ${{ steps.source.outputs.sha }}
           cd ..
 
@@ -118,7 +120,7 @@ jobs:
           echo "✅ Created branch $BRANCH"
 
           cd src
-          git fetch origin
+          git fetch origin ${{ steps.source.outputs.sha }}
           git checkout ${{ steps.source.outputs.sha }}
           cd ..
 
