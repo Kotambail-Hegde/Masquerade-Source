@@ -7,6 +7,26 @@ on:
         description: 'Release version (e.g. 0.7009)'
         required: true
         type: string
+      release_windows:
+        description: 'Include Windows in Emulator PR'
+        required: false
+        type: boolean
+        default: true
+      release_linux:
+        description: 'Include Linux in Emulator PR'
+        required: false
+        type: boolean
+        default: true
+      release_emscripten:
+        description: 'Include Emscripten in Emulator PR'
+        required: false
+        type: boolean
+        default: true
+      release_macos:
+        description: 'Include macOS in Emulator PR (not yet supported — keep unchecked)'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -14,12 +34,17 @@ permissions:
   id-token: write
 
 # ─────────────────────────────────────────────────────────────────────────────
-# BUMP VERSION  —  patches helpers/helpers.h before any build starts
+# BUMP VERSION
+# Creates branch release/<version> in Masquerade-Source, patches helpers.h,
+# and opens PR #1. All build jobs check out this branch — NOT master.
 # ─────────────────────────────────────────────────────────────────────────────
 jobs:
   bump_version:
     name: Bump VERSION macro in helpers.h
     runs-on: ubuntu-latest
+    outputs:
+      source_branch: ${{ steps.branch.outputs.name }}
+
     steps:
       - name: Checkout Masquerade-Source
         uses: actions/checkout@v4
@@ -27,28 +52,61 @@ jobs:
           token: ${{ secrets.EMULATOR_REPO_PAT }}
           fetch-depth: 0
 
+      - name: Compute branch name
+        id: branch
+        run: echo "name=release/${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+
+      - name: Create release branch
+        run: git checkout -b "${{ steps.branch.outputs.name }}"
+
       - name: Update VERSION macro
         run: |
           VERSION="${{ github.event.inputs.version }}"
           FILE="helpers/helpers.h"
-
-          # Replace the existing VERSION macro value with the new one.
-          # Handles any float already there, e.g. 0.7008 → 0.7009
           sed -i "s|#define VERSION\s\+static_cast<float>([0-9.]\+)|#define VERSION                                     static_cast<float>(${VERSION})|" "$FILE"
-
           echo "--- Updated line ---"
           grep "define VERSION" "$FILE"
 
-      - name: Commit and push updated helpers.h
+      - name: Commit and push release branch
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add helpers/helpers.h
           git commit -m "chore: bump VERSION to ${{ github.event.inputs.version }}"
-          git push origin master
+          git push origin "${{ steps.branch.outputs.name }}"
+
+      - name: Upload assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: assets
+          path: assets/
+
+      - name: Open PR #1 in Masquerade-Source
+        env:
+          GH_TOKEN: ${{ secrets.EMULATOR_REPO_PAT }}
+        run: |
+          gh pr create \
+            --repo "Kotambail-Hegde/Masquerade-Source" \
+            --title "Release ${{ github.event.inputs.version }}: bump VERSION macro" \
+            --body "## Version bump: \`${{ github.event.inputs.version }}\`
+
+          Updates \`helpers/helpers.h\`:
+          \`\`\`cpp
+          #define VERSION    static_cast<float>(${{ github.event.inputs.version }})
+          \`\`\`
+
+          All three platforms (Windows, Linux, Emscripten) are building against this branch.
+
+          ### ⚠️ Merge checklist
+          - [ ] All three platform builds passed
+          - [ ] Masquerade-Emulator PR \`release/${{ github.event.inputs.version }}\` is also reviewed and ready
+
+          _Auto-created by the release workflow triggered by @${{ github.actor }}_" \
+            --base master \
+            --head "${{ steps.branch.outputs.name }}"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# WINDOWS BUILD
+# WINDOWS BUILD  — always runs
 # ─────────────────────────────────────────────────────────────────────────────
   build_windows:
     name: Build Windows (MSVC)
@@ -57,6 +115,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.bump_version.outputs.source_branch }}
           submodules: recursive
 
       - name: Export git commit hash
@@ -89,7 +148,6 @@ jobs:
           if (-not (Test-Path "imgui")) {
               git clone https://github.com/ocornut/imgui.git --branch docking --depth 1
           }
-
           if (-not (Test-Path "miniz")) {
               $url = "https://github.com/richgel999/miniz/releases/download/3.0.2/miniz-3.0.2.zip"
               $zip = "miniz-3.0.2.zip"
@@ -101,23 +159,18 @@ jobs:
               Move-Item -Path $tmpDir -Destination "miniz"
               Remove-Item -Path $zip -Force
           }
-
           if (-not (Test-Path "stb/stb")) {
               git clone https://github.com/nothings/stb.git --depth 1 stb/stb
           }
-
           if (-not (Test-Path "rapidjson")) {
               git clone https://github.com/Tencent/rapidjson.git --depth 1 rapidjson
           }
-
           if (-not (Test-Path "SDL")) {
               git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL
           }
-
           if (-not (Test-Path "nativefiledialog-extended")) {
               git clone https://github.com/btzy/nativefiledialog-extended.git --depth 1 --recurse-submodules --shallow-submodules
           }
-
           if (-not (Test-Path "boost")) {
               $boostZip = "boost_1_84_0.zip"
               $boostUrl = "https://archives.boost.io/release/1.84.0/source/boost_1_84_0.zip"
@@ -165,13 +218,13 @@ jobs:
       - name: Set dependency paths
         shell: pwsh
         run: |
-          echo "IMGUI_ROOT=$env:GITHUB_WORKSPACE\external\imgui" >> $env:GITHUB_ENV
-          echo "MINIZ_ROOT=$env:GITHUB_WORKSPACE\external\miniz" >> $env:GITHUB_ENV
-          echo "STB_ROOT=$env:GITHUB_WORKSPACE\external\stb" >> $env:GITHUB_ENV
-          echo "RAPID_JSON_ROOT=$env:GITHUB_WORKSPACE\external\rapidjson" >> $env:GITHUB_ENV
-          echo "BOOST_ROOT=$env:GITHUB_WORKSPACE\external\boost" >> $env:GITHUB_ENV
-          echo "SDL3_ROOT=$env:GITHUB_WORKSPACE\external\SDL\build" >> $env:GITHUB_ENV
-          echo "NFD_ROOT=$env:GITHUB_WORKSPACE\external\nativefiledialog-extended" >> $env:GITHUB_ENV
+          echo "IMGUI_ROOT=$env:GITHUB_WORKSPACE\external\imgui"                       >> $env:GITHUB_ENV
+          echo "MINIZ_ROOT=$env:GITHUB_WORKSPACE\external\miniz"                       >> $env:GITHUB_ENV
+          echo "STB_ROOT=$env:GITHUB_WORKSPACE\external\stb"                           >> $env:GITHUB_ENV
+          echo "RAPID_JSON_ROOT=$env:GITHUB_WORKSPACE\external\rapidjson"              >> $env:GITHUB_ENV
+          echo "BOOST_ROOT=$env:GITHUB_WORKSPACE\external\boost"                       >> $env:GITHUB_ENV
+          echo "SDL3_ROOT=$env:GITHUB_WORKSPACE\external\SDL\build"                    >> $env:GITHUB_ENV
+          echo "NFD_ROOT=$env:GITHUB_WORKSPACE\external\nativefiledialog-extended"     >> $env:GITHUB_ENV
 
       - name: Configure CMake
         shell: cmd
@@ -192,14 +245,14 @@ jobs:
         shell: cmd
         run: cmake --build build --config Release --parallel
 
-      - name: Upload artifacts
+      - name: Upload Windows binaries
         uses: actions/upload-artifact@v4
         with:
           name: windows-build
           path: build/bin/
 
 # ─────────────────────────────────────────────────────────────────────────────
-# LINUX BUILD
+# LINUX BUILD  — always runs
 # ─────────────────────────────────────────────────────────────────────────────
   build_linux:
     name: Build Linux (Ninja)
@@ -208,6 +261,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.bump_version.outputs.source_branch }}
           submodules: recursive
 
       - name: Export git commit hash
@@ -251,9 +305,9 @@ jobs:
             mv _miniz_extract miniz && rm -f miniz.zip
           fi
 
-          [ ! -d "stb/stb" ]           && git clone --depth 1 https://github.com/nothings/stb.git stb/stb
-          [ ! -d "rapidjson" ]          && git clone --depth 1 https://github.com/Tencent/rapidjson.git rapidjson
-          [ ! -d "SDL" ]                && git clone --depth 1 https://github.com/libsdl-org/SDL.git SDL
+          [ ! -d "stb/stb" ]    && git clone --depth 1 https://github.com/nothings/stb.git stb/stb
+          [ ! -d "rapidjson" ]  && git clone --depth 1 https://github.com/Tencent/rapidjson.git rapidjson
+          [ ! -d "SDL" ]        && git clone --depth 1 https://github.com/libsdl-org/SDL.git SDL
 
           if [ ! -d "boost" ]; then
             git clone https://github.com/boostorg/boost.git --branch boost-1.84.0 --depth 1
@@ -286,13 +340,13 @@ jobs:
 
       - name: Set dependency paths
         run: |
-          echo "IMGUI_ROOT=$GITHUB_WORKSPACE/external/imgui"                          >> $GITHUB_ENV
-          echo "MINIZ_ROOT=$GITHUB_WORKSPACE/external/miniz"                          >> $GITHUB_ENV
-          echo "STB_ROOT=$GITHUB_WORKSPACE/external/stb"                              >> $GITHUB_ENV
-          echo "RAPID_JSON_ROOT=$GITHUB_WORKSPACE/external/rapidjson"                 >> $GITHUB_ENV
-          echo "BOOST_ROOT=$GITHUB_WORKSPACE/external/boost"                          >> $GITHUB_ENV
-          echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL/build"                       >> $GITHUB_ENV
-          echo "NFD_ROOT=$GITHUB_WORKSPACE/external/nativefiledialog-extended"        >> $GITHUB_ENV
+          echo "IMGUI_ROOT=$GITHUB_WORKSPACE/external/imgui"                       >> $GITHUB_ENV
+          echo "MINIZ_ROOT=$GITHUB_WORKSPACE/external/miniz"                       >> $GITHUB_ENV
+          echo "STB_ROOT=$GITHUB_WORKSPACE/external/stb"                           >> $GITHUB_ENV
+          echo "RAPID_JSON_ROOT=$GITHUB_WORKSPACE/external/rapidjson"              >> $GITHUB_ENV
+          echo "BOOST_ROOT=$GITHUB_WORKSPACE/external/boost"                       >> $GITHUB_ENV
+          echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL/build"                    >> $GITHUB_ENV
+          echo "NFD_ROOT=$GITHUB_WORKSPACE/external/nativefiledialog-extended"     >> $GITHUB_ENV
 
       - name: Configure CMake
         run: |
@@ -311,14 +365,14 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel $(nproc)
 
-      - name: Upload artifacts
+      - name: Upload Linux binaries
         uses: actions/upload-artifact@v4
         with:
           name: linux-build
           path: build/bin/
 
 # ─────────────────────────────────────────────────────────────────────────────
-# EMSCRIPTEN BUILD
+# EMSCRIPTEN BUILD  — always runs
 # ─────────────────────────────────────────────────────────────────────────────
   build_emscripten:
     name: Build Emscripten (Web)
@@ -327,6 +381,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.bump_version.outputs.source_branch }}
           submodules: recursive
 
       - name: Export git commit hash
@@ -377,9 +432,9 @@ jobs:
             mv _miniz_extract miniz && rm -f miniz.zip
           fi
 
-          [ ! -d "stb/stb" ]    && git clone --depth 1 https://github.com/nothings/stb.git stb/stb
-          [ ! -d "rapidjson" ]  && git clone --depth 1 https://github.com/Tencent/rapidjson.git rapidjson
-          [ ! -d "SDL" ]        && git clone --depth 1 https://github.com/libsdl-org/SDL.git SDL
+          [ ! -d "stb/stb" ]   && git clone --depth 1 https://github.com/nothings/stb.git stb/stb
+          [ ! -d "rapidjson" ] && git clone --depth 1 https://github.com/Tencent/rapidjson.git rapidjson
+          [ ! -d "SDL" ]       && git clone --depth 1 https://github.com/libsdl-org/SDL.git SDL
 
           if [ ! -d "emscripten-browser-file" ]; then
             git clone https://github.com/Armchair-Software/emscripten-browser-file.git --depth 1
@@ -387,13 +442,13 @@ jobs:
 
       - name: Set dependency paths
         run: |
-          echo "IMGUI_ROOT=$GITHUB_WORKSPACE/external/imgui"                          >> $GITHUB_ENV
-          echo "MINIZ_ROOT=$GITHUB_WORKSPACE/external/miniz"                          >> $GITHUB_ENV
-          echo "STB_ROOT=$GITHUB_WORKSPACE/external/stb"                              >> $GITHUB_ENV
-          echo "RAPID_JSON_ROOT=$GITHUB_WORKSPACE/external/rapidjson"                 >> $GITHUB_ENV
-          echo "EFB_ROOT=$GITHUB_WORKSPACE/external/emscripten-browser-file"          >> $GITHUB_ENV
-          echo "BOOST_ROOT=$GITHUB_WORKSPACE/external/boost"                          >> $GITHUB_ENV
-          echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL-install/emscripten"          >> $GITHUB_ENV
+          echo "IMGUI_ROOT=$GITHUB_WORKSPACE/external/imgui"                       >> $GITHUB_ENV
+          echo "MINIZ_ROOT=$GITHUB_WORKSPACE/external/miniz"                       >> $GITHUB_ENV
+          echo "STB_ROOT=$GITHUB_WORKSPACE/external/stb"                           >> $GITHUB_ENV
+          echo "RAPID_JSON_ROOT=$GITHUB_WORKSPACE/external/rapidjson"              >> $GITHUB_ENV
+          echo "EFB_ROOT=$GITHUB_WORKSPACE/external/emscripten-browser-file"       >> $GITHUB_ENV
+          echo "BOOST_ROOT=$GITHUB_WORKSPACE/external/boost"                       >> $GITHUB_ENV
+          echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL-install/emscripten"       >> $GITHUB_ENV
 
       - name: Setup Emscripten
         uses: mymindstorm/setup-emsdk@v14
@@ -449,26 +504,28 @@ jobs:
           cp build/bin/masquerade.js    pages/
           cp build/bin/masquerade.wasm  pages/
 
-      - name: Upload artifacts
+      - name: Upload Emscripten artifacts
         uses: actions/upload-artifact@v4
         with:
           name: emscripten-build
           path: pages/
 
 # ─────────────────────────────────────────────────────────────────────────────
-# RELEASE  —  only runs when all three builds succeed
+# RELEASE  —  only runs when ALL THREE builds pass
+# Copies only the selected platform folders into Masquerade-Emulator.
+# Assets are always copied regardless of selection.
 # ─────────────────────────────────────────────────────────────────────────────
   release:
     name: Create Release PR in Masquerade-Emulator
     needs: [build_windows, build_linux, build_emscripten]
     runs-on: ubuntu-latest
     env:
-      VERSION:      ${{ github.event.inputs.version }}
+      VERSION:       ${{ github.event.inputs.version }}
       EMULATOR_REPO: Kotambail-Hegde/Masquerade-Emulator
-      BRANCH:       release/${{ github.event.inputs.version }}
+      BRANCH:        release/${{ github.event.inputs.version }}
 
     steps:
-      # ── Download all build artifacts ──────────────────────────────────────
+      # ── Download all artifacts (builds always ran for all 3) ──────────────
       - name: Download Windows artifacts
         uses: actions/download-artifact@v4
         with:
@@ -487,85 +544,121 @@ jobs:
           name: emscripten-build
           path: artifacts/emscripten
 
-      # ── Checkout Masquerade-Emulator via PAT ──────────────────────────────
+      - name: Download assets
+        uses: actions/download-artifact@v4
+        with:
+          name: assets
+          path: artifacts/assets
+
+      # ── Checkout Masquerade-Emulator ──────────────────────────────────────
       - name: Checkout Masquerade-Emulator
         uses: actions/checkout@v4
         with:
           repository: ${{ env.EMULATOR_REPO }}
           token: ${{ secrets.EMULATOR_REPO_PAT }}
-          fetch-depth: 0          # full history so we can branch from main
+          fetch-depth: 0
 
-      # ── Create release branch ─────────────────────────────────────────────
       - name: Create release branch
-        run: |
-          git checkout -b "$BRANCH"
+        run: git checkout -b "$BRANCH"
 
-      # ── Copy artifacts into the right folders ─────────────────────────────
+      # ── Copy assets + hosting (always) + selected platform folders ──────
       - name: Place artifacts
         run: |
-          # Windows binaries → /windows
-          rm -rf windows/*
-          cp -r artifacts/windows/. windows/
+          # Assets — always updated
+          rm -rf assets/*
+          cp -r artifacts/assets/. assets/
+          echo "✅ Assets placed"
 
-          # Linux binaries → /linux
-          rm -rf linux/*
-          cp -r artifacts/linux/. linux/
-
-          # Emscripten WASM artifacts → /emscripten
-          rm -rf emscripten/*
-          cp -r artifacts/emscripten/. emscripten/
-
-          # Web hosting files (same content) → /hosting
-          # This is what GitHub Pages serves from Masquerade-Emulator
+          # Hosting — always updated (serves the web version)
           rm -rf hosting/*
           cp -r artifacts/emscripten/. hosting/
+          echo "✅ Hosting placed"
+
+          # Windows — only if selected
+          if [ "${{ github.event.inputs.release_windows }}" = "true" ]; then
+            rm -rf windows/*
+            cp -r artifacts/windows/. windows/
+            echo "✅ Windows artifacts placed"
+          else
+            echo "⏭️  Windows not selected for this release"
+          fi
+
+          # Linux — only if selected
+          if [ "${{ github.event.inputs.release_linux }}" = "true" ]; then
+            rm -rf linux/*
+            cp -r artifacts/linux/. linux/
+            echo "✅ Linux artifacts placed"
+          else
+            echo "⏭️  Linux not selected for this release"
+          fi
+
+          # Emscripten — only if selected
+          if [ "${{ github.event.inputs.release_emscripten }}" = "true" ]; then
+            rm -rf emscripten/*
+            cp -r artifacts/emscripten/. emscripten/
+            echo "✅ Emscripten artifacts placed"
+          else
+            echo "⏭️  Emscripten not selected for this release"
+          fi
+
+          # macOS — not yet supported
+          echo "⏭️  macOS not yet supported"
 
       # ── Commit and push ───────────────────────────────────────────────────
-      - name: Commit artifacts
+      - name: Commit and push
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add windows/ linux/ emscripten/ hosting/
+          git add assets/ windows/ linux/ emscripten/ hosting/
           git commit -m "release: $VERSION
 
-          Built from Masquerade-Source @ ${{ github.sha }}
-          Triggered by: ${{ github.actor }}"
+          Platforms included: windows=${{ github.event.inputs.release_windows }} linux=${{ github.event.inputs.release_linux }} emscripten=${{ github.event.inputs.release_emscripten }}
+          assets/ and hosting/ always updated.
+          All 3 platforms built and passed. Source @ ${{ github.sha }} — triggered by: ${{ github.actor }}"
+          git push origin "$BRANCH"
 
-      - name: Push release branch
-        run: git push origin "$BRANCH"
-
-      # ── Create tag on the release commit ─────────────────────────────────
+      # ── Create tag ────────────────────────────────────────────────────────
       - name: Create tag
         run: |
           git tag "$VERSION"
           git push origin "$VERSION"
 
-      # ── Open PR against main ──────────────────────────────────────────────
-      - name: Create Pull Request
+      # ── Open PR #2 in Masquerade-Emulator ─────────────────────────────────
+      - name: Open PR #2 in Masquerade-Emulator
         env:
           GH_TOKEN: ${{ secrets.EMULATOR_REPO_PAT }}
         run: |
+          # Build the folder table based on what was selected
+          TABLE=""
+          [ "${{ github.event.inputs.release_windows }}" = "true" ]    && TABLE="$TABLE\n| \`/windows\` | Windows (MSVC x64) binaries |"
+          [ "${{ github.event.inputs.release_linux }}" = "true" ]      && TABLE="$TABLE\n| \`/linux\` | Linux (Ninja) binaries |"
+          [ "${{ github.event.inputs.release_emscripten }}" = "true" ] && TABLE="$TABLE\n| \`/emscripten\` | WebAssembly build artifacts |"
+
           gh pr create \
             --repo "$EMULATOR_REPO" \
             --title "Release $VERSION" \
             --body "## Release $VERSION
 
-          ### What's in this PR
+          All three platform builds passed. ✅
+          Artifacts selectively included per release settings.
+
           | Folder | Contents |
           |--------|----------|
-          | \`/windows\` | Windows (MSVC x64) binaries |
-          | \`/linux\` | Linux (Ninja) binaries |
-          | \`/emscripten\` | WebAssembly build artifacts |
-          | \`/hosting\` | Web hosting files (GitHub Pages) |
+          | \`/assets\` | Assets (always updated) |
+          | \`/hosting\` | Web hosting files — GitHub Pages (always updated) |
+          $(echo -e "$TABLE")
+
+          > ℹ️ Platform folders not listed above were intentionally excluded from
+          > this release but their binaries were still built and verified.
 
           ### Source
-          - **Repo:** \`Masquerade-Source\`
+          - **Branch:** \`release/$VERSION\` in Masquerade-Source
           - **Commit:** \`${{ github.sha }}\`
           - **Triggered by:** @${{ github.actor }}
 
-          ### Tag
-          Tag \`$VERSION\` has been created on this branch's tip commit.
-          After merging, the tag will point to the squashed merge commit if you
-          squash-merge; if you want the tag on the tip, use a regular merge." \
+          ### ⚠️ Merge checklist
+          - [ ] Masquerade-Source PR \`release/$VERSION\` reviewed and ready
+          - [ ] This PR reviewed and ready
+          - [ ] Merge both PRs" \
             --base main \
             --head "$BRANCH"
