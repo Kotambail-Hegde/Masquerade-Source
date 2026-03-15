@@ -1,0 +1,535 @@
+name: Release Masquerade
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. 0.7009)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WINDOWS BUILD
+# ─────────────────────────────────────────────────────────────────────────────
+jobs:
+  build_windows:
+    name: Build Windows (MSVC)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Export git commit hash
+        run: echo "GIT_COMMIT_HASH=$env:GITHUB_SHA" >> $env:GITHUB_ENV
+        shell: pwsh
+
+      - name: Cache external dependencies
+        id: cache-external
+        uses: actions/cache@v4
+        with:
+          path: |
+            external/imgui
+            external/miniz
+            external/stb
+            external/rapidjson
+            external/boost
+            external/SDL
+            external/nativefiledialog-extended
+          key: windows-external-all-v9-${{ hashFiles('.github/workflows/*.yml') }}
+          restore-keys: |
+            windows-external-all-v9-
+
+      - name: Clone all dependencies
+        if: steps.cache-external.outputs.cache-hit != 'true'
+        run: |
+          $externalDir = "external"
+          if (-not (Test-Path $externalDir)) { New-Item -ItemType Directory -Path $externalDir | Out-Null }
+          cd external
+
+          if (-not (Test-Path "imgui")) {
+              git clone https://github.com/ocornut/imgui.git --branch docking --depth 1
+          }
+
+          if (-not (Test-Path "miniz")) {
+              $url = "https://github.com/richgel999/miniz/releases/download/3.0.2/miniz-3.0.2.zip"
+              $zip = "miniz-3.0.2.zip"
+              $tmpDir = "_miniz_extract"
+              Invoke-WebRequest -Uri $url -OutFile $zip
+              if (Test-Path $tmpDir) { Remove-Item -Recurse -Force $tmpDir }
+              Expand-Archive $zip -DestinationPath $tmpDir -Force
+              if (Test-Path "miniz") { Remove-Item -Recurse -Force "miniz" }
+              Move-Item -Path $tmpDir -Destination "miniz"
+              Remove-Item -Path $zip -Force
+          }
+
+          if (-not (Test-Path "stb/stb")) {
+              git clone https://github.com/nothings/stb.git --depth 1 stb/stb
+          }
+
+          if (-not (Test-Path "rapidjson")) {
+              git clone https://github.com/Tencent/rapidjson.git --depth 1 rapidjson
+          }
+
+          if (-not (Test-Path "SDL")) {
+              git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL
+          }
+
+          if (-not (Test-Path "nativefiledialog-extended")) {
+              git clone https://github.com/btzy/nativefiledialog-extended.git --depth 1 --recurse-submodules --shallow-submodules
+          }
+
+          if (-not (Test-Path "boost")) {
+              $boostZip = "boost_1_84_0.zip"
+              $boostUrl = "https://archives.boost.io/release/1.84.0/source/boost_1_84_0.zip"
+              Invoke-WebRequest -Uri $boostUrl -OutFile $boostZip
+              Expand-Archive $boostZip -DestinationPath .
+              Rename-Item -Path "boost_1_84_0" -NewName "boost"
+              Remove-Item -Path $boostZip -Force
+          }
+        shell: pwsh
+
+      - name: Build Boost
+        shell: pwsh
+        run: |
+          cd external/boost
+          if (!(Test-Path ".\b2.exe")) { .\bootstrap.bat }
+          .\b2.exe install `
+              variant=release `
+              link=static,shared `
+              threading=multi `
+              runtime-link=shared `
+              address-model=64 `
+              --prefix="$($PWD.Path)" `
+              --jobs=$env:NUMBER_OF_PROCESSORS
+
+      - name: Build SDL3
+        shell: pwsh
+        run: |
+          cd external/SDL
+          if (-not (Test-Path "build")) { New-Item -ItemType Directory -Path "build" | Out-Null }
+          cd build
+          cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$($PWD.Path)" -DSDL_SHARED=ON -DSDL_STATIC=ON
+          cmake --build . --config Release --parallel
+          cmake --build . --config Release --target install
+
+      - name: Build NFD
+        shell: pwsh
+        run: |
+          cd external/nativefiledialog-extended
+          if (-not (Test-Path "build")) { New-Item -ItemType Directory -Path "build" | Out-Null }
+          cd build
+          cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$($PWD.Path)"
+          cmake --build . --config Release --parallel
+          cmake --build . --config Release --target install
+
+      - name: Set dependency paths
+        shell: pwsh
+        run: |
+          echo "IMGUI_ROOT=$env:GITHUB_WORKSPACE\external\imgui" >> $env:GITHUB_ENV
+          echo "MINIZ_ROOT=$env:GITHUB_WORKSPACE\external\miniz" >> $env:GITHUB_ENV
+          echo "STB_ROOT=$env:GITHUB_WORKSPACE\external\stb" >> $env:GITHUB_ENV
+          echo "RAPID_JSON_ROOT=$env:GITHUB_WORKSPACE\external\rapidjson" >> $env:GITHUB_ENV
+          echo "BOOST_ROOT=$env:GITHUB_WORKSPACE\external\boost" >> $env:GITHUB_ENV
+          echo "SDL3_ROOT=$env:GITHUB_WORKSPACE\external\SDL\build" >> $env:GITHUB_ENV
+          echo "NFD_ROOT=$env:GITHUB_WORKSPACE\external\nativefiledialog-extended" >> $env:GITHUB_ENV
+
+      - name: Configure CMake
+        shell: cmd
+        run: |
+          cmake -G "Visual Studio 17 2022" -A x64 ^
+                -DCMAKE_BUILD_TYPE=Release ^
+                -DGIT_COMMIT_HASH=%GIT_COMMIT_HASH% ^
+                -DIMGUI_ROOT=%IMGUI_ROOT% ^
+                -DMINIZ_ROOT=%MINIZ_ROOT% ^
+                -DSTB_ROOT=%STB_ROOT% ^
+                -DRAPID_JSON_ROOT=%RAPID_JSON_ROOT% ^
+                -DBOOST_ROOT=%BOOST_ROOT% ^
+                -DSDL3_ROOT=%SDL3_ROOT% ^
+                -DNFD_ROOT=%NFD_ROOT% ^
+                -S . -B build
+
+      - name: Build
+        shell: cmd
+        run: cmake --build build --config Release --parallel
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: build/bin/
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LINUX BUILD
+# ─────────────────────────────────────────────────────────────────────────────
+  build_linux:
+    name: Build Linux (Ninja)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Export git commit hash
+        run: echo "GIT_COMMIT_HASH=${GITHUB_SHA}" >> $GITHUB_ENV
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build build-essential cmake git \
+                                  libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev \
+                                  libxi-dev libgl1-mesa-dev libglu1-mesa-dev \
+                                  libgtk-3-dev libxss-dev libasound2-dev libpulse-dev libpipewire-0.3-dev \
+                                  libwayland-dev wayland-protocols libxkbcommon-dev
+
+      - name: Cache external dependencies
+        id: cache-external
+        uses: actions/cache@v4
+        with:
+          path: |
+            external/imgui
+            external/miniz
+            external/stb
+            external/rapidjson
+            external/boost
+            external/SDL
+            external/nativefiledialog-extended
+          key: linux-external-all-v2-${{ hashFiles('.github/workflows/*.yml') }}
+          restore-keys: |
+            linux-external-all-v2-
+
+      - name: Clone all dependencies
+        if: steps.cache-external.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p external && cd external
+
+          [ ! -d "imgui" ] && git clone https://github.com/ocornut/imgui.git --branch docking --depth 1
+
+          if [ ! -d "miniz" ]; then
+            curl -L "https://github.com/richgel999/miniz/releases/download/3.0.2/miniz-3.0.2.zip" -o miniz.zip
+            mkdir -p _miniz_extract && unzip miniz.zip -d _miniz_extract
+            mv _miniz_extract miniz && rm -f miniz.zip
+          fi
+
+          [ ! -d "stb/stb" ]           && git clone --depth 1 https://github.com/nothings/stb.git stb/stb
+          [ ! -d "rapidjson" ]          && git clone --depth 1 https://github.com/Tencent/rapidjson.git rapidjson
+          [ ! -d "SDL" ]                && git clone --depth 1 https://github.com/libsdl-org/SDL.git SDL
+
+          if [ ! -d "boost" ]; then
+            git clone https://github.com/boostorg/boost.git --branch boost-1.84.0 --depth 1
+            cd boost && git submodule update --init --depth 1 && cd ..
+          fi
+
+          if [ ! -d "nativefiledialog-extended" ]; then
+            git clone https://github.com/btzy/nativefiledialog-extended.git \
+              --depth 1 --recurse-submodules --shallow-submodules
+          fi
+
+      - name: Build Boost
+        run: |
+          cd external/boost
+          chmod +x bootstrap.sh
+          ./bootstrap.sh --prefix="$PWD"
+          ./b2 install variant=release link=static,shared threading=multi -j$(nproc)
+
+      - name: Build SDL3
+        run: |
+          cd external/SDL && mkdir -p build && cd build
+          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PWD -DSDL_SHARED=ON -DSDL_STATIC=ON
+          ninja -j$(nproc) && ninja install
+
+      - name: Build NFD
+        run: |
+          cd external/nativefiledialog-extended && mkdir -p build && cd build
+          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PWD
+          ninja -j$(nproc) && ninja install
+
+      - name: Set dependency paths
+        run: |
+          echo "IMGUI_ROOT=$GITHUB_WORKSPACE/external/imgui"                          >> $GITHUB_ENV
+          echo "MINIZ_ROOT=$GITHUB_WORKSPACE/external/miniz"                          >> $GITHUB_ENV
+          echo "STB_ROOT=$GITHUB_WORKSPACE/external/stb"                              >> $GITHUB_ENV
+          echo "RAPID_JSON_ROOT=$GITHUB_WORKSPACE/external/rapidjson"                 >> $GITHUB_ENV
+          echo "BOOST_ROOT=$GITHUB_WORKSPACE/external/boost"                          >> $GITHUB_ENV
+          echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL/build"                       >> $GITHUB_ENV
+          echo "NFD_ROOT=$GITHUB_WORKSPACE/external/nativefiledialog-extended"        >> $GITHUB_ENV
+
+      - name: Configure CMake
+        run: |
+          cmake -G Ninja \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DGIT_COMMIT_HASH=$GIT_COMMIT_HASH \
+                -DIMGUI_ROOT=$IMGUI_ROOT \
+                -DMINIZ_ROOT=$MINIZ_ROOT \
+                -DSTB_ROOT=$STB_ROOT \
+                -DRAPID_JSON_ROOT=$RAPID_JSON_ROOT \
+                -DBOOST_ROOT=$BOOST_ROOT \
+                -DSDL3_ROOT=$SDL3_ROOT \
+                -DNFD_ROOT=$NFD_ROOT \
+                -S . -B build
+
+      - name: Build
+        run: cmake --build build --config Release --parallel $(nproc)
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: build/bin/
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EMSCRIPTEN BUILD
+# ─────────────────────────────────────────────────────────────────────────────
+  build_emscripten:
+    name: Build Emscripten (Web)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Export git commit hash
+        run: echo "GIT_COMMIT_HASH=${GITHUB_SHA}" >> $GITHUB_ENV
+
+      - name: Cache external dependencies
+        id: cache-external
+        uses: actions/cache@v4
+        with:
+          path: |
+            external/imgui
+            external/miniz
+            external/stb
+            external/SDL
+            external/emscripten-browser-file
+            external/boost
+            external/rapidjson
+          key: emscripten-external-all-v3-${{ hashFiles('.github/workflows/*.yml') }}
+          restore-keys: |
+            emscripten-external-all-v3-
+
+      - name: Cache SDL3 Emscripten
+        id: cache-sdl-emscripten
+        uses: actions/cache@v4
+        with:
+          path: |
+            external/SDL-build/emscripten
+            external/SDL-install/emscripten
+          key: sdl3-emscripten-v3-${{ hashFiles('external/SDL/**') }}
+          restore-keys: |
+            sdl3-emscripten-v3-
+
+      - name: Clone dependencies
+        if: steps.cache-external.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p external && cd external
+
+          if [ ! -d "boost" ]; then
+            git clone https://github.com/boostorg/boost.git --branch boost-1.84.0 --depth 1
+            cd boost && git submodule update --init --depth 1 && cd ..
+          fi
+
+          [ ! -d "imgui" ] && git clone https://github.com/ocornut/imgui.git --branch docking --depth 1
+
+          if [ ! -d "miniz" ]; then
+            curl -L "https://github.com/richgel999/miniz/releases/download/3.0.2/miniz-3.0.2.zip" -o miniz.zip
+            mkdir -p _miniz_extract && unzip miniz.zip -d _miniz_extract
+            mv _miniz_extract miniz && rm -f miniz.zip
+          fi
+
+          [ ! -d "stb/stb" ]    && git clone --depth 1 https://github.com/nothings/stb.git stb/stb
+          [ ! -d "rapidjson" ]  && git clone --depth 1 https://github.com/Tencent/rapidjson.git rapidjson
+          [ ! -d "SDL" ]        && git clone --depth 1 https://github.com/libsdl-org/SDL.git SDL
+
+          if [ ! -d "emscripten-browser-file" ]; then
+            git clone https://github.com/Armchair-Software/emscripten-browser-file.git --depth 1
+          fi
+
+      - name: Set dependency paths
+        run: |
+          echo "IMGUI_ROOT=$GITHUB_WORKSPACE/external/imgui"                          >> $GITHUB_ENV
+          echo "MINIZ_ROOT=$GITHUB_WORKSPACE/external/miniz"                          >> $GITHUB_ENV
+          echo "STB_ROOT=$GITHUB_WORKSPACE/external/stb"                              >> $GITHUB_ENV
+          echo "RAPID_JSON_ROOT=$GITHUB_WORKSPACE/external/rapidjson"                 >> $GITHUB_ENV
+          echo "EFB_ROOT=$GITHUB_WORKSPACE/external/emscripten-browser-file"          >> $GITHUB_ENV
+          echo "BOOST_ROOT=$GITHUB_WORKSPACE/external/boost"                          >> $GITHUB_ENV
+          echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL-install/emscripten"          >> $GITHUB_ENV
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: '3.1.66'
+          actions-cache-folder: 'emsdk-cache'
+
+      - name: Install Ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Build Boost
+        run: |
+          cd external/boost
+          chmod +x bootstrap.sh
+          ./bootstrap.sh --prefix="$PWD"
+          ./b2 install variant=release link=static,shared threading=multi -j$(nproc)
+
+      - name: Build SDL3 (Emscripten)
+        run: |
+          if [ -f external/SDL-install/emscripten/build/lib/libSDL3.a ]; then
+            echo "SDL3 Emscripten already built, skipping"; exit 0
+          fi
+          mkdir -p external/SDL-build/emscripten external/SDL-install/emscripten/build
+          cd external/SDL-build/emscripten
+          emcmake cmake ../../SDL -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/external/SDL-install/emscripten/build \
+            -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST=OFF -DSDL_TESTS=OFF
+          ninja -j$(nproc) && ninja install
+
+      - name: Configure CMake
+        run: |
+          emcmake cmake -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DGIT_COMMIT_HASH=$GIT_COMMIT_HASH \
+            -DSDL3_ROOT=$SDL3_ROOT \
+            -DIMGUI_ROOT=$IMGUI_ROOT \
+            -DMINIZ_ROOT=$MINIZ_ROOT \
+            -DSTB_ROOT=$STB_ROOT \
+            -DRAPID_JSON_ROOT=$RAPID_JSON_ROOT \
+            -DEFB_ROOT=$EFB_ROOT \
+            -DBOOST_ROOT=$BOOST_ROOT \
+            -S . -B build
+
+      - name: Build
+        run: cmake --build build --config Release --parallel $(nproc)
+
+      - name: Prepare web artifacts
+        run: |
+          mkdir -p pages
+          cp build/bin/masquerade.data  pages/
+          cp build/bin/masquerade.html  pages/
+          cp build/bin/masquerade.js    pages/
+          cp build/bin/masquerade.wasm  pages/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: emscripten-build
+          path: pages/
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RELEASE  —  only runs when all three builds succeed
+# ─────────────────────────────────────────────────────────────────────────────
+  release:
+    name: Create Release PR in Masquerade-Emulator
+    needs: [build_windows, build_linux, build_emscripten]
+    runs-on: ubuntu-latest
+    env:
+      VERSION:      ${{ github.event.inputs.version }}
+      EMULATOR_REPO: Kotambail-Hegde/Masquerade-Emulator
+      BRANCH:       release/${{ github.event.inputs.version }}
+
+    steps:
+      # ── Download all build artifacts ──────────────────────────────────────
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-build
+          path: artifacts/windows
+
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-build
+          path: artifacts/linux
+
+      - name: Download Emscripten artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: emscripten-build
+          path: artifacts/emscripten
+
+      # ── Checkout Masquerade-Emulator via PAT ──────────────────────────────
+      - name: Checkout Masquerade-Emulator
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.EMULATOR_REPO }}
+          token: ${{ secrets.EMULATOR_REPO_PAT }}
+          fetch-depth: 0          # full history so we can branch from main
+
+      # ── Create release branch ─────────────────────────────────────────────
+      - name: Create release branch
+        run: |
+          git checkout -b "$BRANCH"
+
+      # ── Copy artifacts into the right folders ─────────────────────────────
+      - name: Place artifacts
+        run: |
+          # Windows binaries → /windows
+          rm -rf windows/*
+          cp -r artifacts/windows/. windows/
+
+          # Linux binaries → /linux
+          rm -rf linux/*
+          cp -r artifacts/linux/. linux/
+
+          # Emscripten WASM artifacts → /emscripten
+          rm -rf emscripten/*
+          cp -r artifacts/emscripten/. emscripten/
+
+          # Web hosting files (same content) → /hosting
+          # This is what GitHub Pages serves from Masquerade-Emulator
+          rm -rf hosting/*
+          cp -r artifacts/emscripten/. hosting/
+
+      # ── Commit and push ───────────────────────────────────────────────────
+      - name: Commit artifacts
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add windows/ linux/ emscripten/ hosting/
+          git commit -m "release: $VERSION
+
+          Built from Masquerade-Source @ ${{ github.sha }}
+          Triggered by: ${{ github.actor }}"
+
+      - name: Push release branch
+        run: git push origin "$BRANCH"
+
+      # ── Create tag on the release commit ─────────────────────────────────
+      - name: Create tag
+        run: |
+          git tag "$VERSION"
+          git push origin "$VERSION"
+
+      # ── Open PR against main ──────────────────────────────────────────────
+      - name: Create Pull Request
+        env:
+          GH_TOKEN: ${{ secrets.EMULATOR_REPO_PAT }}
+        run: |
+          gh pr create \
+            --repo "$EMULATOR_REPO" \
+            --title "Release $VERSION" \
+            --body "## Release $VERSION
+
+          ### What's in this PR
+          | Folder | Contents |
+          |--------|----------|
+          | \`/windows\` | Windows (MSVC x64) binaries |
+          | \`/linux\` | Linux (Ninja) binaries |
+          | \`/emscripten\` | WebAssembly build artifacts |
+          | \`/hosting\` | Web hosting files (GitHub Pages) |
+
+          ### Source
+          - **Repo:** \`Masquerade-Source\`
+          - **Commit:** \`${{ github.sha }}\`
+          - **Triggered by:** @${{ github.actor }}
+
+          ### Tag
+          Tag \`$VERSION\` has been created on this branch's tip commit.
+          After merging, the tag will point to the squashed merge commit if you
+          squash-merge; if you want the tag on the tip, use a regular merge." \
+            --base main \
+            --head "$BRANCH"
