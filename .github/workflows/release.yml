@@ -537,6 +537,13 @@ jobs:
       BRANCH:        release/${{ github.event.inputs.version }}
 
     steps:
+      # ── Download all artifacts (builds always ran for all 3) ──────────────
+      - name: Download assets
+        uses: actions/download-artifact@v4
+        with:
+          name: assets
+          path: artifacts/assets
+
       - name: Download Windows artifacts
         uses: actions/download-artifact@v4
         with:
@@ -555,11 +562,18 @@ jobs:
           name: emscripten-build
           path: artifacts/emscripten
 
-      - name: Download assets
-        uses: actions/download-artifact@v4
-        with:
-          name: assets
-          path: artifacts/assets
+      - name: Verify all artifacts downloaded
+        run: |
+          echo "=== Artifact download verification ==="
+          for dir in artifacts/assets artifacts/windows artifacts/linux artifacts/emscripten; do
+            if [ -d "$dir" ] && [ "$(ls -A $dir)" ]; then
+              echo "✅ $dir — $(ls $dir | wc -l) files"
+              ls -la "$dir"
+            else
+              echo "❌ $dir — MISSING or EMPTY"
+              exit 1
+            fi
+          done
 
       - name: Checkout Masquerade-Emulator
         uses: actions/checkout@v4
@@ -568,30 +582,29 @@ jobs:
           token: ${{ secrets.EMULATOR_REPO_PAT }}
           fetch-depth: 0
           submodules: recursive
+          path: emulator-repo   # ← CRITICAL: keeps artifacts/ untouched
 
       - name: Create release branch
+        working-directory: emulator-repo
         run: git checkout -b "$BRANCH"
 
       - name: Place artifacts
+        working-directory: emulator-repo
         run: |
-          # Assets — always updated (if present in source)
-          if [ -d "artifacts/assets" ] && [ "$(ls -A artifacts/assets)" ]; then
-            rm -rf assets/*
-            cp -r artifacts/assets/. assets/
-            echo "✅ Assets placed"
-          else
-            echo "⚠️  No assets artifact found — skipping (assets/ may be empty in Masquerade-Source)"
-          fi
+          # Assets — always updated (../artifacts relative to emulator-repo/)
+          rm -rf assets/*
+          cp -r ../artifacts/assets/. assets/
+          echo "✅ Assets placed"
 
           # Hosting — always updated
           rm -rf hosting/*
-          cp -r artifacts/emscripten/. hosting/
+          cp -r ../artifacts/emscripten/. hosting/
           echo "✅ Hosting placed"
 
           # Windows — only if selected
           if [ "${{ github.event.inputs.release_windows }}" = "true" ]; then
             rm -rf windows/*
-            cp -r artifacts/windows/. windows/
+            cp -r ../artifacts/windows/. windows/
             echo "✅ Windows artifacts placed"
           else
             echo "⏭️  Windows not selected for this release"
@@ -600,7 +613,7 @@ jobs:
           # Linux — only if selected
           if [ "${{ github.event.inputs.release_linux }}" = "true" ]; then
             rm -rf linux/*
-            cp -r artifacts/linux/. linux/
+            cp -r ../artifacts/linux/. linux/
             echo "✅ Linux artifacts placed"
           else
             echo "⏭️  Linux not selected for this release"
@@ -609,7 +622,7 @@ jobs:
           # Emscripten — only if selected
           if [ "${{ github.event.inputs.release_emscripten }}" = "true" ]; then
             rm -rf emscripten/*
-            cp -r artifacts/emscripten/. emscripten/
+            cp -r ../artifacts/emscripten/. emscripten/
             echo "✅ Emscripten artifacts placed"
           else
             echo "⏭️  Emscripten not selected for this release"
@@ -619,6 +632,7 @@ jobs:
           echo "⏭️  macOS not yet supported"
 
       - name: Commit and push
+        working-directory: emulator-repo
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -630,10 +644,8 @@ jobs:
           All 3 platforms built and passed. Source @ ${{ github.sha }} — triggered by: ${{ github.actor }}"
           git push origin "$BRANCH"
 
-      # ── Create tags on both repos ─────────────────────────────────────────
-      # Tags point to release branch tip commits (pre-merge).
-      # Content is correct — they just won't point to the squash/merge commit.
       - name: Create tag on Masquerade-Emulator
+        working-directory: emulator-repo
         run: |
           git tag "$VERSION"
           git push origin "$VERSION"
@@ -651,14 +663,11 @@ jobs:
             -f sha="$(gh api /repos/Kotambail-Hegde/Masquerade-Source/git/ref/heads/release/$VERSION --jq '.object.sha')"
           echo "✅ Tag $VERSION created on Masquerade-Source"
 
-      # ── Set PENDING status on the Emulator branch HEAD ────────────────────
-      # This blocks the PR merge button until update-submodule.yml sets it to
-      # SUCCESS after the Source PR is merged.
       - name: Set pending status on Emulator PR
         env:
           GH_TOKEN: ${{ secrets.EMULATOR_REPO_PAT }}
         run: |
-          EMULATOR_BRANCH_SHA=$(git rev-parse HEAD)
+          EMULATOR_BRANCH_SHA=$(cd emulator-repo && git rev-parse HEAD)
           curl -s -X POST \
             -H "Authorization: Bearer ${{ secrets.EMULATOR_REPO_PAT }}" \
             -H "Accept: application/vnd.github+json" \
@@ -670,6 +679,7 @@ jobs:
             }'
 
       - name: Open PR #2 in Masquerade-Emulator
+        working-directory: emulator-repo
         env:
           GH_TOKEN: ${{ secrets.EMULATOR_REPO_PAT }}
         run: |
@@ -709,9 +719,6 @@ jobs:
             --base main \
             --head "$BRANCH"
 
-      # ── Auto-merge the Source PR ──────────────────────────────────────────
-      # Both PRs now exist. Merging Source triggers update-submodule.yml which
-      # updates src/ in the Emulator PR branch and sets status to SUCCESS.
       - name: Auto-merge Source PR
         env:
           GH_TOKEN: ${{ secrets.EMULATOR_REPO_PAT }}
