@@ -32,6 +32,7 @@ permissions:
   contents: write
   pages: write
   id-token: write
+  statuses: write
 
 # ─────────────────────────────────────────────────────────────────────────────
 # BUMP VERSION
@@ -99,7 +100,10 @@ jobs:
 
           ### ⚠️ Merge checklist
           - [ ] All three platform builds passed
-          - [ ] Masquerade-Emulator PR \`release/${{ github.event.inputs.version }}\` is also reviewed and ready
+          - [ ] Masquerade-Emulator PR \`release/${{ github.event.inputs.version }}\` is open
+
+          _Merging this PR will automatically trigger \`update-submodule.yml\` which will
+          update the submodule in the Emulator PR and unblock its merge._
 
           _Auto-created by the release workflow triggered by @${{ github.actor }}_" \
             --base master \
@@ -512,8 +516,9 @@ jobs:
 
 # ─────────────────────────────────────────────────────────────────────────────
 # RELEASE  —  only runs when ALL THREE builds pass
-# Copies only the selected platform folders into Masquerade-Emulator.
-# Assets are always copied regardless of selection.
+# Creates Emulator PR and sets a PENDING status to block merge until
+# update-submodule.yml runs after the Source PR is merged.
+# Tags are NOT created here — update-submodule.yml handles that.
 # ─────────────────────────────────────────────────────────────────────────────
   release:
     name: Create Release PR in Masquerade-Emulator
@@ -525,7 +530,6 @@ jobs:
       BRANCH:        release/${{ github.event.inputs.version }}
 
     steps:
-      # ── Download all artifacts (builds always ran for all 3) ──────────────
       - name: Download Windows artifacts
         uses: actions/download-artifact@v4
         with:
@@ -550,18 +554,17 @@ jobs:
           name: assets
           path: artifacts/assets
 
-      # ── Checkout Masquerade-Emulator ──────────────────────────────────────
       - name: Checkout Masquerade-Emulator
         uses: actions/checkout@v4
         with:
           repository: ${{ env.EMULATOR_REPO }}
           token: ${{ secrets.EMULATOR_REPO_PAT }}
           fetch-depth: 0
+          submodules: recursive
 
       - name: Create release branch
         run: git checkout -b "$BRANCH"
 
-      # ── Copy assets + hosting (always) + selected platform folders ──────
       - name: Place artifacts
         run: |
           # Assets — always updated
@@ -569,7 +572,7 @@ jobs:
           cp -r artifacts/assets/. assets/
           echo "✅ Assets placed"
 
-          # Hosting — always updated (serves the web version)
+          # Hosting — always updated
           rm -rf hosting/*
           cp -r artifacts/emscripten/. hosting/
           echo "✅ Hosting placed"
@@ -604,7 +607,6 @@ jobs:
           # macOS — not yet supported
           echo "⏭️  macOS not yet supported"
 
-      # ── Commit and push ───────────────────────────────────────────────────
       - name: Commit and push
         run: |
           git config user.name  "github-actions[bot]"
@@ -617,18 +619,49 @@ jobs:
           All 3 platforms built and passed. Source @ ${{ github.sha }} — triggered by: ${{ github.actor }}"
           git push origin "$BRANCH"
 
-      # ── Create tag ────────────────────────────────────────────────────────
-      - name: Create tag
+      # ── Create tags on both repos ─────────────────────────────────────────
+      # Tags point to release branch tip commits (pre-merge).
+      # Content is correct — they just won't point to the squash/merge commit.
+      - name: Create tag on Masquerade-Emulator
         run: |
           git tag "$VERSION"
           git push origin "$VERSION"
+          echo "✅ Tag $VERSION created on Masquerade-Emulator"
 
-      # ── Open PR #2 in Masquerade-Emulator ─────────────────────────────────
+      - name: Create tag on Masquerade-Source
+        env:
+          GH_TOKEN: ${{ secrets.EMULATOR_REPO_PAT }}
+        run: |
+          gh api \
+            --method POST \
+            -H "Accept: application/vnd.github+json" \
+            /repos/Kotambail-Hegde/Masquerade-Source/git/refs \
+            -f ref="refs/tags/$VERSION" \
+            -f sha="$(gh api /repos/Kotambail-Hegde/Masquerade-Source/git/ref/heads/release/$VERSION --jq '.object.sha')"
+          echo "✅ Tag $VERSION created on Masquerade-Source"
+
+      # ── Set PENDING status on the Emulator branch HEAD ────────────────────
+      # This blocks the PR merge button until update-submodule.yml sets it to
+      # SUCCESS after the Source PR is merged.
+      - name: Set pending status on Emulator PR
+        env:
+          GH_TOKEN: ${{ secrets.EMULATOR_REPO_PAT }}
+        run: |
+          EMULATOR_BRANCH_SHA=$(git rev-parse HEAD)
+          curl -s -X POST \
+            -H "Authorization: Bearer ${{ secrets.EMULATOR_REPO_PAT }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/${{ env.EMULATOR_REPO }}/statuses/$EMULATOR_BRANCH_SHA \
+            -d '{
+              "state": "pending",
+              "context": "submodule-update",
+              "description": "Waiting for Source PR to be merged and submodule to be updated"
+            }'
+
       - name: Open PR #2 in Masquerade-Emulator
         env:
           GH_TOKEN: ${{ secrets.EMULATOR_REPO_PAT }}
         run: |
-          # Build the folder table based on what was selected
           TABLE=""
           [ "${{ github.event.inputs.release_windows }}" = "true" ]    && TABLE="$TABLE\n| \`/windows\` | Windows (MSVC x64) binaries |"
           [ "${{ github.event.inputs.release_linux }}" = "true" ]      && TABLE="$TABLE\n| \`/linux\` | Linux (Ninja) binaries |"
@@ -640,7 +673,6 @@ jobs:
             --body "## Release $VERSION
 
           All three platform builds passed. ✅
-          Artifacts selectively included per release settings.
 
           | Folder | Contents |
           |--------|----------|
@@ -656,9 +688,33 @@ jobs:
           - **Commit:** \`${{ github.sha }}\`
           - **Triggered by:** @${{ github.actor }}
 
-          ### ⚠️ Merge checklist
-          - [ ] Masquerade-Source PR \`release/$VERSION\` reviewed and ready
-          - [ ] This PR reviewed and ready
-          - [ ] Merge both PRs" \
+          ### ⚠️ Merge order
+          1. Masquerade-Source PR \`release/$VERSION\` will be auto-merged next
+          2. \`update-submodule.yml\` will auto-run, update \`src/\` submodule here, and unblock this PR
+          3. Merge this PR
+
+          ### Status checks
+          - \`submodule-update\` — 🟡 Pending (waiting for submodule update)" \
             --base main \
             --head "$BRANCH"
+
+      # ── Auto-merge the Source PR ──────────────────────────────────────────
+      # Both PRs now exist. Merging Source triggers update-submodule.yml which
+      # updates src/ in the Emulator PR branch and sets status to SUCCESS.
+      - name: Auto-merge Source PR
+        env:
+          GH_TOKEN: ${{ secrets.EMULATOR_REPO_PAT }}
+        run: |
+          PR_NUMBER=$(gh pr list \
+            --repo "Kotambail-Hegde/Masquerade-Source" \
+            --head "$BRANCH" \
+            --json number \
+            --jq '.[0].number')
+
+          echo "Auto-merging Source PR #$PR_NUMBER..."
+          gh pr merge "$PR_NUMBER" \
+            --repo "Kotambail-Hegde/Masquerade-Source" \
+            --merge \
+            --subject "Release $VERSION: bump VERSION macro" \
+            --body "Auto-merged by release workflow after all builds passed and Emulator PR was created."
+          echo "✅ Source PR #$PR_NUMBER merged"
