@@ -573,6 +573,46 @@ jobs:
           submodules: recursive
           path: emulator-repo
 
+      - name: Clean up any existing release branch and tags
+        working-directory: emulator-repo
+        env:
+          GH_TOKEN: ${{ secrets.EMULATOR_REPO_PAT }}
+        run: |
+          # Delete existing Emulator release branch if it exists (from a previous failed/rejected run)
+          if git ls-remote --exit-code --heads origin "$BRANCH" > /dev/null 2>&1; then
+            gh api \
+              --method DELETE \
+              -H "Accept: application/vnd.github+json" \
+              /repos/${{ env.EMULATOR_REPO }}/git/refs/heads/$BRANCH
+            echo "✅ Deleted existing Emulator branch $BRANCH"
+          else
+            echo "ℹ️  No existing Emulator branch $BRANCH"
+          fi
+
+          # Delete existing Emulator tag if it exists
+          if gh api -H "Accept: application/vnd.github+json" \
+              /repos/${{ env.EMULATOR_REPO }}/git/ref/tags/$VERSION > /dev/null 2>&1; then
+            gh api \
+              --method DELETE \
+              -H "Accept: application/vnd.github+json" \
+              /repos/${{ env.EMULATOR_REPO }}/git/refs/tags/$VERSION
+            echo "✅ Deleted existing Emulator tag $VERSION"
+          else
+            echo "ℹ️  No existing Emulator tag $VERSION"
+          fi
+
+          # Delete existing Source tag if it exists
+          if gh api -H "Accept: application/vnd.github+json" \
+              /repos/Kotambail-Hegde/Masquerade-Source/git/ref/tags/$VERSION > /dev/null 2>&1; then
+            gh api \
+              --method DELETE \
+              -H "Accept: application/vnd.github+json" \
+              /repos/Kotambail-Hegde/Masquerade-Source/git/refs/tags/$VERSION
+            echo "✅ Deleted existing Source tag $VERSION"
+          else
+            echo "ℹ️  No existing Source tag $VERSION"
+          fi
+
       - name: Create release branch
         working-directory: emulator-repo
         run: git checkout -b "$BRANCH"
@@ -670,7 +710,10 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add windows/ linux/ emscripten/ hosting/
+          git add hosting/
+          [ "${{ github.event.inputs.release_windows }}" = "true" ]    && git add windows/
+          [ "${{ github.event.inputs.release_linux }}" = "true" ]      && git add linux/
+          [ "${{ github.event.inputs.release_emscripten }}" = "true" ] && git add emscripten/
           git commit -m "release: $VERSION
 
           Platforms included: windows=${{ github.event.inputs.release_windows }} linux=${{ github.event.inputs.release_linux }} emscripten=${{ github.event.inputs.release_emscripten }}
@@ -844,4 +887,3 @@ jobs:
           else
             echo "ℹ️  Branch $BRANCH not found — nothing to delete"
           fi
-          
