@@ -80,9 +80,10 @@ jobs:
           echo "✅ Checked out $BRANCH"
 
           cd src
-          # Fetch the specific commit SHA explicitly — a plain 'git fetch origin'
-          # only fetches branch tips and may not include the exact SHA we need
-          git fetch origin ${{ steps.source.outputs.sha }}
+          # Fetch master — the bump commit is in master's history after auto-merge.
+          # We can't fetch the SHA directly (GitHub rejects non-tip SHA fetches),
+          # but after fetching master the commit is locally available.
+          git fetch origin master
           git checkout ${{ steps.source.outputs.sha }}
           cd ..
 
@@ -120,7 +121,7 @@ jobs:
           echo "✅ Created branch $BRANCH"
 
           cd src
-          git fetch origin ${{ steps.source.outputs.sha }}
+          git fetch origin master
           git checkout ${{ steps.source.outputs.sha }}
           cd ..
 
@@ -150,16 +151,14 @@ jobs:
           echo "✅ PR opened"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CLEANUP ON FAILURE  —  release flow only (push trigger)
-# If submodule update fails after the Source bump was already merged:
-#   1. Revert the version bump commit on Source master
-#   2. Delete the Emulator release branch
-#   3. Delete the Emulator tag (if created)
-#   4. Delete the Source tag (if created)
-# This leaves both repos clean so the release can be re-triggered.
+# CLEANUP ON FAILURE  —  release flow only (triggered_by_release=true)
+# Only reverts the Source bump commit and deletes tags.
+# The Emulator PR and branch are intentionally kept so you can re-run
+# update-submodule.yml manually once the issue is fixed, without needing
+# to re-run the entire release pipeline.
 # ─────────────────────────────────────────────────────────────────────────────
   cleanup_on_failure:
-    name: Revert Source bump and clean Emulator on failure
+    name: Revert Source bump and delete tags on failure
     needs: update_submodule
     if: failure() && github.event.inputs.triggered_by_release == 'true'
     runs-on: ubuntu-latest
@@ -184,32 +183,11 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          # Find the most recent commit that touched helpers.h
           BUMP_SHA=$(git log --oneline --diff-filter=M -- helpers/helpers.h | head -1 | awk '{print $1}')
           echo "Reverting commit: $BUMP_SHA"
-
           git revert --no-edit "$BUMP_SHA"
           git push origin master
           echo "✅ Version bump reverted on Source master"
-
-      - name: Delete Emulator release branch
-        env:
-          GH_TOKEN: ${{ secrets.EMULATOR_REPO_PAT }}
-        run: |
-          BRANCH="release/${{ steps.version.outputs.value }}"
-          if gh api \
-            -H "Accept: application/vnd.github+json" \
-            /repos/${{ env.EMULATOR_REPO }}/git/ref/heads/$BRANCH \
-            > /dev/null 2>&1; then
-            gh api \
-              --method DELETE \
-              -H "Accept: application/vnd.github+json" \
-              /repos/${{ env.EMULATOR_REPO }}/git/refs/heads/$BRANCH
-            echo "✅ Emulator branch $BRANCH deleted"
-          else
-            echo "ℹ️  Emulator branch $BRANCH not found — skipping"
-          fi
 
       - name: Delete Emulator tag
         env:
@@ -246,4 +224,11 @@ jobs:
           else
             echo "ℹ️  Source tag $TAG not found — skipping"
           fi
-          
+
+      - name: Summary
+        run: |
+          echo "⚠️  Submodule update failed."
+          echo "The Emulator PR and branch (release/${{ steps.version.outputs.value }}) are still open."
+          echo "Once the issue is fixed, re-trigger update-submodule.yml manually with:"
+          echo "  version=${{ steps.version.outputs.value }}"
+          echo "  triggered_by_release=true"
