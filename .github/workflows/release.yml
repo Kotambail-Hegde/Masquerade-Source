@@ -588,42 +588,63 @@ jobs:
         working-directory: emulator-repo
         run: git checkout -b "$BRANCH"
 
+      - name: Install rsync
+        run: sudo apt-get install -y rsync
+
       - name: Place artifacts
         working-directory: emulator-repo
         run: |
-          # Assets — always updated (../artifacts relative to emulator-repo/)
-          rm -rf assets/*
-          cp -r ../artifacts/assets/. assets/
-          echo "✅ Assets placed"
+          # ── Helper: copy assets into a platform folder with legal exclusions ──
+          # Excludes:
+          #   - BIOS .bin files (gb/gbc/gba) — legal reasons
+          #   - saves/            — user data, not for distribution
+          #   - spaceInvaders/audio/ — legal reasons
+          #   - c8/db/chip-8-database/ — submodule, not copied (pointer kept by git)
+          copy_assets() {
+            local DEST="$1/assets"
+            rm -rf "$DEST"
+            mkdir -p "$DEST"
+            rsync -a \
+              --exclude='gb/bios/*.bin' \
+              --exclude='gbc/bios/*.bin' \
+              --exclude='gba/bios/*.bin' \
+              --exclude='saves/' \
+              --exclude='spaceInvaders/audio/' \
+              --exclude='c8/db/chip-8-database/' \
+              ../artifacts/assets/. "$DEST/"
+            echo "✅ Assets placed into $DEST (legal exclusions applied)"
+          }
 
-          # Hosting — always updated
+          # Hosting — always updated (no assets here)
           rm -rf hosting/*
           cp -r ../artifacts/emscripten/. hosting/
-          echo "✅ Hosting placed"
+          echo "✅ Hosting placed (no assets)"
 
-          # Windows — only if selected
+          # Windows — binaries + assets inside windows/
           if [ "${{ github.event.inputs.release_windows }}" = "true" ]; then
             rm -rf windows/*
             cp -r ../artifacts/windows/. windows/
+            copy_assets windows
             echo "✅ Windows artifacts placed"
           else
             echo "⏭️  Windows not selected for this release"
           fi
 
-          # Linux — only if selected
+          # Linux — binaries + assets inside linux/
           if [ "${{ github.event.inputs.release_linux }}" = "true" ]; then
             rm -rf linux/*
             cp -r ../artifacts/linux/. linux/
+            copy_assets linux
             echo "✅ Linux artifacts placed"
           else
             echo "⏭️  Linux not selected for this release"
           fi
 
-          # Emscripten — only if selected
+          # Emscripten — no assets (web build handles its own resources)
           if [ "${{ github.event.inputs.release_emscripten }}" = "true" ]; then
             rm -rf emscripten/*
             cp -r ../artifacts/emscripten/. emscripten/
-            echo "✅ Emscripten artifacts placed"
+            echo "✅ Emscripten artifacts placed (no assets)"
           else
             echo "⏭️  Emscripten not selected for this release"
           fi
@@ -636,11 +657,11 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add assets/ windows/ linux/ emscripten/ hosting/
+          git add windows/ linux/ emscripten/ hosting/
           git commit -m "release: $VERSION
 
           Platforms included: windows=${{ github.event.inputs.release_windows }} linux=${{ github.event.inputs.release_linux }} emscripten=${{ github.event.inputs.release_emscripten }}
-          assets/ and hosting/ always updated.
+          hosting/ always updated. Assets placed inside platform folders (legal exclusions applied).
           All 3 platforms built and passed. Source @ ${{ github.sha }} — triggered by: ${{ github.actor }}"
           git push origin "$BRANCH"
 
@@ -736,6 +757,16 @@ jobs:
             --subject "Release $VERSION: bump VERSION macro" \
             --body "Auto-merged by release workflow after all builds passed and Emulator PR was created."
           echo "✅ Source PR #$PR_NUMBER merged"
+
+      - name: Delete Source release branch after merge
+        env:
+          GH_TOKEN: ${{ secrets.EMULATOR_REPO_PAT }}
+        run: |
+          gh api \
+            --method DELETE \
+            -H "Accept: application/vnd.github+json" \
+            /repos/Kotambail-Hegde/Masquerade-Source/git/refs/heads/$BRANCH
+          echo "✅ Source branch $BRANCH deleted"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CLEANUP  —  runs only if any job failed or was cancelled
