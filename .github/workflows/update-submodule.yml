@@ -1,0 +1,153 @@
+name: Update Submodule in Masquerade-Emulator
+
+on:
+  # Auto-fires when Source PR is merged to master (helpers.h changed)
+  # This is the release flow path — release branch already exists in Emulator
+  push:
+    branches:
+      - master
+    paths:
+      - 'helpers/helpers.h'
+
+  # Standalone manual trigger — always creates a new branch + PR
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to update submodule for (e.g. 0.7009). Leave empty to auto-detect from helpers.h'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  statuses: write
+
+jobs:
+  update_submodule:
+    name: Update src/ submodule in Masquerade-Emulator
+    runs-on: ubuntu-latest
+    env:
+      EMULATOR_REPO: Kotambail-Hegde/Masquerade-Emulator
+
+    steps:
+      # ── Checkout Source to read version and get master HEAD SHA ───────────
+      - name: Checkout Masquerade-Source master
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.EMULATOR_REPO_PAT }}
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+            echo "Using manually provided version: $VERSION"
+          else
+            VERSION=$(grep -oP '(?<=#define VERSION\s{0,50}static_cast<float>\()[0-9.]+' helpers/helpers.h)
+            echo "Auto-detected version from helpers.h: $VERSION"
+          fi
+          echo "value=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Capture Source master HEAD SHA
+        id: source
+        run: echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+
+      # ── Checkout Masquerade-Emulator ──────────────────────────────────────
+      - name: Checkout Masquerade-Emulator
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.EMULATOR_REPO }}
+          token: ${{ secrets.EMULATOR_REPO_PAT }}
+          fetch-depth: 0
+          submodules: recursive
+          path: emulator-repo
+
+      # ── RELEASE FLOW PATH (push to master) ────────────────────────────────
+      # release.yml already created release/<version> branch in Emulator.
+      # Just check it out and update the submodule on it.
+      - name: '[Release flow] Checkout existing release branch and update submodule'
+        if: github.event_name == 'push'
+        working-directory: emulator-repo
+        run: |
+          BRANCH="release/${{ steps.version.outputs.value }}"
+
+          if ! git ls-remote --exit-code --heads origin "$BRANCH" > /dev/null 2>&1; then
+            echo "❌ Branch $BRANCH not found in Masquerade-Emulator."
+            echo "This usually means release.yml did not run or failed before creating the Emulator PR."
+            exit 1
+          fi
+
+          git checkout "$BRANCH"
+          echo "✅ Checked out $BRANCH"
+
+          cd src
+          git fetch origin
+          git checkout ${{ steps.source.outputs.sha }}
+          cd ..
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/
+          git commit -m "chore: update src/ submodule to ${{ steps.version.outputs.value }} (${{ steps.source.outputs.sha }})"
+          git push origin "$BRANCH"
+          echo "✅ Submodule updated on $BRANCH"
+
+      - name: '[Release flow] Set SUCCESS status to unblock Emulator PR'
+        if: github.event_name == 'push'
+        run: |
+          EMULATOR_SHA=$(cd emulator-repo && git rev-parse HEAD)
+          curl -s -X POST \
+            -H "Authorization: Bearer ${{ secrets.EMULATOR_REPO_PAT }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/${{ env.EMULATOR_REPO }}/statuses/$EMULATOR_SHA \
+            -d "{
+              \"state\": \"success\",
+              \"context\": \"submodule-update\",
+              \"description\": \"src/ submodule updated to ${{ steps.version.outputs.value }} — ready to merge\"
+            }"
+          echo "✅ Emulator PR merge button unblocked"
+
+      # ── STANDALONE PATH (workflow_dispatch) ───────────────────────────────
+      # Always creates a fresh branch and opens a new PR regardless of what
+      # branches already exist.
+      - name: '[Standalone] Create new branch and update submodule'
+        if: github.event_name == 'workflow_dispatch'
+        working-directory: emulator-repo
+        run: |
+          # Use a unique branch name with timestamp to avoid collisions
+          BRANCH="submodule-update/${{ steps.version.outputs.value }}-$(date +%Y%m%d%H%M%S)"
+          echo "STANDALONE_BRANCH=$BRANCH" >> $GITHUB_ENV
+
+          git checkout -b "$BRANCH"
+          echo "✅ Created branch $BRANCH"
+
+          cd src
+          git fetch origin
+          git checkout ${{ steps.source.outputs.sha }}
+          cd ..
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/
+          git commit -m "chore: update src/ submodule to ${{ steps.version.outputs.value }} (${{ steps.source.outputs.sha }})"
+          git push origin "$BRANCH"
+          echo "✅ Submodule update pushed to $BRANCH"
+
+      - name: '[Standalone] Open PR in Masquerade-Emulator'
+        if: github.event_name == 'workflow_dispatch'
+        working-directory: emulator-repo
+        env:
+          GH_TOKEN: ${{ secrets.EMULATOR_REPO_PAT }}
+        run: |
+          gh pr create \
+            --repo "${{ env.EMULATOR_REPO }}" \
+            --title "Update src/ submodule to ${{ steps.version.outputs.value }}" \
+            --body "## Submodule update: \`${{ steps.version.outputs.value }}\`
+
+          Updates \`src/\` submodule to point to Masquerade-Source master HEAD:
+          \`${{ steps.source.outputs.sha }}\`
+
+          _Triggered manually by @${{ github.actor }} via \`update-submodule.yml\`_" \
+            --base main \
+            --head "${{ env.STANDALONE_BRANCH }}"
+          echo "✅ PR opened"
