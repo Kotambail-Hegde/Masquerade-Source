@@ -4330,7 +4330,7 @@ void GBA_t::OnDMAChannelWritten(DMA dmaID, FLAG oldEnable, FLAG newEnable)
 		// Activate if IMMEDIATE
 		if (cache.scheduleType == DMA_TIMING::IMMEDIATE)
 		{
-			ActivateDMAChannel(dmaID);
+			DelayedDMAActivate(dmaID);
 		}
 	}
 	else
@@ -4353,21 +4353,27 @@ void GBA_t::OnDMAChannelWritten(DMA dmaID, FLAG oldEnable, FLAG newEnable)
 	}
 }
 
+void GBA_t::DelayedDMAActivate(ID dmaID)
+{
+#if (GBA_ENABLE_DELAYED_DMA_ENABLE == YES)
+	// Reset the startup delay
+	// Refer https://discord.com/channels/465585922579103744/465586361731121162/948407365852610590
+	pGBA_instance->GBA_state.dma.cache[dmaID].startupDelay = TWO;
+#else
+	ActivateDMAChannel(dmaID);
+#endif
+}
+
 void GBA_t::ActivateDMAChannel(ID dmaID)
 {
 	auto& dmaState = pGBA_instance->GBA_state.dma;
 
-	//INFO("ActivateDMAChannel(%d): runnableSet=0x%02X, currentActive=%d",
-	//	dmaID, dmaState.runnableSet, dmaState.currentlyActiveDMA);
-
 	if (dmaState.runnableSet == RESET)
 	{
 		dmaState.currentlyActiveDMA = (DMA)dmaID;
-		//INFO("  First DMA, set currentActive=%d", dmaID);
 	}
 	else if (dmaID < dmaState.currentlyActiveDMA)
 	{
-		//INFO("  Preempting DMA%d with DMA%d", dmaState.currentlyActiveDMA, dmaID);
 		dmaState.currentlyActiveDMA = (DMA)dmaID;
 		dmaState.shouldReenterTransferLoop = YES;
 	}
@@ -4383,7 +4389,7 @@ void GBA_t::RequestDMA(DMA_TIMING timing)
 	{
 		if (GETBIT(dmaID, dmaMap))
 		{
-			ActivateDMAChannel(dmaID);
+			DelayedDMAActivate(dmaID);
 		}
 	}
 }
@@ -4766,7 +4772,7 @@ void GBA_t::processPPU(INC64 ppuCycles)
 						&&
 						pGBA_instance->GBA_state.dma.cache[DMA::DMA3].scheduleType == DMA_TIMING::SPECIAL)
 					{
-						ActivateDMAChannel(DMA::DMA3);
+						DelayedDMAActivate(DMA::DMA3);
 					}
 				}
 
@@ -4851,7 +4857,7 @@ void GBA_t::processPPU(INC64 ppuCycles)
 						&&
 						pGBA_instance->GBA_state.dma.cache[DMA::DMA3].scheduleType == DMA_TIMING::SPECIAL)
 					{
-						ActivateDMAChannel(DMA::DMA3);
+						DelayedDMAActivate(DMA::DMA3);
 					}
 				}
 
@@ -4994,7 +5000,7 @@ void GBA_t::processPPU(INC64 ppuCycles)
 						&&
 						pGBA_instance->GBA_state.dma.cache[DMA::DMA3].scheduleType == DMA_TIMING::SPECIAL)
 					{
-						ActivateDMAChannel(DMA::DMA3);
+						DelayedDMAActivate(DMA::DMA3);
 					}
 				}
 				else if (pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY >= 162)

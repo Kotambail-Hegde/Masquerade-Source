@@ -15,6 +15,7 @@
 #define GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN	YES	// Refer : https://nba-emu.github.io/hw-docs/ppu/background.html
 #define GBA_ENABLE_CYCLE_ACCURATE_PPU_TICK				YES	// More accurate, needed to pass the AGS DMA priority tests; note that enabling this will bringdown the FPS!
 #define GBA_ENABLE_DELAYED_MMIO_WRITE					YES
+#define GBA_ENABLE_DELAYED_DMA_ENABLE					YES
 #define GBA_ENABLE_AGS_PATCHED_TEST						NO
 #pragma endregion WIP
 
@@ -4228,6 +4229,7 @@ private:
 	{
 		INC64 dmaCyclesInThisRun = RESET; // Currently there is no use for this, but using this to cache the count before the reset
 
+		// Refer https://github.com/zaydlang/AGBEEG-Aging-Cartridge/blob/master/documentation/dma/cpu_runs_idles_throughout_dma.md
 		if ((IsAnyDMARunning() == YES) && (source == MEMORY_ACCESS_SOURCE::CPU || source == MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH) && (LOCK == NO))
 		{
 			dmaTick();	
@@ -4295,17 +4297,17 @@ private:
 				{
 					sst.internal[sst.index].cycle += ONE;
 				}
-			// First cycle of this SST entry
-			else if (sst.index != RESET)
-			{
-				sst.internal[sst.index].cycle =
-					sst.internal[sst.index - 1].cycle + ONE;
-			}
-			// Very first SST entry
-			else
-			{
-				sst.internal[sst.index].cycle = ONE;
-			}
+				// First cycle of this SST entry
+				else if (sst.index != RESET)
+				{
+					sst.internal[sst.index].cycle =
+						sst.internal[sst.index - 1].cycle + ONE;
+				}
+				// Very first SST entry
+				else
+				{
+					sst.internal[sst.index].cycle = ONE;
+				}
 			}
 #endif
 			while (cpuTicks)
@@ -4713,6 +4715,7 @@ private:
 			FATAL("PPU or APU writing to memory!");
 		}
 
+		// Refer https://github.com/zaydlang/AGBEEG-Aging-Cartridge/blob/master/documentation/dma/cpu_runs_idles_throughout_dma.md
 		if ((IsAnyDMARunning() == YES) && (source == MEMORY_ACCESS_SOURCE::CPU || source == MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH) && (LOCK == NO))
 		{
 			dmaTick();
@@ -5595,6 +5598,24 @@ private:
 			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter++;
 		}
 
+#if (GBA_ENABLE_DELAYED_DMA_ENABLE == YES)
+		// Refer https://discord.com/channels/465585922579103744/465586361731121162/948407365852610590
+		for (int dmaID = 0; dmaID < DMA::TOTAL_DMA; ++dmaID)
+		{
+			auto& d = pGBA_instance->GBA_state.dma.cache[dmaID].startupDelay;
+
+			// branchless decrement: subtract 1 if > 0
+			unsigned old = d;
+			d -= (d > 0);
+
+			// call ActivateDMAChannel if it just reached zero
+			if (old > 0 && d == 0)
+			{
+				ActivateDMAChannel(dmaID);
+			}
+		}
+#endif
+
 #if (ENABLE_ARM7TDMI_SST == YES)
 		if (ROM_TYPE != ROM::TEST_SST) MASQ_UNLIKELY
 #endif
@@ -5761,7 +5782,7 @@ private:
 								if (dmacntH.mDMAnCNT_HFields.DMA_EN == SET
 									&& dmacntH.mDMAnCNT_HFields.DMA_START_TIMING == DMA_TIMING::SPECIAL)
 								{
-									ActivateDMAChannel(DMA::DMA1);
+									DelayedDMAActivate(DMA::DMA1);
 								}
 							}
 						}
@@ -5786,7 +5807,7 @@ private:
 								if (dmacntH.mDMAnCNT_HFields.DMA_EN == SET
 									&& dmacntH.mDMAnCNT_HFields.DMA_START_TIMING == DMA_TIMING::SPECIAL)
 								{
-									ActivateDMAChannel(DMA::DMA2);
+									DelayedDMAActivate(DMA::DMA2);
 								}
 							}
 						}
@@ -5825,6 +5846,8 @@ private:
 	void latchDMARegisters(ID dmaID);
 
 	void OnDMAChannelWritten(DMA dmaID, FLAG oldEnable, FLAG newEnable);
+
+	void DelayedDMAActivate(ID dmaID);
 
 	void ActivateDMAChannel(ID dmaID);
 
