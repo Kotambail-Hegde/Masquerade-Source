@@ -90,12 +90,14 @@
 #define IO_BLDCNT										0x04000050
 #define IO_BLDALPHA										0x04000052
 #define IO_BLDY											0x04000054
+#define IO_4000055										0x04000055
 #define IO_4000056										0x04000056
 #define IO_4000058										0x04000058
 #define IO_400005A										0x0400005A
 #define IO_400005C										0x0400005C
 #define IO_400005E										0x0400005E
 #define IO_SOUND1CNT_L									0x04000060 
+#define IO_4000061										0x04000061 
 #define IO_SOUND1CNT_H									0x04000062 
 #define IO_SOUND1CNT_X									0x04000064 
 #define IO_4000066 										0x04000066 
@@ -225,7 +227,8 @@
 #define IO_400020A										0x0400020A
 #define IO_UNDOC2_START									0x0400020C
 #define IO_UNDOC2_END									0x040002FE
-#define IO_POSTFLG_HALTCNT								0x04000300
+#define IO_POSTFLG										0x04000300
+#define IO_HALTCNT										0x04000301
 #define IO_4000302										0x04000302
 #define IO_IMEMCTRL										0x04000800
 #define IO_END_ADDRESS									0x04FFFFFF
@@ -2614,18 +2617,6 @@ private:
 		BYTE mHALTCNTByte;
 	} mHALTCNTByte_t;
 
-	typedef struct
-	{
-		mPOSTFLGByte_t mPOSTFLGByte;
-		mHALTCNTByte_t mHALTCNTByte;
-	} mPOSTFLG_HALTCNT_Fields_t;
-
-	typedef union
-	{
-		mPOSTFLG_HALTCNT_Fields_t mPOSTFLG_HALTCNT_Fields;
-		uint16_t mPOSTFLG_HALTCNT_HalfWord;
-	} mPOSTFLG_HALTCNT_HalfWord_t;
-
 	// INTMEMCTRL (32-bit)
 	typedef struct
 	{
@@ -2861,7 +2852,8 @@ private:
 		mIMEHalfWord_t mIMEHalfWord;							// 0x04000208
 		GBA_HALFWORD m400020A;									// 0x0400020A
 		GBA_HALFWORD mUNDOC02[(0x04000300 - 0x0400020C) / TWO];	// 0x0400020C - 0x040002FE
-		mPOSTFLG_HALTCNT_HalfWord_t mPOSTFLG_HALTCNT_HalfWord;	// 0x04000300
+		mPOSTFLGByte_t mPOSTFLGByte;							// 0x04000300
+		mHALTCNTByte_t mHALTCNTByte;							// 0x04000301
 		GBA_HALFWORD m4000302;									// 0x04000302
 	} mIOFields_t;
 
@@ -3329,7 +3321,6 @@ private:
 		GBA_WORD target;
 		FLAG isFIFODMA;
 		DMA_SIZE chunkSize;
-		GBA_WORD latchedData;	// Needed when DMA reads from unused memory
 		GBA_WORD wordToBeTransfered;	// Actual valid data that get transfered during valid transfers
 		uint16_t io_dmaen;
 		FLAG didAccessRom;  // <-- Add this to preserve ROM access state
@@ -3346,6 +3337,7 @@ private:
 		DMA currentlyActiveDMA;
 		FLAG shouldReenterTransferLoop;
 		MAP8 runnableSet;
+		GBA_WORD latchedData;	// Needed when DMA reads from unused memory
 		dmaCache_t cache[DMA::TOTAL_DMA];
 		dmaTrigCache_t trigCache[DMA_TIMING::TOTAL_DMA_TIMING];
 	} dma_t;
@@ -4082,6 +4074,11 @@ private:
 		// Refer to "Reading from Unused Memory (00004000-01FFFFFF,10000000-FFFFFFFF)" in https://problemkaputt.de/gbatek-gba-unpredictable-things.htm
 		auto shift = (address & THREE) << THREE;
 
+		if (pGBA_memory->previousAccessSource == MEMORY_ACCESS_SOURCE::DMA)
+		{
+			RETURN ((T)(pGBA_instance->GBA_state.dma.latchedData >> shift));
+		}
+
 		if (getARMState() == STATE_TYPE::ST_ARM)
 		{
 			RETURN ((T)(pGBA_cpuInstance->pipeline.fetchStageOpCode.opCode.rawOpCode >> shift));
@@ -4687,6 +4684,7 @@ private:
 	}
 
 	void writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType);
+	void writeIO8(uint32_t address, BYTE data, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType);
 
 	template <typename T>
 	void writeRawMemoryInternal(uint32_t address, T data, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType, FLAG LOCK = NO)
@@ -4882,18 +4880,34 @@ private:
 		{
 			if (accessWidth == MEMORY_ACCESS_WIDTH::EIGHT_BIT) MASQ_UNLIKELY
 			{
-				data = (BYTE)data;
-				GBA_HALFWORD currentWord = readIO((address & (~ONE)), accessWidth, MEMORY_ACCESS_SOURCE::HOST, accessType);
-				GBA_HALFWORD newWord = currentWord;
-				if ((address & 0x01) == ZERO)
+				if (address == IO_HALTCNT
+					|| address == IO_POSTFLG
+					|| address == IO_BLDY
+#if (GBA_ENABLE_DELAYED_MMIO_WRITE == YES)
+					|| address == IO_TM0CNT_H
+					|| address == IO_TM1CNT_H
+					|| address == IO_TM2CNT_H
+					|| address == IO_TM3CNT_H
+#endif
+					|| address == IO_SOUND1CNT_L)
 				{
-					newWord = (data | (currentWord & 0xFF00));
+					writeIO8(address, TO_UINT8(data), accessWidth, source, accessType);
 				}
-				else
+				else MASQ_LIKELY
 				{
-					newWord = ((currentWord & 0x00FF) | (data << EIGHT));
+					data = (BYTE)data;
+					GBA_HALFWORD currentWord = readIO((address & (~ONE)), accessWidth, MEMORY_ACCESS_SOURCE::HOST, accessType);
+					GBA_HALFWORD newWord = currentWord;
+					if ((address & 0x01) == ZERO)
+					{
+						newWord = (data | (currentWord & 0xFF00));
+					}
+					else
+					{
+						newWord = ((currentWord & 0x00FF) | (data << EIGHT));
+					}
+					writeIO((address & (~ONE)), newWord, accessWidth, source, accessType);
 				}
-				writeIO((address & (~ONE)), newWord, accessWidth, source, accessType);
 			}
 			else if (accessWidth == MEMORY_ACCESS_WIDTH::SIXTEEN_BIT) MASQ_LIKELY 
 			{

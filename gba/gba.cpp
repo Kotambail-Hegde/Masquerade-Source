@@ -1233,13 +1233,23 @@ GBA_HALFWORD  GBA_t::readIO(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, M
 	{
 		RETURN 0x0000;
 	}
+	case IO_POSTFLG:
+	case IO_HALTCNT:
+	{
+		typedef struct
+		{
+			mPOSTFLGByte_t mPOSTFLGByte;
+			mHALTCNTByte_t mHALTCNTByte;
+		} mPOSTFLG_HALTCNT_Fields_t;
+
+		mPOSTFLG_HALTCNT_Fields_t mPOSTFLG_HALTCNT_Fields;
+		mPOSTFLG_HALTCNT_Fields.mHALTCNTByte = pGBA_peripherals->mHALTCNTByte;
+		mPOSTFLG_HALTCNT_Fields.mPOSTFLGByte = pGBA_peripherals->mPOSTFLGByte;
+		RETURN static_cast<GBA_HALFWORD>(mPOSTFLG_HALTCNT_Fields.mPOSTFLGByte.mPOSTFLGByte);
+	}
 	case IO_4000302:
 	{
 		RETURN 0x0000;
-	}
-	case IO_POSTFLG_HALTCNT:
-	{
-		RETURN static_cast<GBA_HALFWORD>(pGBA_peripherals->mPOSTFLG_HALTCNT_HalfWord.mPOSTFLG_HALTCNT_Fields.mPOSTFLGByte.mPOSTFLGByte);
 	}
 	default:
 	{
@@ -1250,6 +1260,9 @@ GBA_HALFWORD  GBA_t::readIO(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, M
 
 void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType)
 {
+#define IO8_WRONG_HANDLER() FATAL("Should be handled by writeIO8, Line: %d in File %s", __LINE__, __FILE__)
+#define REJECT_IO8(width) if ((width) == MEMORY_ACCESS_WIDTH::EIGHT_BIT) MASQ_UNLIKELY IO8_WRONG_HANDLER()
+
 	switch (address)
 	{
 	case IO_DISPCNT:
@@ -1658,6 +1671,7 @@ void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH acc
 	}
 	case IO_BLDY:
 	{
+		REJECT_IO8(accessWidth);
 		pGBA_peripherals->mBLDYHalfWord.mBLDYHalfWord = data;
 		RETURN;
 	}
@@ -1671,6 +1685,7 @@ void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH acc
 	}
 	case IO_SOUND1CNT_L:
 	{
+		REJECT_IO8(accessWidth);
 		BYTE nr10 = pGBA_peripherals->mSOUND1CNT_LHalfWord.mSOUND1CNT_LHalfWord & 0xFF;
 		pGBA_peripherals->mSOUND1CNT_LHalfWord.mSOUND1CNT_LHalfWord = data;
 
@@ -2680,6 +2695,7 @@ void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH acc
 	}
 	case IO_TM0CNT_H:
 	{
+		REJECT_IO8(accessWidth);
 		SETBIT(pGBA_instance->GBA_state.timerPendMap, ONE);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER0].cache.io_tmxcnt_h = data;
 		RETURN;
@@ -2692,6 +2708,7 @@ void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH acc
 	}
 	case IO_TM1CNT_H:
 	{
+		REJECT_IO8(accessWidth);
 		SETBIT(pGBA_instance->GBA_state.timerPendMap, THREE);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER1].cache.io_tmxcnt_h = data;
 		RETURN;
@@ -2704,6 +2721,7 @@ void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH acc
 	}
 	case IO_TM2CNT_H:
 	{
+		REJECT_IO8(accessWidth);
 		SETBIT(pGBA_instance->GBA_state.timerPendMap, FIVE);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER2].cache.io_tmxcnt_h = data;
 		RETURN;
@@ -2716,6 +2734,7 @@ void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH acc
 	}
 	case IO_TM3CNT_H:
 	{
+		REJECT_IO8(accessWidth);
 		SETBIT(pGBA_instance->GBA_state.timerPendMap, SEVEN);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER3].cache.io_tmxcnt_h = data;
 		RETURN;
@@ -3033,36 +3052,6 @@ void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH acc
 	{
 		RETURN;
 	}
-	case IO_POSTFLG_HALTCNT:
-	{
-		BIT stopBit = pGBA_peripherals->mPOSTFLG_HALTCNT_HalfWord.mPOSTFLG_HALTCNT_Fields.mHALTCNTByte.mHALTCNTFields.STOP;
-		pGBA_peripherals->mPOSTFLG_HALTCNT_HalfWord.mPOSTFLG_HALTCNT_HalfWord = data;
-
-		if (stopBit != pGBA_peripherals->mPOSTFLG_HALTCNT_HalfWord.mPOSTFLG_HALTCNT_Fields.mHALTCNTByte.mHALTCNTFields.STOP)
-		{
-			if (pGBA_peripherals->mPOSTFLG_HALTCNT_HalfWord.mPOSTFLG_HALTCNT_Fields.mHALTCNTByte.mHALTCNTFields.STOP == SET)
-			{
-				pGBA_cpuInstance->haltCntState = HALT_CONTROLLER::STOP;
-				FATAL("Stop Mode is not supported")
-			}
-			else
-			{
-				if (shouldUnHaltTheCPU() == YES)
-				{
-					CPUEVENT("[RUN] -> [RUN]");
-					pGBA_cpuInstance->haltCntState = HALT_CONTROLLER::RUN;
-				}
-				else
-				{
-					// Refer "4000301h - HALTCNT - BYTE - Undocumented - Low Power Mode Control (W)" of  https://problemkaputt.de/gbatek-gba-system-control.htm
-					CPUEVENT("[RUN] -> [HALT]");
-					pGBA_cpuInstance->haltCntState = HALT_CONTROLLER::HALT;
-				}
-			}
-		}
-
-		RETURN;
-	}
 	case IO_4000302:
 	{
 		RETURN;
@@ -3070,6 +3059,102 @@ void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH acc
 	default:
 	{
 		pGBA_memory->mGBAMemoryMap.mIO.mIOMemory16bit[(address - IO_START_ADDRESS) / TWO] = data;
+		RETURN;
+	}
+	}
+}
+
+void GBA_t::writeIO8(uint32_t address, BYTE data, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType)
+{
+	switch (address)
+	{
+	case IO_BLDY:
+	{
+		pGBA_peripherals->mBLDYHalfWord.mBLDYFields.EVY_COEFF = data & 0x1F;
+		RETURN;
+	}
+	case IO_SOUND1CNT_L:
+	{
+		BYTE nr10 = pGBA_peripherals->mSOUND1CNT_LHalfWord.mSOUND1CNT_LHalfWord & 0xFF;
+		pGBA_peripherals->mSOUND1CNT_LHalfWord.mSOUND1CNT_LHalfWord = data;
+
+		// writing to Sound channel 1 sweep
+		//if (nr10 != (pGBA_peripherals->mSOUND1CNT_LHalfWord.mSOUND1CNT_LHalfWord & 0xFF))
+		{
+			if (pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.PSG_FIFO_MASTER_EN == ZERO)
+			{
+				pGBA_peripherals->mSOUND1CNT_LHalfWord.mSOUND1CNT_LHalfWord &= 0xFF00;
+				pGBA_peripherals->mSOUND1CNT_LHalfWord.mSOUND1CNT_LHalfWord |= nr10;
+			}
+			// NOTE: One of the weird quirks of frequency sweep
+			// Refer to "Obscure Behaviour" section of this link : https://gbdev.gg8.se/wiki/articles/Gameboy_sound_hardware#Registers
+			else if (pGBA_peripherals->mSOUND1CNT_LHalfWord.mSOUND1CNT_LFields.SWEEP_FREQ_DIR == ZERO
+				&& pGBA_instance->GBA_state.audio.wasSweepDirectionNegativeAtleastOnceSinceLastTrigger == YES)
+			{
+				pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.SOUND1_ON_FLAG = ZERO;
+				pGBA_peripherals->mSOUND1CNT_XHalfWord.mSOUND1CNT_XFields.INITIAL = ZERO;
+				pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].isChannelActuallyEnabled = DISABLED;
+			}
+		}
+
+		RETURN;
+	}
+#if (GBA_ENABLE_DELAYED_MMIO_WRITE == YES)
+	case IO_TM0CNT_H:
+	{
+		SETBIT(pGBA_instance->GBA_state.timerPendMap, ONE);
+		pGBA_instance->GBA_state.timer[TIMER::TIMER0].cache.io_tmxcnt_h = data;
+		RETURN;
+	}
+	case IO_TM1CNT_H:
+	{
+		SETBIT(pGBA_instance->GBA_state.timerPendMap, THREE);
+		pGBA_instance->GBA_state.timer[TIMER::TIMER1].cache.io_tmxcnt_h = data;
+		RETURN;
+	}
+	case IO_TM2CNT_H:
+	{
+		SETBIT(pGBA_instance->GBA_state.timerPendMap, FIVE);
+		pGBA_instance->GBA_state.timer[TIMER::TIMER2].cache.io_tmxcnt_h = data;
+		RETURN;
+	}
+	case IO_TM3CNT_H:
+	{
+		SETBIT(pGBA_instance->GBA_state.timerPendMap, SEVEN);
+		pGBA_instance->GBA_state.timer[TIMER::TIMER3].cache.io_tmxcnt_h = data;
+		RETURN;
+	}
+#endif
+	case IO_POSTFLG:
+	{
+		CPUTODO("If condition of PC <= 0x3FFF at %d in %s is obtained from NBA. Find actual source of this information", __LINE__, __FILE__);
+
+		if (cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)PC) <= 0x3FFF)
+		{
+			pGBA_peripherals->mPOSTFLGByte.mPOSTFLGFields.UNDOC = GETBIT(ZERO, data);
+		}
+
+		RETURN;
+	}
+	case IO_HALTCNT:
+	{
+		CPUTODO("If condition of PC <= 0x3FFF at %d in %s is obtained from NBA. Find actual source of this information", __LINE__, __FILE__);
+		if (cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)PC) <= 0x3FFF)
+		{
+			if (data & 0x80)
+			{
+				pGBA_cpuInstance->haltCntState = HALT_CONTROLLER::STOP;
+				FATAL("Stop Mode is not supported")
+			}
+			else
+			{
+				// Refer "4000301h - HALTCNT - BYTE - Undocumented - Low Power Mode Control (W)" of  https://problemkaputt.de/gbatek-gba-system-control.htm
+				CPUEVENT("[RUN] -> [HALT]");
+				pGBA_cpuInstance->haltCntState = HALT_CONTROLLER::HALT;
+				busCycles();
+			}
+		}
+
 		RETURN;
 	}
 	}
@@ -3092,8 +3177,10 @@ FLAG GBA_t::processSOC()
 	}
 	else if (pGBA_cpuInstance->haltCntState == HALT_CONTROLLER::HALT)
 	{
-		if (IsAnyDMARunning() == YES)
+		if (shouldUnHaltTheCPU() == NO && IsAnyDMARunning() == YES)
 		{
+			// Refer https://github.com/zaydlang/AGBEEG-Aging-Cartridge/blob/master/documentation/dma/cpu_runs_idles_throughout_dma.md
+
 			// Cycles can never be zero; In actual device, clocks are always running
 			// Since the emulation's clocks are based on CPU, even when other masters (eg: DMA) running, cycles can appear to be zero
 			// Ideally, all master's should be running in parallel
@@ -3106,19 +3193,22 @@ FLAG GBA_t::processSOC()
 		}
 
 		dmaCyclesInThisRun = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.dmaCounter;
-		pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.dmaCounter = RESET;
-
-		if (dmaCyclesInThisRun == RESET)
-		{
-			busCycles();
-			cyclesInThisRun = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter;
-		}
 
 		// Refer to http://problemkaputt.de/gbatek-gba-system-control.htm
 		if (shouldUnHaltTheCPU() == YES)
 		{
+			busCycles();
+			cyclesInThisRun = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter;
 			pGBA_cpuInstance->haltCntState = HALT_CONTROLLER::RUN;
 			CPUEVENT("[HALT] -> [RUN]");
+		}
+
+		// Some tick should happen to pull CPU out of HALT state... 
+		// Hence we call busCycles incase both DMA and CPU ticks were zero
+		if (dmaCyclesInThisRun == RESET && cyclesInThisRun == RESET)
+		{
+			busCycles();
+			cyclesInThisRun = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter;
 		}
 	}
 	else
@@ -3166,6 +3256,7 @@ void GBA_t::busCycles()
 void GBA_t::cpuIdleCycles()
 {
 	// Run DMA if any channel is active
+	// Refer https://github.com/zaydlang/AGBEEG-Aging-Cartridge/blob/master/documentation/dma/cpu_runs_idles_throughout_dma.md
 	if (IsAnyDMARunning() == YES)
 	{
 		dmaTick();
@@ -3179,13 +3270,19 @@ void GBA_t::cpuIdleCycles()
 	ticks.freeBusCyclesCounter += ticks.dmaCounter;
 	ticks.dmaCounter = RESET;
 
-	if (ticks.freeBusCyclesCounter <= RESET)
+	if (ticks.freeBusCyclesCounter == RESET)
 	{
-		ticks.freeBusCyclesCounter = RESET;
+		// No DMA cycles pending, so execute a CPU cycle
 		busCycles();
 	}
 	else
 	{
+		// There are pending DMA cycles to account for. 
+		// Each unit in freeBusCyclesCounter represents a CPU cycle that should be skipped 
+		// because a DMA transfer already consumed the bus. 
+		// By decrementing this counter, we effectively delay CPU execution 
+		// until all DMA cycles have been accounted for, ensuring correct timing 
+		// between CPU and DMA activity.
 		--ticks.freeBusCyclesCounter;
 	}
 
@@ -3294,7 +3391,7 @@ void GBA_t::runCPUPipeline()
 		CPSR_FLAG(currentCPSR.psrFields.psrFIQDisBit, "F"), CPSR_FLAG(currentCPSR.psrFields.psrStateBit, "T"));
 
 #if (GBA_ENABLE_AGS_PATCHED_TEST == YES)
-	static const std::string chk1 = "TCHK01–";
+	static const std::string chk1 = "TCHK01ï¿½";
 	static const std::string chk2 = "AGB CHECKER";
 	static const std::string test1 = reinterpret_cast<char*>(pGBA_memory->mGBAMemoryMap.mGamePakRom.mWaitState.mWaitState0.mWaitState0Fields.cartridge_header_SB.cartridge_header_SB_fields.gameCode);
 	static const std::string test2 = reinterpret_cast<char*>(pGBA_memory->mGBAMemoryMap.mGamePakRom.mWaitState.mWaitState0.mWaitState0Fields.cartridge_header_SB.cartridge_header_SB_fields.gametitle);
@@ -3600,7 +3697,7 @@ void GBA_t::dumpCpuStateToConsole()
 	LOG_NEW_LINE;
 	LOG("------------------------------------------------------------");
 
-	/* R0–R7 */
+	/* R0ï¿½R7 */
 	for (uint8_t r = ZERO; r < LO_GP_REGISTERS; r++)
 	{
 		LOG("BANK NA R%-2u %-10s : 0x%08X",
@@ -4184,7 +4281,6 @@ void GBA_t::OnDMAChannelWritten(DMA dmaID, FLAG oldEnable, FLAG newEnable)
 			cache.count = ZERO;
 			cache.target = cache.length;
 			cache.currentState = YES;
-			cache.didAccessRom = NO;
 		}
 		else
 		{
@@ -4321,16 +4417,6 @@ void GBA_t::processDMA()
 
 void GBA_t::RunDMAChannel()
 {
-#define DMA_REENTER_EARLY_RETURN(dmaState)								\
-	do																	\
-	{																	\
-		if ((dmaState).shouldReenterTransferLoop == YES) MASQ_UNLIKELY  \
-		{																\
-			(dmaState).shouldReenterTransferLoop = NO;					\
-			RETURN;														\
-		}																\
-	} while (ZERO)
-
 	auto& dmaState = pGBA_instance->GBA_state.dma;
 	ID activeDMA = dmaState.currentlyActiveDMA;
 
@@ -4350,10 +4436,16 @@ void GBA_t::RunDMAChannel()
 		dstModifier = ZERO;
 	}
 
+	cache.didAccessRom = NO;
+
 	while (cache.count < cache.target)
 	{
 		// Reason for calling this here : https://discord.com/channels/465585922579103744/465586361731121162/959447055967879218
-		DMA_REENTER_EARLY_RETURN(dmaState);
+		if (dmaState.shouldReenterTransferLoop == YES) MASQ_UNLIKELY
+		{
+			dmaState.shouldReenterTransferLoop = NO; 
+			RETURN;
+		}
 
 		MEMORY_ACCESS_TYPE srcType = MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE;
 		MEMORY_ACCESS_TYPE dstType = MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE;
@@ -4374,15 +4466,15 @@ void GBA_t::RunDMAChannel()
 
 		if (cache.chunkSize == DMA_SIZE::HALFWORD_PER_TRANSFER)
 		{
-			if (cache.source >= EXT_WORK_RAM_START_ADDRESS)
+			if (cache.source >= EXT_WORK_RAM_START_ADDRESS) MASQ_LIKELY
 			{
 				cache.wordToBeTransfered = readRawMemory<GBA_HALFWORD>(cache.source, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::DMA, srcType);
 
-				cache.latchedData = (cache.wordToBeTransfered << SIXTEEN) | cache.wordToBeTransfered;
+				dmaState.latchedData = (cache.wordToBeTransfered << SIXTEEN) | cache.wordToBeTransfered;
 			}
 			else
 			{
-				cache.wordToBeTransfered = (cache.destination & TWO) ? (GBA_HALFWORD)(cache.latchedData >> SIXTEEN) : (GBA_HALFWORD)(cache.latchedData);
+				cache.wordToBeTransfered = (cache.destination & TWO) ? (GBA_HALFWORD)(dmaState.latchedData >> SIXTEEN) : (GBA_HALFWORD)(dmaState.latchedData);
 				cpuTick(TICK_TYPE::DMA_TICK);
 			}
 
@@ -4390,16 +4482,16 @@ void GBA_t::RunDMAChannel()
 		}
 		else
 		{
-			if (cache.source >= EXT_WORK_RAM_START_ADDRESS)
+			if (cache.source >= EXT_WORK_RAM_START_ADDRESS) MASQ_LIKELY
 			{
-				cache.latchedData = readRawMemory<GBA_WORD>(cache.source, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::DMA, srcType);
+				dmaState.latchedData = readRawMemory<GBA_WORD>(cache.source, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::DMA, srcType);
 			}
 			else
 			{
 				cpuTick(TICK_TYPE::DMA_TICK);
 			}
 
-			writeRawMemory<GBA_WORD>(cache.destination, cache.latchedData, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::DMA, dstType);
+			writeRawMemory<GBA_WORD>(cache.destination, dmaState.latchedData, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::DMA, dstType);
 		}
 
 		cache.source += srcModifier;
@@ -4453,8 +4545,6 @@ void GBA_t::RunDMAChannel()
 	}
 
 	SelectNextDMA();
-
-#undef DMA_REENTER_EARLY_RETURN
 }
 
 void GBA_t::processAPU(INC64 apuCycles)
