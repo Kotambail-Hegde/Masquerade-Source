@@ -4203,6 +4203,23 @@ private:
 		}
 	}
 
+	MASQ_INLINE uint8_t GenerateNBAAccessMask(
+		MEMORY_ACCESS_TYPE type,
+		MEMORY_ACCESS_SOURCE source,
+		FLAG lock)
+	{
+		constexpr uint8_t ACCESS_SEQUENTIAL = 1 << 0;
+		constexpr uint8_t ACCESS_CODE = 1 << 1;
+		constexpr uint8_t ACCESS_DMA = 1 << 2;
+		constexpr uint8_t ACCESS_LOCK = 1 << 3;
+
+		RETURN 
+			((type == MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE) * ACCESS_SEQUENTIAL) |
+			((source == MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH) * ACCESS_CODE) |
+			((source == MEMORY_ACCESS_SOURCE::DMA) * ACCESS_DMA) |
+			(lock * ACCESS_LOCK);
+	}
+
 	GBA_HALFWORD readIO(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType);
 
 	// NOTE: For memory mirrors, refer http://problemkaputt.de/gbatek-gba-unpredictable-things.htm
@@ -5639,8 +5656,8 @@ private:
 				}
 			}
 
-		/* clear after processing */
-		pGBA_instance->GBA_state.timerPendMap = RESET;
+			/* clear after processing */
+			pGBA_instance->GBA_state.timerPendMap = RESET;
 		}
 #endif
 	}
