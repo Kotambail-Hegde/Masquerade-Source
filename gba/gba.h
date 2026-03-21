@@ -16,6 +16,7 @@
 #define GBA_ENABLE_CYCLE_ACCURATE_PPU_TICK				YES	// More accurate, needed to pass the AGS DMA priority tests; note that enabling this will bringdown the FPS!
 #define GBA_ENABLE_DELAYED_MMIO_WRITE					YES
 #define GBA_ENABLE_DELAYED_DMA_ENABLE					YES
+#define GBA_ENABLE_ROM_SEQ_BURST_QUIRK					YES
 #define GBA_ENABLE_AGS_PATCHED_TEST						NO
 #pragma endregion WIP
 
@@ -3136,7 +3137,9 @@ private:
 		}mBankedWAVERAM;
 		GBA_WORD previouslyAccessedMemory;
 		GBA_WORD previouslyLatchedBiosData;
+		GBA_WORD romLatchedAddress;
 		MEMORY_ACCESS_WIDTH previousAccessWidth;
+		MEMORY_ACCESS_SOURCE previousAccessSource;
 		MEMORY_ACCESS_TYPE getPreviousMemoryAccessType;
 		MEMORY_ACCESS_TYPE setNextMemoryAccessType;
 		MEMORY_ACCESS_TYPE setNextPipelineAccessType;
@@ -3677,8 +3680,9 @@ private:
 	typedef struct
 	{
 		FLAG isRomLoaded;
+		BYTE pad[3];
 		uint32_t codeRomSize;
-		BYTE pad;
+		uint32_t romMaxAddressMask;
 	} aboutRom_t;
 
 	template<std::size_t BaseSize>
@@ -3970,20 +3974,23 @@ private:
 
 	uint32_t cpuReadRegister(REGISTER_BANK_TYPE rb, REGISTER_TYPE rt);
 
-	MASQ_INLINE FLAG gamePAKBoundaryCheck(MEMORY_ACCESS_TYPE& mType, GBA_WORD mCurrentAddress)
+	MASQ_INLINE void gamePAKBoundaryCheck(MEMORY_ACCESS_TYPE& mType, GBA_WORD mCurrentAddress, MEMORY_ACCESS_SOURCE mCurrentSource)
 	{
 		// GamePak ROM 128KB boundary check
 		const uint32_t currentRegion = mCurrentAddress >> TWENTYFOUR;
 		const FLAG isGamePakROM = (currentRegion >= 0x08) && (currentRegion <= 0x0D);
 		const FLAG is128KBoundary = (mCurrentAddress & 0x1FFFF) == ZERO;
 
-		if (isGamePakROM && is128KBoundary)
+		FLAG isDMA2CPU = NO;
+		if ((pGBA_memory->previousAccessSource == MEMORY_ACCESS_SOURCE::DMA) && (mCurrentSource != MEMORY_ACCESS_SOURCE::DMA))
 		{
-			mType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
-			RETURN YES;
+			isDMA2CPU = YES;
 		}
 
-		RETURN NO;
+		if (isGamePakROM && (is128KBoundary || isDMA2CPU))
+		{
+			mType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
+		}
 	}
 
 	MASQ_INLINE uint32_t getMemoryAccessCycles(GBA_WORD mCurrentAddress,
@@ -4037,7 +4044,7 @@ private:
 
 		// GamePak ROM 128KB boundary check
 		// Refer https://discord.com/channels/465585922579103744/465586361731121162/1269412483735486484
-		(MASQ_IGNORE)gamePAKBoundaryCheck(mType, mCurrentAddress);
+		gamePAKBoundaryCheck(mType, mCurrentAddress, mSource);
 
 #if (ENABLE_ARM7TDMI_SST == YES)
 		if (ROM_TYPE == ROM::TEST_SST) MASQ_UNLIKELY
@@ -4063,6 +4070,7 @@ private:
 		// Update state for next call
 		pGBA_instance->GBA_state.gbaMemory.previouslyAccessedMemory = mCurrentAddress;
 		pGBA_memory->previousAccessWidth = mAccessWidth;
+		pGBA_memory->previousAccessSource = mSource;
 		pGBA_memory->getPreviousMemoryAccessType = mType;
 
 		RETURN nCycles;
@@ -4609,6 +4617,73 @@ private:
 			// As part of first level mirroring, OAM (0x08000000 - 0x0DFFFFFF) is mirrored in steps of GAMEPAK_ROM_SIZE 
 			address &= 0x01FFFFFF;
 
+#if (GBA_ENABLE_ROM_SEQ_BURST_QUIRK == YES)
+			/*
+			*
+			* 1) There is no 8 bits access to ROM, we do a 16 bit access and based on address, read out the lower or upper nibble
+			* 2) Because of https://discord.com/channels/465585922579103744/465586361731121162/996871166079803542
+			* Post a non-sequential access, every next read is forced to be the sequential reads and hence as a consequence of this
+			* we always read non-sequential address + 1, until a new non-sequential access is made
+			* 3) We need to handle cases where the read address is greater than the ROM size itself.
+			*/
+
+			if (pGBA_memory->getPreviousMemoryAccessType == MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE)
+			{
+				pGBA_memory->romLatchedAddress = address & pAbsolute_GBA_instance->absolute_GBA_state.aboutRom.romMaxAddressMask;
+			}
+
+			uint32_t dataT = RESET;
+			BYTE stride = RESET;
+
+			if (accessWidth == MEMORY_ACCESS_WIDTH::EIGHT_BIT)
+			{
+				if (pGBA_memory->romLatchedAddress < pAbsolute_GBA_instance->absolute_GBA_state.aboutRom.codeRomSize) MASQ_LIKELY
+				{
+					uint16_t data16 = static_cast<uint16_t>(pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakRom.mWaitState.mWaitState0.mWaitState0Memory16bit[pGBA_memory->romLatchedAddress / TWO]);
+					dataT = static_cast<T>(data16 >> ((address & 0x01) << 0x03));
+				}
+				else
+				{
+					// NOTE: This information is obtained from NBA and Skyemu
+					dataT = pGBA_memory->romLatchedAddress / TWO;
+				}
+
+				stride = sizeof(GBA_HALFWORD);
+			}
+			else if (accessWidth == MEMORY_ACCESS_WIDTH::SIXTEEN_BIT)
+			{
+				if (pGBA_memory->romLatchedAddress < pAbsolute_GBA_instance->absolute_GBA_state.aboutRom.codeRomSize) MASQ_LIKELY
+				{
+					dataT = static_cast<T>(pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakRom.mWaitState.mWaitState0.mWaitState0Memory16bit[pGBA_memory->romLatchedAddress / TWO]);
+				}
+				else
+				{
+					// NOTE: This information is obtained from NBA and Skyemu
+					dataT = pGBA_memory->romLatchedAddress / TWO;
+				}
+
+				stride = sizeof(GBA_HALFWORD);
+			}
+			else if (accessWidth == MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT)
+			{
+				if (pGBA_memory->romLatchedAddress < pAbsolute_GBA_instance->absolute_GBA_state.aboutRom.codeRomSize) MASQ_LIKELY
+				{
+					dataT = static_cast<T>(pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakRom.mWaitState.mWaitState0.mWaitState0Memory32bit[pGBA_memory->romLatchedAddress / FOUR]);
+				}
+				else
+				{
+					// NOTE: This information is obtained from NBA and Skyemu
+					dataT = ((pGBA_memory->romLatchedAddress / TWO) & 0xFFFF) + ((((pGBA_memory->romLatchedAddress / TWO) + ONE) & 0xFFFF) << SIXTEEN);
+				}
+
+				stride = sizeof(GBA_WORD);
+			}
+
+			pGBA_memory->romLatchedAddress += stride;
+			pGBA_memory->romLatchedAddress &= pAbsolute_GBA_instance->absolute_GBA_state.aboutRom.romMaxAddressMask;
+
+			RETURN static_cast<T>(dataT);
+#else
 			if (accessWidth == MEMORY_ACCESS_WIDTH::EIGHT_BIT)
 			{
 				RETURN static_cast<T>(pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakRom.mWaitState.mWaitState0.mWaitState0Memory8bit[address]);
@@ -4621,6 +4696,7 @@ private:
 			{
 				RETURN static_cast<T>(pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakRom.mWaitState.mWaitState0.mWaitState0Memory32bit[address / FOUR]);
 			}
+#endif
 		}
 		else if (IF_ADDRESS_WITHIN(address, GAMEPAK_SRAM_START_ADDRESS, GAMEPAK_SRAM_MIRROR_END_ADDRESS))
 		{
@@ -5122,6 +5198,23 @@ private:
 		}
 		else if (IF_ADDRESS_WITHIN(address, GAMEPAK_ROM_WS0_START_ADDRESS, GAMEPAK_ROM_WS2_END_ADDRESS))
 		{
+#if (GBA_ENABLE_ROM_SEQ_BURST_QUIRK == YES)
+			// As part of first level mirroring, OAM (0x08000000 - 0x0DFFFFFF) is mirrored in steps of GAMEPAK_ROM_SIZE 
+			address &= 0x01FFFFFF;
+
+			/*
+			*
+			* 1) There is no 8 bits access to ROM, its 16 or 32 bit access
+			* 2) Because of https://discord.com/channels/465585922579103744/465586361731121162/996871166079803542
+			* Post a non-sequential access, next write address is latched
+			*/
+
+			if (pGBA_memory->getPreviousMemoryAccessType == MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE)
+			{
+				pGBA_memory->romLatchedAddress = address & pAbsolute_GBA_instance->absolute_GBA_state.aboutRom.romMaxAddressMask;
+			}
+#endif
+
 			RETURN;
 		}
 		else if (IF_ADDRESS_WITHIN(address, GAMEPAK_SRAM_START_ADDRESS, GAMEPAK_SRAM_MIRROR_END_ADDRESS))

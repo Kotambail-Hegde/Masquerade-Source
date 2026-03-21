@@ -3424,7 +3424,7 @@ void GBA_t::runCPUPipeline()
 		CPSR_FLAG(currentCPSR.psrFields.psrFIQDisBit, "F"), CPSR_FLAG(currentCPSR.psrFields.psrStateBit, "T"));
 
 #if (GBA_ENABLE_AGS_PATCHED_TEST == YES)
-	static const std::string chk1 = "TCHK01ï¿½";
+	static const std::string chk1 = "TCHK01–";
 	static const std::string chk2 = "AGB CHECKER";
 	static const std::string test1 = reinterpret_cast<char*>(pGBA_memory->mGBAMemoryMap.mGamePakRom.mWaitState.mWaitState0.mWaitState0Fields.cartridge_header_SB.cartridge_header_SB_fields.gameCode);
 	static const std::string test2 = reinterpret_cast<char*>(pGBA_memory->mGBAMemoryMap.mGamePakRom.mWaitState.mWaitState0.mWaitState0Fields.cartridge_header_SB.cartridge_header_SB_fields.gametitle);
@@ -3730,7 +3730,7 @@ void GBA_t::dumpCpuStateToConsole()
 	LOG_NEW_LINE;
 	LOG("------------------------------------------------------------");
 
-	/* R0ï¿½R7 */
+	/* R0–R7 */
 	for (uint8_t r = ZERO; r < LO_GP_REGISTERS; r++)
 	{
 		LOG("BANK NA R%-2u %-10s : 0x%08X",
@@ -6148,6 +6148,8 @@ FLAG GBA_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 		if (!err && (fp != NULL))
 		{
 			// lets first do some basic initialization before loading the rom
+
+			pAbsolute_GBA_instance->absolute_GBA_state.aboutRom.romMaxAddressMask = (32 * 1024 * 1024) - 1; // 32 MiB Mask
 
 			// fill rom out of bounds values
 			// refer: https://discord.com/channels/465585922579103744/465586361731121162/1200182383031373905
