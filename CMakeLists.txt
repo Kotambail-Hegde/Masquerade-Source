@@ -333,7 +333,7 @@ endif()
 
 set(PLATFORM_SOURCES "")
 if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-    set(PLATFORM_SOURCES masquerade.rc masquerade.aps)
+    set(PLATFORM_SOURCES masquerade.rc)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     configure_file(
         ${CMAKE_SOURCE_DIR}/masquerade.desktop.in
