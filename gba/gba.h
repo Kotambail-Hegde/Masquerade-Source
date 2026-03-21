@@ -15,6 +15,8 @@
 #define GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN	YES	// Refer : https://nba-emu.github.io/hw-docs/ppu/background.html
 #define GBA_ENABLE_CYCLE_ACCURATE_PPU_TICK				YES	// More accurate, needed to pass the AGS DMA priority tests; note that enabling this will bringdown the FPS!
 #define GBA_ENABLE_DELAYED_MMIO_WRITE					YES
+#define GBA_ENABLE_DELAYED_DMA_ENABLE					YES
+#define GBA_ENABLE_ROM_SEQ_BURST_QUIRK					YES
 #define GBA_ENABLE_AGS_PATCHED_TEST						NO
 #pragma endregion WIP
 
@@ -90,12 +92,14 @@
 #define IO_BLDCNT										0x04000050
 #define IO_BLDALPHA										0x04000052
 #define IO_BLDY											0x04000054
+#define IO_4000055										0x04000055
 #define IO_4000056										0x04000056
 #define IO_4000058										0x04000058
 #define IO_400005A										0x0400005A
 #define IO_400005C										0x0400005C
 #define IO_400005E										0x0400005E
 #define IO_SOUND1CNT_L									0x04000060 
+#define IO_4000061										0x04000061 
 #define IO_SOUND1CNT_H									0x04000062 
 #define IO_SOUND1CNT_X									0x04000064 
 #define IO_4000066 										0x04000066 
@@ -225,7 +229,8 @@
 #define IO_400020A										0x0400020A
 #define IO_UNDOC2_START									0x0400020C
 #define IO_UNDOC2_END									0x040002FE
-#define IO_POSTFLG_HALTCNT								0x04000300
+#define IO_POSTFLG										0x04000300
+#define IO_HALTCNT										0x04000301
 #define IO_4000302										0x04000302
 #define IO_IMEMCTRL										0x04000800
 #define IO_END_ADDRESS									0x04FFFFFF
@@ -2614,18 +2619,6 @@ private:
 		BYTE mHALTCNTByte;
 	} mHALTCNTByte_t;
 
-	typedef struct
-	{
-		mPOSTFLGByte_t mPOSTFLGByte;
-		mHALTCNTByte_t mHALTCNTByte;
-	} mPOSTFLG_HALTCNT_Fields_t;
-
-	typedef union
-	{
-		mPOSTFLG_HALTCNT_Fields_t mPOSTFLG_HALTCNT_Fields;
-		uint16_t mPOSTFLG_HALTCNT_HalfWord;
-	} mPOSTFLG_HALTCNT_HalfWord_t;
-
 	// INTMEMCTRL (32-bit)
 	typedef struct
 	{
@@ -2861,7 +2854,8 @@ private:
 		mIMEHalfWord_t mIMEHalfWord;							// 0x04000208
 		GBA_HALFWORD m400020A;									// 0x0400020A
 		GBA_HALFWORD mUNDOC02[(0x04000300 - 0x0400020C) / TWO];	// 0x0400020C - 0x040002FE
-		mPOSTFLG_HALTCNT_HalfWord_t mPOSTFLG_HALTCNT_HalfWord;	// 0x04000300
+		mPOSTFLGByte_t mPOSTFLGByte;							// 0x04000300
+		mHALTCNTByte_t mHALTCNTByte;							// 0x04000301
 		GBA_HALFWORD m4000302;									// 0x04000302
 	} mIOFields_t;
 
@@ -3143,7 +3137,9 @@ private:
 		}mBankedWAVERAM;
 		GBA_WORD previouslyAccessedMemory;
 		GBA_WORD previouslyLatchedBiosData;
+		GBA_WORD romLatchedAddress;
 		MEMORY_ACCESS_WIDTH previousAccessWidth;
+		MEMORY_ACCESS_SOURCE previousAccessSource;
 		MEMORY_ACCESS_TYPE getPreviousMemoryAccessType;
 		MEMORY_ACCESS_TYPE setNextMemoryAccessType;
 		MEMORY_ACCESS_TYPE setNextPipelineAccessType;
@@ -3236,6 +3232,7 @@ private:
 		loggerInterface_t loggerInterface;
 		FLAG logStart;
 		FLAG logEnd;
+		COUNTER64 counter;
 	} debugger_t;
 
 	enum class ARM7TDMI_Opcode : uint8_t
@@ -3329,8 +3326,7 @@ private:
 		GBA_WORD target;
 		FLAG isFIFODMA;
 		DMA_SIZE chunkSize;
-		GBA_WORD latchedData;	// Needed when DMA reads from unused memory
-		GBA_WORD wordToBeTransfered;	// Actual valid data that get transfered during valid transfers
+		GBA_WORD bus;
 		uint16_t io_dmaen;
 		FLAG didAccessRom;  // <-- Add this to preserve ROM access state
 	} dmaCache_t;
@@ -3346,6 +3342,7 @@ private:
 		DMA currentlyActiveDMA;
 		FLAG shouldReenterTransferLoop;
 		MAP8 runnableSet;
+		GBA_WORD latchedData;	// Needed when DMA reads from unused memory
 		dmaCache_t cache[DMA::TOTAL_DMA];
 		dmaTrigCache_t trigCache[DMA_TIMING::TOTAL_DMA_TIMING];
 	} dma_t;
@@ -3684,8 +3681,9 @@ private:
 	typedef struct
 	{
 		FLAG isRomLoaded;
+		BYTE pad[3];
 		uint32_t codeRomSize;
-		BYTE pad;
+		uint32_t romMaxAddressMask;
 	} aboutRom_t;
 
 	template<std::size_t BaseSize>
@@ -3977,20 +3975,23 @@ private:
 
 	uint32_t cpuReadRegister(REGISTER_BANK_TYPE rb, REGISTER_TYPE rt);
 
-	MASQ_INLINE FLAG gamePAKBoundaryCheck(MEMORY_ACCESS_TYPE& mType, GBA_WORD mCurrentAddress)
+	MASQ_INLINE void gamePAKBoundaryCheck(MEMORY_ACCESS_TYPE& mType, GBA_WORD mCurrentAddress, MEMORY_ACCESS_SOURCE mCurrentSource)
 	{
 		// GamePak ROM 128KB boundary check
 		const uint32_t currentRegion = mCurrentAddress >> TWENTYFOUR;
 		const FLAG isGamePakROM = (currentRegion >= 0x08) && (currentRegion <= 0x0D);
 		const FLAG is128KBoundary = (mCurrentAddress & 0x1FFFF) == ZERO;
 
-		if (isGamePakROM && is128KBoundary)
+		FLAG isDMA2CPU = NO;
+		if ((pGBA_memory->previousAccessSource == MEMORY_ACCESS_SOURCE::DMA) && (mCurrentSource != MEMORY_ACCESS_SOURCE::DMA))
 		{
-			mType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
-			RETURN YES;
+			isDMA2CPU = YES;
 		}
 
-		RETURN NO;
+		if (isGamePakROM && (is128KBoundary || isDMA2CPU))
+		{
+			mType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
+		}
 	}
 
 	MASQ_INLINE uint32_t getMemoryAccessCycles(GBA_WORD mCurrentAddress,
@@ -4044,7 +4045,7 @@ private:
 
 		// GamePak ROM 128KB boundary check
 		// Refer https://discord.com/channels/465585922579103744/465586361731121162/1269412483735486484
-		(MASQ_IGNORE)gamePAKBoundaryCheck(mType, mCurrentAddress);
+		gamePAKBoundaryCheck(mType, mCurrentAddress, mSource);
 
 #if (ENABLE_ARM7TDMI_SST == YES)
 		if (ROM_TYPE == ROM::TEST_SST) MASQ_UNLIKELY
@@ -4070,6 +4071,7 @@ private:
 		// Update state for next call
 		pGBA_instance->GBA_state.gbaMemory.previouslyAccessedMemory = mCurrentAddress;
 		pGBA_memory->previousAccessWidth = mAccessWidth;
+		pGBA_memory->previousAccessSource = mSource;
 		pGBA_memory->getPreviousMemoryAccessType = mType;
 
 		RETURN nCycles;
@@ -4081,6 +4083,11 @@ private:
 	{
 		// Refer to "Reading from Unused Memory (00004000-01FFFFFF,10000000-FFFFFFFF)" in https://problemkaputt.de/gbatek-gba-unpredictable-things.htm
 		auto shift = (address & THREE) << THREE;
+
+		if (pGBA_memory->previousAccessSource == MEMORY_ACCESS_SOURCE::DMA)
+		{
+			RETURN ((T)(pGBA_instance->GBA_state.dma.latchedData >> shift));
+		}
 
 		if (getARMState() == STATE_TYPE::ST_ARM)
 		{
@@ -4206,6 +4213,23 @@ private:
 		}
 	}
 
+	MASQ_INLINE uint8_t GenerateNBAAccessMask(
+		MEMORY_ACCESS_TYPE type,
+		MEMORY_ACCESS_SOURCE source,
+		FLAG lock)
+	{
+		constexpr uint8_t ACCESS_SEQUENTIAL = 1 << 0;
+		constexpr uint8_t ACCESS_CODE = 1 << 1;
+		constexpr uint8_t ACCESS_DMA = 1 << 2;
+		constexpr uint8_t ACCESS_LOCK = 1 << 3;
+
+		RETURN 
+			((type == MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE) * ACCESS_SEQUENTIAL) |
+			((source == MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH) * ACCESS_CODE) |
+			((source == MEMORY_ACCESS_SOURCE::DMA) * ACCESS_DMA) |
+			(lock * ACCESS_LOCK);
+	}
+
 	GBA_HALFWORD readIO(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType);
 
 	// NOTE: For memory mirrors, refer http://problemkaputt.de/gbatek-gba-unpredictable-things.htm
@@ -4214,6 +4238,7 @@ private:
 	{
 		INC64 dmaCyclesInThisRun = RESET; // Currently there is no use for this, but using this to cache the count before the reset
 
+		// Refer https://github.com/zaydlang/AGBEEG-Aging-Cartridge/blob/master/documentation/dma/cpu_runs_idles_throughout_dma.md
 		if ((IsAnyDMARunning() == YES) && (source == MEMORY_ACCESS_SOURCE::CPU || source == MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH) && (LOCK == NO))
 		{
 			dmaTick();	
@@ -4281,17 +4306,17 @@ private:
 				{
 					sst.internal[sst.index].cycle += ONE;
 				}
-			// First cycle of this SST entry
-			else if (sst.index != RESET)
-			{
-				sst.internal[sst.index].cycle =
-					sst.internal[sst.index - 1].cycle + ONE;
-			}
-			// Very first SST entry
-			else
-			{
-				sst.internal[sst.index].cycle = ONE;
-			}
+				// First cycle of this SST entry
+				else if (sst.index != RESET)
+				{
+					sst.internal[sst.index].cycle =
+						sst.internal[sst.index - 1].cycle + ONE;
+				}
+				// Very first SST entry
+				else
+				{
+					sst.internal[sst.index].cycle = ONE;
+				}
 			}
 #endif
 			while (cpuTicks)
@@ -4360,8 +4385,7 @@ private:
 				// i.e. all accesses are 32 bit only, and if 8 bit or 16 bit, then data is rotated and then isolated from the 32 bit read word and sent out...
 
 				address &= ~THREE; // Handle 32 bit alignment
-				pGBA_instance->GBA_state.gbaMemory.previouslyLatchedBiosData
-					= pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mSystemRom.mSystemRom32bit[(address - SYSTEM_ROM_START_ADDRESS) / FOUR];
+				pGBA_instance->GBA_state.gbaMemory.previouslyLatchedBiosData = pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mSystemRom.mSystemRom32bit[(address - SYSTEM_ROM_START_ADDRESS) / FOUR];
 			}
 			RETURN ((T)(pGBA_instance->GBA_state.gbaMemory.previouslyLatchedBiosData >> shift));
 		}
@@ -4593,6 +4617,73 @@ private:
 			// As part of first level mirroring, OAM (0x08000000 - 0x0DFFFFFF) is mirrored in steps of GAMEPAK_ROM_SIZE 
 			address &= 0x01FFFFFF;
 
+#if (GBA_ENABLE_ROM_SEQ_BURST_QUIRK == YES)
+			/*
+			*
+			* 1) There is no 8 bits access to ROM, we do a 16 bit access and based on address, read out the lower or upper nibble
+			* 2) Because of https://discord.com/channels/465585922579103744/465586361731121162/996871166079803542
+			* Post a non-sequential access, every next read is forced to be the sequential reads and hence as a consequence of this
+			* we always read non-sequential address + 1, until a new non-sequential access is made
+			* 3) We need to handle cases where the read address is greater than the ROM size itself.
+			*/
+
+			if (pGBA_memory->getPreviousMemoryAccessType == MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE)
+			{
+				pGBA_memory->romLatchedAddress = address & pAbsolute_GBA_instance->absolute_GBA_state.aboutRom.romMaxAddressMask;
+			}
+
+			uint32_t dataT = RESET;
+			BYTE stride = RESET;
+
+			if (accessWidth == MEMORY_ACCESS_WIDTH::EIGHT_BIT)
+			{
+				if (pGBA_memory->romLatchedAddress < pAbsolute_GBA_instance->absolute_GBA_state.aboutRom.codeRomSize) MASQ_LIKELY
+				{
+					uint16_t data16 = static_cast<uint16_t>(pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakRom.mWaitState.mWaitState0.mWaitState0Memory16bit[pGBA_memory->romLatchedAddress / TWO]);
+					dataT = static_cast<T>(data16 >> ((address & 0x01) << 0x03));
+				}
+				else
+				{
+					// NOTE: This information is obtained from NBA and Skyemu
+					dataT = pGBA_memory->romLatchedAddress / TWO;
+				}
+
+				stride = sizeof(GBA_HALFWORD);
+			}
+			else if (accessWidth == MEMORY_ACCESS_WIDTH::SIXTEEN_BIT)
+			{
+				if (pGBA_memory->romLatchedAddress < pAbsolute_GBA_instance->absolute_GBA_state.aboutRom.codeRomSize) MASQ_LIKELY
+				{
+					dataT = static_cast<T>(pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakRom.mWaitState.mWaitState0.mWaitState0Memory16bit[pGBA_memory->romLatchedAddress / TWO]);
+				}
+				else
+				{
+					// NOTE: This information is obtained from NBA and Skyemu
+					dataT = pGBA_memory->romLatchedAddress / TWO;
+				}
+
+				stride = sizeof(GBA_HALFWORD);
+			}
+			else if (accessWidth == MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT)
+			{
+				if (pGBA_memory->romLatchedAddress < pAbsolute_GBA_instance->absolute_GBA_state.aboutRom.codeRomSize) MASQ_LIKELY
+				{
+					dataT = static_cast<T>(pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakRom.mWaitState.mWaitState0.mWaitState0Memory32bit[pGBA_memory->romLatchedAddress / FOUR]);
+				}
+				else
+				{
+					// NOTE: This information is obtained from NBA and Skyemu
+					dataT = ((pGBA_memory->romLatchedAddress / TWO) & 0xFFFF) + ((((pGBA_memory->romLatchedAddress / TWO) + ONE) & 0xFFFF) << SIXTEEN);
+				}
+
+				stride = sizeof(GBA_WORD);
+			}
+
+			pGBA_memory->romLatchedAddress += stride;
+			pGBA_memory->romLatchedAddress &= pAbsolute_GBA_instance->absolute_GBA_state.aboutRom.romMaxAddressMask;
+
+			RETURN static_cast<T>(dataT);
+#else
 			if (accessWidth == MEMORY_ACCESS_WIDTH::EIGHT_BIT)
 			{
 				RETURN static_cast<T>(pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakRom.mWaitState.mWaitState0.mWaitState0Memory8bit[address]);
@@ -4605,6 +4696,7 @@ private:
 			{
 				RETURN static_cast<T>(pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakRom.mWaitState.mWaitState0.mWaitState0Memory32bit[address / FOUR]);
 			}
+#endif
 		}
 		else if (IF_ADDRESS_WITHIN(address, GAMEPAK_SRAM_START_ADDRESS, GAMEPAK_SRAM_MIRROR_END_ADDRESS))
 		{
@@ -4687,6 +4779,7 @@ private:
 	}
 
 	void writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType);
+	void writeIO8(uint32_t address, BYTE data, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType);
 
 	template <typename T>
 	void writeRawMemoryInternal(uint32_t address, T data, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType, FLAG LOCK = NO)
@@ -4698,6 +4791,7 @@ private:
 			FATAL("PPU or APU writing to memory!");
 		}
 
+		// Refer https://github.com/zaydlang/AGBEEG-Aging-Cartridge/blob/master/documentation/dma/cpu_runs_idles_throughout_dma.md
 		if ((IsAnyDMARunning() == YES) && (source == MEMORY_ACCESS_SOURCE::CPU || source == MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH) && (LOCK == NO))
 		{
 			dmaTick();
@@ -4882,18 +4976,34 @@ private:
 		{
 			if (accessWidth == MEMORY_ACCESS_WIDTH::EIGHT_BIT) MASQ_UNLIKELY
 			{
-				data = (BYTE)data;
-				GBA_HALFWORD currentWord = readIO((address & (~ONE)), accessWidth, MEMORY_ACCESS_SOURCE::HOST, accessType);
-				GBA_HALFWORD newWord = currentWord;
-				if ((address & 0x01) == ZERO)
+				if (address == IO_HALTCNT
+					|| address == IO_POSTFLG
+					|| address == IO_BLDY
+#if (GBA_ENABLE_DELAYED_MMIO_WRITE == YES)
+					|| address == IO_TM0CNT_H
+					|| address == IO_TM1CNT_H
+					|| address == IO_TM2CNT_H
+					|| address == IO_TM3CNT_H
+#endif
+					|| address == IO_SOUND1CNT_L)
 				{
-					newWord = (data | (currentWord & 0xFF00));
+					writeIO8(address, TO_UINT8(data), accessWidth, source, accessType);
 				}
-				else
+				else MASQ_LIKELY
 				{
-					newWord = ((currentWord & 0x00FF) | (data << EIGHT));
+					data = (BYTE)data;
+					GBA_HALFWORD currentWord = readIO((address & (~ONE)), accessWidth, MEMORY_ACCESS_SOURCE::HOST, accessType);
+					GBA_HALFWORD newWord = currentWord;
+					if ((address & 0x01) == ZERO)
+					{
+						newWord = (data | (currentWord & 0xFF00));
+					}
+					else
+					{
+						newWord = ((currentWord & 0x00FF) | (data << EIGHT));
+					}
+					writeIO((address & (~ONE)), newWord, accessWidth, source, accessType);
 				}
-				writeIO((address & (~ONE)), newWord, accessWidth, source, accessType);
 			}
 			else if (accessWidth == MEMORY_ACCESS_WIDTH::SIXTEEN_BIT) MASQ_LIKELY 
 			{
@@ -5088,6 +5198,23 @@ private:
 		}
 		else if (IF_ADDRESS_WITHIN(address, GAMEPAK_ROM_WS0_START_ADDRESS, GAMEPAK_ROM_WS2_END_ADDRESS))
 		{
+#if (GBA_ENABLE_ROM_SEQ_BURST_QUIRK == YES)
+			// As part of first level mirroring, OAM (0x08000000 - 0x0DFFFFFF) is mirrored in steps of GAMEPAK_ROM_SIZE 
+			address &= 0x01FFFFFF;
+
+			/*
+			*
+			* 1) There is no 8 bits access to ROM, its 16 or 32 bit access
+			* 2) Because of https://discord.com/channels/465585922579103744/465586361731121162/996871166079803542
+			* Post a non-sequential access, next write address is latched
+			*/
+
+			if (pGBA_memory->getPreviousMemoryAccessType == MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE)
+			{
+				pGBA_memory->romLatchedAddress = address & pAbsolute_GBA_instance->absolute_GBA_state.aboutRom.romMaxAddressMask;
+			}
+#endif
+
 			RETURN;
 		}
 		else if (IF_ADDRESS_WITHIN(address, GAMEPAK_SRAM_START_ADDRESS, GAMEPAK_SRAM_MIRROR_END_ADDRESS))
@@ -5564,6 +5691,24 @@ private:
 			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter++;
 		}
 
+#if (GBA_ENABLE_DELAYED_DMA_ENABLE == YES)
+		// Refer https://discord.com/channels/465585922579103744/465586361731121162/948407365852610590
+		for (int dmaID = 0; dmaID < DMA::TOTAL_DMA; ++dmaID)
+		{
+			auto& d = pGBA_instance->GBA_state.dma.cache[dmaID].startupDelay;
+
+			// branchless decrement: subtract 1 if > 0
+			unsigned old = d;
+			d -= (d > 0);
+
+			// call ActivateDMAChannel if it just reached zero
+			if (old > 0 && d == 0)
+			{
+				ActivateDMAChannel(dmaID);
+			}
+		}
+#endif
+
 #if (ENABLE_ARM7TDMI_SST == YES)
 		if (ROM_TYPE != ROM::TEST_SST) MASQ_UNLIKELY
 #endif
@@ -5625,8 +5770,8 @@ private:
 				}
 			}
 
-		/* clear after processing */
-		pGBA_instance->GBA_state.timerPendMap = RESET;
+			/* clear after processing */
+			pGBA_instance->GBA_state.timerPendMap = RESET;
 		}
 #endif
 	}
@@ -5730,7 +5875,7 @@ private:
 								if (dmacntH.mDMAnCNT_HFields.DMA_EN == SET
 									&& dmacntH.mDMAnCNT_HFields.DMA_START_TIMING == DMA_TIMING::SPECIAL)
 								{
-									ActivateDMAChannel(DMA::DMA1);
+									DelayedDMAActivate(DMA::DMA1);
 								}
 							}
 						}
@@ -5755,7 +5900,7 @@ private:
 								if (dmacntH.mDMAnCNT_HFields.DMA_EN == SET
 									&& dmacntH.mDMAnCNT_HFields.DMA_START_TIMING == DMA_TIMING::SPECIAL)
 								{
-									ActivateDMAChannel(DMA::DMA2);
+									DelayedDMAActivate(DMA::DMA2);
 								}
 							}
 						}
@@ -5794,6 +5939,8 @@ private:
 	void latchDMARegisters(ID dmaID);
 
 	void OnDMAChannelWritten(DMA dmaID, FLAG oldEnable, FLAG newEnable);
+
+	void DelayedDMAActivate(ID dmaID);
 
 	void ActivateDMAChannel(ID dmaID);
 
