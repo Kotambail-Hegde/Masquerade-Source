@@ -3232,6 +3232,7 @@ private:
 		loggerInterface_t loggerInterface;
 		FLAG logStart;
 		FLAG logEnd;
+		COUNTER64 counter;
 	} debugger_t;
 
 	enum class ARM7TDMI_Opcode : uint8_t
@@ -3325,7 +3326,7 @@ private:
 		GBA_WORD target;
 		FLAG isFIFODMA;
 		DMA_SIZE chunkSize;
-		GBA_WORD wordToBeTransfered;	// Actual valid data that get transfered during valid transfers
+		GBA_WORD bus;
 		uint16_t io_dmaen;
 		FLAG didAccessRom;  // <-- Add this to preserve ROM access state
 	} dmaCache_t;
@@ -4384,8 +4385,7 @@ private:
 				// i.e. all accesses are 32 bit only, and if 8 bit or 16 bit, then data is rotated and then isolated from the 32 bit read word and sent out...
 
 				address &= ~THREE; // Handle 32 bit alignment
-				pGBA_instance->GBA_state.gbaMemory.previouslyLatchedBiosData
-					= pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mSystemRom.mSystemRom32bit[(address - SYSTEM_ROM_START_ADDRESS) / FOUR];
+				pGBA_instance->GBA_state.gbaMemory.previouslyLatchedBiosData = pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mSystemRom.mSystemRom32bit[(address - SYSTEM_ROM_START_ADDRESS) / FOUR];
 			}
 			RETURN ((T)(pGBA_instance->GBA_state.gbaMemory.previouslyLatchedBiosData >> shift));
 		}

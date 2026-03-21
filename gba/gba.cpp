@@ -4489,6 +4489,9 @@ void GBA_t::RunDMAChannel()
 		MEMORY_ACCESS_TYPE srcType = MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE;
 		MEMORY_ACCESS_TYPE dstType = MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE;
 
+		// Sequential enforcing is done only when transaction starts from ROM and not when source / dest addr becomes ROM addrs mid DMA as part of DMA transfer
+		// Refer https://discord.com/channels/465585922579103744/465586361731121162/757690707199656079
+
 		if (cache.didAccessRom == NO)
 		{
 			if (cache.source >= GAMEPAK_ROM_WS0_START_ADDRESS)
@@ -4505,38 +4508,77 @@ void GBA_t::RunDMAChannel()
 
 		if (cache.chunkSize == DMA_SIZE::HALFWORD_PER_TRANSFER)
 		{
+			GBA_HALFWORD data16 = RESET;
+
 			if (cache.source >= EXT_WORK_RAM_START_ADDRESS) MASQ_LIKELY
 			{
-				cache.wordToBeTransfered = readRawMemory<GBA_HALFWORD>(cache.source, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::DMA, srcType);
+				data16 = readRawMemory<GBA_HALFWORD>(cache.source, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::DMA, srcType);
 
-				dmaState.latchedData = (cache.wordToBeTransfered << SIXTEEN) | cache.wordToBeTransfered;
+				// This separate per channel latch is needed to pass the suite's DMA0 R+0x10 tests
+				cache.bus = (data16 << SIXTEEN) | data16; 
+
+				// for openbus, independent of channel if last transaction was a DMA (any DMA)
+				dmaState.latchedData = cache.bus;
 			}
 			else
 			{
-				cache.wordToBeTransfered = (cache.destination & TWO) ? (GBA_HALFWORD)(dmaState.latchedData >> SIXTEEN) : (GBA_HALFWORD)(dmaState.latchedData);
+				// Refer https://discord.com/channels/465585922579103744/465586361731121162/757700928202735626 for reads < 0x02000000 
+				data16 = (cache.destination & TWO) ? (GBA_HALFWORD)(cache.bus >> SIXTEEN) : (GBA_HALFWORD)(cache.bus);
 				cpuTick(TICK_TYPE::DMA_TICK);
 			}
 
-			writeRawMemory<GBA_HALFWORD>(cache.destination, cache.wordToBeTransfered, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::DMA, dstType);
+			writeRawMemory<GBA_HALFWORD>(cache.destination, data16, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::DMA, dstType);
+
+			//LOG("Tick: %d; Access src: %d; Access dest: %d; DMA: %d; HW : src : %d; dst : %d; data : %d"
+			//	, pGBA_instance->GBA_state.emulatorStatus.debugger.counter
+			//	, (srcType == MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE)
+			//	, (dstType == MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE)
+			//	, activeDMA
+			//	, cache.source
+			//	, cache.destination
+			//	, data16);
+			//++pGBA_instance->GBA_state.emulatorStatus.debugger.counter;
 		}
 		else
 		{
 			if (cache.source >= EXT_WORK_RAM_START_ADDRESS) MASQ_LIKELY
 			{
-				dmaState.latchedData = readRawMemory<GBA_WORD>(cache.source, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::DMA, srcType);
+				// This separate per channel latch is needed to pass the suite's DMA0 R+0x10 tests
+				cache.bus = readRawMemory<GBA_WORD>(cache.source, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::DMA, srcType);
+
+				// for openbus, independent of channel if last transaction was a DMA (any DMA)
+				dmaState.latchedData = cache.bus;
 			}
 			else
 			{
+				// Refer https://discord.com/channels/465585922579103744/465586361731121162/757700928202735626 for reads < 0x02000000 
 				cpuTick(TICK_TYPE::DMA_TICK);
 			}
 
-			writeRawMemory<GBA_WORD>(cache.destination, dmaState.latchedData, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::DMA, dstType);
+			writeRawMemory<GBA_WORD>(cache.destination, cache.bus, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::DMA, dstType);
+
+			//LOG("Tick: %d; Access src: %d; Access dest: %d; DMA: %d; W : src : %d; dst : %d; data : %d"
+			//	, pGBA_instance->GBA_state.emulatorStatus.debugger.counter
+			//	, (srcType == MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE)
+			//	, (dstType == MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE)
+			//	, activeDMA
+			//	, cache.source
+			//	, cache.destination
+			//	, cache.bus);
+			//++pGBA_instance->GBA_state.emulatorStatus.debugger.counter;
 		}
 
 		cache.source += srcModifier;
 		cache.destination += dstModifier;
 		cache.length--;
 		cache.count++;
+
+		//LOG("Tick: %d; DMA: %d; src_addr : %d; dst_addr : %d"
+		//	, pGBA_instance->GBA_state.emulatorStatus.debugger.counter
+		//	, activeDMA
+		//	, cache.source
+		//	, cache.destination);
+		//++pGBA_instance->GBA_state.emulatorStatus.debugger.counter;
 	}
 
 	// Completed
