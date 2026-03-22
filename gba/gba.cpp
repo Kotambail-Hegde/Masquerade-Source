@@ -4297,7 +4297,7 @@ void GBA_t::OnDMAChannelWritten(DMA dmaID, FLAG oldEnable, FLAG newEnable)
 	mDMAnCNT_HHalfWord_t* CNTH = getDMACNTHRegister(dmaID);
 	auto& cache = pGBA_instance->GBA_state.dma.cache[dmaID];
 
-	// Remove from all trigger maps
+	// Remove from all trigger maps for this particular DMA ID
 	for (int timing = DMA_TIMING::IMMEDIATE; timing < DMA_TIMING::TOTAL_DMA_TIMING; timing++)
 	{
 		UNSETBIT(pGBA_instance->GBA_state.dma.trigCache[timing].dmaIdMap, dmaID);
@@ -4317,7 +4317,7 @@ void GBA_t::OnDMAChannelWritten(DMA dmaID, FLAG oldEnable, FLAG newEnable)
 		}
 		else
 		{
-			// 1->1: If modifying currently active DMA, trigger re-enter
+			// 1->1: If modifying currently active DMA, trigger re-enter if it was currently running
 			if (pGBA_instance->GBA_state.dma.currentlyActiveDMA == dmaID)
 			{
 				pGBA_instance->GBA_state.dma.shouldReenterTransferLoop = YES;
@@ -4445,6 +4445,7 @@ void GBA_t::processDMA()
 
 	cpuTick(TICK_TYPE::DMA_TICK);
 
+	// Handles the loop for all DMA IDs
 	do
 	{
 		RunDMAChannel();
@@ -4477,12 +4478,14 @@ void GBA_t::RunDMAChannel()
 
 	cache.didAccessRom = NO;
 
+	// Handles the loop for one DMA ID
 	while (cache.count < cache.target)
 	{
 		// Reason for calling this here : https://discord.com/channels/465585922579103744/465586361731121162/959447055967879218
 		if (dmaState.shouldReenterTransferLoop == YES) MASQ_UNLIKELY
 		{
-			dmaState.shouldReenterTransferLoop = NO; 
+			dmaState.shouldReenterTransferLoop = NO;
+			// Returning from here, goes back to loop which handles all DMA IDs and based on priority, next DMA ID (or the same one during 1 -> 1) is scheduled
 			RETURN;
 		}
 
@@ -4491,7 +4494,6 @@ void GBA_t::RunDMAChannel()
 
 		// Sequential enforcing is done only when transaction starts from ROM and not when source / dest addr becomes ROM addrs mid DMA as part of DMA transfer
 		// Refer https://discord.com/channels/465585922579103744/465586361731121162/757690707199656079
-
 		if (cache.didAccessRom == NO)
 		{
 			if (cache.source >= GAMEPAK_ROM_WS0_START_ADDRESS)
