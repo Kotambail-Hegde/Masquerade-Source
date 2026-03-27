@@ -13,9 +13,9 @@
 #pragma region MACROS
 #pragma region WIP
 #define GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN	YES	// Refer : https://nba-emu.github.io/hw-docs/ppu/background.html
-#define GBA_ENABLE_CYCLE_ACCURATE_PPU_TICK				YES	// More accurate, needed to pass the AGS DMA priority tests; note that enabling this will bringdown the FPS!
-#define GBA_ENABLE_DELAYED_MMIO_WRITE					YES
+#define GBA_ENABLE_DELAYED_IRQ							YES
 #define GBA_ENABLE_DELAYED_DMA_ENABLE					YES
+#define GBA_ENABLE_DELAYED_TIMER_REG					YES
 #define GBA_ENABLE_ROM_SEQ_BURST_QUIRK					YES
 #define GBA_ENABLE_AGS_PATCHED_TEST						NO
 #pragma endregion WIP
@@ -3652,15 +3652,18 @@ private:
 
 	typedef struct
 	{
-		uint16_t irqQ;
-		uint16_t syncDelay;
+		FLAG cpsrIrqMaskLatch;
+		FLAG irqAvailLatch;
+		FLAG irqLineLatch;
+		uint32_t imePend;
+		uint32_t iePend;
+		uint32_t ifPend;
 	} interrupt_t;
 
 	typedef struct
 	{
 		cpu_t cpuInstance;
 		gbaMemory_t gbaMemory;
-		FLAG irqPend;
 		interrupt_t interrupt;
 		uint16_t dmaPendMap;
 		dma_t dma;
@@ -4154,63 +4157,20 @@ private:
 		}
 	}
 
+	MASQ_INLINE void imeRegUpdate(uint16_t data)
+	{
+		pGBA_peripherals->mIMEHalfWord.mIMEHalfWord = data;
+		pGBA_peripherals->mIMEHalfWord.mIMEFields.NOT_USED_0 = ZERO;
+	}
+
+	MASQ_INLINE void ieRegUpdate(uint16_t data)
+	{
+		pGBA_peripherals->mIEHalfWord.mIEHalfWord = data;
+	}
+
 	MASQ_INLINE void ifRegUpdate(uint16_t data)
 	{
-		pGBA_peripherals->mIFHalfWord.mIFHalfWord |= (ONE << data);
-	}
-
-	MASQ_INLINE void cntlRegUpdate(TIMER timer, uint16_t data)
-	{
-		// Write should directly happen to "reload" instead of the actual mTIMERxCNT_L)
-		pGBA_instance->GBA_state.timer[timer].cache.reload = data; // Store the new value in "reload"
-	}
-
-	MASQ_INLINE void cnthRegUpdate(TIMER timer, uint16_t data)
-	{
-		auto setTimerCNTLRegister = [&](TIMER timer, uint16_t value)
-			{
-				// Use a switch statement for better performance in this context.
-				switch (timer)
-				{
-				case TIMER::TIMER0:
-					pGBA_peripherals->mTIMER0CNT_L = value;
-					BREAK;
-				case TIMER::TIMER1:
-					pGBA_peripherals->mTIMER1CNT_L = value;
-					BREAK;
-				case TIMER::TIMER2:
-					pGBA_peripherals->mTIMER2CNT_L = value;
-					BREAK;
-				case TIMER::TIMER3:
-					pGBA_peripherals->mTIMER3CNT_L = value;
-					BREAK;
-				default:
-					FATAL("Unknown Timer : %d", TO_UINT8(timer));
-					BREAK;
-				}
-			};
-
-		static mTIMERnCNT_HHalfWord_t* CNTHLUT[] = {
-			&pGBA_peripherals->mTIMER0CNT_H,
-			&pGBA_peripherals->mTIMER1CNT_H,
-			&pGBA_peripherals->mTIMER2CNT_H,
-			&pGBA_peripherals->mTIMER3CNT_H
-		};
-
-		mTIMERnCNT_HHalfWord_t* CNTH = CNTHLUT[timer];
-
-		BIT timerxEnBeforeUpdate = CNTH->mTIMERnCNT_HFields.TIMER_START_STOP;
-		CNTH->mTIMERnCNT_HHalfWord = data;
-		if (timerxEnBeforeUpdate == RESET && CNTH->mTIMERnCNT_HFields.TIMER_START_STOP == SET)
-		{
-			pGBA_instance->GBA_state.timer[timer].cache.counter = pGBA_instance->GBA_state.timer[timer].cache.reload;
-			setTimerCNTLRegister(timer, pGBA_instance->GBA_state.timer[timer].cache.counter);
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.timerCounter[timer] = RESET;
-			// Takes 2 cycles for CNTH to get applied after writing to control/reload
-			// Refer : https://discordapp.com/channels/465585922579103744/465586361731121162/1034239922602782801
-			pGBA_instance->GBA_state.timer[timer].currentState = DISABLED;
-			pGBA_instance->GBA_state.timer[timer].startupDelay = ONE;
-		}
+		pGBA_peripherals->mIFHalfWord.mIFHalfWord = data;
 	}
 
 	MASQ_INLINE uint8_t GenerateNBAAccessMask(
@@ -4979,7 +4939,7 @@ private:
 				if (address == IO_HALTCNT
 					|| address == IO_POSTFLG
 					|| address == IO_BLDY
-#if (GBA_ENABLE_DELAYED_MMIO_WRITE == YES)
+#if (GBA_ENABLE_DELAYED_TIMER_REG == YES)
 					|| address == IO_TM0CNT_H
 					|| address == IO_TM1CNT_H
 					|| address == IO_TM2CNT_H
@@ -5682,32 +5642,19 @@ private:
 
 	MASQ_INLINE void cpuTick(TICK_TYPE type = TICK_TYPE::CPU_TICK)
 	{
+		// Cache state pointer to reduce dereferencing overhead
+		auto* state = &pGBA_instance->GBA_state;
+
 		if (type == TICK_TYPE::DMA_TICK)
 		{
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.dmaCounter++;
+			state->emulatorStatus.ticks.cycle_accurate.dmaCounter++;
 		}
 		else
 		{
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter++;
+			state->emulatorStatus.ticks.cycle_accurate.cpuCounter++;
 		}
 
-#if (GBA_ENABLE_DELAYED_DMA_ENABLE == YES)
-		// Refer https://discord.com/channels/465585922579103744/465586361731121162/948407365852610590
-		for (int dmaID = 0; dmaID < DMA::TOTAL_DMA; ++dmaID)
-		{
-			auto& d = pGBA_instance->GBA_state.dma.cache[dmaID].startupDelay;
-
-			// branchless decrement: subtract 1 if > 0
-			unsigned old = d;
-			d -= (d > 0);
-
-			// call ActivateDMAChannel if it just reached zero
-			if (old > 0 && d == 0)
-			{
-				ActivateDMAChannel(dmaID);
-			}
-		}
-#endif
+		MASQ_UNUSED(state);
 
 #if (ENABLE_ARM7TDMI_SST == YES)
 		if (ROM_TYPE != ROM::TEST_SST) MASQ_UNLIKELY
@@ -5725,55 +5672,85 @@ private:
 		ppuTick();
 		processBackup();
 
-#if (GBA_ENABLE_DELAYED_MMIO_WRITE == YES)
+		// Cache state pointer to reduce dereferencing overhead
+		auto* state = &pGBA_instance->GBA_state;
 
-		if (pGBA_instance->GBA_state.interrupt.syncDelay > RESET)
-		{
-			--pGBA_instance->GBA_state.interrupt.syncDelay;
-		}
+#if (GBA_ENABLE_DELAYED_IRQ == YES)
 
-		if (pGBA_instance->GBA_state.irqPend == YES)
-		{
-			ifRegUpdate(pGBA_instance->GBA_state.interrupt.irqQ);
-			pGBA_instance->GBA_state.irqPend = NO;
-			pGBA_instance->GBA_state.interrupt.syncDelay = RESET;
-		}
+		// Refer https://discord.com/channels/465585922579103744/465586361731121162/959490468868161569
 
-		if (pGBA_instance->GBA_state.timerPendMap != RESET) MASQ_UNLIKELY
+		// 1 cycle CPSR delay
+		state->interrupt.cpsrIrqMaskLatch = pGBA_registers->cpsr.psrFields.psrIRQDisBit;
+
+		// 1 cycle delay of IRQ Avail latch from the time when register is updated
+		state->interrupt.irqLineLatch = (FLAG)(state->interrupt.irqAvailLatch && ((FLAG)pGBA_peripherals->mIMEHalfWord.mIMEFields.ENABLE_ALL_INTERRUPTS));
+
+		// 1 cycle delay of IRQ Avail latch from the time when register is updated
+		state->interrupt.irqAvailLatch = (FLAG)(pGBA_peripherals->mIFHalfWord.mIFHalfWord & pGBA_peripherals->mIEHalfWord.mIEHalfWord & 0x3FFF);
+
+		// 1 cycle delay of IME, IE and IF from the time the register write is initiated
+		imeRegUpdate(state->interrupt.imePend);
+		ieRegUpdate(state->interrupt.iePend);
+		ifRegUpdate(state->interrupt.ifPend);
+#endif
+
+#if (GBA_ENABLE_DELAYED_DMA_ENABLE == YES)
+		// Refer https://discord.com/channels/465585922579103744/465586361731121162/948407365852610590
+		for (int dmaID = 0; dmaID < DMA::TOTAL_DMA; ++dmaID)
 		{
-			for (uint8_t timerID = ZERO; timerID < FOUR; timerID++)
+			auto& d = state->dma.cache[dmaID].startupDelay;
+
+			// branchless decrement: subtract 1 if > 0
+			unsigned old = d;
+			d -= (d > 0);
+
+			// call ActivateDMAChannel if it just reached zero
+			if (old > 0 && d == 0)
 			{
-				/* bits (CNT_L | CNT_H) for this timer */
-				uint8_t mask = (uint8_t)(THREE << (timerID << ONE)); // 0x03,0x0C,0x30,0xC0
-				/* nothing pending for this timer */
-				if ((pGBA_instance->GBA_state.timerPendMap & mask) == ZERO)
-				{
-					CONTINUE;
-				}
-				uint8_t bitL = (timerID << ONE);       // 0,2,4,6
-				uint8_t bitH = bitL + ONE;             // 1,3,5,7
-				if (GETBIT(bitL, pGBA_instance->GBA_state.timerPendMap))
-				{
-					cntlRegUpdate(
-						(TIMER)timerID,
-						pGBA_instance->GBA_state.timer[timerID]
-						.cache.io_tmxcnt_l
-					);
-				}
-				if (GETBIT(bitH, pGBA_instance->GBA_state.timerPendMap))
-				{
-					cnthRegUpdate(
-						(TIMER)timerID,
-						pGBA_instance->GBA_state.timer[timerID]
-						.cache.io_tmxcnt_h
-					);
-				}
+				ActivateDMAChannel(dmaID);
 			}
-
-			/* clear after processing */
-			pGBA_instance->GBA_state.timerPendMap = RESET;
 		}
 #endif
+
+#if (GBA_ENABLE_DELAYED_TIMER_REG == YES)
+		if (state->timerPendMap != RESET) MASQ_UNLIKELY
+		{
+			uint16_t pendMap = state->timerPendMap;
+			auto* timers = state->timer;
+
+			// Timer 0
+			if (pendMap & 0x03)
+			{
+				if (pendMap & 0x01) cntlRegUpdate(TIMER0, timers[TIMER0].cache.io_tmxcnt_l);
+				if (pendMap & 0x02) cnthRegUpdate(TIMER0, timers[TIMER0].cache.io_tmxcnt_h);
+			}
+
+			// Timer 1
+			if (pendMap & 0x0C)
+			{
+				if (pendMap & 0x04) cntlRegUpdate(TIMER1, timers[TIMER1].cache.io_tmxcnt_l);
+				if (pendMap & 0x08) cnthRegUpdate(TIMER1, timers[TIMER1].cache.io_tmxcnt_h);
+			}
+
+			// Timer 2
+			if (pendMap & 0x30)
+			{
+				if (pendMap & 0x10) cntlRegUpdate(TIMER2, timers[TIMER2].cache.io_tmxcnt_l);
+				if (pendMap & 0x20) cnthRegUpdate(TIMER2, timers[TIMER2].cache.io_tmxcnt_h);
+			}
+
+			// Timer 3
+			if (pendMap & 0xC0)
+			{
+				if (pendMap & 0x40) cntlRegUpdate(TIMER3, timers[TIMER3].cache.io_tmxcnt_l);
+				if (pendMap & 0x80) cnthRegUpdate(TIMER3, timers[TIMER3].cache.io_tmxcnt_h);
+			}
+
+			state->timerPendMap = RESET;
+		}
+#endif
+
+		MASQ_UNUSED(state);
 	}
 
 	void timerTick();
@@ -5803,6 +5780,62 @@ private:
 	void captureIO();
 
 private:
+
+	MASQ_INLINE void cntlRegUpdate(TIMER timer, uint16_t data)
+	{
+		// Write should directly happen to "reload" instead of the actual mTIMERxCNT_L)
+		pGBA_instance->GBA_state.timer[timer].cache.reload = data; // Store the new value in "reload"
+	}
+
+	MASQ_INLINE void cnthRegUpdate(TIMER timer, uint16_t data)
+	{
+		auto setTimerCNTLRegister = [&](TIMER timer, uint16_t value)
+			{
+				// Use a switch statement for better performance in this context.
+				switch (timer)
+				{
+				case TIMER::TIMER0:
+					pGBA_peripherals->mTIMER0CNT_L = value;
+					BREAK;
+				case TIMER::TIMER1:
+					pGBA_peripherals->mTIMER1CNT_L = value;
+					BREAK;
+				case TIMER::TIMER2:
+					pGBA_peripherals->mTIMER2CNT_L = value;
+					BREAK;
+				case TIMER::TIMER3:
+					pGBA_peripherals->mTIMER3CNT_L = value;
+					BREAK;
+				default:
+					FATAL("Unknown Timer : %d", TO_UINT8(timer));
+					BREAK;
+				}
+			};
+
+		static mTIMERnCNT_HHalfWord_t* CNTHLUT[] = {
+			&pGBA_peripherals->mTIMER0CNT_H,
+			&pGBA_peripherals->mTIMER1CNT_H,
+			&pGBA_peripherals->mTIMER2CNT_H,
+			&pGBA_peripherals->mTIMER3CNT_H
+		};
+
+		mTIMERnCNT_HHalfWord_t* CNTH = CNTHLUT[timer];
+
+		BIT timerxEnBeforeUpdate = CNTH->mTIMERnCNT_HFields.TIMER_START_STOP;
+		CNTH->mTIMERnCNT_HHalfWord = data;
+		if (timerxEnBeforeUpdate == RESET && CNTH->mTIMERnCNT_HFields.TIMER_START_STOP == SET)
+		{
+			pGBA_instance->GBA_state.timer[timer].cache.counter = pGBA_instance->GBA_state.timer[timer].cache.reload;
+			setTimerCNTLRegister(timer, pGBA_instance->GBA_state.timer[timer].cache.counter);
+			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.timerCounter[timer] = RESET;
+			// Takes 2 cycles for CNTH to get applied after writing to control/reload
+			// Refer : https://discordapp.com/channels/465585922579103744/465586361731121162/1034239922602782801
+			// To be more precise: writing the timer control/reload registers takes a cycle to apply. Then it takes another cycle for the timer to actually start.
+			// Also refer : https://discord.com/channels/465585922579103744/465586361731121162/1034240236944891935
+			pGBA_instance->GBA_state.timer[timer].currentState = DISABLED;
+			pGBA_instance->GBA_state.timer[timer].startupDelay = ONE;
+		}
+	}
 
 	MASQ_INLINE void setTimerCNTLRegister(TIMER timer, uint16_t value)
 	{
@@ -5850,61 +5883,60 @@ private:
 					requestInterrupts((GBA_INTERRUPT)(timerIdx + TO_UINT(GBA_INTERRUPT::IRQ_TIMER0)));
 				}
 
-					// Handle FIFO audio for Timer 0 or Timer 1
-					if ((timerIdx == 0 || timerIdx == 1)
-						&& pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.PSG_FIFO_MASTER_EN == ONE) MASQ_UNLIKELY
+				// Handle FIFO audio for Timer 0 or Timer 1
+				if ((timerIdx == 0 || timerIdx == 1) && pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.PSG_FIFO_MASTER_EN == ONE) MASQ_UNLIKELY
+				{
+					// Process both FIFOs (unrolled)
+					auto& fifoA = pGBA_audio->FIFO[DIRECT_SOUND_A];
+					if (fifoA.timer == timerIdx)
 					{
-						// Process both FIFOs (unrolled)
-						auto& fifoA = pGBA_audio->FIFO[DIRECT_SOUND_A];
-						if (fifoA.timer == timerIdx)
+						if (fifoA.size > ZERO) MASQ_LIKELY
 						{
-							if (fifoA.size > ZERO) MASQ_LIKELY
-							{
-								fifoA.latch = ((GBA_AUDIO_SAMPLE_TYPE)fifoA.fifo[fifoA.position] << ONE);
-								fifoA.position = (fifoA.position + ONE) & THIRTYONE;
-								fifoA.size--;
-							}
-							else
-							{
-								fifoA.latch = (GBA_AUDIO_SAMPLE_TYPE)MUTE_AUDIO;
-							}
-
-							if (fifoA.size < SIXTEEN) MASQ_UNLIKELY
-							{
-								auto& dmacntH = pGBA_peripherals->mDMA1CNT_H;
-								if (dmacntH.mDMAnCNT_HFields.DMA_EN == SET
-									&& dmacntH.mDMAnCNT_HFields.DMA_START_TIMING == DMA_TIMING::SPECIAL)
-								{
-									DelayedDMAActivate(DMA::DMA1);
-								}
-							}
+							fifoA.latch = ((GBA_AUDIO_SAMPLE_TYPE)fifoA.fifo[fifoA.position] << ONE);
+							fifoA.position = (fifoA.position + ONE) & THIRTYONE;
+							fifoA.size--;
+						}
+						else
+						{
+							fifoA.latch = (GBA_AUDIO_SAMPLE_TYPE)MUTE_AUDIO;
 						}
 
-						auto& fifoB = pGBA_audio->FIFO[DIRECT_SOUND_B];
-						if (fifoB.timer == timerIdx)
+						if (fifoA.size < SIXTEEN) MASQ_UNLIKELY
 						{
-							if (fifoB.size > ZERO) MASQ_LIKELY
+							auto& dmacntH = pGBA_peripherals->mDMA1CNT_H;
+							if (dmacntH.mDMAnCNT_HFields.DMA_EN == SET
+								&& dmacntH.mDMAnCNT_HFields.DMA_START_TIMING == DMA_TIMING::SPECIAL)
 							{
-								fifoB.latch = ((GBA_AUDIO_SAMPLE_TYPE)fifoB.fifo[fifoB.position] << ONE);
-								fifoB.position = (fifoB.position + ONE) & THIRTYONE;
-								fifoB.size--;
-							}
-							else
-							{
-								fifoB.latch = (GBA_AUDIO_SAMPLE_TYPE)MUTE_AUDIO;
-							}
-
-							if (fifoB.size < SIXTEEN) MASQ_UNLIKELY
-							{
-								auto& dmacntH = pGBA_peripherals->mDMA2CNT_H;
-								if (dmacntH.mDMAnCNT_HFields.DMA_EN == SET
-									&& dmacntH.mDMAnCNT_HFields.DMA_START_TIMING == DMA_TIMING::SPECIAL)
-								{
-									DelayedDMAActivate(DMA::DMA2);
-								}
+								DelayedDMAActivate(DMA::DMA1);
 							}
 						}
 					}
+
+					auto& fifoB = pGBA_audio->FIFO[DIRECT_SOUND_B];
+					if (fifoB.timer == timerIdx)
+					{
+						if (fifoB.size > ZERO) MASQ_LIKELY
+						{
+							fifoB.latch = ((GBA_AUDIO_SAMPLE_TYPE)fifoB.fifo[fifoB.position] << ONE);
+							fifoB.position = (fifoB.position + ONE) & THIRTYONE;
+							fifoB.size--;
+						}
+						else
+						{
+							fifoB.latch = (GBA_AUDIO_SAMPLE_TYPE)MUTE_AUDIO;
+						}
+
+						if (fifoB.size < SIXTEEN) MASQ_UNLIKELY
+						{
+							auto& dmacntH = pGBA_peripherals->mDMA2CNT_H;
+							if (dmacntH.mDMAnCNT_HFields.DMA_EN == SET
+								&& dmacntH.mDMAnCNT_HFields.DMA_START_TIMING == DMA_TIMING::SPECIAL)
+							{
+								DelayedDMAActivate(DMA::DMA2);
+							}
+						}
+					}
+				}
 			}
 			else MASQ_LIKELY
 			{

@@ -2686,7 +2686,7 @@ void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH acc
 	{
 		RETURN;
 	}
-#if (GBA_ENABLE_DELAYED_MMIO_WRITE == YES)
+#if (GBA_ENABLE_DELAYED_TIMER_REG == YES)
 	case IO_TM0CNT_L:
 	{
 		SETBIT(pGBA_instance->GBA_state.timerPendMap, ZERO);
@@ -2925,7 +2925,11 @@ void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH acc
 	}
 	case IO_IE:
 	{
+#if (GBA_ENABLE_DELAYED_IRQ == YES)
+		pGBA_instance->GBA_state.interrupt.iePend = data;
+#else
 		pGBA_peripherals->mIEHalfWord.mIEHalfWord = data;
+#endif
 		RETURN;
 	}
 	case IO_IF:
@@ -2933,7 +2937,11 @@ void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH acc
 		// For IF: Refer http://problemkaputt.de/gbatek-gba-interrupt-control.htm
 		// Writing from CPU is always an ACK, so this is basically W1C register for CPU
 		// Masters other than CPU should be able to write this without triggering W1C
+#if (GBA_ENABLE_DELAYED_IRQ == YES)
+		pGBA_instance->GBA_state.interrupt.ifPend &= ~data;
+#else
 		pGBA_peripherals->mIFHalfWord.mIFHalfWord &= ~data;
+#endif
 		RETURN;
 	}
 	case IO_WAITCNT:
@@ -3077,8 +3085,12 @@ void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH acc
 	}
 	case IO_IME:
 	{
+#if (GBA_ENABLE_DELAYED_IRQ == YES)
+		pGBA_instance->GBA_state.interrupt.imePend = data;
+#else
 		pGBA_peripherals->mIMEHalfWord.mIMEHalfWord = data;
 		pGBA_peripherals->mIMEHalfWord.mIMEFields.NOT_USED_0 = ZERO;
+#endif
 		RETURN;
 	}
 	case IO_400020A:
@@ -3132,7 +3144,7 @@ void GBA_t::writeIO8(uint32_t address, BYTE data, MEMORY_ACCESS_WIDTH accessWidt
 
 		RETURN;
 	}
-#if (GBA_ENABLE_DELAYED_MMIO_WRITE == YES)
+#if (GBA_ENABLE_DELAYED_TIMER_REG == YES)
 	case IO_TM0CNT_H:
 	{
 		SETBIT(pGBA_instance->GBA_state.timerPendMap, ONE);
@@ -3248,10 +3260,6 @@ FLAG GBA_t::processSOC()
 	{
 		FATAL("CPU is in STOP mode");
 	}
-
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_TICK == NO)
-	processPPU(cyclesInThisRun);
-#endif
 
 	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.cpuCounter = RESET;
 	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.dmaCounter = RESET;
@@ -3807,9 +3815,7 @@ void GBA_t::apuTick()
 
 void GBA_t::ppuTick()
 {
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_TICK == YES)
 	processPPU(ONE);
-#endif
 }
 #pragma endregion CYCLE_ACCURATE
 
@@ -3818,43 +3824,54 @@ void GBA_t::ppuTick()
 
 void GBA_t::requestInterrupts(GBA_INTERRUPT interrupt)
 {
-#if (GBA_ENABLE_DELAYED_MMIO_WRITE == YES)
-	pGBA_instance->GBA_state.irqPend = YES;
-	pGBA_instance->GBA_state.interrupt.irqQ = (uint16_t)interrupt;
+#if (GBA_ENABLE_DELAYED_IRQ == YES)
+	pGBA_instance->GBA_state.interrupt.ifPend |= (ONE << TO_UINT(interrupt));
 #else
-	ifRegUpdate((uint16_t)interrupt);
+	pGBA_peripherals->mIFHalfWord.mIFHalfWord = (uint16_t)(ONE << TO_UINT16(interrupt));
 #endif
 }
 
 FLAG GBA_t::shouldUnHaltTheCPU()
 {
-	if (((pGBA_peripherals->mIFHalfWord.mIFHalfWord & pGBA_peripherals->mIEHalfWord.mIEHalfWord & 0x3FFF) != ZERO)
-		&& (pGBA_instance->GBA_state.interrupt.syncDelay == RESET))
+#if (GBA_ENABLE_DELAYED_IRQ == YES)
+	RETURN pGBA_instance->GBA_state.interrupt.irqAvailLatch;
+#else
+	if ((pGBA_peripherals->mIFHalfWord.mIFHalfWord & pGBA_peripherals->mIEHalfWord.mIEHalfWord & 0x3FFF) != ZERO)
 	{
 		RETURN YES;
 	}
 
 	RETURN NO;
+#endif
 }
 
 FLAG GBA_t::isInterruptReadyToBeServed()
 {
-	if (((pGBA_peripherals->mIFHalfWord.mIFHalfWord & pGBA_peripherals->mIEHalfWord.mIEHalfWord & 0x3FFF) != ZERO)
-		&& (pGBA_instance->GBA_state.interrupt.syncDelay == RESET))
+#if (GBA_ENABLE_DELAYED_IRQ == YES)
+	RETURN pGBA_instance->GBA_state.interrupt.irqAvailLatch;
+#else
+	if ((pGBA_peripherals->mIFHalfWord.mIFHalfWord & pGBA_peripherals->mIEHalfWord.mIEHalfWord & 0x3FFF) != ZERO)
 	{
 		RETURN YES;
 	}
 
 	RETURN NO;
+#endif
 }
 
 FLAG GBA_t::handleInterruptsIfApplicable()
 {
 	FLAG interruptWasServiced = NO;
 
+#if (GBA_ENABLE_DELAYED_IRQ == YES)
+	if (pGBA_instance->GBA_state.interrupt.cpsrIrqMaskLatch == DISABLED 
+		&& pGBA_instance->GBA_state.interrupt.irqLineLatch == ENABLED
+		&& isInterruptReadyToBeServed() == YES)
+#else
 	if (pGBA_peripherals->mIMEHalfWord.mIMEFields.ENABLE_ALL_INTERRUPTS == ENABLED
 		&& pGBA_registers->cpsr.psrFields.psrIRQDisBit == RESET
 		&& isInterruptReadyToBeServed() == YES)
+#endif
 	{
 		// Refer : http://problemkaputt.de/gbatek-arm-cpu-exceptions.htm for details on steps to be taken when interrupt occurs
 
@@ -4013,7 +4030,9 @@ void GBA_t::processTimer(INC64 timerCycles)
 		mTIMERnCNT_HHalfWord_t* const CNTH = CNTHLUT[timerID];
 
 		if (CNTH->mTIMERnCNT_HFields.TIMER_START_STOP != SET) MASQ_UNLIKELY
-			CONTINUE;
+		{ 
+			CONTINUE; 
+		}
 
 		auto& timer = timers[timerID];
 		const uint16_t CNTL = timer.cache.reload;
@@ -4297,7 +4316,7 @@ void GBA_t::OnDMAChannelWritten(DMA dmaID, FLAG oldEnable, FLAG newEnable)
 	mDMAnCNT_HHalfWord_t* CNTH = getDMACNTHRegister(dmaID);
 	auto& cache = pGBA_instance->GBA_state.dma.cache[dmaID];
 
-	// Remove from all trigger maps
+	// Remove from all trigger maps for this particular DMA ID
 	for (int timing = DMA_TIMING::IMMEDIATE; timing < DMA_TIMING::TOTAL_DMA_TIMING; timing++)
 	{
 		UNSETBIT(pGBA_instance->GBA_state.dma.trigCache[timing].dmaIdMap, dmaID);
@@ -4317,7 +4336,7 @@ void GBA_t::OnDMAChannelWritten(DMA dmaID, FLAG oldEnable, FLAG newEnable)
 		}
 		else
 		{
-			// 1->1: If modifying currently active DMA, trigger re-enter
+			// 1->1: If modifying currently active DMA, trigger re-enter if it was currently running
 			if (pGBA_instance->GBA_state.dma.currentlyActiveDMA == dmaID)
 			{
 				pGBA_instance->GBA_state.dma.shouldReenterTransferLoop = YES;
@@ -4445,6 +4464,7 @@ void GBA_t::processDMA()
 
 	cpuTick(TICK_TYPE::DMA_TICK);
 
+	// Handles the loop for all DMA IDs
 	do
 	{
 		RunDMAChannel();
@@ -4477,12 +4497,14 @@ void GBA_t::RunDMAChannel()
 
 	cache.didAccessRom = NO;
 
+	// Handles the loop for one DMA ID
 	while (cache.count < cache.target)
 	{
 		// Reason for calling this here : https://discord.com/channels/465585922579103744/465586361731121162/959447055967879218
 		if (dmaState.shouldReenterTransferLoop == YES) MASQ_UNLIKELY
 		{
-			dmaState.shouldReenterTransferLoop = NO; 
+			dmaState.shouldReenterTransferLoop = NO;
+			// Returning from here, goes back to loop which handles all DMA IDs and based on priority, next DMA ID (or the same one during 1 -> 1) is scheduled
 			RETURN;
 		}
 
@@ -4491,7 +4513,6 @@ void GBA_t::RunDMAChannel()
 
 		// Sequential enforcing is done only when transaction starts from ROM and not when source / dest addr becomes ROM addrs mid DMA as part of DMA transfer
 		// Refer https://discord.com/channels/465585922579103744/465586361731121162/757690707199656079
-
 		if (cache.didAccessRom == NO)
 		{
 			if (cache.source >= GAMEPAK_ROM_WS0_START_ADDRESS)
