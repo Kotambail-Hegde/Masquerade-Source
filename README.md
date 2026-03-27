@@ -10,6 +10,23 @@ A multi-system emulator supporting classic gaming consoles and simulators.
 
 ---
 
+## Version
+
+Current Version: **0.7x**
+
+> 🚧 **Beta Notice**  
+> Masquerade is currently in **beta**. All versions before **1.0** are under active development and may contain bugs, incomplete features, or breaking changes.
+>
+> 🔄 **Frequent Updates**  
+> Releases may be frequent as development progresses rapidly.
+>
+> ⚠️ **Breaking Changes**  
+> Backward compatibility is **not guaranteed** between versions. Save states, configs, or behaviors may change without notice.
+>
+> Stability, accuracy, and performance will continue improving toward the **1.x stable release**.
+
+---
+
 ## Supported Systems
 
 - **Game Boy Advance (GBA)**
@@ -116,19 +133,17 @@ A multi-system emulator supporting classic gaming consoles and simulators.
 - Passes all tests within the AGB aging catridge test suite except:
   - Prefetch Buffer
 - Passes all mgba-suite tests except for few test-cases within the following tests:
-  - Timing Tests
-  - Timer Count-Up Tests
-  - Timer IRQ Tests
-  - DMA Tests
-  - SIO Tests
-  - MISC Edge Case Tests
+  - GamePAK prefetch related timing tests
+  - Few timer count-up tests
+  - Few timer IRQ tests
+  - Few SIO tests
+  - Few MISC edge case tests
+- Passes CPU subtests of AGBEEG aging catridge test suite (still fails the Catridge and DMA subtests)
 - Passes all tests in tonc's test suite
 - Passes all belogic's audio tests
 
-#### Known Issues
-- Fails many AGBEEG aging catridge tests
-- Doesn't support GBS
-- Unable to play few video ROMs like Dragon Ball GT
+#### Known Issues (other than the ones mentioned above)
+- No audio issue while running GBS
 - Minor visual artifacts top left corner in Mode 3 for some video ROMs like Pokemon
 - Some undesired audio artifacts (expected fix in **_P0152_** variant)
 - Low end devices still need PGOs to run at full speed (expected fix in **_P0152_** variant)
@@ -192,7 +207,7 @@ A multi-system emulator supporting classic gaming consoles and simulators.
   - stat-mode-window
   - vram
 
-#### Known Issues
+#### Known Issues (other than the ones mentioned above)
 - Fails cgb-acid-hell
 - Fails windesync-validate.gb
 - Fails many docboy-test-suite's APU and CGB tests
@@ -238,7 +253,7 @@ A multi-system emulator supporting classic gaming consoles and simulators.
 - Passes Blargg mmc3_irq_tests suite except:
   - 4-scanline_timing.nes
 
-#### Known Issues
+#### Known Issues (other than the ones mentioned above)
 - Unable to boot Dragon Warrior III
 - DMC DMA timing quirks need proper emulation
 
@@ -313,13 +328,18 @@ A multi-system emulator supporting classic gaming consoles and simulators.
 
 ---
 
-### Additional CPU Test Coverage
+### CPUs
 
 - Passes extensive test ROM suites for:
   - 8080 (official and unofficial opcodes)
   - Z80 (official and unofficial opcodes)
   - SM83 (official and unofficial opcodes)
-  - 6502 (official and unofficial opcodes)
+  - Ricoh 2A03 (NES-6502) (official and unofficial opcodes)
+  - ARM7TDMI (ARMv4T instruction set)
+
+---
+
+### Additional
 - Supports Save States and Load States
 - Supports OTA updates
 - Supports dynamic drag and drop of ROMs including multipart ROMs for Space Invaders and Pacman/MsPacman
