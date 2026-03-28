@@ -1666,6 +1666,8 @@ private:
 
 	typedef struct
 	{
+		uint64_t globalCounter;
+		uint32_t lcdBlankCounter;
 		uint64_t apuCounter;
 		uint64_t cpuCounter;
 		FLAG isValidTickForDoubleSpeed;

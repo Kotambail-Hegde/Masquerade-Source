@@ -1277,6 +1277,12 @@ void GBc_t::cpuTickM(CPU_TICK_TYPE type)
 	else
 #endif
 	{
+		// Tick global counter
+
+		pGBc_instance->GBc_state.emulatorStatus.ticks.globalCounter += FOUR;
+
+		// Tick CPU counter
+
 		pGBc_instance->GBc_state.emulatorStatus.ticks.cpuCounter++;
 
 		// handle delayed write of 'actual' STAT in GB
@@ -2501,23 +2507,6 @@ void GBc_t::ppuTick()
 						// Set the VBLANK flag
 						pGBc_display->wasVblankJustTriggerred = YES;
 
-						// Handle blanking of LCD if needed here as VBLANK was just triggered
-						if (pGBc_emuStatus->freezeLCDOneFrame == YES) MASQ_UNLIKELY
-						{
-							Pixel FROZEN = { 0x00 };
-							if (ROM_TYPE == ROM::GAME_BOY_COLOR)
-							{
-								FROZEN = getColorFromColorIDForGBC(0x7FFF, pGBc_instance->GBc_state.gbc_palette == PALETTE_ID::PALETTE_2).COLOR;
-							}
-							else
-							{
-								FROZEN = paletteIDToColor.at(pGBc_instance->GBc_state.gb_palette).COLOR_000P.COLOR;
-							}
-
-							std::fill_n(pGBc_display->imGuiBuffer.imGuiBuffer1D, sizeof(pGBc_display->imGuiBuffer.imGuiBuffer1D), FROZEN);
-							pGBc_instance->GBc_state.emulatorStatus.freezeLCDOneFrame = CLEAR;
-						}
-
 						// Reset the window line counter since we are in Vblank
 						pGBc_display->windowLineCounter = RESET;
 
@@ -2568,21 +2557,8 @@ void GBc_t::ppuTick()
 	}
 	else
 	{
-		if (pGBc_instance->GBc_state.emulatorStatus.freezeLCD == NO) MASQ_UNLIKELY
-		{
-			Pixel FROZEN = { 0x00 };
-			if (ROM_TYPE == ROM::GAME_BOY_COLOR)
-			{
-				FROZEN = getColorFromColorIDForGBC(0x7FFF, pGBc_instance->GBc_state.gbc_palette == PALETTE_ID::PALETTE_2).COLOR;
-			}
-			else
-			{
-				FROZEN = paletteIDToColor.at(pGBc_instance->GBc_state.gb_palette).COLOR_000P.COLOR;
-			}
-
-			std::fill_n(pGBc_display->imGuiBuffer.imGuiBuffer1D, sizeof(pGBc_display->imGuiBuffer.imGuiBuffer1D), FROZEN);
-			pGBc_instance->GBc_state.emulatorStatus.freezeLCD = YES;
-		}
+		// Tick the lcd blank counter needed for gbc
+		++pGBc_instance->GBc_state.emulatorStatus.ticks.lcdBlankCounter;
 
 		pGBc_display->fakeBgFetcherRuns = ZERO;
 
@@ -2819,7 +2795,7 @@ FLAG GBc_t::handleInterruptsIfApplicable(FLAG effectiveIME, FLAG effectiveInterr
 	// Refer : https://gbdev.io/pandocs/Interrupts.html
 	// And https://gist.github.com/SonoSooS/c0055300670d678b5ae8433e20bea595#isr-and-nmi
 	// NOTE:
-	// Gekkio recently published a test that shows that the GB CPU reads IE twice when firing an interrupt –
+	// Gekkio recently published a test that shows that the GB CPU reads IE twice when firing an interrupt ï¿½
 	// 1) once when it checks if an interrupt occurred, and
 	// 2) once when it checks which interrupt occured.
 	// These reads are not in the same M-Cycle.
@@ -2872,7 +2848,7 @@ FLAG GBc_t::handleInterruptsIfApplicable(FLAG effectiveIME, FLAG effectiveInterr
 		{
 			static const uint16_t vectorTable[5] = { 0x0040, 0x0048, 0x0050, 0x0058, 0x0060 };
 
-			// Find the lowest set bit — highest priority interrupt
+			// Find the lowest set bit ï¿½ highest priority interrupt
 			interruptIndex = (ID8)ctz32_portable(activeInterrupts);
 			pcToHandler = vectorTable[interruptIndex];
 			interruptFound = YES;
@@ -4276,12 +4252,9 @@ void GBc_t::processLCDEnable()
 	pGBc_display->currentLCDMode = LCD_MODES::MODE_LCD_H_BLANK;
 	setPPULCDMode(LCD_MODES::MODE_LCD_H_BLANK);
 
-	// Wierd PPU behaviour on PPU OFF -> PPU ON
+	// Weird PPU behaviour on PPU OFF -> PPU ON
 	pGBc_display->lcdJustEn = YES;
 	pGBc_display->skipMode2 = YES;
-
-	// Blank for 1 frame
-	pGBc_emuStatus->freezeLCDOneFrame = YES;
 
 	// The initial mode 0 takes 4 less cycles
 	// Ideally, when we start in mode 0, ppuCounterPerLY should be 456 - x where x is the number of cycles we want to spend in this special mode!
@@ -4311,6 +4284,14 @@ void GBc_t::processLCDEnable()
 	{
 		pGBc_instance->GBc_state.emulatorStatus.isHDMAAllowedToBlockCPUPipeline = YES;
 	}
+
+	// GBC blanking only if disabled for more than 4560 T cycles
+	if ((ROM_TYPE == ROM::GAME_BOY_COLOR) && (pGBc_instance->GBc_state.emulatorStatus.ticks.lcdBlankCounter < LCD_V_BLANK))
+	{
+		pGBc_emuStatus->freezeLCDOneFrame = NO;
+	}
+
+	pGBc_instance->GBc_state.emulatorStatus.ticks.lcdBlankCounter = RESET;
 }
 
 void GBc_t::processLCDDisable()
@@ -4358,6 +4339,9 @@ void GBc_t::processLCDDisable()
 	pGBc_display->nX159SpritesPresent = ZERO;
 	pGBc_display->wasX0Object = NO;
 	pGBc_display->yConditionForWindowIsMetForCurrentFrame = NO;
+
+	// Blank for 1 frame
+	pGBc_emuStatus->freezeLCDOneFrame = YES;
 
 	setPPULCDMode(LCD_MODES::MODE_LCD_H_BLANK);
 }
@@ -6389,6 +6373,45 @@ void GBc_t::translateGFX(PALETTE_ID from, PALETTE_ID to, PALETTE_ID colorCorrect
 
 void GBc_t::displayCompleteScreen()
 {
+	// If we need to blank a frame and LCD was just enabled
+	if (pGBc_emuStatus->freezeLCDOneFrame == YES && isPPULCDEnabled() == YES) MASQ_UNLIKELY
+	{
+		auto freezeLCDStep = [&](Pixel color)
+			{
+				std::fill_n(pGBc_display->imGuiBuffer.imGuiBuffer1D, sizeof(pGBc_display->imGuiBuffer.imGuiBuffer1D), color);
+
+				// Clear the ghost accumulator when the LCD blanks so the frozen
+				// color does not bleed into the next game scene.
+				if (ghost_decay > 0.0f)
+				{
+					GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, ghost_fbo));
+					GL_CALL(glClearColor(
+						color.r / 255.0f,
+						color.g / 255.0f,
+						color.b / 255.0f,
+						1.0f
+					));
+					GL_CALL(glClear(GL_COLOR_BUFFER_BIT));
+					GL_CALL(glClearColor(0.0f, 0.0f, 0.0f, 1.0f)); // restore default
+					GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, 0));
+				}
+			};
+
+		if (ROM_TYPE == ROM::GAME_BOY_COLOR)
+		{
+			Pixel FROZEN = getColorFromColorIDForGBC(0x7FFF, pGBc_instance->GBc_state.gbc_palette == PALETTE_ID::PALETTE_2).COLOR;
+			freezeLCDStep(FROZEN);
+		}
+		else
+		{
+			Pixel FROZEN = paletteIDToColor.at(pGBc_instance->GBc_state.gb_palette).COLOR_000P.COLOR;
+			freezeLCDStep(FROZEN);
+		}
+
+		// Clear blanking of LCD if needed here as this frame is done...
+		pGBc_emuStatus->freezeLCDOneFrame = CLEAR;
+	}
+
 #if (GL_FIXED_FUNCTION_PIPELINE == YES) && !defined(IMGUI_IMPL_OPENGL_ES2) && !defined(IMGUI_IMPL_OPENGL_ES3)
 	glBindFramebuffer(GL_FRAMEBUFFER, frame_buffer);
 
@@ -7375,13 +7398,13 @@ void GBc_t::randomizeRAM()
 	std::random_device rd;
 	std::mt19937 gen(rd());
 
-	// Base uniform distribution (0–255). We will transform it manually.
+	// Base uniform distribution (0ï¿½255). We will transform it manually.
 	std::uniform_int_distribution<int> dist(0, 255);
 
 	// WRAM
 	for (auto& b : pGBc_memory->GBcMemoryMap.mWorkRam.wRamMemory)
 	{
-		// Get a uniform 0–255
+		// Get a uniform 0ï¿½255
 		int r = dist(gen);
 
 		// Exponential bias AWAY from zero:
