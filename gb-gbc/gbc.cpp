@@ -7956,6 +7956,9 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 			uint32_t sizeOfRAMSlot = 0x2000;
 			uint8_t numberOfRAMSlots = ZERO;
 
+			// Needed for Initial D Gaiden (Japan) (SGB Enhanced).gb, otherwise game wrongly detects a save file and crashes
+			memset(pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks, 0xFF, sizeof(pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks));
+
 			if (inSRAM.fail() == false)
 			{
 				numberOfRAMSlots = getNumberOfRAMBanksUsed();
