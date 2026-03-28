@@ -2035,6 +2035,11 @@ void GBc_t::ppuTick()
 				{
 					pGBc_display->isTheLastVblankLine = CLEAR;
 
+					// Reset the y condition latch for window
+					// Refer to https://discord.com/channels/465585922579103744/465586075830845475/852208456491728897
+					// But refer to https://discord.com/channels/465585922579103744/465586075830845475/1325933355547627612 as well
+					pGBc_display->yConditionForWindowIsMetForCurrentFrame = NO;
+
 					PPUINFO("LCD MODE : V-Blank; Dots : %d", pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode);
 					pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode = RESET;
 
@@ -2147,15 +2152,9 @@ void GBc_t::ppuTick()
 				// clear "visibleOamIndexPerLY" as we are in new frame
 				visibleOamIndexPerLY.clear();
 
-				// Check whether "Y" window layer is triggerred for current scanline
-				// Refer : https://gbdev.io/pandocs/Scrolling.html#window
-				// Refer : https://discord.com/channels/465585922579103744/465586075830845475/852208456491728897
-				// Refer : https://discord.com/channels/465585922579103744/465586075830845475/1295044210654842980
-				// Note that WINDOW_LAYER_ENABLE should not be checked here as mentioned in https://discord.com/channels/465585922579103744/465586075830845475/757342004052099072
-				if (pGBc_peripherals->LY == pGBc_peripherals->WY)
-				{
-					pGBc_display->yConditionForWindowIsMetForCurrentFrame = YES;
-				}
+				// Note that sameboy does this check in multiple place unlike what is mentioned in pandocs
+				// As per latest discord, check happens atleast twice per line https://discord.com/channels/465585922579103744/465586075830845475/1042070805644845147
+				checkWindowYTrigger(pGBc_peripherals->LY);
 			}
 
 			if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == ONE)
@@ -2462,6 +2461,10 @@ void GBc_t::ppuTick()
 					PPUINFO("LCD MODE : H-Blank; Dots : %d", pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode);
 					pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode = RESET;
 
+					// Note that sameboy does this check in multiple place unlike what is mentioned in pandocs
+					// As per latest discord, check happens atleast twice per line https://discord.com/channels/465585922579103744/465586075830845475/1042070805644845147
+					checkWindowYTrigger(pGBc_peripherals->LY);
+
 					// Increment LY
 					pGBc_display->currentScanline++;
 					pGBc_peripherals->LY = pGBc_display->currentScanline;
@@ -2517,10 +2520,6 @@ void GBc_t::ppuTick()
 
 						// Reset the window line counter since we are in Vblank
 						pGBc_display->windowLineCounter = RESET;
-
-						// Reset the y condition latch for window
-						// Refer to https://discord.com/channels/465585922579103744/465586075830845475/852208456491728897
-						pGBc_display->yConditionForWindowIsMetForCurrentFrame = NO;
 
 						if (ROM_TYPE == ROM::GAME_BOY)
 						{
@@ -4358,6 +4357,7 @@ void GBc_t::processLCDDisable()
 	pGBc_display->wasNotFirstSpriteInX = NO;
 	pGBc_display->nX159SpritesPresent = ZERO;
 	pGBc_display->wasX0Object = NO;
+	pGBc_display->yConditionForWindowIsMetForCurrentFrame = NO;
 
 	setPPULCDMode(LCD_MODES::MODE_LCD_H_BLANK);
 }

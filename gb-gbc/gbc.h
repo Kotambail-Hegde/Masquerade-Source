@@ -2573,6 +2573,21 @@ private:
 	void dmaTick();
 	void serialTick();
 	void rtcTick();
+	MASQ_INLINE void checkWindowYTrigger(uint8_t ly)
+	{
+		// Check whether "Y" window layer is triggerred for current scanline
+		// Refer : https://gbdev.io/pandocs/Scrolling.html#window
+		// Refer : https://discord.com/channels/465585922579103744/465586075830845475/852208456491728897
+		// Refer : https://discord.com/channels/465585922579103744/465586075830845475/1295044210654842980
+
+		/*
+		 * Note that WINDOW_LAYER_ENABLE should not be checked here as mentioned in https ://discord.com/channels/465585922579103744/465586075830845475/757342004052099072
+		 * But, sameboy does check WINDOW_LAYER_ENABLE, so we will keep this as is.
+		 */
+
+		pGBc_display->yConditionForWindowIsMetForCurrentFrame |=
+			((ly == pGBc_peripherals->WY) & (pGBc_peripherals->LCDC.lcdControlFields.WINDOW_LAYER_ENABLE == SET));
+	}
 	void ppuTick();
 	void apuTick();
 
