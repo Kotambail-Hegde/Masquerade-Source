@@ -182,6 +182,13 @@ static uint32_t gameboy_texture;
 static uint32_t matrix_texture;
 static uint32_t matrix[16] = { 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0x000000FF, 0x000000FF, 0x000000FF, 0x000000FF };
 
+static GLuint ghost_texture;
+static GLuint ghost_fbo;
+static GLuint shaderProgramGhost;
+static float  ghost_decay = 0.0f;  // 0.0 = off, ~0.6 = DMG feel, ~0.4 = GBC (less ghosting)
+static float _GB_GHOST_FACTOR = 0.6f;
+static float _GBC_GHOST_FACTOR = 0.4f;
+
 #if _DEBUG
 COUNTER32 OAM_STAT_TO_MODE_2_T_CYCLES = RESET;
 #endif
@@ -250,6 +257,8 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 		_FORCE_GB_GFX_FOR_GBC = to_bool(pt.get<std::string>("gb-gbc._force_gb_gfx_for_gbc"));
 		_FORCE_GBC_FOR_GB = to_bool(pt.get<std::string>("gb-gbc._force_gbc_for_gb"));
 		_ENABLE_AUDIO_HPF = to_bool(config.get<std::string>("gb-gbc._enable_audio_hpf"));
+		_GB_GHOST_FACTOR = config.get<std::float_t>("gb-gbc._gb_ghosting");
+		_GBC_GHOST_FACTOR = config.get<std::float_t>("gb-gbc._gbc_ghosting");
 
 		if (ROM_TYPE == ROM::GAME_BOY && _FORCE_GBC_FOR_GB == YES)
 		{
@@ -258,6 +267,8 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 			ROM_TYPE = ROM::GAME_BOY_COLOR; // .gb loaded to GBC
 			_ENABLE_DMG_BIOS = NO;
 			_ENABLE_CGB_BIOS = YES;
+
+			ghost_decay = _GB_GHOST_FACTOR;
 		}
 		else if (ROM_TYPE == ROM::GAME_BOY_COLOR && _FORCE_GB_FOR_GBC == YES)
 		{
@@ -265,6 +276,8 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 			INFO("Forced DMG mode requires DMG bios to be loaded");
 			ROM_TYPE = ROM::GAME_BOY; // .gbc loaded to GB
 			_ENABLE_CGB_BIOS = NO;
+
+			ghost_decay = _GBC_GHOST_FACTOR;
 		}
 
 		FLAG searchForBios = NO;
@@ -284,6 +297,8 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 			std::cout << "Searching for BIOS in " << _BIOS_LOCATION << '\n';
 			dmg_cgb_bios.expectedBiosSize = 0x100;
 			searchForBios = YES;
+
+			ghost_decay = _GB_GHOST_FACTOR;
 		}
 		else if
 			((ROM_TYPE == ROM::GAME_BOY_COLOR && _ENABLE_CGB_BIOS == YES)
@@ -301,6 +316,8 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 			std::cout << "Searching for BIOS in " << _BIOS_LOCATION << '\n';
 			dmg_cgb_bios.expectedBiosSize = 0x900;
 			searchForBios = YES;
+
+			ghost_decay = _GBC_GHOST_FACTOR;
 		}
 		else
 		{
@@ -6522,15 +6539,45 @@ void GBc_t::displayCompleteScreen()
 	GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter));
 	GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter));
 
-	// 2. Render gameboy_texture into framebuffer (masquerade_texture target)
+	// 1b. Ghost pass � exponential decay blend of gameboy_texture into ghost_texture.
+	//     Runs at native GB/GBC resolution (160x144 or 160x144 GBC) before upscaling.
+	//     ghost_texture is NOT cleared between frames � that persistence is the effect.
+	if (ghost_decay > 0.0f)
+	{
+		GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, ghost_fbo));
+		GL_CALL(glViewport(0, 0, getScreenWidth(), getScreenHeight()));
+		// !! No glClear here � intentional: previous ghost content must survive !!
+
+		GL_CALL(glUseProgram(shaderProgramGhost));
+
+		GL_CALL(glActiveTexture(GL_TEXTURE0));
+		GL_CALL(glBindTexture(GL_TEXTURE_2D, gameboy_texture));
+		GL_CALL(glUniform1i(glGetUniformLocation(shaderProgramGhost, "u_Current"), 0));
+
+		GL_CALL(glActiveTexture(GL_TEXTURE1));
+		GL_CALL(glBindTexture(GL_TEXTURE_2D, ghost_texture));
+		GL_CALL(glUniform1i(glGetUniformLocation(shaderProgramGhost, "u_Ghost"), 1));
+
+		GL_CALL(glUniform1f(glGetUniformLocation(shaderProgramGhost, "u_Decay"), ghost_decay));
+
+		GL_CALL(glBindVertexArray(fullscreenVAO));
+		GL_CALL(glDrawArrays(GL_TRIANGLES, 0, 6));
+		GL_CALL(glBindVertexArray(0));
+		GL_CALL(glUseProgram(0));
+
+		GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, 0));
+	}
+
+	// 2. Render into framebuffer (masquerade_texture target)
+	//    Source is ghost_texture when ghosting is active, gameboy_texture otherwise.
 	GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, frame_buffer));
 	GL_CALL(glViewport(0, 0, getScreenWidth() * FRAME_BUFFER_SCALE, getScreenHeight() * FRAME_BUFFER_SCALE));
 	GL_CALL(glClear(GL_COLOR_BUFFER_BIT));
 
-	// Pass 1: Render base texture (Game Boy framebuffer)
+	// Pass 1: Render base texture (ghosted or raw Game Boy framebuffer)
 	GL_CALL(glUseProgram(shaderProgramBasic));
 	GL_CALL(glActiveTexture(GL_TEXTURE0));
-	GL_CALL(glBindTexture(GL_TEXTURE_2D, gameboy_texture));
+	GL_CALL(glBindTexture(GL_TEXTURE_2D, (ghost_decay > 0.0f) ? ghost_texture : gameboy_texture));
 	GL_CALL(glUniform1i(glGetUniformLocation(shaderProgramBasic, "u_Texture"), 0));
 
 	GL_CALL(glBindVertexArray(fullscreenVAO));
@@ -7188,6 +7235,27 @@ FLAG GBc_t::initializeEmulator()
 		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT));
 		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT));
 
+		// 4b. Ghost accumulator texture (native GB/GBC resolution, NOT scaled)
+		//     This persists between frames to simulate LCD phosphor decay.
+		GL_CALL(glGenTextures(1, &ghost_texture));
+		GL_CALL(glBindTexture(GL_TEXTURE_2D, ghost_texture));
+		GL_CALL(glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, getScreenWidth(), getScreenHeight(), 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr));
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST));
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST));
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
+
+		// 4c. Ghost FBO (renders blend result back into ghost_texture each frame)
+		GL_CALL(glGenFramebuffers(1, &ghost_fbo));
+		GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, ghost_fbo));
+		GL_CALL(glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, ghost_texture, 0));
+
+		if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+		{
+			LOG("Error: Ghost framebuffer is not complete!");
+		}
+		GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, 0));
+
 		// 5. Fullscreen Quad VAO/VBO (for textured quad rendering)
 		float fullscreenVertices[] = {
 			//  X     Y      U     V
@@ -7230,6 +7298,9 @@ FLAG GBc_t::initializeEmulator()
 		// 7. Compile blend shader (for LCD effect)
 		shaderProgramSource_t blendShader = parseShader(shaderPath + "/shaders/blend.shaders");
 		shaderProgramBlend = createShader(blendShader.vertexSource, blendShader.fragmentSource);
+		// 8. Compile ghost shader (for LCD ghosting / frame persistence)
+		shaderProgramSource_t ghostShader = parseShader(shaderPath + "/shaders/ghost.shaders");
+		shaderProgramGhost = createShader(ghostShader.vertexSource, ghostShader.fragmentSource);
 
 		DEBUG("PASSTHROUGH VERTEX");
 		DEBUG("%s", passthroughShader.vertexSource.c_str());
@@ -7239,6 +7310,10 @@ FLAG GBc_t::initializeEmulator()
 		DEBUG("%s", blendShader.vertexSource.c_str());
 		DEBUG("BLEND FRAGMENT");
 		DEBUG("%s", blendShader.fragmentSource.c_str());
+		DEBUG("GHOST VERTEX");
+		DEBUG("%s", ghostShader.vertexSource.c_str());
+		DEBUG("GHOST FRAGMENT");
+		DEBUG("%s", ghostShader.fragmentSource.c_str());
 #endif
 	}
 
