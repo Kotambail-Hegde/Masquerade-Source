@@ -2323,6 +2323,8 @@ public:
 
 public:
 
+	void updatePhysicalKeys();
+	void updateJOYP(STATE8 prevState);
 	void captureIO();
 
 public:

@@ -3170,76 +3170,65 @@ void GBc_t::processHDMA()
 	}
 }
 
-void GBc_t::captureIO()
+// Called once per frame from your main loop
+void GBc_t::updatePhysicalKeys()
 {
 	pGBc_emuStatus->keyUP = ImGui::IsKeyDown(ImGuiKey_UpArrow);
 	pGBc_emuStatus->keyDOWN = ImGui::IsKeyDown(ImGuiKey_DownArrow);
 	pGBc_emuStatus->keyLEFT = ImGui::IsKeyDown(ImGuiKey_LeftArrow);
 	pGBc_emuStatus->keyRIGHT = ImGui::IsKeyDown(ImGuiKey_RightArrow);
-
 	pGBc_emuStatus->keySTART = ImGui::IsKeyDown(ImGuiKey_Enter);
 	pGBc_emuStatus->keySELECT = ImGui::IsKeyDown(ImGuiKey_Space);
 	pGBc_emuStatus->keyA = ImGui::IsKeyDown(ImGuiKey_Z);
 	pGBc_emuStatus->keyB = ImGui::IsKeyDown(ImGuiKey_X);
 
-	BYTE previousJoyPadState = pGBc_peripherals->P1_JOYP.joyPadMemory;
+	// After updating physical key states, sync JOYP with current selection mode
+	updateJOYP(pGBc_peripherals->P1_JOYP.joyPadMemory & 0x0F);
+}
 
-	if (pGBc_peripherals->P1_JOYP.joyPadFields.P15_SEL_ACTION_KEYS == ZERO
-		&& pGBc_peripherals->P1_JOYP.joyPadFields.P14_SEL_DIRECTION_KEYS == ONE)
+// Called EVERY TIME P14/P15 selection bits change (on JOYP write) AND after updatePhysicalKeys
+void GBc_t::updateJOYP(STATE8 prevState)
+{
+	auto& joy = pGBc_peripherals->P1_JOYP.joyPadFields;
+	auto& keys = *pGBc_emuStatus;
+
+	const bool selectAction = (joy.P15_SEL_ACTION_KEYS == ZERO);
+	const bool selectDir = (joy.P14_SEL_DIRECTION_KEYS == ZERO);
+
+	auto toState = [](bool pressed) 
+		{
+			RETURN pressed ? JOYPAD_STATES::PRESSED : JOYPAD_STATES::NOT_PRESSED;
+		};
+
+	if (selectAction && !selectDir)
 	{
-		pGBc_peripherals->P1_JOYP.joyPadFields.P10_RIGHT_A = ((pGBc_emuStatus->keyA == YES ?
-			JOYPAD_STATES::PRESSED : JOYPAD_STATES::NOT_PRESSED));
-
-		pGBc_peripherals->P1_JOYP.joyPadFields.P11_LEFT_B = ((pGBc_emuStatus->keyB == YES ?
-			JOYPAD_STATES::PRESSED : JOYPAD_STATES::NOT_PRESSED));
-
-		pGBc_peripherals->P1_JOYP.joyPadFields.P12_UP_SELECT = ((pGBc_emuStatus->keySELECT == YES ?
-			JOYPAD_STATES::PRESSED : JOYPAD_STATES::NOT_PRESSED));
-
-		pGBc_peripherals->P1_JOYP.joyPadFields.P13_DOWN_START = ((pGBc_emuStatus->keySTART == YES ?
-			JOYPAD_STATES::PRESSED : JOYPAD_STATES::NOT_PRESSED));
-
+		joy.P10_RIGHT_A = toState(keys.keyA == YES);
+		joy.P11_LEFT_B = toState(keys.keyB == YES);
+		joy.P12_UP_SELECT = toState(keys.keySELECT == YES);
+		joy.P13_DOWN_START = toState(keys.keySTART == YES);
 	}
-	else if (pGBc_peripherals->P1_JOYP.joyPadFields.P14_SEL_DIRECTION_KEYS == ZERO
-		&& pGBc_peripherals->P1_JOYP.joyPadFields.P15_SEL_ACTION_KEYS == ONE)
+	else if (selectDir && !selectAction)
 	{
-		pGBc_peripherals->P1_JOYP.joyPadFields.P10_RIGHT_A = ((pGBc_emuStatus->keyRIGHT == YES ?
-			JOYPAD_STATES::PRESSED : JOYPAD_STATES::NOT_PRESSED));
+		joy.P10_RIGHT_A = toState(keys.keyRIGHT == YES);
+		joy.P11_LEFT_B = toState(keys.keyLEFT == YES);
+		joy.P12_UP_SELECT = toState(keys.keyUP == YES);
+		joy.P13_DOWN_START = toState(keys.keyDOWN == YES);
 
-		pGBc_peripherals->P1_JOYP.joyPadFields.P11_LEFT_B = ((pGBc_emuStatus->keyLEFT == YES ?
-			JOYPAD_STATES::PRESSED : JOYPAD_STATES::NOT_PRESSED));
-
-		pGBc_peripherals->P1_JOYP.joyPadFields.P12_UP_SELECT = ((pGBc_emuStatus->keyUP == YES ?
-			JOYPAD_STATES::PRESSED : JOYPAD_STATES::NOT_PRESSED));
-
-		pGBc_peripherals->P1_JOYP.joyPadFields.P13_DOWN_START = ((pGBc_emuStatus->keyDOWN == YES ?
-			JOYPAD_STATES::PRESSED : JOYPAD_STATES::NOT_PRESSED));
+		// If RIGHT is pressed, forcibly release LEFT (and vice versa)
+		if (keys.keyRIGHT == YES) joy.P11_LEFT_B = toState(NO);
+		if (keys.keyLEFT == YES) joy.P10_RIGHT_A = toState(NO);
+		// If UP is pressed, forcibly release DOWN (and vice versa)
+		if (keys.keyUP == YES) joy.P13_DOWN_START = toState(NO);
+		if (keys.keyDOWN == YES) joy.P12_UP_SELECT = toState(NO);
 	}
-	else if (pGBc_peripherals->P1_JOYP.joyPadFields.P14_SEL_DIRECTION_KEYS == ZERO
-		&& pGBc_peripherals->P1_JOYP.joyPadFields.P15_SEL_ACTION_KEYS == ZERO)
+	else if (selectDir && selectAction)
 	{
 		// Source: Sameboy; Refer https://github.com/LIJI32/SameBoy/blob/master/Core/joypad.c#L126
 		// OR of both groups: pressed = dir OR action, then invert (active low)
-		TODO("Find source of JOYP behaviour when both bits 4 and 5 are set");
-		pGBc_peripherals->P1_JOYP.joyPadFields.P12_UP_SELECT =
-			((pGBc_emuStatus->keyUP == YES ||
-				pGBc_emuStatus->keySELECT == YES) ?
-				JOYPAD_STATES::PRESSED : JOYPAD_STATES::NOT_PRESSED);
-
-		pGBc_peripherals->P1_JOYP.joyPadFields.P13_DOWN_START =
-			((pGBc_emuStatus->keyDOWN == YES ||
-				pGBc_emuStatus->keySTART == YES) ?
-				JOYPAD_STATES::PRESSED : JOYPAD_STATES::NOT_PRESSED);
-
-		pGBc_peripherals->P1_JOYP.joyPadFields.P11_LEFT_B =
-			((pGBc_emuStatus->keyLEFT == YES ||
-				pGBc_emuStatus->keyB == YES) ?
-				JOYPAD_STATES::PRESSED : JOYPAD_STATES::NOT_PRESSED);
-
-		pGBc_peripherals->P1_JOYP.joyPadFields.P10_RIGHT_A =
-			((pGBc_emuStatus->keyRIGHT == YES ||
-				pGBc_emuStatus->keyA == YES) ?
-				JOYPAD_STATES::PRESSED : JOYPAD_STATES::NOT_PRESSED);
+		joy.P10_RIGHT_A = toState((keys.keyRIGHT == YES) || (keys.keyA == YES));
+		joy.P11_LEFT_B = toState((keys.keyLEFT == YES) || (keys.keyB == YES));
+		joy.P12_UP_SELECT = toState((keys.keyUP == YES) || (keys.keySELECT == YES));
+		joy.P13_DOWN_START = toState((keys.keyDOWN == YES) || (keys.keySTART == YES));
 	}
 	else
 	{
@@ -3247,11 +3236,19 @@ void GBc_t::captureIO()
 		pGBc_peripherals->P1_JOYP.joyPadMemory |= 0x0F;
 	}
 
+	// Setting the unused bits to 1
+	pGBc_peripherals->P1_JOYP.joyPadMemory |= 0xC0;
+
 	// Check if we need to request for interrupt
-	if (((previousJoyPadState & (~(pGBc_peripherals->P1_JOYP.joyPadMemory & 0x0F))) & 0x0F) != ZERO)
+	if ((prevState & ~(pGBc_peripherals->P1_JOYP.joyPadMemory & 0x0F)) & 0x0F)
 	{
 		requestInterrupts(INTERRUPTS::JOYPAD_INTERRUPT);
 	}
+}
+
+void GBc_t::captureIO()
+{
+	updatePhysicalKeys();
 }
 
 void GBc_t::processSerialClockSpeedBit()
@@ -7939,7 +7936,7 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 			setWRAMBankNumber(ONE);
 
 			// initialize the JoyPad state
-			pGBc_peripherals->P1_JOYP.joyPadMemory = 0x0F; // lower nibble set to all ones indicate, no selection and no keys being active
+			pGBc_peripherals->P1_JOYP.joyPadMemory = 0xCF; // lower nibble set to all ones indicate, no selection and no keys being active; reserved bits are set as well
 
 			pAbsolute_GBc_instance->absolute_GBc_state.aboutRom.isRomLoaded = true;
 
@@ -8902,18 +8899,11 @@ byte GBc_t::readRawMemory(uint16_t address
 		// reading from Joypad register; bits 7 and 6 are unused
 		if (address == P1_JOYP_ADDRESS)
 		{
-			pGBc_peripherals->P1_JOYP.joyPadFields.JP_SPARE_06 = ONE;
-			pGBc_peripherals->P1_JOYP.joyPadFields.JP_SPARE_07 = ONE;
-
 			auto joyp = pGBc_peripherals->P1_JOYP;
 
-			if ((joyp.joyPadFields.P14_SEL_DIRECTION_KEYS == RESET)
-				&& (joyp.joyPadFields.P15_SEL_ACTION_KEYS == RESET))
+			if ((joyp.joyPadFields.P14_SEL_DIRECTION_KEYS == RESET) && (joyp.joyPadFields.P15_SEL_ACTION_KEYS == RESET))
 			{
-				joyp.joyPadFields.P10_RIGHT_A = ONE;
-				joyp.joyPadFields.P11_LEFT_B = ONE;
-				joyp.joyPadFields.P12_UP_SELECT = ONE;
-				joyp.joyPadFields.P13_DOWN_START = ONE;
+				joyp.joyPadMemory |= 0xCF; // including the spare bits
 			}
 
 			RETURN joyp.joyPadMemory;
@@ -8923,6 +8913,7 @@ byte GBc_t::readRawMemory(uint16_t address
 		if (address == SC_ADDRESS)
 		{
 			auto SC = pGBc_peripherals->SC;
+
 			if (ROM_TYPE == ROM::GAME_BOY)
 			{
 				SC.scFields.CLOCK_SPEED = SET;
@@ -10134,13 +10125,10 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 		// writing to Joypad register; bits 7 and 6 are unused
 		if (address == P1_JOYP_ADDRESS)
 		{
-			const uint8_t selDir = GETBIT(FOUR, data); // P14
-			const uint8_t selAct = GETBIT(FIVE, data); // P15
-
-			pGBc_peripherals->P1_JOYP.joyPadFields.P14_SEL_DIRECTION_KEYS = selDir;
-			pGBc_peripherals->P1_JOYP.joyPadFields.P15_SEL_ACTION_KEYS = selAct;
-
-			captureIO();
+			STATE8 previousJoyPadState = pGBc_peripherals->P1_JOYP.joyPadMemory & 0x0F;
+			pGBc_peripherals->P1_JOYP.joyPadFields.P14_SEL_DIRECTION_KEYS = GETBIT(FOUR, data);
+			pGBc_peripherals->P1_JOYP.joyPadFields.P15_SEL_ACTION_KEYS = GETBIT(FIVE, data);
+			updateJOYP(previousJoyPadState);
 			RETURN;
 		}
 

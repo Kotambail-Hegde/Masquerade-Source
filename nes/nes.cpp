@@ -1608,7 +1608,7 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 						auto data = GETBIT(pNES_instance->NES_state.controller.keyID, pNES_instance->NES_state.controller.keyStatus);
 						++pNES_instance->NES_state.controller.keyID;
 						// Refer https://www.nesdev.org/wiki/Standard_controller for reasons to OR with MSB of address
-						RETURN(data | (address >> EIGHT));
+						RETURN (data | (address >> EIGHT));
 					}
 					else
 					{
