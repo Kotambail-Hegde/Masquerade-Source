@@ -546,6 +546,26 @@ private:
 		"Konami (Yu-Gi-Oh!)"
 	};
 
+	enum class MBCType 
+	{
+		NONE, 
+		MBC1, 
+		MBC2, 
+		MBC3, 
+		MBC5
+	};
+
+	const std::unordered_map<uint16_t, MBCType> kMBCTypeMap = 
+	{
+		{0x00, MBCType::NONE},
+		{0x01, MBCType::MBC1}, {0x02, MBCType::MBC1}, {0x03, MBCType::MBC1},
+		{0x05, MBCType::MBC2}, {0x06, MBCType::MBC2},
+		{0x0F, MBCType::MBC3}, {0x10, MBCType::MBC3}, {0x11, MBCType::MBC3},
+		{0x12, MBCType::MBC3}, {0x13, MBCType::MBC3},
+		{0x19, MBCType::MBC5}, {0x1A, MBCType::MBC5}, {0x1B, MBCType::MBC5},
+		{0x1C, MBCType::MBC5}, {0x1D, MBCType::MBC5}, {0x1E, MBCType::MBC5},
+	};
+
 	typedef struct
 	{
 		uint8_t CLOCK_SELECT : 1; // bit  0
@@ -1752,12 +1772,8 @@ private:
 		byte dataWrittenToMBCReg3;
 		byte dataWrittenToMBCReg4;
 		FLAG is_mbc2_rom_mode;
-		FLAG no_mbc;
-		FLAG mbc1;
-		FLAG mbc2;
-		FLAG mbc3;
-		FLAG mbc5;
 		FLAG isMBC1_Mode1;
+		MBCType activeMBC;
 		FLAG romBank32K;
 		FLAG romBank64K;
 		FLAG romBank128K;
@@ -2278,6 +2294,31 @@ private:
 
 private:
 
+	MASQ_INLINE void initMBC() const
+	{
+		pGBc_emuStatus->activeMBC = MBCType::NONE;
+		RETURN;
+	}
+	MASQ_INLINE FLAG isNoMBC() const
+	{
+		RETURN pGBc_emuStatus->activeMBC == MBCType::NONE;
+	}
+	MASQ_INLINE FLAG isMBC1() const
+	{
+		RETURN pGBc_emuStatus->activeMBC == MBCType::MBC1;
+	}
+	MASQ_INLINE FLAG isMBC2() const
+	{
+		RETURN pGBc_emuStatus->activeMBC == MBCType::MBC2;
+	}
+	MASQ_INLINE FLAG isMBC3() const
+	{
+		RETURN pGBc_emuStatus->activeMBC == MBCType::MBC3;
+	}
+	MASQ_INLINE FLAG isMBC5() const
+	{
+		RETURN pGBc_emuStatus->activeMBC == MBCType::MBC5;
+	}
 	void setMBCType(uint16_t mbcType);
 	void setROMBankType(uint16_t romBankType);
 	void setROMBankNumber(uint16_t romBankNumber);
