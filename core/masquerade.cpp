@@ -510,6 +510,10 @@ private:
 private:
 
 	CheatEngine_t* ceMAS;
+
+private:
+
+	KeyBindings keyBindings;
 #pragma endregion INFRASTRUCTURE_DECLARATION
 
 #pragma region INFRASTRUCTURE_DEFINITION
@@ -783,6 +787,9 @@ private:
 
 		// Provide the graphics and audio engine to emulator and initialize the emulator
 		current_instance->setupTheCoreOfEmulation(nullptr, nullptr, nullptr);
+
+		// Setup default keybindings
+		keyBindings.setDefault(current_instance->getEmulationID());
 
 		currentFrame = ZERO;
 
@@ -1865,6 +1872,54 @@ public:
 			ID64 tickAtStart = RESET;
 			FLAG done = NO;
 			io.IniFilename = _IMGUI_LOCATION.c_str();
+
+			// Shared event handler
+			auto handleSDLEvent = [&](SDL_Event& e)
+				{
+					ImGui_ImplSDL3_ProcessEvent(&e);
+					if (e.type == SDL_EVENT_QUIT)
+					{
+						done = true;
+					}
+					if (e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED && e.window.windowID == SDL_GetWindowID(window))
+					{
+						done = true;
+					}
+					if (e.type == SDL_EVENT_DROP_FILE)
+					{
+						auto it = std::find(recentlyOpenedList.begin(), recentlyOpenedList.end(), std::string(e.drop.data));
+						if (it != recentlyOpenedList.end())
+						{
+							recentlyOpenedList.erase(it);
+						}
+						recentlyOpenedList.push_front(e.drop.data);
+						if (recentlyOpenedList.size() > _MAX_RECENTLY_USED_LIST_SIZE)
+						{
+							recentlyOpenedList.pop_back();
+						}
+						dynamicDragNDropAndMenuSelect.push_back(e.drop.data);
+					}
+					if (e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_KEY_UP)
+					{
+						EmuKey key = keyBindings.resolve(current_instance->getEmulationID(), (int)e.key.scancode);
+						EmuKeyAction act = (e.type == SDL_EVENT_KEY_DOWN) ? EmuKeyAction::PRESSED : EmuKeyAction::RELEASED;
+						if (key != EmuKey::UNKNOWN)
+						{
+							current_instance->onKeyEvent(key, act);
+						}
+					}
+				};
+
+			// Input hint callback — called mid-frame from emulator
+			current_instance->setInputHintCallback([&]()
+				{
+					SDL_Event e;
+					while (SDL_PollEvent(&e))
+					{
+						handleSDLEvent(e);
+					}
+				});
+
 #ifdef __EMSCRIPTEN__
 			auto denominator = myFPS <= 60 ? myFPS : 60;
 			const double timestep = 1.0 / denominator;
@@ -2000,28 +2055,9 @@ public:
 							SDL_Event event;
 							while (SDL_PollEvent(&event))
 							{
-								ImGui_ImplSDL3_ProcessEvent(&event);
-								if (event.type == SDL_EVENT_QUIT)
-									done = true;
-								if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED && event.window.windowID == SDL_GetWindowID(window))
-									done = true;
-								if (event.type == SDL_EVENT_DROP_FILE)
-								{
-									auto it = std::find(recentlyOpenedList.begin(), recentlyOpenedList.end(), std::string(event.drop.data));
-									// Check if the element was found
-									if (it != recentlyOpenedList.end())
-									{
-										// Element found, delete it
-										recentlyOpenedList.erase(it);
-									}
-									recentlyOpenedList.push_front(event.drop.data);
-									if (recentlyOpenedList.size() > _MAX_RECENTLY_USED_LIST_SIZE)
-									{
-										recentlyOpenedList.pop_back();
-									}
-									dynamicDragNDropAndMenuSelect.push_back(event.drop.data);
-								}
+								handleSDLEvent(event);
 							}
+
 							if (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED)
 							{
 								SDL_Delay(10);

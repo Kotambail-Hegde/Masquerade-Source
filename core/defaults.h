@@ -85,6 +85,8 @@ public:
 	bool runEmulationAtFixedRate(uint32_t) override { RETURN true; }
 	bool runEmulationLoopAtFixedRate(uint32_t) override { RETURN true; }
 
+	FLAG onKeyEvent(EmuKey key, EmuKeyAction action) override { RETURN true; }
+
 	bool initializeEmulator() override { RETURN true; }
 	void destroyEmulator() override {};
 #pragma endregion EMULATION_METHOD_DECLARATION

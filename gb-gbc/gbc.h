@@ -2323,7 +2323,6 @@ public:
 
 public:
 
-	void updatePhysicalKeys();
 	void updateJOYP(STATE8 prevState);
 	void captureIO();
 
@@ -2400,6 +2399,7 @@ public:
 	FLAG runEmulationLoopAtHostRate(uint32_t currentFrame) override;
 	FLAG runEmulationAtFixedRate(uint32_t currentFrame) override;
 	FLAG runEmulationLoopAtFixedRate(uint32_t currentFrame) override;
+	FLAG onKeyEvent(EmuKey key, EmuKeyAction action) override;
 
 public:
 
@@ -2573,8 +2573,9 @@ private:
 	void cpuTickM(CPU_TICK_TYPE type = CPU_TICK_TYPE::READ_WRITE);
 	void gbCpuTick2T(FLAG isT2orT3);
 	void syncOtherGBModuleTicks();
-	void timerTick();
 	void dmaTick();
+	void joypadTick();
+	void timerTick();
 	void serialTick();
 	void rtcTick();
 	MASQ_INLINE void checkWindowYTrigger(uint8_t ly)

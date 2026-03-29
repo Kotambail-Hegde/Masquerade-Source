@@ -1347,6 +1347,7 @@ void GBc_t::gbCpuTick2T(FLAG isT2orT3)
 		pGBc_instance->GBc_state.emulatorStatus.isNewTimerCycle = YES;
 
 		dmaTick();
+		joypadTick();
 	}
 	timerTick();
 	serialTick();
@@ -1387,6 +1388,7 @@ void GBc_t::syncOtherGBModuleTicks()
 	if (isCGBDoubleSpeedEnabled() == YES)
 	{
 		dmaTick();
+		joypadTick();
 		timerTick();
 		serialTick();
 		if (IS_VALID_TICK_FOR_DOUBLE_SPEED() == YES)
@@ -1429,6 +1431,7 @@ void GBc_t::syncOtherGBModuleTicks()
 	{
 		RESET_TICK_FOR_DOUBLE_SPEED();
 		dmaTick();
+		joypadTick();
 		timerTick();
 		serialTick();
 		rtcTick();
@@ -1580,6 +1583,14 @@ void GBc_t::dmaTick()
 			FATAL("DMA Mode Error");
 		}
 		}
+	}
+}
+
+void GBc_t::joypadTick()
+{
+	if (inputHintCallback)
+	{
+		inputHintCallback();
 	}
 }
 
@@ -3170,23 +3181,7 @@ void GBc_t::processHDMA()
 	}
 }
 
-// Called once per frame from your main loop
-void GBc_t::updatePhysicalKeys()
-{
-	pGBc_emuStatus->keyUP = ImGui::IsKeyDown(ImGuiKey_UpArrow);
-	pGBc_emuStatus->keyDOWN = ImGui::IsKeyDown(ImGuiKey_DownArrow);
-	pGBc_emuStatus->keyLEFT = ImGui::IsKeyDown(ImGuiKey_LeftArrow);
-	pGBc_emuStatus->keyRIGHT = ImGui::IsKeyDown(ImGuiKey_RightArrow);
-	pGBc_emuStatus->keySTART = ImGui::IsKeyDown(ImGuiKey_Enter);
-	pGBc_emuStatus->keySELECT = ImGui::IsKeyDown(ImGuiKey_Space);
-	pGBc_emuStatus->keyA = ImGui::IsKeyDown(ImGuiKey_Z);
-	pGBc_emuStatus->keyB = ImGui::IsKeyDown(ImGuiKey_X);
-
-	// After updating physical key states, sync JOYP with current selection mode
-	updateJOYP(pGBc_peripherals->P1_JOYP.joyPadMemory & 0x0F);
-}
-
-// Called EVERY TIME P14/P15 selection bits change (on JOYP write) AND after updatePhysicalKeys
+// Called EVERY TIME P14/P15 selection bits change (on JOYP write) AND after onKeyEvent
 void GBc_t::updateJOYP(STATE8 prevState)
 {
 	auto& joy = pGBc_peripherals->P1_JOYP.joyPadFields;
@@ -3248,7 +3243,7 @@ void GBc_t::updateJOYP(STATE8 prevState)
 
 void GBc_t::captureIO()
 {
-	updatePhysicalKeys();
+	DO_NOTHING;
 }
 
 void GBc_t::processSerialClockSpeedBit()
@@ -7122,6 +7117,25 @@ FLAG GBc_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 	}
 
 	RETURN pGBc_display->wasVblankJustTriggerred;
+}
+
+FLAG GBc_t::onKeyEvent(EmuKey key, EmuKeyAction action)
+{
+	bool pressed = (action == EmuKeyAction::PRESSED);
+	switch (key)
+	{
+	case EmuKey::A:      pGBc_emuStatus->keyA = pressed; BREAK;
+	case EmuKey::B:      pGBc_emuStatus->keyB = pressed; BREAK;
+	case EmuKey::START:  pGBc_emuStatus->keySTART = pressed; BREAK;
+	case EmuKey::SELECT: pGBc_emuStatus->keySELECT = pressed; BREAK;
+	case EmuKey::UP:     pGBc_emuStatus->keyUP = pressed; BREAK;
+	case EmuKey::DOWN:   pGBc_emuStatus->keyDOWN = pressed; BREAK;
+	case EmuKey::LEFT:   pGBc_emuStatus->keyLEFT = pressed; BREAK;
+	case EmuKey::RIGHT:  pGBc_emuStatus->keyRIGHT = pressed; BREAK;
+	default:             RETURN NO;
+	}
+	updateJOYP(pGBc_peripherals->P1_JOYP.joyPadMemory & 0x0F);
+	RETURN YES;
 }
 
 FLAG GBc_t::initializeEmulator()

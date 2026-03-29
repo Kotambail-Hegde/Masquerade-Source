@@ -2453,3 +2453,113 @@ private:
 	size_t m_blockByteIndex{};
 	size_t m_messageByteLength{};
 };
+
+#ifndef ENABLE_OTA_EXECUTABLE
+enum class EmuKey
+{
+	// Gamepad
+	UP,
+	DOWN,
+	LEFT,
+	RIGHT,
+	A,
+	B,
+	X,
+	Y,
+	START,
+	SELECT,
+	L,
+	R,
+	// System
+	UNKNOWN
+};
+
+enum class EmuKeyAction
+{
+	PRESSED,
+	RELEASED
+};
+
+struct EmulationIDHash
+{
+	std::size_t operator()(EMULATION_ID id) const
+	{
+		RETURN std::hash<uint8_t>{}(static_cast<uint8_t>(id));
+	}
+};
+
+class KeyBindings
+{
+public:
+	void setDefault(EMULATION_ID id)
+	{
+		bindings[id] = 
+		{
+			{ SDL_SCANCODE_Z,      EmuKey::A      },
+			{ SDL_SCANCODE_X,      EmuKey::B      },
+			{ SDL_SCANCODE_RETURN, EmuKey::START  },
+			{ SDL_SCANCODE_SPACE,  EmuKey::SELECT },
+			{ SDL_SCANCODE_UP,     EmuKey::UP     },
+			{ SDL_SCANCODE_DOWN,   EmuKey::DOWN   },
+			{ SDL_SCANCODE_LEFT,   EmuKey::LEFT   },
+			{ SDL_SCANCODE_RIGHT,  EmuKey::RIGHT  },
+		};
+	}
+
+	EmuKey resolve(EMULATION_ID id, int keyCode) const
+	{
+		auto sysIt = bindings.find(id);
+		if (sysIt == bindings.end())
+		{
+			RETURN EmuKey::UNKNOWN;
+		}
+		auto keyIt = sysIt->second.find(keyCode);
+		if (keyIt == sysIt->second.end())
+		{
+			RETURN EmuKey::UNKNOWN;
+		}
+		RETURN keyIt->second;
+	}
+
+	void rebind(EMULATION_ID id, EmuKey key, int newKeyCode)
+	{
+		auto& map = bindings[id];
+		for (auto it = map.begin(); it != map.end(); )
+		{
+			if (it->second == key)
+			{
+				it = map.erase(it);
+			}
+			else
+			{
+				++it;
+			}
+		}
+		map[newKeyCode] = key;
+	}
+
+	// Get current keycode for a given EmuKey (for displaying in UI)
+	int getCurrentCode(EMULATION_ID id, EmuKey key) const
+	{
+		auto sysIt = bindings.find(id);
+		if (sysIt == bindings.end())
+		{
+			RETURN INVALID;
+		}
+		for (auto& [code, k] : sysIt->second)
+		{
+			if (k == key)
+			{
+				RETURN code;
+			}
+		}
+		RETURN INVALID;
+	}
+
+	void load(boost::property_tree::ptree& config, EMULATION_ID id);
+	void save(boost::property_tree::ptree& config, EMULATION_ID id);
+
+private:
+	std::unordered_map<EMULATION_ID, std::unordered_map<int, EmuKey>, EmulationIDHash> bindings;
+};
+#endif
