@@ -546,7 +546,7 @@ private:
 		"Konami (Yu-Gi-Oh!)"
 	};
 
-	enum class MBCType 
+	enum class MBCType  : uint16_t
 	{
 		NONE, 
 		MBC1, 
@@ -564,6 +564,33 @@ private:
 		{0x12, MBCType::MBC3}, {0x13, MBCType::MBC3},
 		{0x19, MBCType::MBC5}, {0x1A, MBCType::MBC5}, {0x1B, MBCType::MBC5},
 		{0x1C, MBCType::MBC5}, {0x1D, MBCType::MBC5}, {0x1E, MBCType::MBC5},
+
+	enum class ROMBankType : uint16_t
+	{
+		ROM_32K,
+		ROM_64K,
+		ROM_128K,
+		ROM_256K,
+		ROM_512K,
+		ROM_1M,
+		ROM_2M,
+		ROM_4M,
+		ROM_8M,
+		ROM_1_1M = 34,
+		ROM_1_2M = 35,
+		ROM_1_5M = 36,
+		ROM_UNKNOWN = 0xFFFF
+	};
+
+	enum class RAMBankType : uint16_t
+	{
+		NO_BANK = 0,
+		RAM_2K = 1,
+		RAM_8K = 2,
+		RAM_32K = 3,
+		RAM_128K = 4,
+		RAM_64K = 5,
+		RAM_UNKNOWN = 0xFFFF
 	};
 
 	typedef struct
@@ -1771,21 +1798,10 @@ private:
 		byte dataWrittenToMBCReg2;
 		byte dataWrittenToMBCReg3;
 		byte dataWrittenToMBCReg4;
-		FLAG is_mbc2_rom_mode;
-		FLAG isMBC1_Mode1;
+		FLAG isMBC2ROMMode;
+		FLAG isMBC1Mode1;
 		MBCType activeMBC;
-		FLAG romBank32K;
-		FLAG romBank64K;
-		FLAG romBank128K;
-		FLAG romBank256K;
-		FLAG romBank512K;
-		FLAG romBank1M;
-		FLAG romBank2M;
-		FLAG romBank4M;
-		FLAG romBank8M;
-		FLAG romBank1_1M;
-		FLAG romBank1_2M;
-		FLAG romBank1_5M;
+		ROMBankType romBank;
 		union
 		{
 			struct
@@ -1796,12 +1812,7 @@ private:
 			} mbc1Fields;
 			uint16_t raw;
 		} currentROMBankNumber;
-		FLAG no_ramBank;
-		FLAG ramBank2K;
-		FLAG ramBank8K;
-		FLAG ramBank32K;
-		FLAG ramBank128K;
-		FLAG ramBank64K;
+		RAMBankType ramBank;
 		FLAG enableRAMBanking;
 		uint8_t currentRAMBankNumber;
 		uint8_t currentVRAMBankNumber;

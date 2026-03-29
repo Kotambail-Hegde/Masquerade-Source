@@ -577,7 +577,7 @@ bool GBc_t::bessSaveState(uint8_t id)
 		}
 		else if (isMBC2())
 		{
-			if (pGBc_instance->GBc_state.emulatorStatus.is_mbc2_rom_mode == YES)
+			if (pGBc_instance->GBc_state.emulatorStatus.isMBC2ROMMode == YES)
 			{
 				auto mbc_reg = 0x0000;
 				BESS_BLOCK_MBC->mbc[0x00] = mbc_reg & 0xFF;
