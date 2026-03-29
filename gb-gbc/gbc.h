@@ -552,7 +552,8 @@ private:
 		MBC1, 
 		MBC2, 
 		MBC3, 
-		MBC5
+		MBC5, 
+		MBC7
 	};
 
 	const std::unordered_map<uint16_t, MBCType> kMBCTypeMap = 
@@ -564,6 +565,8 @@ private:
 		{0x12, MBCType::MBC3}, {0x13, MBCType::MBC3},
 		{0x19, MBCType::MBC5}, {0x1A, MBCType::MBC5}, {0x1B, MBCType::MBC5},
 		{0x1C, MBCType::MBC5}, {0x1D, MBCType::MBC5}, {0x1E, MBCType::MBC5},
+		{0x22, MBCType::MBC7},
+	};
 
 	enum class ROMBankType : uint16_t
 	{
@@ -1812,8 +1815,50 @@ private:
 			} mbc1Fields;
 			uint16_t raw;
 		} currentROMBankNumber;
+		struct
+		{
+			union
+			{
+				struct
+				{
+					BYTE ax2xAccXLo;
+					BYTE ax3xAccXHi;
+				} fields;
+				uint16_t raw;
+			} accX;
+			union
+			{
+				struct
+				{
+					BYTE ax4xAccYLo;
+					BYTE ax5xAccYHi;
+				} fields;
+				uint16_t raw;
+			} accY;
+			union
+			{
+				struct
+				{
+					BYTE ax6xAccZLo;
+					BYTE ax7xAccZHi;
+				} fields;
+				uint16_t raw;
+			} accZ;
+			FLAG isErased;
+			// EEPROM state
+			FLAG     eepromCS;
+			FLAG     eepromCLK;
+			FLAG     eepromDI;
+			FLAG     eepromDO;
+			FLAG     eepromWriteEnabled;
+			uint16_t eepromCommand;
+			uint8_t  eepromArgBitsLeft;
+			uint16_t eepromReadBits;
+		} mbc7Regs;
 		RAMBankType ramBank;
 		FLAG enableRAMBanking;
+		FLAG isMBC7RamEn1;
+		FLAG isMBC7RamEn2;
 		uint8_t currentRAMBankNumber;
 		uint8_t currentVRAMBankNumber;
 		uint8_t currentWRAMBankNumber;
@@ -2329,6 +2374,10 @@ private:
 	MASQ_INLINE FLAG isMBC5() const
 	{
 		RETURN pGBc_emuStatus->activeMBC == MBCType::MBC5;
+	}
+	MASQ_INLINE FLAG isMBC7() const
+	{
+		RETURN pGBc_emuStatus->activeMBC == MBCType::MBC7;
 	}
 	void setMBCType(uint16_t mbcType);
 	void setROMBankType(uint16_t romBankType);

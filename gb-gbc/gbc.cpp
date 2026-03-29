@@ -146,6 +146,8 @@
 
 #define initializeSerialClockSpeed						processSerialClockSpeedBit
 #define performOverFlowCheck							getUpdatedFrequency
+
+#define MBC7_EEPROM_WORD(addr)							(((uint16_t*)pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[0])[(addr) & 0x7F])
 #pragma endregion GB_GBC_SPECIFIC_MACROS
 
 #pragma region CONDITIONAL_INCLUDES
@@ -892,7 +894,14 @@ void GBc_t::disableRAMBank()
 
 FLAG GBc_t::isRAMBankEnabled()
 {
-	RETURN pGBc_emuStatus->enableRAMBanking;
+	if (isMBC7()) MASQ_UNLIKELY
+	{
+		RETURN pGBc_emuStatus->isMBC7RamEn1 && pGBc_emuStatus->isMBC7RamEn2;
+	}
+	else
+	{
+		RETURN pGBc_emuStatus->enableRAMBanking;
+	}
 }
 
 void GBc_t::setRAMBankType(uint16_t ramBankType)
@@ -7616,6 +7625,35 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 				setROMModeIfMBC1();
 			}
 
+			// setup defaults if MBC7
+			if (isMBC7())
+			{
+				auto& e = pGBc_emuStatus->mbc7Regs;
+
+				e.accX.raw = 0x8000;
+				e.accY.raw = 0x8000;
+				e.accZ.raw = 0xFF00;
+				e.isErased = NO;
+
+				// EEPROM pin state
+				e.eepromCS = NO;
+				e.eepromCLK = NO;
+				e.eepromDI = NO;
+				e.eepromDO = NO;
+
+				// EEPROM logic state
+				e.eepromWriteEnabled = NO;   // 93LC56 powers on write-disabled (EWDS state)
+				e.eepromCommand = 0;
+				e.eepromArgBitsLeft = 0;
+				e.eepromReadBits = 0;
+
+				// EEPROM memory content — erased state is 0xFF
+				memset(
+					pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[0],
+					0xFF,
+					0x100); // 256 bytes
+			}
+
 			// disable ram banking for now
 			disableRAMBank();
 
@@ -8466,7 +8504,55 @@ byte GBc_t::readRawMemory(uint16_t address
 				}
 				else
 				{
-					RETURN pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[getRAMBankNumber()][address];
+					if (isMBC7()) MASQ_UNLIKELY
+					{
+						auto& e = pGBc_emuStatus->mbc7Regs;
+
+						switch (address & 0xF0F0)
+						{
+						case 0xA020:
+						{
+							RETURN e.accX.fields.ax2xAccXLo;
+						}
+						case 0xA030:
+						{
+							RETURN e.accX.fields.ax3xAccXHi;
+						}
+						case 0xA040:
+						{
+							RETURN e.accY.fields.ax4xAccYLo;
+						}
+						case 0xA050:
+						{
+							RETURN e.accY.fields.ax5xAccYHi;
+						}
+						case 0xA060:
+						{
+							RETURN e.accZ.fields.ax6xAccZLo;
+						}
+						case 0xA070:
+						{
+							RETURN e.accZ.fields.ax7xAccZHi;
+						}
+						case 0xA080:
+						{
+							RETURN(uint8_t)(
+								((e.eepromDO ? 1u : 0u)) |  // bit 0: DO
+								((e.eepromDI ? 1u : 0u) << 1) |  // bit 1: DI (echoed back)
+								((e.eepromCLK ? 1u : 0u) << 6) |  // bit 6: CLK (echoed back)
+								((e.eepromCS ? 1u : 0u) << 7)    // bit 7: CS (echoed back)
+								);
+						}
+						default:
+						{
+							RETURN 0xFF;
+						}
+						}
+					}
+					else
+					{
+						RETURN pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[getRAMBankNumber()][address];
+					}
 				}
 			}
 			else
@@ -9400,14 +9486,14 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 			{
 				if (address <= 0x1FFF)
 				{
-					if (isMBC1() || isMBC2() || isMBC3() || isMBC5())
+					if (isMBC1() || isMBC2() || isMBC3() || isMBC5() || isMBC7())
 					{
 						pGBc_emuStatus->dataWrittenToMBCReg0 = data;
 					}
 				}
 				else if (address <= 0x2FFF)
 				{
-					if (isMBC1() || isMBC3() || isMBC5())
+					if (isMBC1() || isMBC3() || isMBC5() || isMBC7())
 					{
 						pGBc_emuStatus->dataWrittenToMBCReg1 = data;
 					}
@@ -9418,7 +9504,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 				}
 				else if (address <= 0x3FFF)
 				{
-					if (isMBC1() || isMBC3())
+					if (isMBC1() || isMBC3() || isMBC7())
 					{
 						pGBc_emuStatus->dataWrittenToMBCReg1 = data;
 					}
@@ -9433,7 +9519,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 				}
 				else if (address <= 0x5FFF)
 				{
-					if (isMBC1() || isMBC3())
+					if (isMBC1() || isMBC3() || isMBC7())
 					{
 						pGBc_emuStatus->dataWrittenToMBCReg2 = data;
 					}
@@ -9455,13 +9541,30 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 					{
 						pGBc_emuStatus->dataWrittenToMBCReg4 = data;
 					}
+
+					// 0xA000 - 0xAFFF
+					if (address <= 0xAFFF)
+					{
+						if (isMBC7())
+						{
+							pGBc_emuStatus->dataWrittenToMBCReg3 = data;
+						}
+					}
+					// 0xB000 - 0xBFFF
+					else
+					{
+						if (isMBC7())
+						{
+							pGBc_emuStatus->dataWrittenToMBCReg4 = data;
+						}
+					}
 				}
 			}
 
 			// --- 0x0000 - 0x1FFF : RAM/RTC enable ---
 			if (address <= 0x1FFF)
 			{
-				if (isMBC1() || isMBC2() || isMBC3() || isMBC5())
+				if (isMBC1() || isMBC2() || isMBC3() || isMBC5() || isMBC7())
 				{
 					// MBC2 special handling
 					if (isMBC2())
@@ -9492,6 +9595,10 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 						{
 							enableRTCAccess();
 						}
+						if (isMBC7()) MASQ_UNLIKELY
+						{
+							pGBc_emuStatus->isMBC7RamEn1 = YES;
+						}
 					}
 					else
 					{
@@ -9499,6 +9606,10 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 						if (isMBC3())
 						{
 							disableRTCAccess();
+						}
+						if (isMBC7()) MASQ_UNLIKELY
+						{
+							pGBc_emuStatus->isMBC7RamEn1 = NO;
 						}
 					}
 					RETURN;
@@ -9565,6 +9676,13 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 						setROMBankNumber(ROMBankNumber);
 						RETURN;
 					}
+
+					else if (isMBC7())
+					{
+						ROMBankNumber |= (data & 0xFF); // set the ROM bank number
+						ROMBankNumber &= (getNumberOfROMBanksUsed() - ONE); // Ensure that rom bank number is within the maximum supported for the game
+						setROMBankNumber(ROMBankNumber);
+					}
 				}
 			}
 
@@ -9612,6 +9730,24 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 					auto ramBankNumber = (data & 0x0F) & (getNumberOfRAMBanksUsed() - ONE);
 					setRAMBankNumber(ramBankNumber);
 					RETURN;
+				}
+				// Enable RAM for MBC7
+				else if (isMBC7())
+				{
+					if ((data & 0xFF) == 0x40)
+					{
+						if (isMBC7()) MASQ_UNLIKELY
+						{
+							pGBc_emuStatus->isMBC7RamEn2 = YES;
+						}
+					}
+					else
+					{
+						if (isMBC7()) MASQ_UNLIKELY
+						{
+							pGBc_emuStatus->isMBC7RamEn2 = NO;
+						}
+					}
 				}
 			}
 
@@ -9702,7 +9838,197 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 
 			if (isRAMBankEnabled() == YES)
 			{
-				pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[getRAMBankNumber()][address] = data;
+				if (isMBC7()) MASQ_UNLIKELY
+				{
+					switch (address & 0xF0F0)
+					{
+					case 0xA000:
+					{
+						if (data == 0x55)
+						{
+							pGBc_emuStatus->mbc7Regs.accX.raw = 0x8000;
+							pGBc_emuStatus->mbc7Regs.accY.raw = 0x8000;
+							pGBc_emuStatus->mbc7Regs.accZ.raw = 0xFF00;
+							pGBc_emuStatus->mbc7Regs.isErased = YES;
+						}
+						BREAK;
+					}
+					case 0xA010:
+					{
+						if (data == 0xAA && pGBc_emuStatus->mbc7Regs.isErased == YES)
+						{
+							pGBc_emuStatus->mbc7Regs.isErased = CLEAR;
+
+							float mx, my;
+							float nmx, nmy;
+							if (getMouseRelPosIfDocked(&mx, &my, getScreenWidth(), getScreenHeight()))
+							{
+								// Clamp to GB screen bounds
+								signed x = (signed)ImMax(ImMin((int)mx, static_cast<int>(getScreenWidth())), 0);
+								signed y = (signed)ImMax(ImMin((int)my, static_cast<int>(getScreenHeight())), 0);
+
+								const float midx = static_cast<float>((getScreenWidth() >> TWO));
+								const float midy = static_cast<float>((getScreenHeight() >> TWO));
+
+								nmx = ((x - midx) / -midx);
+								nmy = ((y - midy) / -midy);
+
+								// Refer to https://gbdev.io/pandocs/MBC7.html#a000-afff---ram-registers-readwrite
+								pGBc_emuStatus->mbc7Regs.accX.raw = static_cast <uint16_t>(0x81D0 + 0x70 * nmx);
+								pGBc_emuStatus->mbc7Regs.accY.raw = static_cast <uint16_t>(0x81D0 + 0x70 * nmy);
+							}
+						}
+						BREAK;
+					}
+					case 0xA080:
+					{
+						auto& e = pGBc_emuStatus->mbc7Regs;
+
+						e.eepromCS = (data & 0x80) ? YES : NO;
+						e.eepromDI = (data & 0x02) ? YES : NO;
+
+						// If CS is asserted
+						if (e.eepromCS)
+						{
+							// Rising edge of CLK
+							if (!e.eepromCLK && (data & 0x40))
+							{
+								// Shift out read data MSB first
+								e.eepromDO = (e.eepromReadBits >> 15) & 1;
+								e.eepromReadBits <<= 1;
+								e.eepromReadBits |= 1; // fill with 1s after shifting out
+
+								if (e.eepromArgBitsLeft == 0)
+								{
+									// Shift in command bits
+									e.eepromCommand <<= 1;
+									e.eepromCommand |= e.eepromDI ? 1 : 0;
+
+									if (e.eepromCommand & 0x400) // 11 bits received (1 start + 10 command)
+									{
+										switch ((e.eepromCommand >> 6) & 0xF)
+										{
+											// READ (10 xAAAAAAA)
+										case 0x8: case 0x9: case 0xA: case 0xB:
+										{
+											e.eepromReadBits = MBC7_EEPROM_WORD(e.eepromCommand & 0x7F);
+											e.eepromCommand = 0;
+											BREAK;
+										}
+										// EWEN (0011 xxxxxx)
+										case 0x3:
+										{
+											e.eepromWriteEnabled = YES;
+											e.eepromCommand = 0;
+											BREAK;
+										}
+										// EWDS (0000 xxxxxx)
+										case 0x0:
+										{
+											e.eepromWriteEnabled = NO;
+											e.eepromCommand = 0;
+											BREAK;
+										}
+										// WRITE (01 xAAAAAAA) - need 16 more bits
+										case 0x4: case 0x5: case 0x6: case 0x7:
+										{
+											if (e.eepromWriteEnabled)
+											{
+												MBC7_EEPROM_WORD(e.eepromCommand & 0x7F) = 0x0000;
+											}
+											e.eepromArgBitsLeft = 16;
+											// Don't clear command — needed to identify WRITE vs WRAL below
+											BREAK;
+										}
+										// ERASE (11 xAAAAAAA)
+										case 0xC: case 0xD: case 0xE: case 0xF:
+										{
+											if (e.eepromWriteEnabled)
+											{
+												MBC7_EEPROM_WORD(e.eepromCommand & 0x7F) = 0xFFFF;
+												e.eepromReadBits = 0x3FFF; // settling time
+											}
+											e.eepromCommand = 0;
+											BREAK;
+										}
+										// ERAL (0010 xxxxxx)
+										case 0x2:
+										{
+											if (e.eepromWriteEnabled)
+											{
+												memset(
+													pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[0],
+													0xFF,
+													0x100); // 256 bytes
+												e.eepromReadBits = 0x00FF; // settling time
+											}
+											e.eepromCommand = 0;
+											BREAK;
+										}
+										// WRAL (0001 xxxxxx) - need 16 more bits
+										case 0x1:
+										{
+											if (e.eepromWriteEnabled)
+											{
+												memset(
+													pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[0],
+													0x00,
+													0x100);
+											}
+											e.eepromArgBitsLeft = 16;
+											// Don't clear command
+											BREAK;
+										}
+										default: BREAK;
+										}
+									}
+								}
+								else
+								{
+									// Shifting in extra data bits for WRITE or WRAL
+									e.eepromArgBitsLeft--;
+									e.eepromDO = YES; // RDY/BUSY line, high = busy
+
+									if (e.eepromDI)
+									{
+										uint16_t bit = (uint16_t)(1 << e.eepromArgBitsLeft);
+
+										if (e.eepromCommand & 0x100) // WRITE
+										{
+											MBC7_EEPROM_WORD(e.eepromCommand & 0x7F) |= bit;
+										}
+										else // WRAL
+										{
+											for (uint8_t i = 0; i < 0x7F; i++)
+											{
+												MBC7_EEPROM_WORD(i) |= bit;
+											}
+										}
+									}
+
+									if (e.eepromArgBitsLeft == 0) // Done
+									{
+										// Emulate settling time; WRITE takes longer than WRAL
+										e.eepromReadBits = (e.eepromCommand & 0x100) ? 0x00FF : 0x3FFF;
+										e.eepromCommand = 0;
+									}
+								}
+							}
+						}
+
+						e.eepromCLK = (data & 0x40) ? YES : NO;
+						BREAK;
+					}
+					default:
+					{
+						BREAK;
+					}
+					}
+				}
+				else
+				{
+					pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[getRAMBankNumber()][address] = data;
+				}
 			}
 			else
 			{
