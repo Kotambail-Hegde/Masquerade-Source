@@ -142,6 +142,7 @@ FLAG _ENABLE_BESS_FORMAT = NO;
 FLAG _ENABLE_REWIND = NO;
 uint32_t _REWIND_BUFFER_SIZE = 5000;
 int32_t _TEST_NUMBER = INVALID;
+FLAG _ENABLE_ACCURATE_INPUT_SAMPLING = NO;
 
 // Indicates that a absolute save state's output is loaded instead of a valid ROM
 FLAG isAbsoluteLoad = NO;
@@ -589,6 +590,7 @@ private:
 				{
 					_REWIND_BUFFER_SIZE = config.get<std::uint32_t>("mods._REWIND_BUFFER_SIZE");
 				}
+				_ENABLE_ACCURATE_INPUT_SAMPLING = to_bool(config.get<std::string>("mods._ENABLE_ACCURATE_INPUT_SAMPLING", _ENABLE_ACCURATE_INPUT_SAMPLING ? "true" : "false"));
 			}
 		}
 	}
@@ -1674,7 +1676,7 @@ public:
 			if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD))
 			{
 				FATAL("Error: SDL_Init(): %s", SDL_GetError());
-				RETURN - ONE;
+				RETURN -ONE;
 			}
 
 			// Decide GL+GLSL versions
@@ -1914,7 +1916,7 @@ public:
 			current_instance->setInputHintCallback([&]()
 				{
 					SDL_Event e;
-					while (SDL_PollEvent(&e))
+					if (SDL_PollEvent(&e))
 					{
 						handleSDLEvent(e);
 					}
@@ -1931,92 +1933,7 @@ public:
 			{
 				auto LOOP = [&]()
 					{
-						if (RUN_IMGUI_DEMO == YES)
-						{
-							// Poll and handle events (inputs, window resize, etc.)
-							// You can read the io.WantCaptureMouse, io.WantCaptureKeyboard flags to tell if dear imgui wants to use your inputs.
-							// - When io.WantCaptureMouse is true, do not dispatch mouse input data to your main application, or clear/overwrite your copy of the mouse data.
-							// - When io.WantCaptureKeyboard is true, do not dispatch keyboard input data to your main application, or clear/overwrite your copy of the keyboard data.
-							// Generally you may always pass all inputs to dear imgui, and hide them from your application based on those two flags.
-							SDL_Event event;
-							while (SDL_PollEvent(&event))
-							{
-								ImGui_ImplSDL3_ProcessEvent(&event);
-								if (event.type == SDL_EVENT_QUIT)
-									done = true;
-								if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED && event.window.windowID == SDL_GetWindowID(window))
-									done = true;
-							}
-							if (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED)
-							{
-								SDL_Delay(10);
-								RETURN;
-							}
-
-							// Start the Dear ImGui frame
-							ImGui_ImplOpenGL3_NewFrame();
-							ImGui_ImplSDL3_NewFrame();
-							ImGui::NewFrame();
-
-							// 1. Show the big demo window (Most of the sample code is in ImGui::ShowDemoWindow()! You can browse its code to learn more about Dear ImGui!).
-							if (show_demo_window)
-								ImGui::ShowDemoWindow(&show_demo_window);
-
-							// 2. Show a simple window that we create ourselves. We use a Begin/End pair to create a named window.
-							{
-								static float f = 0.0f;
-								static int counter = 0;
-
-								ImGui::Begin("Hello, world!");                          // Create a window called "Hello, world!" and append into it.
-
-								ImGui::Text("This is some useful text.");               // Display some text (you can use a format strings too)
-								ImGui::Checkbox("Demo Window", &show_demo_window);      // Edit bools storing our window open/close state
-								ImGui::Checkbox("Another Window", &show_another_window);
-
-								ImGui::SliderFloat("float", &f, 0.0f, 1.0f);            // Edit 1 float using a slider from 0.0f to 1.0f
-								ImGui::ColorEdit3("clear color", (float*)&clear_color); // Edit 3 floats representing a color
-
-								if (ImGui::Button("Button"))                            // Buttons RETURN true when clicked (most widgets RETURN true when edited/activated)
-									counter++;
-								ImGui::SameLine();
-								ImGui::Text("counter = %d", counter);
-
-								ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
-								ImGui::End();
-							}
-
-							// 3. Show another simple window.
-							if (show_another_window)
-							{
-								ImGui::Begin("Another Window", &show_another_window);   // Pass a pointer to our FLAG variable (the window will have a closing button that will clear the FLAG when clicked)
-								ImGui::Text("Hello from another window!");
-								if (ImGui::Button("Close Me"))
-									show_another_window = false;
-								ImGui::End();
-							}
-
-							// Rendering
-							ImGui::Render();
-							glViewport(0, 0, (int)io.DisplaySize.x, (int)io.DisplaySize.y);
-							glClearColor(clear_color.x * clear_color.w, clear_color.y * clear_color.w, clear_color.z * clear_color.w, clear_color.w);
-							glClear(GL_COLOR_BUFFER_BIT);
-							ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-
-							// Update and Render additional Platform Windows
-							// (Platform functions may change the current OpenGL context, so we save/restore it to make it easier to paste this code elsewhere.
-							//  For this specific demo app we could also call SDL_GL_MakeCurrent(window, gl_context) directly)
-							if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
-							{
-								SDL_Window* backup_current_window = SDL_GL_GetCurrentWindow();
-								SDL_GLContext backup_current_context = SDL_GL_GetCurrentContext();
-								ImGui::UpdatePlatformWindows();
-								ImGui::RenderPlatformWindowsDefault();
-								SDL_GL_MakeCurrent(backup_current_window, backup_current_context);
-							}
-
-							SDL_GL_SwapWindow(window);
-						}
-						else
+						if (ENABLED)
 						{
 							// Windows to be displayed
 							static FLAG showEmuWin = YES;
@@ -2024,7 +1941,8 @@ public:
 							static FLAG showAboutWin = NO;
 							static FLAG showLoggerWin = NO;
 							static FLAG showCheatWin = NO;
-							static FLAG maintainAspectRatio = config.get<FLAG>("mods._MAINTAIN_ASPECT_RATIO");
+							static FLAG maintainAspectRatio = config.get<FLAG>("mods._MAINTAIN_ASPECT_RATIO", true);
+							static FLAG accurateInputSampling = config.get<FLAG>("mods._ENABLE_ACCURATE_INPUT_SAMPLING", false);
 
 							// Get tick
 							tickAtStart = SDL_GetTicksNS();
@@ -2053,7 +1971,7 @@ public:
 							// - When io.WantCaptureKeyboard is true, do not dispatch keyboard input data to your main application, or clear/overwrite your copy of the keyboard data.
 							// Generally you may always pass all inputs to dear imgui, and hide them from your application based on those two flags.
 							SDL_Event event;
-							while (SDL_PollEvent(&event))
+							if (SDL_PollEvent(&event))
 							{
 								handleSDLEvent(event);
 							}
@@ -2410,6 +2328,21 @@ public:
 													currEnGbcPalette = ((currEnGbcPalette == PALETTE_ID::PALETTE_1) ? PALETTE_ID::PALETTE_2 : PALETTE_ID::PALETTE_1);
 												}
 												ImGui::EndMenu();
+											}
+											ImGui::EndMenu();
+										}
+										if (ImGui::BeginMenu("Input"))
+										{
+											if (ImGui::MenuItem("Accurate Input Sampling", NULL, accurateInputSampling))
+											{
+												accurateInputSampling = (accurateInputSampling == YES ? NO : YES);
+												_ENABLE_ACCURATE_INPUT_SAMPLING = accurateInputSampling;
+												config.put<FLAG>("mods._ENABLE_ACCURATE_INPUT_SAMPLING", accurateInputSampling);
+												boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
+											}
+											if (ImGui::IsItemHovered())
+											{
+												ImGui::SetTooltip("Some ROMs like \"tellinglys\" needs this to be enabled");
 											}
 											ImGui::EndMenu();
 										}

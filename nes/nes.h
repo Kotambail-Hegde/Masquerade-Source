@@ -1432,6 +1432,8 @@ private:
 
 	void apuTick();
 
+	void joypadTick();
+
 private:
 
 	void captureIO();

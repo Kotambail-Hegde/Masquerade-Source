@@ -4854,6 +4854,11 @@ void NES_t::apuTick()
 	++pNES_instance->NES_state.emulatorStatus.ticks.apuCounter;
 }
 
+void NES_t::joypadTick()
+{
+	DO_NOTHING;
+}
+
 void NES_t::captureIO()
 {
 	pNES_instance->NES_state.controller.keyStatus = (

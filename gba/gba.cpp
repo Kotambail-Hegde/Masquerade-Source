@@ -3817,6 +3817,11 @@ void GBA_t::ppuTick()
 {
 	processPPU(ONE);
 }
+
+void GBA_t::joypadTick()
+{
+	DO_NOTHING;
+}
 #pragma endregion CYCLE_ACCURATE
 
 #pragma region CYCLE_COUNT_ACCURATE

@@ -947,6 +947,32 @@ MASQ_INLINE std::bitset<8> toBinary(int n)
 	RETURN std::bitset<8>(n);
 }
 
+static constexpr MASQ_INLINE uint32_t next_pow2(uint32_t x)
+{
+	if (x <= 1) RETURN 1;
+	--x;
+#if defined(__GNUC__) || defined(__clang__) || defined(__EMSCRIPTEN__)
+	RETURN 1u << (32 - __builtin_clz(x));  // single BSR instruction
+#elif defined(_MSC_VER)
+	if (std::is_constant_evaluated())
+	{
+		// Constexpr path for MSVC (no intrinsics allowed at compile time)
+		x |= x >> 1; x |= x >> 2; x |= x >> 4; x |= x >> 8; x |= x >> 16;
+		RETURN x + 1;
+	}
+	else
+	{
+		// Runtime path for MSVC — single BSR instruction
+		unsigned long index;
+		_BitScanReverse(&index, x);
+		RETURN 1u << (index + 1);
+	}
+#else
+	x |= x >> 1; x |= x >> 2; x |= x >> 4; x |= x >> 8; x |= x >> 16;
+	RETURN x + 1;
+#endif
+}
+
 MASQ_INLINE std::string hex(uint32_t n, uint8_t d)
 {
 	std::string s(d, '0');

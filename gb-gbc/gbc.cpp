@@ -1276,11 +1276,18 @@ void GBc_t::dmaTick()
 	}
 }
 
-void GBc_t::joypadTick()
+static constexpr uint32_t KEY_SAMPLING_MASK = next_pow2(GBc_t::LCD_MODE_CYCLES::LCD_TOTAL_CYCLES_PER_SCANLINE) - ONE; // = 511
+
+MASQ_INLINE void GBc_t::joypadTick()
 {
-	if (inputHintCallback)
+	if (_ENABLE_ACCURATE_INPUT_SAMPLING == YES)
 	{
-		inputHintCallback();
+		auto& counter = pGBc_instance->GBc_state.emulatorStatus.ticks.keySamplingCounter;
+		counter = (counter + ONE) & KEY_SAMPLING_MASK;
+		if (counter == RESET)
+		{
+			inputHintCallback();
+		}
 	}
 }
 

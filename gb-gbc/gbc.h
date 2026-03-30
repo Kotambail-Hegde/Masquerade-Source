@@ -336,6 +336,8 @@ private:
 		MODE_LCD_BITS_CLEAR = 4,
 	};
 
+public:
+
 	enum LCD_MODE_CYCLES : uint16_t
 	{
 		LCD_SEARCHING_OAM = 80,
@@ -1717,18 +1719,20 @@ private:
 	typedef struct
 	{
 		uint64_t globalCounter;
+		uint32_t keySamplingCounter;
 		uint32_t lcdBlankCounter;
 		uint64_t apuCounter;
 		uint64_t cpuCounter;
 		FLAG isValidTickForDoubleSpeed;
+		BYTE pad[3];
 		uint16_t dividerCounter;
 		uint16_t serialCounter;
 		uint16_t ppuCounterPerLY;
 		uint16_t ppuCounterPerMode;
 		uint32_t ppuCounterPerFrame;
-		uint64_t rtcCounter;
 		uint16_t rtcDayCounter;
 		uint16_t timerCounter;
+		uint64_t rtcCounter;
 	} ticks_t;
 
 	typedef struct
