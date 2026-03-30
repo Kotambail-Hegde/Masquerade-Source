@@ -1666,6 +1666,8 @@ private:
 
 	typedef struct
 	{
+		uint64_t globalCounter;
+		uint32_t lcdBlankCounter;
 		uint64_t apuCounter;
 		uint64_t cpuCounter;
 		FLAG isValidTickForDoubleSpeed;
@@ -2321,6 +2323,7 @@ public:
 
 public:
 
+	void updateJOYP(STATE8 prevState);
 	void captureIO();
 
 public:
@@ -2396,6 +2399,7 @@ public:
 	FLAG runEmulationLoopAtHostRate(uint32_t currentFrame) override;
 	FLAG runEmulationAtFixedRate(uint32_t currentFrame) override;
 	FLAG runEmulationLoopAtFixedRate(uint32_t currentFrame) override;
+	FLAG onKeyEvent(EmuKey key, EmuKeyAction action) override;
 
 public:
 
@@ -2569,10 +2573,26 @@ private:
 	void cpuTickM(CPU_TICK_TYPE type = CPU_TICK_TYPE::READ_WRITE);
 	void gbCpuTick2T(FLAG isT2orT3);
 	void syncOtherGBModuleTicks();
-	void timerTick();
 	void dmaTick();
+	void joypadTick();
+	void timerTick();
 	void serialTick();
 	void rtcTick();
+	MASQ_INLINE void checkWindowYTrigger(uint8_t ly)
+	{
+		// Check whether "Y" window layer is triggerred for current scanline
+		// Refer : https://gbdev.io/pandocs/Scrolling.html#window
+		// Refer : https://discord.com/channels/465585922579103744/465586075830845475/852208456491728897
+		// Refer : https://discord.com/channels/465585922579103744/465586075830845475/1295044210654842980
+
+		/*
+		 * Note that WINDOW_LAYER_ENABLE should not be checked here as mentioned in https ://discord.com/channels/465585922579103744/465586075830845475/757342004052099072
+		 * But, sameboy does check WINDOW_LAYER_ENABLE, so we will keep this as is.
+		 */
+
+		pGBc_display->yConditionForWindowIsMetForCurrentFrame |=
+			((ly == pGBc_peripherals->WY) & (pGBc_peripherals->LCDC.lcdControlFields.WINDOW_LAYER_ENABLE == SET));
+	}
 	void ppuTick();
 	void apuTick();
 

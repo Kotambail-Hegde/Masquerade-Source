@@ -263,6 +263,11 @@ public:
 	FLAG runEmulationAtFixedRate(uint32_t) override;
 	FLAG runEmulationLoopAtFixedRate(uint32_t) override;
 
+	FLAG onKeyEvent(EmuKey key, EmuKeyAction action) override
+	{
+		RETURN YES;
+	}
+
 public:
 
 	FLAG initializeEmulator() override;

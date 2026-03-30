@@ -62,6 +62,8 @@ extern uint32_t fullscreenVBO;
 extern uint32_t FRAME_BUFFER_SCALE;
 
 extern float _ACTUAL_FPS;
+
+using InputHintCallback = std::function<void()>;
 #pragma endregion GLOBAL_INFRASTRUCTURE_DECLARATIONS
 
 #pragma region CORE
@@ -207,8 +209,18 @@ public:
 	virtual FLAG runEmulationAtFixedRate(uint32_t currentFrame) = 0;
 	virtual FLAG runEmulationLoopAtFixedRate(uint32_t currentFrame) = 0;
 
+	virtual FLAG onKeyEvent(EmuKey key, EmuKeyAction action) = 0;
+
 	virtual FLAG initializeEmulator() = 0;
 	virtual void destroyEmulator() = 0;
+
+public:
+	void setInputHintCallback(InputHintCallback cb) 
+	{
+		inputHintCallback = cb;
+	}
+protected:
+	InputHintCallback inputHintCallback = nullptr;
 #pragma endregion EMULATOR_DEFINITIONS
 
 #pragma region CORE_DEFINITIONS

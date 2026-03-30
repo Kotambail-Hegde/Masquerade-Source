@@ -182,6 +182,13 @@ static uint32_t gameboy_texture;
 static uint32_t matrix_texture;
 static uint32_t matrix[16] = { 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0x000000FF, 0x000000FF, 0x000000FF, 0x000000FF };
 
+static GLuint ghost_texture;
+static GLuint ghost_fbo;
+static GLuint shaderProgramGhost;
+static float  ghost_decay = 0.0f;  // 0.0 = off, ~0.6 = DMG feel, ~0.4 = GBC (less ghosting)
+static float _GB_GHOST_FACTOR = 0.6f;
+static float _GBC_GHOST_FACTOR = 0.4f;
+
 #if _DEBUG
 COUNTER32 OAM_STAT_TO_MODE_2_T_CYCLES = RESET;
 #endif
@@ -250,6 +257,8 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 		_FORCE_GB_GFX_FOR_GBC = to_bool(pt.get<std::string>("gb-gbc._force_gb_gfx_for_gbc"));
 		_FORCE_GBC_FOR_GB = to_bool(pt.get<std::string>("gb-gbc._force_gbc_for_gb"));
 		_ENABLE_AUDIO_HPF = to_bool(config.get<std::string>("gb-gbc._enable_audio_hpf"));
+		_GB_GHOST_FACTOR = config.get<std::float_t>("gb-gbc._gb_ghosting");
+		_GBC_GHOST_FACTOR = config.get<std::float_t>("gb-gbc._gbc_ghosting");
 
 		if (ROM_TYPE == ROM::GAME_BOY && _FORCE_GBC_FOR_GB == YES)
 		{
@@ -258,6 +267,8 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 			ROM_TYPE = ROM::GAME_BOY_COLOR; // .gb loaded to GBC
 			_ENABLE_DMG_BIOS = NO;
 			_ENABLE_CGB_BIOS = YES;
+
+			ghost_decay = _GB_GHOST_FACTOR;
 		}
 		else if (ROM_TYPE == ROM::GAME_BOY_COLOR && _FORCE_GB_FOR_GBC == YES)
 		{
@@ -265,6 +276,8 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 			INFO("Forced DMG mode requires DMG bios to be loaded");
 			ROM_TYPE = ROM::GAME_BOY; // .gbc loaded to GB
 			_ENABLE_CGB_BIOS = NO;
+
+			ghost_decay = _GBC_GHOST_FACTOR;
 		}
 
 		FLAG searchForBios = NO;
@@ -284,6 +297,8 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 			std::cout << "Searching for BIOS in " << _BIOS_LOCATION << '\n';
 			dmg_cgb_bios.expectedBiosSize = 0x100;
 			searchForBios = YES;
+
+			ghost_decay = _GB_GHOST_FACTOR;
 		}
 		else if
 			((ROM_TYPE == ROM::GAME_BOY_COLOR && _ENABLE_CGB_BIOS == YES)
@@ -301,6 +316,8 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 			std::cout << "Searching for BIOS in " << _BIOS_LOCATION << '\n';
 			dmg_cgb_bios.expectedBiosSize = 0x900;
 			searchForBios = YES;
+
+			ghost_decay = _GBC_GHOST_FACTOR;
 		}
 		else
 		{
@@ -1277,6 +1294,12 @@ void GBc_t::cpuTickM(CPU_TICK_TYPE type)
 	else
 #endif
 	{
+		// Tick global counter
+
+		pGBc_instance->GBc_state.emulatorStatus.ticks.globalCounter += FOUR;
+
+		// Tick CPU counter
+
 		pGBc_instance->GBc_state.emulatorStatus.ticks.cpuCounter++;
 
 		// handle delayed write of 'actual' STAT in GB
@@ -1324,6 +1347,7 @@ void GBc_t::gbCpuTick2T(FLAG isT2orT3)
 		pGBc_instance->GBc_state.emulatorStatus.isNewTimerCycle = YES;
 
 		dmaTick();
+		joypadTick();
 	}
 	timerTick();
 	serialTick();
@@ -1364,6 +1388,7 @@ void GBc_t::syncOtherGBModuleTicks()
 	if (isCGBDoubleSpeedEnabled() == YES)
 	{
 		dmaTick();
+		joypadTick();
 		timerTick();
 		serialTick();
 		if (IS_VALID_TICK_FOR_DOUBLE_SPEED() == YES)
@@ -1406,6 +1431,7 @@ void GBc_t::syncOtherGBModuleTicks()
 	{
 		RESET_TICK_FOR_DOUBLE_SPEED();
 		dmaTick();
+		joypadTick();
 		timerTick();
 		serialTick();
 		rtcTick();
@@ -1557,6 +1583,14 @@ void GBc_t::dmaTick()
 			FATAL("DMA Mode Error");
 		}
 		}
+	}
+}
+
+void GBc_t::joypadTick()
+{
+	if (inputHintCallback)
+	{
+		inputHintCallback();
 	}
 }
 
@@ -2035,6 +2069,11 @@ void GBc_t::ppuTick()
 				{
 					pGBc_display->isTheLastVblankLine = CLEAR;
 
+					// Reset the y condition latch for window
+					// Refer to https://discord.com/channels/465585922579103744/465586075830845475/852208456491728897
+					// But refer to https://discord.com/channels/465585922579103744/465586075830845475/1325933355547627612 as well
+					pGBc_display->yConditionForWindowIsMetForCurrentFrame = NO;
+
 					PPUINFO("LCD MODE : V-Blank; Dots : %d", pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode);
 					pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode = RESET;
 
@@ -2147,15 +2186,9 @@ void GBc_t::ppuTick()
 				// clear "visibleOamIndexPerLY" as we are in new frame
 				visibleOamIndexPerLY.clear();
 
-				// Check whether "Y" window layer is triggerred for current scanline
-				// Refer : https://gbdev.io/pandocs/Scrolling.html#window
-				// Refer : https://discord.com/channels/465585922579103744/465586075830845475/852208456491728897
-				// Refer : https://discord.com/channels/465585922579103744/465586075830845475/1295044210654842980
-				// Note that WINDOW_LAYER_ENABLE should not be checked here as mentioned in https://discord.com/channels/465585922579103744/465586075830845475/757342004052099072
-				if (pGBc_peripherals->LY == pGBc_peripherals->WY)
-				{
-					pGBc_display->yConditionForWindowIsMetForCurrentFrame = YES;
-				}
+				// Note that sameboy does this check in multiple place unlike what is mentioned in pandocs
+				// As per latest discord, check happens atleast twice per line https://discord.com/channels/465585922579103744/465586075830845475/1042070805644845147
+				checkWindowYTrigger(pGBc_peripherals->LY);
 			}
 
 			if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == ONE)
@@ -2462,6 +2495,10 @@ void GBc_t::ppuTick()
 					PPUINFO("LCD MODE : H-Blank; Dots : %d", pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode);
 					pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode = RESET;
 
+					// Note that sameboy does this check in multiple place unlike what is mentioned in pandocs
+					// As per latest discord, check happens atleast twice per line https://discord.com/channels/465585922579103744/465586075830845475/1042070805644845147
+					checkWindowYTrigger(pGBc_peripherals->LY);
+
 					// Increment LY
 					pGBc_display->currentScanline++;
 					pGBc_peripherals->LY = pGBc_display->currentScanline;
@@ -2498,29 +2535,8 @@ void GBc_t::ppuTick()
 						// Set the VBLANK flag
 						pGBc_display->wasVblankJustTriggerred = YES;
 
-						// Handle blanking of LCD if needed here as VBLANK was just triggered
-						if (pGBc_emuStatus->freezeLCDOneFrame == YES) MASQ_UNLIKELY
-						{
-							Pixel FROZEN = { 0x00 };
-							if (ROM_TYPE == ROM::GAME_BOY_COLOR)
-							{
-								FROZEN = getColorFromColorIDForGBC(0x7FFF, pGBc_instance->GBc_state.gbc_palette == PALETTE_ID::PALETTE_2).COLOR;
-							}
-							else
-							{
-								FROZEN = paletteIDToColor.at(pGBc_instance->GBc_state.gb_palette).COLOR_000P.COLOR;
-							}
-
-							std::fill_n(pGBc_display->imGuiBuffer.imGuiBuffer1D, sizeof(pGBc_display->imGuiBuffer.imGuiBuffer1D), FROZEN);
-							pGBc_instance->GBc_state.emulatorStatus.freezeLCDOneFrame = CLEAR;
-						}
-
 						// Reset the window line counter since we are in Vblank
 						pGBc_display->windowLineCounter = RESET;
-
-						// Reset the y condition latch for window
-						// Refer to https://discord.com/channels/465585922579103744/465586075830845475/852208456491728897
-						pGBc_display->yConditionForWindowIsMetForCurrentFrame = NO;
 
 						if (ROM_TYPE == ROM::GAME_BOY)
 						{
@@ -2569,21 +2585,8 @@ void GBc_t::ppuTick()
 	}
 	else
 	{
-		if (pGBc_instance->GBc_state.emulatorStatus.freezeLCD == NO) MASQ_UNLIKELY
-		{
-			Pixel FROZEN = { 0x00 };
-			if (ROM_TYPE == ROM::GAME_BOY_COLOR)
-			{
-				FROZEN = getColorFromColorIDForGBC(0x7FFF, pGBc_instance->GBc_state.gbc_palette == PALETTE_ID::PALETTE_2).COLOR;
-			}
-			else
-			{
-				FROZEN = paletteIDToColor.at(pGBc_instance->GBc_state.gb_palette).COLOR_000P.COLOR;
-			}
-
-			std::fill_n(pGBc_display->imGuiBuffer.imGuiBuffer1D, sizeof(pGBc_display->imGuiBuffer.imGuiBuffer1D), FROZEN);
-			pGBc_instance->GBc_state.emulatorStatus.freezeLCD = YES;
-		}
+		// Tick the lcd blank counter needed for gbc
+		++pGBc_instance->GBc_state.emulatorStatus.ticks.lcdBlankCounter;
 
 		pGBc_display->fakeBgFetcherRuns = ZERO;
 
@@ -2820,7 +2823,7 @@ FLAG GBc_t::handleInterruptsIfApplicable(FLAG effectiveIME, FLAG effectiveInterr
 	// Refer : https://gbdev.io/pandocs/Interrupts.html
 	// And https://gist.github.com/SonoSooS/c0055300670d678b5ae8433e20bea595#isr-and-nmi
 	// NOTE:
-	// Gekkio recently published a test that shows that the GB CPU reads IE twice when firing an interrupt –
+	// Gekkio recently published a test that shows that the GB CPU reads IE twice when firing an interrupt ï¿½
 	// 1) once when it checks if an interrupt occurred, and
 	// 2) once when it checks which interrupt occured.
 	// These reads are not in the same M-Cycle.
@@ -2873,7 +2876,7 @@ FLAG GBc_t::handleInterruptsIfApplicable(FLAG effectiveIME, FLAG effectiveInterr
 		{
 			static const uint16_t vectorTable[5] = { 0x0040, 0x0048, 0x0050, 0x0058, 0x0060 };
 
-			// Find the lowest set bit — highest priority interrupt
+			// Find the lowest set bit ï¿½ highest priority interrupt
 			interruptIndex = (ID8)ctz32_portable(activeInterrupts);
 			pcToHandler = vectorTable[interruptIndex];
 			interruptFound = YES;
@@ -3178,76 +3181,49 @@ void GBc_t::processHDMA()
 	}
 }
 
-void GBc_t::captureIO()
+// Called EVERY TIME P14/P15 selection bits change (on JOYP write) AND after onKeyEvent
+void GBc_t::updateJOYP(STATE8 prevState)
 {
-	pGBc_emuStatus->keyUP = ImGui::IsKeyDown(ImGuiKey_UpArrow);
-	pGBc_emuStatus->keyDOWN = ImGui::IsKeyDown(ImGuiKey_DownArrow);
-	pGBc_emuStatus->keyLEFT = ImGui::IsKeyDown(ImGuiKey_LeftArrow);
-	pGBc_emuStatus->keyRIGHT = ImGui::IsKeyDown(ImGuiKey_RightArrow);
+	auto& joy = pGBc_peripherals->P1_JOYP.joyPadFields;
+	auto& keys = *pGBc_emuStatus;
 
-	pGBc_emuStatus->keySTART = ImGui::IsKeyDown(ImGuiKey_Enter);
-	pGBc_emuStatus->keySELECT = ImGui::IsKeyDown(ImGuiKey_Space);
-	pGBc_emuStatus->keyA = ImGui::IsKeyDown(ImGuiKey_Z);
-	pGBc_emuStatus->keyB = ImGui::IsKeyDown(ImGuiKey_X);
+	const bool selectAction = (joy.P15_SEL_ACTION_KEYS == ZERO);
+	const bool selectDir = (joy.P14_SEL_DIRECTION_KEYS == ZERO);
 
-	BYTE previousJoyPadState = pGBc_peripherals->P1_JOYP.joyPadMemory;
+	auto toState = [](bool pressed) 
+		{
+			RETURN pressed ? JOYPAD_STATES::PRESSED : JOYPAD_STATES::NOT_PRESSED;
+		};
 
-	if (pGBc_peripherals->P1_JOYP.joyPadFields.P15_SEL_ACTION_KEYS == ZERO
-		&& pGBc_peripherals->P1_JOYP.joyPadFields.P14_SEL_DIRECTION_KEYS == ONE)
+	if (selectAction && !selectDir)
 	{
-		pGBc_peripherals->P1_JOYP.joyPadFields.P10_RIGHT_A = ((pGBc_emuStatus->keyA == YES ?
-			JOYPAD_STATES::PRESSED : JOYPAD_STATES::NOT_PRESSED));
-
-		pGBc_peripherals->P1_JOYP.joyPadFields.P11_LEFT_B = ((pGBc_emuStatus->keyB == YES ?
-			JOYPAD_STATES::PRESSED : JOYPAD_STATES::NOT_PRESSED));
-
-		pGBc_peripherals->P1_JOYP.joyPadFields.P12_UP_SELECT = ((pGBc_emuStatus->keySELECT == YES ?
-			JOYPAD_STATES::PRESSED : JOYPAD_STATES::NOT_PRESSED));
-
-		pGBc_peripherals->P1_JOYP.joyPadFields.P13_DOWN_START = ((pGBc_emuStatus->keySTART == YES ?
-			JOYPAD_STATES::PRESSED : JOYPAD_STATES::NOT_PRESSED));
-
+		joy.P10_RIGHT_A = toState(keys.keyA == YES);
+		joy.P11_LEFT_B = toState(keys.keyB == YES);
+		joy.P12_UP_SELECT = toState(keys.keySELECT == YES);
+		joy.P13_DOWN_START = toState(keys.keySTART == YES);
 	}
-	else if (pGBc_peripherals->P1_JOYP.joyPadFields.P14_SEL_DIRECTION_KEYS == ZERO
-		&& pGBc_peripherals->P1_JOYP.joyPadFields.P15_SEL_ACTION_KEYS == ONE)
+	else if (selectDir && !selectAction)
 	{
-		pGBc_peripherals->P1_JOYP.joyPadFields.P10_RIGHT_A = ((pGBc_emuStatus->keyRIGHT == YES ?
-			JOYPAD_STATES::PRESSED : JOYPAD_STATES::NOT_PRESSED));
+		joy.P10_RIGHT_A = toState(keys.keyRIGHT == YES);
+		joy.P11_LEFT_B = toState(keys.keyLEFT == YES);
+		joy.P12_UP_SELECT = toState(keys.keyUP == YES);
+		joy.P13_DOWN_START = toState(keys.keyDOWN == YES);
 
-		pGBc_peripherals->P1_JOYP.joyPadFields.P11_LEFT_B = ((pGBc_emuStatus->keyLEFT == YES ?
-			JOYPAD_STATES::PRESSED : JOYPAD_STATES::NOT_PRESSED));
-
-		pGBc_peripherals->P1_JOYP.joyPadFields.P12_UP_SELECT = ((pGBc_emuStatus->keyUP == YES ?
-			JOYPAD_STATES::PRESSED : JOYPAD_STATES::NOT_PRESSED));
-
-		pGBc_peripherals->P1_JOYP.joyPadFields.P13_DOWN_START = ((pGBc_emuStatus->keyDOWN == YES ?
-			JOYPAD_STATES::PRESSED : JOYPAD_STATES::NOT_PRESSED));
+		// If RIGHT is pressed, forcibly release LEFT (and vice versa)
+		if (keys.keyRIGHT == YES) joy.P11_LEFT_B = toState(NO);
+		if (keys.keyLEFT == YES) joy.P10_RIGHT_A = toState(NO);
+		// If UP is pressed, forcibly release DOWN (and vice versa)
+		if (keys.keyUP == YES) joy.P13_DOWN_START = toState(NO);
+		if (keys.keyDOWN == YES) joy.P12_UP_SELECT = toState(NO);
 	}
-	else if (pGBc_peripherals->P1_JOYP.joyPadFields.P14_SEL_DIRECTION_KEYS == ZERO
-		&& pGBc_peripherals->P1_JOYP.joyPadFields.P15_SEL_ACTION_KEYS == ZERO)
+	else if (selectDir && selectAction)
 	{
 		// Source: Sameboy; Refer https://github.com/LIJI32/SameBoy/blob/master/Core/joypad.c#L126
 		// OR of both groups: pressed = dir OR action, then invert (active low)
-		TODO("Find source of JOYP behaviour when both bits 4 and 5 are set");
-		pGBc_peripherals->P1_JOYP.joyPadFields.P12_UP_SELECT =
-			((pGBc_emuStatus->keyUP == YES ||
-				pGBc_emuStatus->keySELECT == YES) ?
-				JOYPAD_STATES::PRESSED : JOYPAD_STATES::NOT_PRESSED);
-
-		pGBc_peripherals->P1_JOYP.joyPadFields.P13_DOWN_START =
-			((pGBc_emuStatus->keyDOWN == YES ||
-				pGBc_emuStatus->keySTART == YES) ?
-				JOYPAD_STATES::PRESSED : JOYPAD_STATES::NOT_PRESSED);
-
-		pGBc_peripherals->P1_JOYP.joyPadFields.P11_LEFT_B =
-			((pGBc_emuStatus->keyLEFT == YES ||
-				pGBc_emuStatus->keyB == YES) ?
-				JOYPAD_STATES::PRESSED : JOYPAD_STATES::NOT_PRESSED);
-
-		pGBc_peripherals->P1_JOYP.joyPadFields.P10_RIGHT_A =
-			((pGBc_emuStatus->keyRIGHT == YES ||
-				pGBc_emuStatus->keyA == YES) ?
-				JOYPAD_STATES::PRESSED : JOYPAD_STATES::NOT_PRESSED);
+		joy.P10_RIGHT_A = toState((keys.keyRIGHT == YES) || (keys.keyA == YES));
+		joy.P11_LEFT_B = toState((keys.keyLEFT == YES) || (keys.keyB == YES));
+		joy.P12_UP_SELECT = toState((keys.keyUP == YES) || (keys.keySELECT == YES));
+		joy.P13_DOWN_START = toState((keys.keyDOWN == YES) || (keys.keySTART == YES));
 	}
 	else
 	{
@@ -3255,11 +3231,19 @@ void GBc_t::captureIO()
 		pGBc_peripherals->P1_JOYP.joyPadMemory |= 0x0F;
 	}
 
+	// Setting the unused bits to 1
+	pGBc_peripherals->P1_JOYP.joyPadMemory |= 0xC0;
+
 	// Check if we need to request for interrupt
-	if (((previousJoyPadState & (~(pGBc_peripherals->P1_JOYP.joyPadMemory & 0x0F))) & 0x0F) != ZERO)
+	if ((prevState & ~(pGBc_peripherals->P1_JOYP.joyPadMemory & 0x0F)) & 0x0F)
 	{
 		requestInterrupts(INTERRUPTS::JOYPAD_INTERRUPT);
 	}
+}
+
+void GBc_t::captureIO()
+{
+	DO_NOTHING;
 }
 
 void GBc_t::processSerialClockSpeedBit()
@@ -4277,12 +4261,9 @@ void GBc_t::processLCDEnable()
 	pGBc_display->currentLCDMode = LCD_MODES::MODE_LCD_H_BLANK;
 	setPPULCDMode(LCD_MODES::MODE_LCD_H_BLANK);
 
-	// Wierd PPU behaviour on PPU OFF -> PPU ON
+	// Weird PPU behaviour on PPU OFF -> PPU ON
 	pGBc_display->lcdJustEn = YES;
 	pGBc_display->skipMode2 = YES;
-
-	// Blank for 1 frame
-	pGBc_emuStatus->freezeLCDOneFrame = YES;
 
 	// The initial mode 0 takes 4 less cycles
 	// Ideally, when we start in mode 0, ppuCounterPerLY should be 456 - x where x is the number of cycles we want to spend in this special mode!
@@ -4312,6 +4293,14 @@ void GBc_t::processLCDEnable()
 	{
 		pGBc_instance->GBc_state.emulatorStatus.isHDMAAllowedToBlockCPUPipeline = YES;
 	}
+
+	// GBC blanking only if disabled for more than 4560 T cycles
+	if ((ROM_TYPE == ROM::GAME_BOY_COLOR) && (pGBc_instance->GBc_state.emulatorStatus.ticks.lcdBlankCounter < LCD_V_BLANK))
+	{
+		pGBc_emuStatus->freezeLCDOneFrame = NO;
+	}
+
+	pGBc_instance->GBc_state.emulatorStatus.ticks.lcdBlankCounter = RESET;
 }
 
 void GBc_t::processLCDDisable()
@@ -4358,6 +4347,10 @@ void GBc_t::processLCDDisable()
 	pGBc_display->wasNotFirstSpriteInX = NO;
 	pGBc_display->nX159SpritesPresent = ZERO;
 	pGBc_display->wasX0Object = NO;
+	pGBc_display->yConditionForWindowIsMetForCurrentFrame = NO;
+
+	// Blank for 1 frame
+	pGBc_emuStatus->freezeLCDOneFrame = YES;
 
 	setPPULCDMode(LCD_MODES::MODE_LCD_H_BLANK);
 }
@@ -6389,6 +6382,45 @@ void GBc_t::translateGFX(PALETTE_ID from, PALETTE_ID to, PALETTE_ID colorCorrect
 
 void GBc_t::displayCompleteScreen()
 {
+	// If we need to blank a frame and LCD was just enabled
+	if (pGBc_emuStatus->freezeLCDOneFrame == YES && isPPULCDEnabled() == YES) MASQ_UNLIKELY
+	{
+		auto freezeLCDStep = [&](Pixel color)
+			{
+				std::fill_n(pGBc_display->imGuiBuffer.imGuiBuffer1D, sizeof(pGBc_display->imGuiBuffer.imGuiBuffer1D), color);
+
+				// Clear the ghost accumulator when the LCD blanks so the frozen
+				// color does not bleed into the next game scene.
+				if (ghost_decay > 0.0f)
+				{
+					GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, ghost_fbo));
+					GL_CALL(glClearColor(
+						color.r / 255.0f,
+						color.g / 255.0f,
+						color.b / 255.0f,
+						1.0f
+					));
+					GL_CALL(glClear(GL_COLOR_BUFFER_BIT));
+					GL_CALL(glClearColor(0.0f, 0.0f, 0.0f, 1.0f)); // restore default
+					GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, 0));
+				}
+			};
+
+		if (ROM_TYPE == ROM::GAME_BOY_COLOR)
+		{
+			Pixel FROZEN = getColorFromColorIDForGBC(0x7FFF, pGBc_instance->GBc_state.gbc_palette == PALETTE_ID::PALETTE_2).COLOR;
+			freezeLCDStep(FROZEN);
+		}
+		else
+		{
+			Pixel FROZEN = paletteIDToColor.at(pGBc_instance->GBc_state.gb_palette).COLOR_000P.COLOR;
+			freezeLCDStep(FROZEN);
+		}
+
+		// Clear blanking of LCD if needed here as this frame is done...
+		pGBc_emuStatus->freezeLCDOneFrame = CLEAR;
+	}
+
 #if (GL_FIXED_FUNCTION_PIPELINE == YES) && !defined(IMGUI_IMPL_OPENGL_ES2) && !defined(IMGUI_IMPL_OPENGL_ES3)
 	glBindFramebuffer(GL_FRAMEBUFFER, frame_buffer);
 
@@ -6499,15 +6531,45 @@ void GBc_t::displayCompleteScreen()
 	GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter));
 	GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter));
 
-	// 2. Render gameboy_texture into framebuffer (masquerade_texture target)
+	// 1b. Ghost pass ï¿½ exponential decay blend of gameboy_texture into ghost_texture.
+	//     Runs at native GB/GBC resolution (160x144 or 160x144 GBC) before upscaling.
+	//     ghost_texture is NOT cleared between frames ï¿½ that persistence is the effect.
+	if (ghost_decay > 0.0f)
+	{
+		GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, ghost_fbo));
+		GL_CALL(glViewport(0, 0, getScreenWidth(), getScreenHeight()));
+		// !! No glClear here ï¿½ intentional: previous ghost content must survive !!
+
+		GL_CALL(glUseProgram(shaderProgramGhost));
+
+		GL_CALL(glActiveTexture(GL_TEXTURE0));
+		GL_CALL(glBindTexture(GL_TEXTURE_2D, gameboy_texture));
+		GL_CALL(glUniform1i(glGetUniformLocation(shaderProgramGhost, "u_Current"), 0));
+
+		GL_CALL(glActiveTexture(GL_TEXTURE1));
+		GL_CALL(glBindTexture(GL_TEXTURE_2D, ghost_texture));
+		GL_CALL(glUniform1i(glGetUniformLocation(shaderProgramGhost, "u_Ghost"), 1));
+
+		GL_CALL(glUniform1f(glGetUniformLocation(shaderProgramGhost, "u_Decay"), ghost_decay));
+
+		GL_CALL(glBindVertexArray(fullscreenVAO));
+		GL_CALL(glDrawArrays(GL_TRIANGLES, 0, 6));
+		GL_CALL(glBindVertexArray(0));
+		GL_CALL(glUseProgram(0));
+
+		GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, 0));
+	}
+
+	// 2. Render into framebuffer (masquerade_texture target)
+	//    Source is ghost_texture when ghosting is active, gameboy_texture otherwise.
 	GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, frame_buffer));
 	GL_CALL(glViewport(0, 0, getScreenWidth() * FRAME_BUFFER_SCALE, getScreenHeight() * FRAME_BUFFER_SCALE));
 	GL_CALL(glClear(GL_COLOR_BUFFER_BIT));
 
-	// Pass 1: Render base texture (Game Boy framebuffer)
+	// Pass 1: Render base texture (ghosted or raw Game Boy framebuffer)
 	GL_CALL(glUseProgram(shaderProgramBasic));
 	GL_CALL(glActiveTexture(GL_TEXTURE0));
-	GL_CALL(glBindTexture(GL_TEXTURE_2D, gameboy_texture));
+	GL_CALL(glBindTexture(GL_TEXTURE_2D, (ghost_decay > 0.0f) ? ghost_texture : gameboy_texture));
 	GL_CALL(glUniform1i(glGetUniformLocation(shaderProgramBasic, "u_Texture"), 0));
 
 	GL_CALL(glBindVertexArray(fullscreenVAO));
@@ -7057,6 +7119,25 @@ FLAG GBc_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 	RETURN pGBc_display->wasVblankJustTriggerred;
 }
 
+FLAG GBc_t::onKeyEvent(EmuKey key, EmuKeyAction action)
+{
+	bool pressed = (action == EmuKeyAction::PRESSED);
+	switch (key)
+	{
+	case EmuKey::A:      pGBc_emuStatus->keyA = pressed; BREAK;
+	case EmuKey::B:      pGBc_emuStatus->keyB = pressed; BREAK;
+	case EmuKey::START:  pGBc_emuStatus->keySTART = pressed; BREAK;
+	case EmuKey::SELECT: pGBc_emuStatus->keySELECT = pressed; BREAK;
+	case EmuKey::UP:     pGBc_emuStatus->keyUP = pressed; BREAK;
+	case EmuKey::DOWN:   pGBc_emuStatus->keyDOWN = pressed; BREAK;
+	case EmuKey::LEFT:   pGBc_emuStatus->keyLEFT = pressed; BREAK;
+	case EmuKey::RIGHT:  pGBc_emuStatus->keyRIGHT = pressed; BREAK;
+	default:             RETURN NO;
+	}
+	updateJOYP(pGBc_peripherals->P1_JOYP.joyPadMemory & 0x0F);
+	RETURN YES;
+}
+
 FLAG GBc_t::initializeEmulator()
 {
 	FLAG status = true;
@@ -7165,6 +7246,27 @@ FLAG GBc_t::initializeEmulator()
 		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT));
 		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT));
 
+		// 4b. Ghost accumulator texture (native GB/GBC resolution, NOT scaled)
+		//     This persists between frames to simulate LCD phosphor decay.
+		GL_CALL(glGenTextures(1, &ghost_texture));
+		GL_CALL(glBindTexture(GL_TEXTURE_2D, ghost_texture));
+		GL_CALL(glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, getScreenWidth(), getScreenHeight(), 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr));
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST));
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST));
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
+
+		// 4c. Ghost FBO (renders blend result back into ghost_texture each frame)
+		GL_CALL(glGenFramebuffers(1, &ghost_fbo));
+		GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, ghost_fbo));
+		GL_CALL(glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, ghost_texture, 0));
+
+		if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+		{
+			LOG("Error: Ghost framebuffer is not complete!");
+		}
+		GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, 0));
+
 		// 5. Fullscreen Quad VAO/VBO (for textured quad rendering)
 		float fullscreenVertices[] = {
 			//  X     Y      U     V
@@ -7207,6 +7309,9 @@ FLAG GBc_t::initializeEmulator()
 		// 7. Compile blend shader (for LCD effect)
 		shaderProgramSource_t blendShader = parseShader(shaderPath + "/shaders/blend.shaders");
 		shaderProgramBlend = createShader(blendShader.vertexSource, blendShader.fragmentSource);
+		// 8. Compile ghost shader (for LCD ghosting / frame persistence)
+		shaderProgramSource_t ghostShader = parseShader(shaderPath + "/shaders/ghost.shaders");
+		shaderProgramGhost = createShader(ghostShader.vertexSource, ghostShader.fragmentSource);
 
 		DEBUG("PASSTHROUGH VERTEX");
 		DEBUG("%s", passthroughShader.vertexSource.c_str());
@@ -7216,6 +7321,10 @@ FLAG GBc_t::initializeEmulator()
 		DEBUG("%s", blendShader.vertexSource.c_str());
 		DEBUG("BLEND FRAGMENT");
 		DEBUG("%s", blendShader.fragmentSource.c_str());
+		DEBUG("GHOST VERTEX");
+		DEBUG("%s", ghostShader.vertexSource.c_str());
+		DEBUG("GHOST FRAGMENT");
+		DEBUG("%s", ghostShader.fragmentSource.c_str());
 #endif
 	}
 
@@ -7375,13 +7484,13 @@ void GBc_t::randomizeRAM()
 	std::random_device rd;
 	std::mt19937 gen(rd());
 
-	// Base uniform distribution (0–255). We will transform it manually.
+	// Base uniform distribution (0ï¿½255). We will transform it manually.
 	std::uniform_int_distribution<int> dist(0, 255);
 
 	// WRAM
 	for (auto& b : pGBc_memory->GBcMemoryMap.mWorkRam.wRamMemory)
 	{
-		// Get a uniform 0–255
+		// Get a uniform 0ï¿½255
 		int r = dist(gen);
 
 		// Exponential bias AWAY from zero:
@@ -7841,7 +7950,7 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 			setWRAMBankNumber(ONE);
 
 			// initialize the JoyPad state
-			pGBc_peripherals->P1_JOYP.joyPadMemory = 0x0F; // lower nibble set to all ones indicate, no selection and no keys being active
+			pGBc_peripherals->P1_JOYP.joyPadMemory = 0xCF; // lower nibble set to all ones indicate, no selection and no keys being active; reserved bits are set as well
 
 			pAbsolute_GBc_instance->absolute_GBc_state.aboutRom.isRomLoaded = true;
 
@@ -7860,6 +7969,9 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 
 			uint32_t sizeOfRAMSlot = 0x2000;
 			uint8_t numberOfRAMSlots = ZERO;
+
+			// Needed for Initial D Gaiden (Japan) (SGB Enhanced).gb, otherwise game wrongly detects a save file and crashes
+			memset(pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks, 0xFF, sizeof(pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks));
 
 			if (inSRAM.fail() == false)
 			{
@@ -8804,18 +8916,11 @@ byte GBc_t::readRawMemory(uint16_t address
 		// reading from Joypad register; bits 7 and 6 are unused
 		if (address == P1_JOYP_ADDRESS)
 		{
-			pGBc_peripherals->P1_JOYP.joyPadFields.JP_SPARE_06 = ONE;
-			pGBc_peripherals->P1_JOYP.joyPadFields.JP_SPARE_07 = ONE;
-
 			auto joyp = pGBc_peripherals->P1_JOYP;
 
-			if ((joyp.joyPadFields.P14_SEL_DIRECTION_KEYS == RESET)
-				&& (joyp.joyPadFields.P15_SEL_ACTION_KEYS == RESET))
+			if ((joyp.joyPadFields.P14_SEL_DIRECTION_KEYS == RESET) && (joyp.joyPadFields.P15_SEL_ACTION_KEYS == RESET))
 			{
-				joyp.joyPadFields.P10_RIGHT_A = ONE;
-				joyp.joyPadFields.P11_LEFT_B = ONE;
-				joyp.joyPadFields.P12_UP_SELECT = ONE;
-				joyp.joyPadFields.P13_DOWN_START = ONE;
+				joyp.joyPadMemory |= 0xCF; // including the spare bits
 			}
 
 			RETURN joyp.joyPadMemory;
@@ -8825,6 +8930,7 @@ byte GBc_t::readRawMemory(uint16_t address
 		if (address == SC_ADDRESS)
 		{
 			auto SC = pGBc_peripherals->SC;
+
 			if (ROM_TYPE == ROM::GAME_BOY)
 			{
 				SC.scFields.CLOCK_SPEED = SET;
@@ -10036,13 +10142,10 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 		// writing to Joypad register; bits 7 and 6 are unused
 		if (address == P1_JOYP_ADDRESS)
 		{
-			const uint8_t selDir = GETBIT(FOUR, data); // P14
-			const uint8_t selAct = GETBIT(FIVE, data); // P15
-
-			pGBc_peripherals->P1_JOYP.joyPadFields.P14_SEL_DIRECTION_KEYS = selDir;
-			pGBc_peripherals->P1_JOYP.joyPadFields.P15_SEL_ACTION_KEYS = selAct;
-
-			captureIO();
+			STATE8 previousJoyPadState = pGBc_peripherals->P1_JOYP.joyPadMemory & 0x0F;
+			pGBc_peripherals->P1_JOYP.joyPadFields.P14_SEL_DIRECTION_KEYS = GETBIT(FOUR, data);
+			pGBc_peripherals->P1_JOYP.joyPadFields.P15_SEL_ACTION_KEYS = GETBIT(FIVE, data);
+			updateJOYP(previousJoyPadState);
 			RETURN;
 		}
 

@@ -475,6 +475,11 @@ public:
 	bool runEmulationAtFixedRate(uint32_t currentFrame) override;
 	bool runEmulationLoopAtFixedRate(uint32_t currentFrame) override;
 
+	FLAG onKeyEvent(EmuKey key, EmuKeyAction action) override
+	{
+		RETURN YES;
+	}
+
 public:
 
 	float getEmulationVolume() override;
