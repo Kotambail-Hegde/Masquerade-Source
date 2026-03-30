@@ -525,23 +525,23 @@ bool GBc_t::bessSaveState(uint8_t id)
 
 	// 5) BESS_BLOCK_MBC_t
 
-	if (pAbsolute_GBc_instance->absolute_GBc_state.GBc_instance.GBc_state.emulatorStatus.no_mbc == NO)
+	if (!isNoMBC())
 	{
 		uint32_t mbc_size = RESET;
 
-		if (pAbsolute_GBc_instance->absolute_GBc_state.GBc_instance.GBc_state.emulatorStatus.mbc1 == YES)
+		if (isMBC1())
 		{
 			mbc_size = 12;
 		}
-		else if (pAbsolute_GBc_instance->absolute_GBc_state.GBc_instance.GBc_state.emulatorStatus.mbc2 == YES)
+		else if (isMBC2())
 		{
 			mbc_size = 6;
 		}
-		else if (pAbsolute_GBc_instance->absolute_GBc_state.GBc_instance.GBc_state.emulatorStatus.mbc3 == YES)
+		else if (isMBC3())
 		{
 			mbc_size = 15;
 		}
-		else if (pAbsolute_GBc_instance->absolute_GBc_state.GBc_instance.GBc_state.emulatorStatus.mbc5 == YES)
+		else if (isMBC5())
 		{
 			mbc_size = 12;
 		}
@@ -552,7 +552,7 @@ bool GBc_t::bessSaveState(uint8_t id)
 		// Copy the name of block
 		std::memcpy(BESS_BLOCK_MBC->BESS_BLOCK_HEADER.ascii_ident, "MBC ", 4);
 
-		if (pAbsolute_GBc_instance->absolute_GBc_state.GBc_instance.GBc_state.emulatorStatus.mbc1 == YES)
+		if (isMBC1())
 		{
 			auto mbc_reg = 0x0000;
 			BESS_BLOCK_MBC->mbc[0x00] = mbc_reg & 0xFF;
@@ -575,9 +575,9 @@ bool GBc_t::bessSaveState(uint8_t id)
 			BESS_BLOCK_MBC->mbc[0x0B] = pGBc_instance->GBc_state.emulatorStatus.dataWrittenToMBCReg2;
 			//BESS_BLOCK_MBC->mbc[0x0B] = pGBc_instance->GBc_state.emulatorStatus.currentROMBankNumber.mbc1Fields.mbcBank2Reg;
 		}
-		else if (pAbsolute_GBc_instance->absolute_GBc_state.GBc_instance.GBc_state.emulatorStatus.mbc2 == YES)
+		else if (isMBC2())
 		{
-			if (pGBc_instance->GBc_state.emulatorStatus.is_mbc2_rom_mode == YES)
+			if (pGBc_instance->GBc_state.emulatorStatus.isMBC2ROMMode == YES)
 			{
 				auto mbc_reg = 0x0000;
 				BESS_BLOCK_MBC->mbc[0x00] = mbc_reg & 0xFF;
@@ -604,7 +604,7 @@ bool GBc_t::bessSaveState(uint8_t id)
 				//BESS_BLOCK_MBC->mbc[0x05] = ((isRAMBankEnabled() == YES) ? 0x0A : 0x00);
 			}
 		}
-		else if (pAbsolute_GBc_instance->absolute_GBc_state.GBc_instance.GBc_state.emulatorStatus.mbc3 == YES)
+		else if (isMBC3())
 		{
 			auto mbc_reg = 0x0000;
 			BESS_BLOCK_MBC->mbc[0x00] = mbc_reg & 0xFF;
@@ -629,7 +629,7 @@ bool GBc_t::bessSaveState(uint8_t id)
 			BESS_BLOCK_MBC->mbc[0x0D] = (mbc_reg >> EIGHT) & 0xFF;
 			BESS_BLOCK_MBC->mbc[0x0E] = pGBc_instance->GBc_state.emulatorStatus.dataWrittenToMBCReg4;
 		}
-		else if (pAbsolute_GBc_instance->absolute_GBc_state.GBc_instance.GBc_state.emulatorStatus.mbc5 == YES)
+		else if (isMBC5())
 		{
 			auto mbc_reg = 0x0000;
 			BESS_BLOCK_MBC->mbc[0x00] = mbc_reg & 0xFF;
@@ -662,7 +662,7 @@ bool GBc_t::bessSaveState(uint8_t id)
 
 	// 6) BESS_BLOCK_RTC_t
 
-	if (pAbsolute_GBc_instance->absolute_GBc_state.GBc_instance.GBc_state.emulatorStatus.mbc3 == YES)
+	if (isMBC3())
 	{
 		BESS_BLOCK_RTC_t BESS_BLOCK_RTC;
 
@@ -953,7 +953,7 @@ bool GBc_t::bessLoadState(uint8_t id)
 			EVENT("This is the MBC block!");
 			BESS_OCCURENCE[TO_UINT(BESS_BLOCKS::BESS_MBC)] = YES;
 
-			if (pAbsolute_GBc_instance->absolute_GBc_state.GBc_instance.GBc_state.emulatorStatus.no_mbc == NO)
+			if (!isNoMBC())
 			{
 				size_t blk_len = static_cast<size_t>(BESS_BLOCK_HEADER.blk_len);
 
@@ -995,7 +995,7 @@ bool GBc_t::bessLoadState(uint8_t id)
 			EVENT("This is the RTC block!");
 			BESS_OCCURENCE[TO_UINT(BESS_BLOCKS::BESS_RTC)] = YES;
 
-			if (pAbsolute_GBc_instance->absolute_GBc_state.GBc_instance.GBc_state.emulatorStatus.mbc3 == YES)
+			if (isMBC3())
 			{
 				BESS_BLOCK_RTC_t BESS_BLOCK_RTC;
 				save.read(reinterpret_cast<char*>(&BESS_BLOCK_RTC), sizeof(BESS_BLOCK_RTC_t));

@@ -1911,10 +1911,10 @@ MASQ_INLINE void firFilter(const double* coeffs, double* input, double* output, 
 
 }
 
-//
-
-MASQ_INLINE void getMouseRelPosIfDocked(float* xpos, float* ypos, uint32_t emuScreenWidth, uint32_t emuScreenHeight)
+// Get relative mouse coords
+MASQ_INLINE FLAG getMouseRelPosIfDocked(float* xpos, float* ypos, uint32_t emuScreenWidth, uint32_t emuScreenHeight)
 {
+	FLAG inside = YES;
 	static const float upperborder = 8;
 	static const float otherborder = 8;
 	float maxX = emuWindowMaxX - otherborder;
@@ -1930,9 +1930,12 @@ MASQ_INLINE void getMouseRelPosIfDocked(float* xpos, float* ypos, uint32_t emuSc
 		(*xpos < 0 || *ypos < 0))
 	{
 		*xpos = *ypos = 0;
+		inside = NO;
 	}
 	*xpos = *xpos * emuScreenWidth / maxX;
 	*ypos = *ypos * emuScreenHeight / maxY;
+
+	RETURN inside;
 }
 
 template <typename T>

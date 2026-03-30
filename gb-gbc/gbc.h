@@ -546,6 +546,56 @@ private:
 		"Konami (Yu-Gi-Oh!)"
 	};
 
+	enum class MBCType  : uint16_t
+	{
+		NONE, 
+		MBC1, 
+		MBC2, 
+		MBC3, 
+		MBC5, 
+		MBC7
+	};
+
+	const std::unordered_map<uint16_t, MBCType> kMBCTypeMap = 
+	{
+		{0x00, MBCType::NONE},
+		{0x01, MBCType::MBC1}, {0x02, MBCType::MBC1}, {0x03, MBCType::MBC1},
+		{0x05, MBCType::MBC2}, {0x06, MBCType::MBC2},
+		{0x0F, MBCType::MBC3}, {0x10, MBCType::MBC3}, {0x11, MBCType::MBC3},
+		{0x12, MBCType::MBC3}, {0x13, MBCType::MBC3},
+		{0x19, MBCType::MBC5}, {0x1A, MBCType::MBC5}, {0x1B, MBCType::MBC5},
+		{0x1C, MBCType::MBC5}, {0x1D, MBCType::MBC5}, {0x1E, MBCType::MBC5},
+		{0x22, MBCType::MBC7},
+	};
+
+	enum class ROMBankType : uint16_t
+	{
+		ROM_32K,
+		ROM_64K,
+		ROM_128K,
+		ROM_256K,
+		ROM_512K,
+		ROM_1M,
+		ROM_2M,
+		ROM_4M,
+		ROM_8M,
+		ROM_1_1M = 34,
+		ROM_1_2M = 35,
+		ROM_1_5M = 36,
+		ROM_UNKNOWN = 0xFFFF
+	};
+
+	enum class RAMBankType : uint16_t
+	{
+		NO_BANK = 0,
+		RAM_2K = 1,
+		RAM_8K = 2,
+		RAM_32K = 3,
+		RAM_128K = 4,
+		RAM_64K = 5,
+		RAM_UNKNOWN = 0xFFFF
+	};
+
 	typedef struct
 	{
 		uint8_t CLOCK_SELECT : 1; // bit  0
@@ -1751,25 +1801,10 @@ private:
 		byte dataWrittenToMBCReg2;
 		byte dataWrittenToMBCReg3;
 		byte dataWrittenToMBCReg4;
-		FLAG is_mbc2_rom_mode;
-		FLAG no_mbc;
-		FLAG mbc1;
-		FLAG mbc2;
-		FLAG mbc3;
-		FLAG mbc5;
-		FLAG isMBC1_Mode1;
-		FLAG romBank32K;
-		FLAG romBank64K;
-		FLAG romBank128K;
-		FLAG romBank256K;
-		FLAG romBank512K;
-		FLAG romBank1M;
-		FLAG romBank2M;
-		FLAG romBank4M;
-		FLAG romBank8M;
-		FLAG romBank1_1M;
-		FLAG romBank1_2M;
-		FLAG romBank1_5M;
+		FLAG isMBC2ROMMode;
+		FLAG isMBC1Mode1;
+		MBCType activeMBC;
+		ROMBankType romBank;
 		union
 		{
 			struct
@@ -1780,13 +1815,50 @@ private:
 			} mbc1Fields;
 			uint16_t raw;
 		} currentROMBankNumber;
-		FLAG no_ramBank;
-		FLAG ramBank2K;
-		FLAG ramBank8K;
-		FLAG ramBank32K;
-		FLAG ramBank128K;
-		FLAG ramBank64K;
+		struct
+		{
+			union
+			{
+				struct
+				{
+					BYTE ax2xAccXLo;
+					BYTE ax3xAccXHi;
+				} fields;
+				uint16_t raw;
+			} accX;
+			union
+			{
+				struct
+				{
+					BYTE ax4xAccYLo;
+					BYTE ax5xAccYHi;
+				} fields;
+				uint16_t raw;
+			} accY;
+			union
+			{
+				struct
+				{
+					BYTE ax6xAccZLo;
+					BYTE ax7xAccZHi;
+				} fields;
+				uint16_t raw;
+			} accZ;
+			FLAG isErased;
+			// EEPROM state
+			FLAG     eepromCS;
+			FLAG     eepromCLK;
+			FLAG     eepromDI;
+			FLAG     eepromDO;
+			FLAG     eepromWriteEnabled;
+			uint16_t eepromCommand;
+			uint8_t  eepromArgBitsLeft;
+			uint16_t eepromReadBits;
+		} mbc7Regs;
+		RAMBankType ramBank;
 		FLAG enableRAMBanking;
+		FLAG isMBC7RamEn1;
+		FLAG isMBC7RamEn2;
 		uint8_t currentRAMBankNumber;
 		uint8_t currentVRAMBankNumber;
 		uint8_t currentWRAMBankNumber;
@@ -2278,6 +2350,35 @@ private:
 
 private:
 
+	MASQ_INLINE void initMBC() const
+	{
+		pGBc_emuStatus->activeMBC = MBCType::NONE;
+		RETURN;
+	}
+	MASQ_INLINE FLAG isNoMBC() const
+	{
+		RETURN pGBc_emuStatus->activeMBC == MBCType::NONE;
+	}
+	MASQ_INLINE FLAG isMBC1() const
+	{
+		RETURN pGBc_emuStatus->activeMBC == MBCType::MBC1;
+	}
+	MASQ_INLINE FLAG isMBC2() const
+	{
+		RETURN pGBc_emuStatus->activeMBC == MBCType::MBC2;
+	}
+	MASQ_INLINE FLAG isMBC3() const
+	{
+		RETURN pGBc_emuStatus->activeMBC == MBCType::MBC3;
+	}
+	MASQ_INLINE FLAG isMBC5() const
+	{
+		RETURN pGBc_emuStatus->activeMBC == MBCType::MBC5;
+	}
+	MASQ_INLINE FLAG isMBC7() const
+	{
+		RETURN pGBc_emuStatus->activeMBC == MBCType::MBC7;
+	}
 	void setMBCType(uint16_t mbcType);
 	void setROMBankType(uint16_t romBankType);
 	void setROMBankNumber(uint16_t romBankNumber);
