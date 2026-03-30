@@ -390,6 +390,10 @@ private:
 		{{Pixel(0x08, 0x18, 0x10, ALPHA), colorID::COLOR_099P}, {Pixel(0x39, 0x61, 0x39, ALPHA), colorID::COLOR_066P}, {Pixel(0x84, 0xA5, 0x63, ALPHA), colorID::COLOR_033P}, {Pixel(0xC6, 0xDE, 0x8C, ALPHA), colorID::COLOR_000P}}}
 		,{PALETTE_ID::PALETTE_4,
 		{{Pixel(0x08, 0x18, 0x20, ALPHA), colorID::COLOR_099P}, {Pixel(0x34, 0x68, 0x56, ALPHA), colorID::COLOR_066P}, {Pixel(0x88, 0xC0, 0x70, ALPHA), colorID::COLOR_033P}, {Pixel(0xE0, 0xF8, 0xD0, ALPHA), colorID::COLOR_000P}}}
+		,{PALETTE_ID::PALETTE_5,
+		{{Pixel(0x0F, 0x38, 0x0F, ALPHA), colorID::COLOR_099P}, {Pixel(0x30, 0x62, 0x30, ALPHA), colorID::COLOR_066P}, {Pixel(0x7B, 0x9C, 0x0F, ALPHA), colorID::COLOR_033P}, {Pixel(0x9B, 0xBC, 0x0F, ALPHA), colorID::COLOR_000P}}}
+		,{PALETTE_ID::PALETTE_6,
+		{{Pixel(0x22, 0x24, 0x21, ALPHA), colorID::COLOR_099P}, {Pixel(0x50, 0x54, 0x45, ALPHA), colorID::COLOR_066P}, {Pixel(0x7E, 0x8E, 0x67, ALPHA), colorID::COLOR_033P}, {Pixel(0xAC, 0xBE, 0x8C, ALPHA), colorID::COLOR_000P}}}
 	};
 
 private:

@@ -1541,6 +1541,8 @@ enum class PALETTE_ID
 	PALETTE_2,
 	PALETTE_3,
 	PALETTE_4,
+	PALETTE_5,
+	PALETTE_6,
 	PALETTE_MAX,
 	NO_PALETTE
 };
@@ -1554,6 +1556,8 @@ std::unordered_map<std::string, PALETTE_ID> const configToGbPaletteID =
 	,{"Black/White", PALETTE_ID::PALETTE_2}
 	,{"SameBoy", PALETTE_ID::PALETTE_3}
 	,{"BGB", PALETTE_ID::PALETTE_4}
+	,{"Gameboy", PALETTE_ID::PALETTE_5}
+	,{"DMG", PALETTE_ID::PALETTE_6}
 };
 
 std::unordered_map<PALETTE_ID, std::string> const gbPaletteIDToConfig =
@@ -1562,6 +1566,8 @@ std::unordered_map<PALETTE_ID, std::string> const gbPaletteIDToConfig =
 	,{PALETTE_ID::PALETTE_2, "Black/White"}
 	,{PALETTE_ID::PALETTE_3, "SameBoy"}
 	,{PALETTE_ID::PALETTE_4, "BGB"}
+	,{PALETTE_ID::PALETTE_5, "Gameboy"}
+	,{PALETTE_ID::PALETTE_6, "DMG"}
 };
 
 struct Pixel
