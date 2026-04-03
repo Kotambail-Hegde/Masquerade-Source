@@ -22,7 +22,12 @@ chip8_t::chip8_t(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, boos
 	this->pt = config;
 
 #ifndef __EMSCRIPTEN__
-	_SAVE_LOCATION = pt.get<std::string>("chip8._save_location");
+	_SAVE_LOCATION = pt.get<std::string>("chip8._save_location", "");
+	if (_SAVE_LOCATION.empty())
+	{
+		FATAL("Could not locate the save directory");
+		RETURN;
+	}
 #else
 	_SAVE_LOCATION = "assets/saves";
 #endif
@@ -467,21 +472,21 @@ void chip8_t::setupVariant(VARIANT ovrd)
 		};
 
 	auto& q = pChip8_instance->chip8_state.quirks;
-	q._QUIRK_VF_RESET = to_bool(pt.get<std::string>("chip8._QUIRK_VF_RESET"));
-	q._QUIRK_MEMORY = to_bool(pt.get<std::string>("chip8._QUIRK_MEMORY"));
-	q._QUIRK_DISPLAY_WAIT = to_bool(pt.get<std::string>("chip8._QUIRK_DISPLAY_WAIT"));
-	q._QUIRK_CLIP = to_bool(pt.get<std::string>("chip8._QUIRK_CLIP"));
-	q._QUIRK_SHIFT = to_bool(pt.get<std::string>("chip8._QUIRK_SHIFT"));
-	q._QUIRK_JUMP = to_bool(pt.get<std::string>("chip8._QUIRK_JUMP"));
+	q._QUIRK_VF_RESET = to_bool(pt.get<std::string>("chip8._QUIRK_VF_RESET", q._QUIRK_VF_RESET ? "true" : "false"));
+	q._QUIRK_MEMORY = to_bool(pt.get<std::string>("chip8._QUIRK_MEMORY", q._QUIRK_MEMORY ? "true" : "false"));
+	q._QUIRK_DISPLAY_WAIT = to_bool(pt.get<std::string>("chip8._QUIRK_DISPLAY_WAIT", q._QUIRK_DISPLAY_WAIT ? "true" : "false"));
+	q._QUIRK_CLIP = to_bool(pt.get<std::string>("chip8._QUIRK_CLIP", q._QUIRK_CLIP ? "true" : "false"));
+	q._QUIRK_SHIFT = to_bool(pt.get<std::string>("chip8._QUIRK_SHIFT", q._QUIRK_SHIFT ? "true" : "false"));
+	q._QUIRK_JUMP = to_bool(pt.get<std::string>("chip8._QUIRK_JUMP", q._QUIRK_JUMP ? "true" : "false"));
 
 	if (ovrd == VARIANT::UNKNOWN)
 	{
 		// Read chip/platform flags
-		pChip8_quirks->_quirk_modern_chip8 = to_bool(pt.get<std::string>("chip8._modern_chip8"));
-		pChip8_quirks->_quirk_chip8 = to_bool(pt.get<std::string>("chip8._chip8"));
-		pChip8_quirks->_quirk_schip_modern = to_bool(pt.get<std::string>("chip8._schip_modern"));
-		pChip8_quirks->_quirk_schip_legacy = to_bool(pt.get<std::string>("chip8._schip_legacy"));
-		pChip8_quirks->_quirk_xo_chip = to_bool(pt.get<std::string>("chip8._xo_chip"));
+		pChip8_quirks->_quirk_modern_chip8 = to_bool(pt.get<std::string>("chip8._modern_chip8", pChip8_quirks->_quirk_modern_chip8 ? "true" : "false"));
+		pChip8_quirks->_quirk_chip8 = to_bool(pt.get<std::string>("chip8._chip8", pChip8_quirks->_quirk_chip8 ? "true" : "false"));
+		pChip8_quirks->_quirk_schip_modern = to_bool(pt.get<std::string>("chip8._schip_modern", pChip8_quirks->_quirk_schip_modern ? "true" : "false"));
+		pChip8_quirks->_quirk_schip_legacy = to_bool(pt.get<std::string>("chip8._schip_legacy", pChip8_quirks->_quirk_schip_legacy ? "true" : "false"));
+		pChip8_quirks->_quirk_xo_chip = to_bool(pt.get<std::string>("chip8._xo_chip", pChip8_quirks->_quirk_xo_chip ? "true" : "false"));
 
 		// Determine variant and set quirks
 		if (pChip8_quirks->_quirk_xo_chip)
@@ -686,7 +691,7 @@ bool chip8_t::initializeEmulator()
 
 	// check whether to enable the db or not
 
-	pChip8_quirks->_enable_c8_db = to_bool(pt.get<std::string>("chip8._enable_c8_db"));
+	pChip8_quirks->_enable_c8_db = to_bool(pt.get<std::string>("chip8._enable_c8_db", pChip8_quirks->_enable_c8_db ? "true" : "false"));
 
 	// setup the volume for audio
 
@@ -695,7 +700,7 @@ bool chip8_t::initializeEmulator()
 	audioStream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &AudioSettings, NULL, NULL);
 	SDL_ResumeAudioDevice(SDL_GetAudioStreamDevice(audioStream));
 
-	pChip8_instance->chip8_state.audio.emulatorVolume = pt.get<float>("chip8._volume");
+	pChip8_instance->chip8_state.audio.emulatorVolume = pt.get<float>("chip8._volume", 0.1f);
 	SDL_SetAudioDeviceGain(SDL_GetAudioStreamDevice(audioStream), pChip8_instance->chip8_state.audio.emulatorVolume);
 
 	for (size_t ii = 0; ii < TO_UINT(EMULATED_AUDIO_SAMPLING_RATE_FOR_CHIP8); ii++)
@@ -803,7 +808,11 @@ bool chip8_t::initializeEmulator()
 
 	std::string shaderPath;
 #ifndef __EMSCRIPTEN__
-	shaderPath = pt.get<std::string>("internal._working_directory");
+	shaderPath = pt.get<std::string>("internal._working_directory", "");
+	if (shaderPath.empty())
+	{
+		FATAL("Could not locate the shaders");
+	}
 #else
 	shaderPath = "assets/internal";
 #endif

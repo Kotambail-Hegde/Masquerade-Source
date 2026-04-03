@@ -556,39 +556,35 @@ private:
 	{
 		if (bPostComplete == false || (isCLI() == YES || ImGui::IsKeyPressed(ImGuiKey_Home)))
 		{
-			debugConfig._DEBUG_FPS = to_bool(config.get<std::string>("debug._DEBUG_FPS"));
-			debugConfig._DEBUG_MEMORY = to_bool(config.get<std::string>("debug._DEBUG_MEMORY"));
-			debugConfig._DEBUG_REGISTERS = to_bool(config.get<std::string>("debug._DEBUG_REGISTERS"));
-
+			debugConfig._DEBUG_FPS = to_bool(config.get<std::string>("debug._DEBUG_FPS", debugConfig._DEBUG_FPS ? "true" : "false"));
+			debugConfig._DEBUG_MEMORY = to_bool(config.get<std::string>("debug._DEBUG_MEMORY", debugConfig._DEBUG_MEMORY ? "true" : "false"));
+			debugConfig._DEBUG_REGISTERS = to_bool(config.get<std::string>("debug._DEBUG_REGISTERS", debugConfig._DEBUG_REGISTERS ? "true" : "false"));
 			if (bPostComplete == false)
 			{
-				debugConfig._DEBUG_PROFILER = to_bool(config.get<std::string>("debug._DEBUG_PROFILER"));
-
-				_ENABLE_AUDIO = to_bool(config.get<std::string>("mods._ENABLE_AUDIO"));
-				_MUTE_AUDIO = to_bool(config.get<std::string>("mods._MUTE_AUDIO"));
-
+				debugConfig._DEBUG_PROFILER = to_bool(config.get<std::string>("debug._DEBUG_PROFILER", debugConfig._DEBUG_PROFILER ? "true" : "false"));
+				_ENABLE_AUDIO = to_bool(config.get<std::string>("mods._ENABLE_AUDIO", _ENABLE_AUDIO ? "true" : "false"));
+				_MUTE_AUDIO = to_bool(config.get<std::string>("mods._MUTE_AUDIO", _MUTE_AUDIO ? "true" : "false"));
 				if (_MUTE_AUDIO == YES)
 				{
 					INFO("AUDIO is by default MUTED");
 					INFO("Press M to toggle between MUTE/UNMUTE");
 				}
-
-				_ENABLE_FRAME_LIMIT = to_bool(config.get<std::string>("mods._ENABLE_FRAME_LIMIT"));
-				_ENABLE_QUICK_SAVE = to_bool(config.get<std::string>("mods._ENABLE_QUICK_SAVE"));
-				_ENABLE_BESS_FORMAT = to_bool(config.get<std::string>("mods._ENABLE_BESS_FORMAT"));
-				_ENABLE_NETWORK = to_bool(config.get<std::string>("mods._ENABLE_NETWORK"));
+				_ENABLE_FRAME_LIMIT = to_bool(config.get<std::string>("mods._ENABLE_FRAME_LIMIT", _ENABLE_FRAME_LIMIT ? "true" : "false"));
+				_ENABLE_QUICK_SAVE = to_bool(config.get<std::string>("mods._ENABLE_QUICK_SAVE", _ENABLE_QUICK_SAVE ? "true" : "false"));
+				_ENABLE_BESS_FORMAT = to_bool(config.get<std::string>("mods._ENABLE_BESS_FORMAT", _ENABLE_BESS_FORMAT ? "true" : "false"));
+				_ENABLE_NETWORK = to_bool(config.get<std::string>("mods._ENABLE_NETWORK", _ENABLE_NETWORK ? "true" : "false"));
 				if (_ENABLE_NETWORK == YES)
 				{
-					_NETWORK_TIMEOUT_LIMIT = config.get<std::uint32_t>("mods._NETWORK_TIMEOUT_LIMIT");
+					_NETWORK_TIMEOUT_LIMIT = config.get<std::uint32_t>("mods._NETWORK_TIMEOUT_LIMIT", _NETWORK_TIMEOUT_LIMIT);
 				}
 				else
 				{
 					_NETWORK_TIMEOUT_LIMIT = ONE;
 				}
-				_ENABLE_REWIND = to_bool(config.get<std::string>("mods._ENABLE_REWIND"));
+				_ENABLE_REWIND = to_bool(config.get<std::string>("mods._ENABLE_REWIND", _ENABLE_REWIND ? "true" : "false"));
 				if (_ENABLE_REWIND == YES)
 				{
-					_REWIND_BUFFER_SIZE = config.get<std::uint32_t>("mods._REWIND_BUFFER_SIZE");
+					_REWIND_BUFFER_SIZE = config.get<std::uint32_t>("mods._REWIND_BUFFER_SIZE", _REWIND_BUFFER_SIZE);
 				}
 				_ENABLE_ACCURATE_INPUT_SAMPLING = to_bool(config.get<std::string>("mods._ENABLE_ACCURATE_INPUT_SAMPLING", _ENABLE_ACCURATE_INPUT_SAMPLING ? "true" : "false"));
 			}
@@ -1718,8 +1714,8 @@ public:
 #endif
 #endif
 
-			auto newX = config.get<std::int16_t>("mods._X") - WINDOW_PADDING;
-			auto newY = config.get<std::int16_t>("mods._Y") - WINDOW_PADDING - WINDOW_PADDING;
+			auto newX = config.get<std::int16_t>("mods._X", 345) - WINDOW_PADDING;
+			auto newY = config.get<std::int16_t>("mods._Y", 200) - WINDOW_PADDING - WINDOW_PADDING;
 			if (newX > 0 && newY > 0)
 			{
 				current_instance->setScreenWidth(newX);
@@ -1739,7 +1735,7 @@ public:
 			if (window == nullptr)
 			{
 				FATAL("Error: SDL_CreateWindow(): %s", SDL_GetError());
-				RETURN - ONE;
+				RETURN -ONE;
 			}
 #ifndef __EMSCRIPTEN__
 
@@ -1757,7 +1753,7 @@ public:
 			if (gl_context == nullptr)
 			{
 				FATAL("Error: SDL_GL_CreateContext(): %s", SDL_GetError());
-				RETURN - ONE;
+				RETURN -ONE;
 			}
 
 			// This is needed (especially for emscripten builds)
@@ -1824,7 +1820,7 @@ public:
 			if (NFD_Init() != NFD_OKAY)
 			{
 				FATAL("Error: NFD_Init(): %s", NFD_GetError());
-				RETURN - ONE;
+				RETURN -ONE;
 			}
 
 			TODO("NFD_GetNativeWindowFromSDLWindow needs to be called when NFD's support for SDL3 is available");
@@ -1860,7 +1856,13 @@ public:
 
 			// Load Image or Gif if any
 #ifndef __EMSCRIPTEN__
-			std::string imLoc = config.get<std::string>("internal._ui_sprites_directory") + "\\BG1.png";
+			auto uiSpritesDir = config.get<std::string>("internal._ui_sprites_directory", "");
+			if (uiSpritesDir.empty())
+			{
+				FATAL("Could not locate the UI sprites directory");
+				RETURN -ONE;
+			}
+			std::string imLoc = uiSpritesDir + "\\BG1.png";
 #else
 			std::string imLoc = "assets/ui/sprites/BG1.png";
 #endif
@@ -2026,7 +2028,7 @@ public:
 										{
 											auto menuOption = [&](const char* label, const char* key)
 												{
-													FLAG isTicked = to_bool(config.get<std::string>(key)) == YES;
+													FLAG isTicked = to_bool(config.get<std::string>(key, "false")) == YES;
 													if (ImGui::MenuItem(label, nullptr, isTicked))
 													{
 														// Clear all
@@ -2161,7 +2163,7 @@ public:
 										{
 											if (ImGui::BeginMenu("GB Bios"))
 											{
-												static FLAG isTicked = to_bool(config.get<std::string>("gb-gbc._use_dmg_bios"));
+												static FLAG isTicked = to_bool(config.get<std::string>("gb-gbc._use_dmg_bios", "true"));
 												if (ImGui::MenuItem("Load##GB Bios", NULL, NO, inEnscriptenMode == NO))
 												{
 													bootRomSelect(ROM::GAME_BOY);
@@ -2176,7 +2178,7 @@ public:
 											}
 											if (ImGui::BeginMenu("GBC Bios"))
 											{
-												static FLAG isTicked = to_bool(config.get<std::string>("gb-gbc._use_cgb_bios"));
+												static FLAG isTicked = to_bool(config.get<std::string>("gb-gbc._use_cgb_bios", "true"));
 												if (ImGui::MenuItem("Load##GBC Bios", NULL, NO, inEnscriptenMode == NO))
 												{
 													bootRomSelect(ROM::GAME_BOY_COLOR);
@@ -2191,7 +2193,7 @@ public:
 											}
 											if (ImGui::BeginMenu("GBA Bios"))
 											{
-												static FLAG isTicked = to_bool(config.get<std::string>("gba._use_gba_bios"));
+												static FLAG isTicked = to_bool(config.get<std::string>("gba._use_gba_bios", "true"));
 												if (ImGui::MenuItem("Load##GBA Bios", NULL, NO, inEnscriptenMode == NO))
 												{
 													bootRomSelect(ROM::GAME_BOY_ADVANCE);
@@ -2319,7 +2321,7 @@ public:
 											}
 											if (ImGui::BeginMenu("GBC"))
 											{
-												static FLAG isTicked = to_bool(config.get<std::string>("gb-gbc._enable_cgb_color_correction"));
+												static FLAG isTicked = to_bool(config.get<std::string>("gb-gbc._enable_cgb_color_correction", "true"));
 												if (ImGui::MenuItem("GBC Color Correction", "C", isTicked))
 												{
 													isTicked = !isTicked;
@@ -2375,7 +2377,7 @@ public:
 											}
 											if (ImGui::BeginMenu("Chip8 Family"))
 											{
-												static FLAG isTicked = to_bool(config.get<std::string>("chip8._enable_c8_db"));
+												static FLAG isTicked = to_bool(config.get<std::string>("chip8._enable_c8_db", "false"));
 												if (ImGui::MenuItem("Enable ROM Database", NULL, isTicked))
 												{
 													isTicked = !isTicked;
@@ -2388,10 +2390,10 @@ public:
 											{
 												static FLAG DIP[FOUR] =
 												{
-													to_bool(config.get<std::string>("spaceinvaders._DIP3"))
-													, to_bool(config.get<std::string>("spaceinvaders._DIP5"))
-													, to_bool(config.get<std::string>("spaceinvaders._DIP6"))
-													, to_bool(config.get<std::string>("spaceinvaders._DIP7"))
+													to_bool(config.get<std::string>("spaceinvaders._DIP3", "true"))
+													, to_bool(config.get<std::string>("spaceinvaders._DIP5", "true"))
+													, to_bool(config.get<std::string>("spaceinvaders._DIP6", "true"))
+													, to_bool(config.get<std::string>("spaceinvaders._DIP7", "true"))
 												};
 												static const STATE8 DIPLUT[4] = { 3, 5, 6, 7 };
 												FLAG wasClicked = NO;
@@ -2414,7 +2416,7 @@ public:
 											}
 											if (ImGui::BeginMenu("GB"))
 											{
-												static FLAG isTicked = to_bool(config.get<std::string>("gb-gbc._force_gbc_for_gb"));
+												static FLAG isTicked = to_bool(config.get<std::string>("gb-gbc._force_gbc_for_gb", "false"));
 												if (ImGui::MenuItem("CGB Mode", NULL, isTicked))
 												{
 													isTicked = !isTicked;
@@ -2468,7 +2470,7 @@ public:
 										ImGui::Separator();
 										if (ImGui::BeginMenu("Load/Save"))
 										{
-											static FLAG isQLSTicked = to_bool(config.get<std::string>("mods._ENABLE_QUICK_SAVE"));
+											static FLAG isQLSTicked = to_bool(config.get<std::string>("mods._ENABLE_QUICK_SAVE", "true"));
 											if (ImGui::MenuItem("Enable Save States", NULL, isQLSTicked))
 											{
 												isQLSTicked = !isQLSTicked;
@@ -2476,7 +2478,7 @@ public:
 												config.put("mods._ENABLE_QUICK_SAVE", isQLSTicked);
 												boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
 											}
-											static FLAG isBESSTicked = to_bool(config.get<std::string>("mods._ENABLE_BESS_FORMAT"));
+											static FLAG isBESSTicked = to_bool(config.get<std::string>("mods._ENABLE_BESS_FORMAT", "false"));
 											if (ImGui::MenuItem("Enable BESS format", NULL, isBESSTicked && _ENABLE_QUICK_SAVE))
 											{
 												isBESSTicked = !isBESSTicked;
@@ -3885,23 +3887,23 @@ FLAG startMasquerade(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLA
 	INFO("Nvidia Control Panel > 3D Settings > Global settings > V - Sync->OFF");
 
 	// check if scaling is needed
-	_XSCALE = config.get<DIM32>("mods._XSCALE");
+	_XSCALE = config.get<DIM32>("mods._XSCALE", 1);
 
 	// check if FPS boost is needed
-	_XFPS = config.get<DIM32>("mods._XFPS");
+	_XFPS = config.get<DIM32>("mods._XFPS", 1);
 
 	// check if debugger needs to be enabled
-	debugConfig._DEBUG_PPU_VIEWER_GUI = to_bool(config.get<std::string>("debug._DEBUG_PPU_VIEWER_GUI"));
-	debugConfig._DEBUG_PPU_VIEWER_GUI_TRIGGER = config.get<INC64>("debug._DEBUG_PPU_VIEWER_GUI_TRIGGER");
-	debugConfig._DEBUG_LOGGER_CLI = to_bool(config.get<std::string>("debug._DEBUG_LOGGER_CLI"));
-	debugConfig._DEBUG_LOGGER_CLI_MASK = config.get<MAP64>("debug._DEBUG_LOGGER_CLI_MASK");
+	debugConfig._DEBUG_PPU_VIEWER_GUI = to_bool(config.get<std::string>("debug._DEBUG_PPU_VIEWER_GUI", "false"));
+	debugConfig._DEBUG_PPU_VIEWER_GUI_TRIGGER = config.get<INC64>("debug._DEBUG_PPU_VIEWER_GUI_TRIGGER", 71);
+	debugConfig._DEBUG_LOGGER_CLI = to_bool(config.get<std::string>("debug._DEBUG_LOGGER_CLI", "false"));
+	debugConfig._DEBUG_LOGGER_CLI_MASK = config.get<MAP64>("debug._DEBUG_LOGGER_CLI_MASK", 0);
 
 	// get emulator theme
-	currentEmuTheme = TO_UINT8(configToEmuThemes.at(config.get<std::string>("mods._EMULATOR_THEME")));
+	currentEmuTheme = TO_UINT8(configToEmuThemes.at(config.get<std::string>("mods._EMULATOR_THEME", "DARK")));
 	previousEmuTheme = currentEmuTheme;
 
 	// get video filter selected
-	currEnVFilter = configToVFilters.at(config.get<std::string>("mods._VIDEO_EFFECTS"));
+	currEnVFilter = configToVFilters.at(config.get<std::string>("mods._VIDEO_EFFECTS", "LCD_FILTER"));
 
 	numberOfRomsSelected = nFiles;
 
@@ -3995,9 +3997,12 @@ void postPrimaryBootLoader()
 		};
 
 #ifndef __EMSCRIPTEN__
-	std::string uiWorkingDir = config.get<std::string>("internal._ui_working_directory");
+	std::string uiWorkingDir = config.get<std::string>("internal._ui_working_directory", "");
+	if (uiWorkingDir.empty())
+	{
+		FATAL("Could not locate the UI working directory");
+	}
 	normalizePath(uiWorkingDir);
-
 	_IMGUI_LOCATION = (std::filesystem::path(uiWorkingDir) / "IMGUI.ini").string();
 #else
 	_IMGUI_LOCATION = "assets/ui/config/IMGUI.ini";
@@ -4028,29 +4033,29 @@ void postPrimaryBootLoader()
 	createLUTForCRC();
 
 #ifndef __EMSCRIPTEN__
-	recentlyOpenedListPath = config.get<std::string>("internal._working_directory");
-	normalizePath(recentlyOpenedListPath);
+	std::string workingDir = config.get<std::string>("internal._working_directory", "");
+	if (workingDir.empty())
+	{
+		FATAL("Could not locate the working directory");
+		return;
+	}
+	normalizePath(workingDir);
+	recentlyOpenedListPath = workingDir;
 #else
 	recentlyOpenedListPath = "assets/internal";
 #endif
-
 	// --- Ensure working directory exists
 	ifNoDirectoryThenCreate(recentlyOpenedListPath);
-
 #ifndef __EMSCRIPTEN__
 	recentlyOpenedListPath = (std::filesystem::path(recentlyOpenedListPath) / "recentlyOpenedListPath.dir").string();
-
 	recentlyOpenedList = readDequeFromFile(recentlyOpenedListPath);
-#else
-	recentlyOpenedListPath += "/recentlyOpenedListPath.dir";
-#endif
-
-#ifndef __EMSCRIPTEN__
-	_CHEAT_SAVE_LOCATION = (std::filesystem::path(config.get<std::string>("internal._working_directory")) /"cheats.txt").string();
+	_CHEAT_SAVE_LOCATION = (std::filesystem::path(workingDir) / "cheats.txt").string();
 	normalizePath(_CHEAT_SAVE_LOCATION);
 #else
+	recentlyOpenedListPath += "/recentlyOpenedListPath.dir";
 	_CHEAT_SAVE_LOCATION = "assets/internal/cheats.txt";
 #endif
+
 
 	BYTE bootType = BOOT;
 

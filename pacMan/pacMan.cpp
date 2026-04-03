@@ -141,11 +141,17 @@ pacMan_t::pacMan_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATF
 	}
 
 #ifndef __EMSCRIPTEN__
-	_SAVE_LOCATION = pt.get<std::string>("pacman._save_location");
+	_SAVE_LOCATION = pt.get<std::string>("pacman._save_location", "");
+	if (_SAVE_LOCATION.empty())
+	{
+		FATAL("Could not locate the save directory");
+		RETURN;
+	}
 #else
 	_SAVE_LOCATION = "assets/saves";
 #endif
-	_TEST_NUMBER = pt.get<std::int32_t>("pacman._test_to_run");
+
+	_TEST_NUMBER = pt.get<std::int32_t>("pacman._test_to_run", 0);
 
 	// check if directory mentioned by "_SAVE_LOCATION" exists, if not we need to explicitly create it
 	ifNoDirectoryThenCreate(_SAVE_LOCATION);
@@ -3136,7 +3142,7 @@ void pacMan_t::initializeAudio()
 	audioStream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &AudioSettings, NULL, NULL);
 	SDL_ResumeAudioDevice(SDL_GetAudioStreamDevice(audioStream));
 
-	pPacMan_instance->pacMan_state.audio.emulatorVolume = pt.get<std::float_t>("pacman._volume");
+	pPacMan_instance->pacMan_state.audio.emulatorVolume = pt.get<std::float_t>("pacman._volume", 0.1f);
 
 	if (_MUTE_AUDIO == YES)
 	{
@@ -4497,7 +4503,11 @@ FLAG pacMan_t::initializeEmulator()
 
 		std::string shaderPath;
 #ifndef __EMSCRIPTEN__
-		shaderPath = pt.get<std::string>("internal._working_directory");
+		shaderPath = pt.get<std::string>("internal._working_directory", "");
+		if (shaderPath.empty())
+		{
+			FATAL("Could not locate the shaders");
+		}
 #else
 		shaderPath = "assets/internal";
 #endif

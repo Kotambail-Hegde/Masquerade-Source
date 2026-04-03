@@ -167,7 +167,11 @@ NES_t::NES_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 		ROM_TYPE = (getExt(rom[ZERO]) == "nes") ? ROM::NES : (rom.size() > ONE && getExt(rom[ONE]) == "bin") ? ROM::TEST_ROM_BIN : ROM::NO_ROM;
 
 #ifndef __EMSCRIPTEN__
-		_SAVE_LOCATION = pt.get<std::string>("nes._save_location");
+		_SAVE_LOCATION = pt.get<std::string>("nes._save_location", "");
+		if (_SAVE_LOCATION.empty())
+		{
+			FATAL("Could not locate the save directory");
+		}
 #else
 		_SAVE_LOCATION = "assets/saves";
 #endif
@@ -5271,7 +5275,7 @@ void NES_t::initializeAudio()
 	pNES_instance->NES_state.emulatorStatus.ticks.apuCounter = RESET; // APU ticks = 0
 	pNES_instance->NES_state.audio.isReset = YES;
 
-	pNES_instance->NES_state.audio.emulatorVolume = pt.get<std::float_t>("nes._volume");
+	pNES_instance->NES_state.audio.emulatorVolume = pt.get<std::float_t>("nes._volume", 0.1f);
 	SDL_SetAudioDeviceGain(SDL_GetAudioStreamDevice(audioStream), pNES_instance->NES_state.audio.emulatorVolume);
 
 	// Refer to https://forums.nesdev.org/viewtopic.php?p=163157&sid=d5d3c2ba788e71c4b0d23d7651bb7dd5#p163157
@@ -5719,7 +5723,11 @@ bool NES_t::initializeEmulator()
 
 		std::string shaderPath;
 #ifndef __EMSCRIPTEN__
-		shaderPath = pt.get<std::string>("internal._working_directory");
+		shaderPath = pt.get<std::string>("internal._working_directory", "");
+		if (shaderPath.empty())
+		{
+			FATAL("Could not locate the shaders");
+		}
 #else
 		shaderPath = "assets/internal";
 #endif
