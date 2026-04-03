@@ -400,154 +400,6 @@ private:
 
 private:
 
-	const char* ROM_TYPES[0x23] =
-	{
-		"ROM ONLY",
-		"MBC1",
-		"MBC1+RAM",
-		"MBC1+RAM+BATTERY",
-		"0x04 ???",
-		"MBC2",
-		"MBC2+BATTERY",
-		"0x07 ???",
-		"ROM+RAM 1",
-		"ROM+RAM+BATTERY 1",
-		"0x0A ???",
-		"MMM01",
-		"MMM01+RAM",
-		"MMM01+RAM+BATTERY",
-		"0x0E ???",
-		"MBC3+TIMER+BATTERY",
-		"MBC3+TIMER+RAM+BATTERY 2",
-		"MBC3",
-		"MBC3+RAM 2",
-		"MBC3+RAM+BATTERY 2",
-		"0x14 ???",
-		"0x15 ???",
-		"0x16 ???",
-		"0x17 ???",
-		"0x18 ???",
-		"MBC5",
-		"MBC5+RAM",
-		"MBC5+RAM+BATTERY",
-		"MBC5+RUMBLE",
-		"MBC5+RUMBLE+RAM",
-		"MBC5+RUMBLE+RAM+BATTERY",
-		"0x1F ???",
-		"MBC6",
-		"0x21 ???",
-		"MBC7+SENSOR+RUMBLE+RAM+BATTERY",
-	};
-
-	const char* LIC_CODE[0xA5] =
-	{
-		"unknown",
-		"unknown",
-		"unknown",
-		"unknown",
-		"unknown",
-		"Ubi Soft",
-		"Atlus",
-		"unknown",
-		"Malibu",
-		"unknown",
-		"angel",
-		"Bullet-Proof",
-		"unknown",
-		"irem",
-		"unknown",
-		"unknown",
-		"unknown",
-		"unknown",
-		"unknown",
-		"unknown",
-		"Absolute",
-		"Acclaim",
-		"Activision",
-		"American sammy",
-		"Konami",
-		"Hi tech entertainment",
-		"LJN",
-		"Matchbox",
-		"Mattel",
-		"Milton Bradley",
-		"unknown",
-		"unknown",
-		"unknown",
-		"unknown",
-		"unknown",
-		"unknown",
-		"Titus",
-		"Virgin",
-		"unknown",
-		"unknown",
-		"LucasArts",
-		"unknown",
-		"unknown",
-		"Ocean",
-		"unknown",
-		"Electronic Arts",
-		"unknown",
-		"unknown",
-		"unknown",
-		"unknown",
-		"unknown",
-		"unknown",
-		"Infogrames",
-		"Interplay",
-		"Broderbund",
-		"sculptured",
-		"unknown",
-		"sci",
-		"unknown",
-		"unknown",
-		"THQ",
-		"Accolade",
-		"unknown",
-		"unknown",
-		"unknown",
-		"unknown",
-		"unknown",
-		"unknown",
-		"misawa",
-		"unknown",
-		"unknown",
-		"lozc",
-		"Tokuma Shoten Intermedia",
-		"unknown",
-		"unknown",
-		"Tsukuda Original",
-		"unknown",
-		"unknown",
-		"unknown",
-		"unknown",
-		"unknown",
-		"unknown",
-		"unknown",
-		"unknown",
-		"unknown",
-		"Chunsoft",
-		"Video system",
-		"Ocean/Acclaim",
-		"unknown",
-		"Varie",
-		"Yonezawa Toys",
-		"Kaneko",
-		"unknown",
-		"Pack in soft",
-		"unknown",
-		"unknown",
-		"unknown",
-		"unknown",
-		"unknown",
-		"unknown",
-		"unknown",
-		"unknown",
-		"unknown",
-		"unknown",
-		"Konami (Yu-Gi-Oh!)"
-	};
-
 	enum class MBCType  : uint16_t
 	{
 		NONE, 
@@ -555,7 +407,9 @@ private:
 		MBC2, 
 		MBC3, 
 		MBC5, 
-		MBC7
+		MBC7,
+		HUC1,
+		HUC3,
 	};
 
 	const std::unordered_map<uint16_t, MBCType> kMBCTypeMap = 
@@ -563,11 +417,11 @@ private:
 		{0x00, MBCType::NONE},
 		{0x01, MBCType::MBC1}, {0x02, MBCType::MBC1}, {0x03, MBCType::MBC1},
 		{0x05, MBCType::MBC2}, {0x06, MBCType::MBC2},
-		{0x0F, MBCType::MBC3}, {0x10, MBCType::MBC3}, {0x11, MBCType::MBC3},
-		{0x12, MBCType::MBC3}, {0x13, MBCType::MBC3},
-		{0x19, MBCType::MBC5}, {0x1A, MBCType::MBC5}, {0x1B, MBCType::MBC5},
-		{0x1C, MBCType::MBC5}, {0x1D, MBCType::MBC5}, {0x1E, MBCType::MBC5},
+		{0x0F, MBCType::MBC3}, {0x10, MBCType::MBC3}, {0x11, MBCType::MBC3},{0x12, MBCType::MBC3}, {0x13, MBCType::MBC3},
+		{0x19, MBCType::MBC5}, {0x1A, MBCType::MBC5}, {0x1B, MBCType::MBC5},{0x1C, MBCType::MBC5}, {0x1D, MBCType::MBC5}, {0x1E, MBCType::MBC5},
 		{0x22, MBCType::MBC7},
+		{0xFE, MBCType::HUC3},
+		{0xFF, MBCType::HUC1},
 	};
 
 	enum class ROMBankType : uint16_t
@@ -629,7 +483,7 @@ private:
 		uint8_t entryPoint[0x0004];
 		uint8_t nintendologo[0x0030];
 		title_AND_cgbType_t title;
-		uint16_t newLicCode;
+		char newLicCode[2];
 		uint8_t sgbFlag;
 		uint8_t cartridgeType;
 		uint8_t romSize;
@@ -1793,6 +1647,17 @@ private:
 		NONE
 	} STAT_INTR_SRC;
 
+	enum class HUC3_MODES
+	{
+		RAM_RO	= 0x0,
+		RAM_RW	= 0xA,
+		RTC_W	= 0xB,
+		RTC_R	= 0xC,
+		RTC_RW	= 0xD,
+		IR		= 0xE,
+		UNKNOWN	= 0xF
+	};
+
 	typedef struct
 	{
 		STAT_INTR_SRC STAT_src;
@@ -1859,6 +1724,21 @@ private:
 			uint8_t  eepromArgBitsLeft;
 			uint16_t eepromReadBits;
 		} mbc7Regs;
+		FLAG isHuc1IrMode;
+		FLAG huc1EnableIrTx;
+		FLAG huc1IrSignalRx;
+		FLAG huc3EnableIrTx;
+		FLAG huc3IrSignalRx;
+		struct
+		{
+			BYTE command;
+			BYTE argument;
+			BYTE result;
+			BYTE rtcSeconds; // internal seconds, not directly game-readable
+			INC8 rtcMemIdx;
+			BYTE rtcMem[0x80];
+		} huc3Rtc;
+		HUC3_MODES huc3Mode;
 		RAMBankType ramBank;
 		FLAG enableRAMBanking;
 		FLAG isMBC7RamEn1;
@@ -1869,7 +1749,9 @@ private:
 		uint16_t serialMaxClockPerTransfer;
 		uint16_t serialMasterByteShiftCount;
 		uint16_t serialSlaveByteShiftCount;
-		FLAG isRTCAvailableInMBC3;
+		FLAG isBatteryAvailable;
+		FLAG isCartRAMAvailable;
+		FLAG isRTCAvailable;
 		FLAG enableRTCAccessTimer;
 		FLAG mapRTCRegisters;
 		uint8_t currentRTCRegister;
@@ -2333,7 +2215,10 @@ private:
 
 private:
 
-	FLAG isRTCAvailableInMBC3();
+	FLAG isBatteryAvailable();
+	FLAG isCartRAMAvailable();
+
+	FLAG isRTCAvailable();
 	void enableRTCAccess();
 	void disableRTCAccess();
 	FLAG isRTCAccessEnabled();
@@ -2382,6 +2267,14 @@ private:
 	MASQ_INLINE FLAG isMBC7() const
 	{
 		RETURN pGBc_emuStatus->activeMBC == MBCType::MBC7;
+	}
+	MASQ_INLINE FLAG isHUC1() const
+	{
+		RETURN pGBc_emuStatus->activeMBC == MBCType::HUC1;
+	}
+	MASQ_INLINE FLAG isHUC3() const
+	{
+		RETURN pGBc_emuStatus->activeMBC == MBCType::HUC3;
 	}
 	void setMBCType(uint16_t mbcType);
 	void setROMBankType(uint16_t romBankType);
@@ -2532,6 +2425,8 @@ private:
 		, MEMORY_ACCESS_SOURCE source
 		, FLAG FirstPriority_readFromVRAMBank01ForCGB = false
 		, FLAG SecondPriority_readFromVRAMBank00ForCGB = false);
+	void executeHUC3ExtendedCommand();
+	void executeHUC3Command();
 	void writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE source);
 
 	void stackPush(BYTE data);

@@ -190,6 +190,7 @@ static GLuint shaderProgramGhost;
 static float  ghost_decay = 0.0f;  // 0.0 = off, ~0.6 = DMG feel, ~0.4 = GBC (less ghosting)
 static float _GB_GHOST_FACTOR = 0.6f;
 static float _GBC_GHOST_FACTOR = 0.4f;
+static float _ACCELEROMETER_SENSITIVITY = 0.4f;
 
 #if _DEBUG
 COUNTER32 OAM_STAT_TO_MODE_2_T_CYCLES = RESET;
@@ -253,14 +254,15 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 		// check if directory mentioned by "_SAVE_LOCATION" exists, if not we need to explicitly create it
 		ifNoDirectoryThenCreate(_SAVE_LOCATION);
 
-		_ENABLE_DMG_BIOS = to_bool(pt.get<std::string>("gb-gbc._use_dmg_bios"));
-		_ENABLE_CGB_BIOS = to_bool(pt.get<std::string>("gb-gbc._use_cgb_bios"));
-		_FORCE_GB_FOR_GBC = to_bool(pt.get<std::string>("gb-gbc._force_gb_for_gbc"));
-		_FORCE_GB_GFX_FOR_GBC = to_bool(pt.get<std::string>("gb-gbc._force_gb_gfx_for_gbc"));
-		_FORCE_GBC_FOR_GB = to_bool(pt.get<std::string>("gb-gbc._force_gbc_for_gb"));
-		_ENABLE_AUDIO_HPF = to_bool(config.get<std::string>("gb-gbc._enable_audio_hpf"));
-		_GB_GHOST_FACTOR = config.get<std::float_t>("gb-gbc._gb_ghosting");
-		_GBC_GHOST_FACTOR = config.get<std::float_t>("gb-gbc._gbc_ghosting");
+		_ENABLE_DMG_BIOS = to_bool(pt.get<std::string>("gb-gbc._use_dmg_bios", _ENABLE_DMG_BIOS ? "true" : "false"));
+		_ENABLE_CGB_BIOS = to_bool(pt.get<std::string>("gb-gbc._use_cgb_bios", _ENABLE_CGB_BIOS ? "true" : "false"));
+		_FORCE_GB_FOR_GBC = to_bool(pt.get<std::string>("gb-gbc._force_gb_for_gbc", _FORCE_GB_FOR_GBC ? "true" : "false"));
+		_FORCE_GB_GFX_FOR_GBC = to_bool(pt.get<std::string>("gb-gbc._force_gb_gfx_for_gbc", _FORCE_GB_GFX_FOR_GBC ? "true" : "false"));
+		_FORCE_GBC_FOR_GB = to_bool(pt.get<std::string>("gb-gbc._force_gbc_for_gb", _FORCE_GBC_FOR_GB ? "true" : "false"));
+		_ENABLE_AUDIO_HPF = to_bool(config.get<std::string>("gb-gbc._enable_audio_hpf", _ENABLE_AUDIO_HPF ? "true" : "false"));
+		_GB_GHOST_FACTOR = config.get<std::float_t>("gb-gbc._gb_ghosting", _GB_GHOST_FACTOR);
+		_GBC_GHOST_FACTOR = config.get<std::float_t>("gb-gbc._gbc_ghosting", _GBC_GHOST_FACTOR);
+		_ACCELEROMETER_SENSITIVITY = config.get<std::float_t>("gb-gbc._accelerometer_sensitivity", _ACCELEROMETER_SENSITIVITY);
 
 		if (ROM_TYPE == ROM::GAME_BOY && _FORCE_GBC_FOR_GB == YES)
 		{
@@ -583,22 +585,150 @@ void GBc_t::blarggConsoleOutput()
 #pragma region EMULATION_DEFINITIONS
 const char* GBc_t::cartridgeLicName()
 {
-	if (pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_fields.newLicCode <= 0xA4)
-	{
-		RETURN LIC_CODE[pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_fields.newLicCode];
-	}
+	const auto& hdr =
+		pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields
+		.romBank_00.romBank00_Fields.cartridge_header
+		.cartridge_header_fields;
 
-	RETURN "UNKNOWN";
+	// new licensee code is 2 ASCII bytes
+	const char c1 = hdr.newLicCode[0];
+	const char c2 = hdr.newLicCode[1];
+
+	const uint16_t code = (uint16_t(c1) << 8) | uint16_t(c2);
+
+	switch (code)
+	{
+	case ('0' << 8) | '0': RETURN "None";
+	case ('0' << 8) | '1': RETURN "Nintendo R&D1";
+
+	case ('0' << 8) | '8': RETURN "Capcom";
+	case ('1' << 8) | '3': RETURN "Electronic Arts";
+	case ('1' << 8) | '8': RETURN "Hudson Soft";
+	case ('1' << 8) | '9': RETURN "B-AI";
+
+	case ('2' << 8) | '0': RETURN "KSS";
+	case ('2' << 8) | '2': RETURN "Planning Office WADA";
+	case ('2' << 8) | '4': RETURN "PCM Complete";
+	case ('2' << 8) | '5': RETURN "San-X";
+	case ('2' << 8) | '8': RETURN "Kemco";
+	case ('2' << 8) | '9': RETURN "SETA";
+
+	case ('3' << 8) | '0': RETURN "Viacom";
+	case ('3' << 8) | '1': RETURN "Nintendo";
+	case ('3' << 8) | '2': RETURN "Bandai";
+	case ('3' << 8) | '3': RETURN "Ocean/Acclaim";
+	case ('3' << 8) | '4': RETURN "Konami";
+	case ('3' << 8) | '5': RETURN "HectorSoft";
+
+	case ('3' << 8) | '7': RETURN "Taito";
+	case ('3' << 8) | '8': RETURN "Hudson Soft";
+	case ('3' << 8) | '9': RETURN "Banpresto";
+
+	case ('4' << 8) | '1': RETURN "Ubi Soft";
+	case ('4' << 8) | '2': RETURN "Atlus";
+	case ('4' << 8) | '4': RETURN "Malibu";
+	case ('4' << 8) | '6': RETURN "Angel";
+	case ('4' << 8) | '7': RETURN "Bullet-Proof";
+	case ('4' << 8) | '9': RETURN "Irem";
+
+	case ('5' << 8) | '0': RETURN "Absolute";
+	case ('5' << 8) | '1': RETURN "Acclaim";
+	case ('5' << 8) | '2': RETURN "Activision";
+	case ('5' << 8) | '3': RETURN "Sammy";
+	case ('5' << 8) | '4': RETURN "Konami";
+	case ('5' << 8) | '5': RETURN "Hi Tech Expressions";
+	case ('5' << 8) | '6': RETURN "LJN";
+	case ('5' << 8) | '7': RETURN "Matchbox";
+	case ('5' << 8) | '8': RETURN "Mattel";
+	case ('5' << 8) | '9': RETURN "Milton Bradley";
+
+	case ('6' << 8) | '0': RETURN "Titus";
+	case ('6' << 8) | '1': RETURN "Virgin";
+
+	case ('6' << 8) | '4': RETURN "LucasArts";
+	case ('6' << 8) | '7': RETURN "Ocean";
+	case ('6' << 8) | '9': RETURN "Electronic Arts";
+
+	case ('7' << 8) | '0': RETURN "Infogrames";
+	case ('7' << 8) | '1': RETURN "Interplay";
+	case ('7' << 8) | '2': RETURN "Broderbund";
+	case ('7' << 8) | '3': RETURN "Sculptured";
+	case ('7' << 8) | '5': RETURN "SCI";
+
+	case ('7' << 8) | '8': RETURN "THQ";
+	case ('7' << 8) | '9': RETURN "Accolade";
+
+	case ('8' << 8) | '0': RETURN "Misawa";
+	case ('8' << 8) | '3': RETURN "LOZC";
+	case ('8' << 8) | '6': RETURN "Tokuma Shoten";
+	case ('8' << 8) | '7': RETURN "Tsukuda Original";
+
+	case ('9' << 8) | '1': RETURN "Chunsoft";
+	case ('9' << 8) | '2': RETURN "Video System";
+	case ('9' << 8) | '3': RETURN "Ocean/Acclaim";
+	case ('9' << 8) | '5': RETURN "Varie";
+	case ('9' << 8) | '6': RETURN "Yonezawa/S'Pal";
+	case ('9' << 8) | '7': RETURN "Kaneko";
+	case ('9' << 8) | '9': RETURN "Pack-In-Video";
+
+	case ('9' << 8) | 'H': RETURN "Bottom Up";
+
+	case ('A' << 8) | '4': RETURN "Konami (Yu-Gi-Oh!)";
+
+	case ('B' << 8) | 'L': RETURN "MTO";
+	case ('D' << 8) | 'K': RETURN "Kodansha";
+
+	default: RETURN "UNKNOWN";
+	}
 }
 
 const char* GBc_t::cartridgeTypeName()
 {
-	if (pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_fields.cartridgeType <= 0x22)
-	{
-		RETURN ROM_TYPES[pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_fields.cartridgeType];
-	}
+	const uint8_t type =
+		pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields
+		.romBank_00.romBank00_Fields.cartridge_header
+		.cartridge_header_fields.cartridgeType;
 
-	RETURN "UNKNOWN";
+	switch (type)
+	{
+	case 0x00: RETURN "ROM ONLY";
+	case 0x01: RETURN "MBC1";
+	case 0x02: RETURN "MBC1+RAM";
+	case 0x03: RETURN "MBC1+RAM+BATTERY";
+
+	case 0x05: RETURN "MBC2";
+	case 0x06: RETURN "MBC2+BATTERY";
+
+	case 0x08: RETURN "ROM+RAM";
+	case 0x09: RETURN "ROM+RAM+BATTERY";
+
+	case 0x0B: RETURN "MMM01";
+	case 0x0C: RETURN "MMM01+RAM";
+	case 0x0D: RETURN "MMM01+RAM+BATTERY";
+
+	case 0x0F: RETURN "MBC3+TIMER+BATTERY";
+	case 0x10: RETURN "MBC3+TIMER+RAM+BATTERY";
+	case 0x11: RETURN "MBC3";
+	case 0x12: RETURN "MBC3+RAM";
+	case 0x13: RETURN "MBC3+RAM+BATTERY";
+
+	case 0x19: RETURN "MBC5";
+	case 0x1A: RETURN "MBC5+RAM";
+	case 0x1B: RETURN "MBC5+RAM+BATTERY";
+	case 0x1C: RETURN "MBC5+RUMBLE";
+	case 0x1D: RETURN "MBC5+RUMBLE+RAM";
+	case 0x1E: RETURN "MBC5+RUMBLE+RAM+BATTERY";
+
+	case 0x20: RETURN "MBC6";
+	case 0x22: RETURN "MBC7+SENSOR+RUMBLE+RAM+BATTERY";
+
+	case 0xFC: RETURN "POCKET CAMERA";
+	case 0xFD: RETURN "BANDAI TAMA5";
+	case 0xFE: RETURN "HuC3";
+	case 0xFF: RETURN "HuC1+RAM+BATTERY";
+
+	default:   RETURN "UNKNOWN";
+	}
 }
 
 FLAG GBc_t::isCGBDoubleSpeedEnabled()
@@ -611,24 +741,35 @@ void GBc_t::toggleCGBSpeedMode()
 	pGBc_emuStatus->isCGBDoubleSpeedMode = !pGBc_emuStatus->isCGBDoubleSpeedMode;
 }
 
-FLAG GBc_t::isRTCAvailableInMBC3()
+FLAG GBc_t::isBatteryAvailable()
 {
-	RETURN pGBc_emuStatus->isRTCAvailableInMBC3;
+	RETURN pGBc_emuStatus->isBatteryAvailable;
+}
+
+FLAG GBc_t::isCartRAMAvailable()
+{
+	RETURN pGBc_emuStatus->isCartRAMAvailable;
+}
+
+FLAG GBc_t::isRTCAvailable()
+{
+	RETURN pGBc_emuStatus->isRTCAvailable;
 }
 
 void GBc_t::enableRTCAccess()
 {
-	if (isRTCAvailableInMBC3() == NO)
+	if (isRTCAvailable() == NO)
 	{
+		pGBc_emuStatus->enableRTCAccessTimer = NO;
 		RETURN;
 	}
 
-	pGBc_emuStatus->enableRTCAccessTimer = true;
+	pGBc_emuStatus->enableRTCAccessTimer = YES;
 }
 
 void GBc_t::disableRTCAccess()
 {
-	pGBc_emuStatus->enableRTCAccessTimer = false;
+	pGBc_emuStatus->enableRTCAccessTimer = NO;
 }
 
 FLAG GBc_t::isRTCAccessEnabled()
@@ -884,12 +1025,12 @@ FLAG GBc_t::getROMOrRAMModeInMBC1()
 
 void GBc_t::enableRAMBank()
 {
-	pGBc_emuStatus->enableRAMBanking = true;
+	pGBc_emuStatus->enableRAMBanking = YES;
 }
 
 void GBc_t::disableRAMBank()
 {
-	pGBc_emuStatus->enableRAMBanking = false;
+	pGBc_emuStatus->enableRAMBanking = NO;
 }
 
 FLAG GBc_t::isRAMBankEnabled()
@@ -931,6 +1072,11 @@ void GBc_t::setRAMBankNumber(uint8_t ramBankNumber)
 
 uint8_t GBc_t::getNumberOfRAMBanksUsed()
 {
+	if (isMBC2() || isMBC7() || isCartRAMAvailable() == NO)
+	{
+		RETURN ONE;
+	}
+
 	switch (pGBc_emuStatus->ramBank)
 	{
 	case RAMBankType::NO_BANK:  RETURN ONE;
@@ -1442,82 +1588,126 @@ void GBc_t::serialTick()
 
 void GBc_t::rtcTick()
 {
-	// Refer : https://gbdev.io/pandocs/MBC3.html?highlight=rtc#mbc3
-
-	// Check if RTC is halted
-	if (pGBc_instance->GBc_state.rtc.rtcFields.rtc_DH.rtcDHFields.DAYCOUNTER_HALT == ONE)
-	{
-		RETURN;
-	}
-
-	// Ideally, RTC should tick at 32768 Hz, i.e. it should increment by 0.0078125 second for every 32768 clocks
-	// But our minimum resolution of RTC field is 1 second, i.e. the smallest unit that we can increment is by 1 second (fractional seconds is not possible)
-	// Hence, instead of counting till 32768 clocks, we count till 4194304 clocks
-	// Hence when "rtcCounter" reaches 4194304, this indicates 1 second of emulated time
-
 	pGBc_instance->GBc_state.emulatorStatus.ticks.rtcCounter++;
 
-	if (pGBc_instance->GBc_state.emulatorStatus.ticks.rtcCounter >= GB_GBC_REFERENCE_CLOCK_HZ)
+	// Refer : https://gbdev.io/pandocs/MBC3.html?highlight=rtc#mbc3
+
+	if (isRTCAccessEnabled())
 	{
-		pGBc_instance->GBc_state.emulatorStatus.ticks.rtcCounter = ZERO;
-
-		// fetch the current day counter value (needed incase we need to increment the day counter)
-
-		pGBc_instance->GBc_state.emulatorStatus.ticks.rtcDayCounter = getRTCDayCounter();
-
-		// Increment the rtc second
-
-		pGBc_instance->GBc_state.rtc.rtcFields.rtc_S++;
-
-		if (pGBc_instance->GBc_state.rtc.rtcFields.rtc_S > 0x3F) // 0x3F instead of 60 because of Invalid Rollover Tests mentioned in https://github.com/aaaaaa123456789/rtc3test/blob/master/tests.md
+		if (isMBC3())
 		{
-			pGBc_instance->GBc_state.rtc.rtcFields.rtc_S = ZERO;
-			RETURN;
+			// Check if RTC is halted
+			if (pGBc_instance->GBc_state.rtc.rtcFields.rtc_DH.rtcDHFields.DAYCOUNTER_HALT == ONE)
+			{
+				RETURN;
+			}
+
+			// Ideally, RTC should tick at 32768 Hz, i.e. it should increment by 0.0078125 second for every 32768 clocks
+			// But our minimum resolution of RTC field is 1 second, i.e. the smallest unit that we can increment is by 1 second (fractional seconds is not possible)
+			// Hence, instead of counting till 32768 clocks, we count till 4194304 clocks
+			// Hence when "rtcCounter" reaches 4194304, this indicates 1 second of emulated time
+
+			if (pGBc_instance->GBc_state.emulatorStatus.ticks.rtcCounter >= GB_GBC_REFERENCE_CLOCK_HZ)
+			{
+				pGBc_instance->GBc_state.emulatorStatus.ticks.rtcCounter = ZERO;
+
+				// fetch the current day counter value (needed incase we need to increment the day counter)
+
+				pGBc_instance->GBc_state.emulatorStatus.ticks.rtcDayCounter = getRTCDayCounter();
+
+				// Increment the rtc second
+
+				pGBc_instance->GBc_state.rtc.rtcFields.rtc_S++;
+
+				if (pGBc_instance->GBc_state.rtc.rtcFields.rtc_S > 0x3F) // 0x3F instead of 60 because of Invalid Rollover Tests mentioned in https://github.com/aaaaaa123456789/rtc3test/blob/master/tests.md
+				{
+					pGBc_instance->GBc_state.rtc.rtcFields.rtc_S = ZERO;
+					RETURN;
+				}
+				else if (pGBc_instance->GBc_state.rtc.rtcFields.rtc_S == 60) // ==60 instead of >59 because of Invalid Tick Tests mentioned in https://github.com/aaaaaa123456789/rtc3test/blob/master/tests.md
+				{
+					pGBc_instance->GBc_state.rtc.rtcFields.rtc_S = ZERO;
+					pGBc_instance->GBc_state.rtc.rtcFields.rtc_M++;
+				}
+
+				if (pGBc_instance->GBc_state.rtc.rtcFields.rtc_M > 0x3F) // 0x3F instead of 60 because of Invalid Rollover Tests mentioned in https://github.com/aaaaaa123456789/rtc3test/blob/master/tests.md
+				{
+					pGBc_instance->GBc_state.rtc.rtcFields.rtc_M = ZERO;
+					RETURN;
+				}
+				else if (pGBc_instance->GBc_state.rtc.rtcFields.rtc_M == 60) // ==60 instead of >59 because of Invalid Tick Tests mentioned in https://github.com/aaaaaa123456789/rtc3test/blob/master/tests.md
+				{
+					pGBc_instance->GBc_state.rtc.rtcFields.rtc_M = ZERO;
+					pGBc_instance->GBc_state.rtc.rtcFields.rtc_H++;
+				}
+
+				if (pGBc_instance->GBc_state.rtc.rtcFields.rtc_H > 0x1F) // 0x1F instead of 60 because of Invalid Rollover Tests mentioned in https://github.com/aaaaaa123456789/rtc3test/blob/master/tests.md
+				{
+					pGBc_instance->GBc_state.rtc.rtcFields.rtc_H = ZERO;
+					RETURN;
+				}
+				else if (pGBc_instance->GBc_state.rtc.rtcFields.rtc_H == 24) // ==24 instead of >23 because of Invalid Tick Tests mentioned in https://github.com/aaaaaa123456789/rtc3test/blob/master/tests.md
+				{
+					pGBc_instance->GBc_state.rtc.rtcFields.rtc_H = ZERO;
+					pGBc_instance->GBc_state.emulatorStatus.ticks.rtcDayCounter++;
+				}
+
+				pGBc_instance->GBc_state.rtc.rtcFields.rtc_DL = (pGBc_instance->GBc_state.emulatorStatus.ticks.rtcDayCounter & 0xFF);
+
+				if (GETBIT(EIGHT, pGBc_instance->GBc_state.emulatorStatus.ticks.rtcDayCounter) == ONE)
+				{
+					pGBc_instance->GBc_state.rtc.rtcFields.rtc_DH.rtcDHFields.DAYCOUNTER_MSB = ONE;
+				}
+				else
+				{
+					pGBc_instance->GBc_state.rtc.rtcFields.rtc_DH.rtcDHFields.DAYCOUNTER_MSB = ZERO;
+				}
+
+				if (pGBc_instance->GBc_state.emulatorStatus.ticks.rtcDayCounter > 511)
+				{
+					pGBc_instance->GBc_state.rtc.rtcFields.rtc_DL = ZERO;
+					pGBc_instance->GBc_state.rtc.rtcFields.rtc_DH.rtcDHFields.DAYCOUNTER_MSB = ZERO;
+					pGBc_instance->GBc_state.rtc.rtcFields.rtc_DH.rtcDHFields.DAYCOUNTER_CARRY = ONE;
+				}
+			}
 		}
-		else if (pGBc_instance->GBc_state.rtc.rtcFields.rtc_S == 60) // ==60 instead of >59 because of Invalid Tick Tests mentioned in https://github.com/aaaaaa123456789/rtc3test/blob/master/tests.md
+		else if (isHUC3())
 		{
-			pGBc_instance->GBc_state.rtc.rtcFields.rtc_S = ZERO;
-			pGBc_instance->GBc_state.rtc.rtcFields.rtc_M++;
-		}
+			// Refer https://gbdev.gg8.se/forums/viewtopic.php?id=744
+			if (pGBc_instance->GBc_state.emulatorStatus.ticks.rtcCounter >= GB_GBC_REFERENCE_CLOCK_HZ)
+			{
+				pGBc_instance->GBc_state.emulatorStatus.ticks.rtcCounter = ZERO;
 
-		if (pGBc_instance->GBc_state.rtc.rtcFields.rtc_M > 0x3F) // 0x3F instead of 60 because of Invalid Rollover Tests mentioned in https://github.com/aaaaaa123456789/rtc3test/blob/master/tests.md
-		{
-			pGBc_instance->GBc_state.rtc.rtcFields.rtc_M = ZERO;
-			RETURN;
-		}
-		else if (pGBc_instance->GBc_state.rtc.rtcFields.rtc_M == 60) // ==60 instead of >59 because of Invalid Tick Tests mentioned in https://github.com/aaaaaa123456789/rtc3test/blob/master/tests.md
-		{
-			pGBc_instance->GBc_state.rtc.rtcFields.rtc_M = ZERO;
-			pGBc_instance->GBc_state.rtc.rtcFields.rtc_H++;
-		}
+				auto& rtc = pGBc_emuStatus->huc3Rtc;
 
-		if (pGBc_instance->GBc_state.rtc.rtcFields.rtc_H > 0x1F) // 0x1F instead of 60 because of Invalid Rollover Tests mentioned in https://github.com/aaaaaa123456789/rtc3test/blob/master/tests.md
-		{
-			pGBc_instance->GBc_state.rtc.rtcFields.rtc_H = ZERO;
-			RETURN;
-		}
-		else if (pGBc_instance->GBc_state.rtc.rtcFields.rtc_H == 24) // ==24 instead of >23 because of Invalid Tick Tests mentioned in https://github.com/aaaaaa123456789/rtc3test/blob/master/tests.md
-		{
-			pGBc_instance->GBc_state.rtc.rtcFields.rtc_H = ZERO;
-			pGBc_instance->GBc_state.emulatorStatus.ticks.rtcDayCounter++;
-		}
+				rtc.rtcSeconds++;
+				if (rtc.rtcSeconds < 60) RETURN;
+				rtc.rtcSeconds = ZERO;
 
-		pGBc_instance->GBc_state.rtc.rtcFields.rtc_DL = (pGBc_instance->GBc_state.emulatorStatus.ticks.rtcDayCounter & 0xFF);
+				// LSN at lower index: [0x10]=bits3-0, [0x11]=bits7-4, [0x12]=bits11-8
+				uint16_t minutes = ((uint16_t)rtc.rtcMem[0x12] << 8)
+					| ((uint16_t)rtc.rtcMem[0x11] << 4)
+					| rtc.rtcMem[0x10];
+				minutes++;
 
-		if (GETBIT(EIGHT, pGBc_instance->GBc_state.emulatorStatus.ticks.rtcDayCounter) == ONE)
-		{
-			pGBc_instance->GBc_state.rtc.rtcFields.rtc_DH.rtcDHFields.DAYCOUNTER_MSB = ONE;
-		}
-		else
-		{
-			pGBc_instance->GBc_state.rtc.rtcFields.rtc_DH.rtcDHFields.DAYCOUNTER_MSB = ZERO;
-		}
+				if (minutes >= 1440)
+				{
+					minutes = ZERO;
 
-		if (pGBc_instance->GBc_state.emulatorStatus.ticks.rtcDayCounter > 511)
-		{
-			pGBc_instance->GBc_state.rtc.rtcFields.rtc_DL = ZERO;
-			pGBc_instance->GBc_state.rtc.rtcFields.rtc_DH.rtcDHFields.DAYCOUNTER_MSB = ZERO;
-			pGBc_instance->GBc_state.rtc.rtcFields.rtc_DH.rtcDHFields.DAYCOUNTER_CARRY = ONE;
+					uint16_t days = ((uint16_t)rtc.rtcMem[0x15] << 8)
+						| ((uint16_t)rtc.rtcMem[0x14] << 4)
+						| rtc.rtcMem[0x13];
+					days = (days + 1) & 0xFFF;
+
+					rtc.rtcMem[0x13] = (days >> 0) & 0x0F;
+					rtc.rtcMem[0x14] = (days >> 4) & 0x0F;
+					rtc.rtcMem[0x15] = (days >> 8) & 0x0F;
+				}
+
+				rtc.rtcMem[0x10] = (minutes >> 0) & 0x0F;
+				rtc.rtcMem[0x11] = (minutes >> 4) & 0x0F;
+				rtc.rtcMem[0x12] = (minutes >> 8) & 0x0F;
+			}
 		}
 	}
 }
@@ -6869,9 +7059,18 @@ FLAG GBc_t::initializeEmulator()
 	pGBc_emuStatus->ticks.serialCounter = 0x08;
 
 	// Only the below 2 configurations are read here instead of in the constructor because "pGBc_instance" is not ready at that time...
-	currEnGbPalette = configToGbPaletteID.at(pt.get<std::string>("gb-gbc._force_gb_palette"));
+	auto gbPaletteStr = pt.get<std::string>("gb-gbc._force_gb_palette", "");
+	if (!gbPaletteStr.empty() && configToGbPaletteID.count(gbPaletteStr))
+	{
+		currEnGbPalette = configToGbPaletteID.at(gbPaletteStr);
+	}
 	pGBc_instance->GBc_state.gb_palette = currEnGbPalette;
-	currEnGbcPalette = ((to_bool(pt.get<std::string>("gb-gbc._enable_cgb_color_correction")) == YES) ? PALETTE_ID::PALETTE_2 : PALETTE_ID::PALETTE_1);
+
+	auto cgbCorrStr = pt.get<std::string>("gb-gbc._enable_cgb_color_correction", "");
+	if (!cgbCorrStr.empty())
+	{
+		currEnGbcPalette = (to_bool(cgbCorrStr) == YES) ? PALETTE_ID::PALETTE_2 : PALETTE_ID::PALETTE_1;
+	}
 	pGBc_instance->GBc_state.gbc_palette = currEnGbcPalette;
 
 	if (isCLI() == NO)
@@ -6995,7 +7194,11 @@ FLAG GBc_t::initializeEmulator()
 
 		std::string shaderPath;
 #ifndef __EMSCRIPTEN__
-		shaderPath = pt.get<std::string>("internal._working_directory");
+		shaderPath = pt.get<std::string>("internal._working_directory", "");
+		if (shaderPath.empty())
+		{
+			FATAL("Could not locate the shaders");
+		}
 #else
 		shaderPath = "assets/internal";
 #endif
@@ -7040,101 +7243,132 @@ void GBc_t::destroyEmulator()
 
 	// Saving SRAM + RTC
 
-	std::string saveFileNameForThisROM = getSaveFileName(
-		pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_buffer
-		, sizeof(pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_buffer)
-	);
-
-	saveFileNameForThisROM = _SAVE_LOCATION + "\\" + saveFileNameForThisROM;
-
-	std::cout << "\nSaving to " << saveFileNameForThisROM << std::endl;
-
-	std::ofstream outSRAM(saveFileNameForThisROM.c_str(), std::ios_base::binary);
-	uint32_t sizeOfRAMSlot = 0x2000;
-	uint8_t numberOfRAMSlots = ZERO;
-
-	if (outSRAM.fail() == false)
+	if (isBatteryAvailable())
 	{
-		numberOfRAMSlots = getNumberOfRAMBanksUsed();
+		std::string saveFileNameForThisROM = getSaveFileName(
+			pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_buffer
+			, sizeof(pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_buffer)
+		);
 
-		for (uint32_t ii = ZERO; ii < numberOfRAMSlots; ii++)
+		saveFileNameForThisROM = _SAVE_LOCATION + "\\" + saveFileNameForThisROM;
+
+		std::cout << "\nSaving to " << saveFileNameForThisROM << std::endl;
+
+		std::ofstream outSRAM(saveFileNameForThisROM.c_str(), std::ios_base::binary);
+
+		if (outSRAM.fail() == NO)
 		{
-			for (uint32_t jj = ZERO; jj < sizeOfRAMSlot; jj++)
+			if (isCartRAMAvailable() == YES)
 			{
-				BYTE ramByte = pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[ii][jj];
-				outSRAM.write(reinterpret_cast<const char*> (&ramByte), ONE);
+				uint32_t sizeOfRAMSlot = 0x2000;
+				if (isMBC2())
+				{
+					sizeOfRAMSlot = 0x200;
+				}
+				else if (isMBC7())
+				{
+					sizeOfRAMSlot = 0x100;
+				}
+				uint8_t numberOfRAMSlots = ZERO;
+
+				numberOfRAMSlots = getNumberOfRAMBanksUsed();
+
+				for (uint32_t ii = ZERO; ii < numberOfRAMSlots; ii++)
+				{
+					for (uint32_t jj = ZERO; jj < sizeOfRAMSlot; jj++)
+					{
+						BYTE ramByte = pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[ii][jj];
+						outSRAM.write(reinterpret_cast<const char*>(&ramByte), ONE);
+					}
+				}
 			}
+
+			if (isRTCAvailable())
+			{
+				if (isMBC3())
+				{
+					// Refer to https://bgb.bircd.org/rtcsave.html
+					constexpr size_t RTC_DUMP_SIZE = 48;
+
+					std::vector<uint8_t> buffer;
+					buffer.reserve(RTC_DUMP_SIZE); // Optional, avoid reallocations
+
+					// Helper to write a single byte
+					auto writeByte = [&](uint8_t value) {
+						buffer.push_back(value);
+						};
+
+					// Helper to write 8-byte little-endian value
+					auto write64LE = [&](uint64_t value) {
+						uint8_t bytes[8];
+						std::memcpy(bytes, &value, 8);
+						buffer.insert(buffer.end(), bytes, bytes + 8);
+						};
+
+					// --- Write RTC fields ---
+					writeByte(pGBc_instance->GBc_state.rtc.rtcFields.rtc_S);
+					writeByte(RESET); writeByte(RESET); writeByte(RESET);
+
+					writeByte(pGBc_instance->GBc_state.rtc.rtcFields.rtc_M);
+					writeByte(RESET); writeByte(RESET); writeByte(RESET);
+
+					writeByte(pGBc_instance->GBc_state.rtc.rtcFields.rtc_H);
+					writeByte(RESET); writeByte(RESET); writeByte(RESET);
+
+					writeByte(pGBc_instance->GBc_state.rtc.rtcFields.rtc_DL);
+					writeByte(RESET); writeByte(RESET); writeByte(RESET);
+
+					writeByte(pGBc_instance->GBc_state.rtc.rtcFields.rtc_DH.rtcDHMemory);
+					writeByte(RESET); writeByte(RESET); writeByte(RESET);
+
+					// 20 bytes written
+
+					// --- Write latched RTC fields ---
+					writeByte(pGBc_instance->GBc_state.rtcLatched.rtcFields.rtc_S);
+					writeByte(RESET); writeByte(RESET); writeByte(RESET);
+
+					writeByte(pGBc_instance->GBc_state.rtcLatched.rtcFields.rtc_M);
+					writeByte(RESET); writeByte(RESET); writeByte(RESET);
+
+					writeByte(pGBc_instance->GBc_state.rtcLatched.rtcFields.rtc_H);
+					writeByte(RESET); writeByte(RESET); writeByte(RESET);
+
+					writeByte(pGBc_instance->GBc_state.rtcLatched.rtcFields.rtc_DL);
+					writeByte(RESET); writeByte(RESET); writeByte(RESET);
+
+					writeByte(pGBc_instance->GBc_state.rtcLatched.rtcFields.rtc_DH.rtcDHMemory);
+					writeByte(RESET); writeByte(RESET); writeByte(RESET);
+
+					// Now 40 bytes total
+
+					// --- Write 8-byte Unix timestamp (little endian) ---
+					uint64_t unixTS = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count());
+					write64LE(unixTS); // Now total is 48 bytes
+
+					// Final write
+					outSRAM.write(reinterpret_cast<const char*>(buffer.data()), buffer.size());
+				}
+				else if (isHUC3())
+				{
+					// Format: 128 bytes rtcMem + 1 byte rtcSeconds + 8 bytes unix timestamp = 137 bytes
+					auto& rtc = pGBc_emuStatus->huc3Rtc;
+
+					outSRAM.write(reinterpret_cast<const char*>(rtc.rtcMem), sizeof(rtc.rtcMem));
+					outSRAM.write(reinterpret_cast<const char*>(&rtc.rtcSeconds), ONE);
+
+					uint64_t unixTS = static_cast<uint64_t>(
+						std::chrono::duration_cast<std::chrono::seconds>(
+							std::chrono::system_clock::now().time_since_epoch()
+						).count());
+					outSRAM.write(reinterpret_cast<const char*>(&unixTS), sizeof(unixTS));
+				}
+			}
+
+			outSRAM.flush();
 		}
 
-		// Refer to https://bgb.bircd.org/rtcsave.html
-		constexpr size_t RTC_DUMP_SIZE = 48;
-
-		std::vector<uint8_t> buffer;
-		buffer.reserve(RTC_DUMP_SIZE); // Optional, avoid reallocations
-
-		// Helper to write a single byte
-		auto writeByte = [&](uint8_t value) {
-			buffer.push_back(value);
-			};
-
-		// Helper to write 8-byte little-endian value
-		auto write64LE = [&](uint64_t value) {
-			uint8_t bytes[8];
-			std::memcpy(bytes, &value, 8);
-			buffer.insert(buffer.end(), bytes, bytes + 8);
-			};
-
-		// --- Write RTC fields ---
-		writeByte(pGBc_instance->GBc_state.rtc.rtcFields.rtc_S);
-		writeByte(RESET); writeByte(RESET); writeByte(RESET);
-
-		writeByte(pGBc_instance->GBc_state.rtc.rtcFields.rtc_M);
-		writeByte(RESET); writeByte(RESET); writeByte(RESET);
-
-		writeByte(pGBc_instance->GBc_state.rtc.rtcFields.rtc_H);
-		writeByte(RESET); writeByte(RESET); writeByte(RESET);
-
-		writeByte(pGBc_instance->GBc_state.rtc.rtcFields.rtc_DL);
-		writeByte(RESET); writeByte(RESET); writeByte(RESET);
-
-		writeByte(pGBc_instance->GBc_state.rtc.rtcFields.rtc_DH.rtcDHMemory);
-		writeByte(RESET); writeByte(RESET); writeByte(RESET);
-
-		// 20 bytes written
-
-		// --- Write latched RTC fields ---
-		writeByte(pGBc_instance->GBc_state.rtcLatched.rtcFields.rtc_S);
-		writeByte(RESET); writeByte(RESET); writeByte(RESET);
-
-		writeByte(pGBc_instance->GBc_state.rtcLatched.rtcFields.rtc_M);
-		writeByte(RESET); writeByte(RESET); writeByte(RESET);
-
-		writeByte(pGBc_instance->GBc_state.rtcLatched.rtcFields.rtc_H);
-		writeByte(RESET); writeByte(RESET); writeByte(RESET);
-
-		writeByte(pGBc_instance->GBc_state.rtcLatched.rtcFields.rtc_DL);
-		writeByte(RESET); writeByte(RESET); writeByte(RESET);
-
-		writeByte(pGBc_instance->GBc_state.rtcLatched.rtcFields.rtc_DH.rtcDHMemory);
-		writeByte(RESET); writeByte(RESET); writeByte(RESET);
-		
-		// Now 40 bytes total
-
-		// --- Write 8-byte Unix timestamp (little endian) ---
-		uint64_t unixTS = static_cast<uint64_t>(
-			std::chrono::duration_cast<std::chrono::seconds>(
-				std::chrono::system_clock::now().time_since_epoch()
-			).count()
-			);
-		write64LE(unixTS); // Now total is 48 bytes
-
-		// Final write
-		outSRAM.write(reinterpret_cast<const char*>(buffer.data()), buffer.size());
-
-		outSRAM.flush();
+		outSRAM.close();
 	}
-
-	outSRAM.close();
 
 	// reset globals
 
@@ -7646,7 +7880,7 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 				e.eepromCS = NO;
 				e.eepromCLK = NO;
 				e.eepromDI = NO;
-				e.eepromDO = NO;
+				e.eepromDO = YES;
 
 				// EEPROM logic state
 				e.eepromWriteEnabled = NO;   // 93LC56 powers on write-disabled (EWDS state)
@@ -7659,6 +7893,11 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 					pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[0],
 					0xFF,
 					0x100); // 256 bytes
+			}
+
+			if (isHUC3())
+			{
+				std::memset(&pGBc_emuStatus->huc3Rtc, RESET, sizeof(pGBc_emuStatus->huc3Rtc));
 			}
 
 			// disable ram banking for now
@@ -7681,151 +7920,272 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 
 			pAbsolute_GBc_instance->absolute_GBc_state.aboutRom.isRomLoaded = true;
 
-			// load SRAM + RTC (if applicable)
-
-			std::string saveFileNameForThisROM = getSaveFileName(
-				pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_buffer
-				, sizeof(pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_buffer)
-			);
-
-			saveFileNameForThisROM = _SAVE_LOCATION + "\\" + saveFileNameForThisROM;
-
-			INFO("Attempting to load %s", saveFileNameForThisROM.c_str());
-
-			std::ifstream inSRAM(saveFileNameForThisROM.c_str(), std::ios::in | std::ios_base::binary);
-
-			uint32_t sizeOfRAMSlot = 0x2000;
-			uint8_t numberOfRAMSlots = ZERO;
-
 			// Needed for Initial D Gaiden (Japan) (SGB Enhanced).gb, otherwise game wrongly detects a save file and crashes
 			memset(pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks, 0xFF, sizeof(pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks));
 
-			if (inSRAM.fail() == false)
-			{
-				numberOfRAMSlots = getNumberOfRAMBanksUsed();
-
-				for (uint32_t ii = ZERO; ii < numberOfRAMSlots; ii++)
-				{
-					for (uint32_t jj = ZERO; jj < sizeOfRAMSlot; jj++)
-					{
-						BYTE ramByte = ZERO;
-						inSRAM.read(reinterpret_cast<char*> (&ramByte), ONE);
-						pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[ii][jj] = ramByte;
-					}
-				}
-			}
+			// load SRAM + RTC (if applicable)
 
 			BYTE cartridgeType = pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_fields.cartridgeType;
-			if (cartridgeType == 0x0F /* MBC3+TIMER+BATTERY* / || cartridgeType == 0x10 /* MBC3+TIMER+RAM+BATTERY 2 */)
+
+			switch (cartridgeType)
 			{
-				pGBc_emuStatus->isRTCAvailableInMBC3 = YES;
+			case 0x03: // MBC1+RAM+BATTERY
+			case 0x06: // MBC2+BATTERY
+			case 0x09: // ROM+RAM+BATTERY
+			case 0x0D: // MMM01+RAM+BATTERY
+			case 0x0F: // MBC3+TIMER+BATTERY
+			case 0x10: // MBC3+TIMER+RAM+BATTERY
+			case 0x13: // MBC3+RAM+BATTERY
+			case 0x1B: // MBC5+RAM+BATTERY
+			case 0x1E: // MBC5+RUMBLE+RAM+BATTERY
+			case 0x22: // MBC7+SENSOR+RUMBLE+RAM+BATTERY
+			case 0xFD: // BANDAI TAMA5 (has battery-backed features)
+			case 0xFE: // HuC3 (RTC -> battery-backed)
+			case 0xFF: // HuC1+RAM+BATTERY
+				pGBc_emuStatus->isBatteryAvailable = YES;
+				BREAK;
+			default:
+				pGBc_emuStatus->isBatteryAvailable = NO;
+				BREAK;
+			}
+
+			// MBC3+TIMER+BATTERY or MBC3+TIMER+RAM+BATTERY 2 or HuC3
+			if (cartridgeType == 0x0F || cartridgeType == 0x10 || cartridgeType == 0xFE)
+			{
+				pGBc_emuStatus->isRTCAvailable = YES;
 			}
 			else
 			{
-				pGBc_emuStatus->isRTCAvailableInMBC3 = NO;
+				pGBc_emuStatus->isRTCAvailable = NO;
 			}
 
-			if (isRTCAvailableInMBC3() == YES)
+			switch (cartridgeType)
 			{
-				// By this point, we would have read 8192 (0x2000) bytes, so the remaining bytes is RTC data
+			case 0x02: // MBC1+RAM
+			case 0x03: // MBC1+RAM+BATTERY
+			case 0x06: // MBC2+BATTERY
+			case 0x08: // ROM+RAM
+			case 0x09: // ROM+RAM+BATTERY
+			case 0x0C: // MMM01+RAM
+			case 0x0D: // MMM01+RAM+BATTERY
+			case 0x10: // MBC3+TIMER+RAM+BATTERY
+			case 0x12: // MBC3+RAM
+			case 0x13: // MBC3+RAM+BATTERY
+			case 0x1A: // MBC5+RAM
+			case 0x1B: // MBC5+RAM+BATTERY
+			case 0x1D: // MBC5+RUMBLE+RAM
+			case 0x1E: // MBC5+RUMBLE+RAM+BATTERY
+			case 0x22: // MBC7+SENSOR+RUMBLE+RAM+BATTERY
+			case 0xFE: // HuC3
+			case 0xFF: // HuC1+RAM+BATTERY
+				pGBc_emuStatus->isCartRAMAvailable = YES;
+				BREAK;
+			default:
+				pGBc_emuStatus->isCartRAMAvailable = NO;
+				BREAK;
+			}
 
-				constexpr size_t RTC_DUMP_SIZE = 48;
-				std::vector<uint8_t> buffer(RTC_DUMP_SIZE);
+			if (isBatteryAvailable())
+			{
+				std::string saveFileNameForThisROM = getSaveFileName(
+					pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_buffer
+					, sizeof(pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_buffer)
+				);
 
-				// Read entire RTC block from file/stream
-				inSRAM.read(reinterpret_cast<char*>(buffer.data()), RTC_DUMP_SIZE);
+				saveFileNameForThisROM = _SAVE_LOCATION + "\\" + saveFileNameForThisROM;
 
-				inSRAM.close();
+				INFO("Attempting to load %s", saveFileNameForThisROM.c_str());
 
-				// Offset tracker
-				size_t offset = 0;
+				std::ifstream inSRAM(saveFileNameForThisROM.c_str(), std::ios::in | std::ios_base::binary);
 
-				// Helper to read 1 byte from buffer
-				auto readByte = [&]() -> uint8_t
-					{
-						RETURN buffer[offset++];
-					};
-
-				// Helper to skip 3 unused bytes
-				auto skipPadding3 = [&]()
-					{
-						offset += 3;
-					};
-
-				// Helper to read 8-byte little-endian uint64_t
-				auto read64LE = [&]() -> uint64_t
-					{
-						uint64_t result;
-						std::memcpy(&result, &buffer[offset], 8);
-						offset += 8;
-						RETURN result;
-					};
-
-				// --- Restore Non-Latched RTC Fields ---
-				pGBc_instance->GBc_state.rtc.rtcFields.rtc_S = readByte(); skipPadding3();
-				pGBc_instance->GBc_state.rtc.rtcFields.rtc_M = readByte(); skipPadding3();
-				pGBc_instance->GBc_state.rtc.rtcFields.rtc_H = readByte(); skipPadding3();
-				pGBc_instance->GBc_state.rtc.rtcFields.rtc_DL = readByte(); skipPadding3();
-				pGBc_instance->GBc_state.rtc.rtcFields.rtc_DH.rtcDHMemory = readByte(); skipPadding3();
-
-				// --- Restore Latched RTC Fields ---
-				pGBc_instance->GBc_state.rtcLatched.rtcFields.rtc_S = readByte(); skipPadding3();
-				pGBc_instance->GBc_state.rtcLatched.rtcFields.rtc_M = readByte(); skipPadding3();
-				pGBc_instance->GBc_state.rtcLatched.rtcFields.rtc_H = readByte(); skipPadding3();
-				pGBc_instance->GBc_state.rtcLatched.rtcFields.rtc_DL = readByte(); skipPadding3();
-				pGBc_instance->GBc_state.rtcLatched.rtcFields.rtc_DH.rtcDHMemory = readByte(); skipPadding3();
-
-				// --- Read 8-byte timestamp ---
-				uint64_t unixSTS = read64LE();
-
-				// Get current time in seconds
-				uint64_t unixCTS = static_cast<uint64_t>(
-					std::chrono::duration_cast<std::chrono::seconds>(
-						std::chrono::system_clock::now().time_since_epoch()
-					).count()
-					);
-
-				// Get diff
-				auto totalSeconds = unixCTS - unixSTS;
-
-				pGBc_instance->GBc_state.rtc.rtcFields.rtc_S += totalSeconds % 60;
-				pGBc_instance->GBc_state.rtc.rtcFields.rtc_M += (totalSeconds / 60) % 60;
-				pGBc_instance->GBc_state.rtc.rtcFields.rtc_H += (totalSeconds / 3600) % 24;
-				auto days = totalSeconds / 86400;
-
-				if (pGBc_instance->GBc_state.rtc.rtcFields.rtc_S >= 60)
+				if (isCartRAMAvailable() == YES)
 				{
-					pGBc_instance->GBc_state.rtc.rtcFields.rtc_S -= 60;
-					pGBc_instance->GBc_state.rtc.rtcFields.rtc_M++;
-				}
-				if (pGBc_instance->GBc_state.rtc.rtcFields.rtc_M >= 60)
-				{
-					pGBc_instance->GBc_state.rtc.rtcFields.rtc_M -= 60;
-					pGBc_instance->GBc_state.rtc.rtcFields.rtc_H++;
-				}
-				if (pGBc_instance->GBc_state.rtc.rtcFields.rtc_H >= 24)
-				{
-					pGBc_instance->GBc_state.rtc.rtcFields.rtc_H -= 24;
-					days++;
-				}
-				while (days)
-				{
-					++pGBc_instance->GBc_state.rtc.rtcFields.rtc_DL;
+					uint32_t sizeOfRAMSlot = 0x2000;
+					uint8_t numberOfRAMSlots = ZERO;
 
-					// If DL overflows
-					if (pGBc_instance->GBc_state.rtc.rtcFields.rtc_DL == RESET)
+					if (isMBC2())
 					{
-						if (pGBc_instance->GBc_state.rtc.rtcFields.rtc_DH.rtcDHFields.DAYCOUNTER_MSB)
+						sizeOfRAMSlot = 0x200;
+					}
+					else if (isMBC7())
+					{
+						sizeOfRAMSlot = 0x100;
+					}
+
+					if (inSRAM.fail() == false)
+					{
+						numberOfRAMSlots = getNumberOfRAMBanksUsed();
+
+						for (uint32_t ii = ZERO; ii < numberOfRAMSlots; ii++)
 						{
-							pGBc_instance->GBc_state.rtc.rtcFields.rtc_DH.rtcDHFields.DAYCOUNTER_MSB = RESET;
-							pGBc_instance->GBc_state.rtc.rtcFields.rtc_DH.rtcDHFields.DAYCOUNTER_CARRY = SET;
-						}
-						else
-						{
-							pGBc_instance->GBc_state.rtc.rtcFields.rtc_DH.rtcDHFields.DAYCOUNTER_MSB = SET;
+							for (uint32_t jj = ZERO; jj < sizeOfRAMSlot; jj++)
+							{
+								BYTE ramByte = ZERO;
+								inSRAM.read(reinterpret_cast<char*>(&ramByte), ONE);
+								pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[ii][jj] = ramByte;
+							}
 						}
 					}
-					--days;
+				}
+
+				if (isRTCAvailable() == YES)
+				{
+					if (isMBC3())
+					{
+						// By this point, we would have read 8192 (0x2000) bytes, so the remaining bytes is RTC data
+
+						constexpr size_t RTC_DUMP_SIZE = 48;
+						std::vector<uint8_t> buffer(RTC_DUMP_SIZE);
+
+						// Read entire RTC block from file/stream
+						inSRAM.read(reinterpret_cast<char*>(buffer.data()), RTC_DUMP_SIZE);
+
+						inSRAM.close();
+
+						// Offset tracker
+						size_t offset = 0;
+
+						// Helper to read 1 byte from buffer
+						auto readByte = [&]() -> uint8_t
+							{
+								RETURN buffer[offset++];
+							};
+
+						// Helper to skip 3 unused bytes
+						auto skipPadding3 = [&]()
+							{
+								offset += 3;
+							};
+
+						// Helper to read 8-byte little-endian uint64_t
+						auto read64LE = [&]() -> uint64_t
+							{
+								uint64_t result;
+								std::memcpy(&result, &buffer[offset], 8);
+								offset += 8;
+								RETURN result;
+							};
+
+						// --- Restore Non-Latched RTC Fields ---
+						pGBc_instance->GBc_state.rtc.rtcFields.rtc_S = readByte(); skipPadding3();
+						pGBc_instance->GBc_state.rtc.rtcFields.rtc_M = readByte(); skipPadding3();
+						pGBc_instance->GBc_state.rtc.rtcFields.rtc_H = readByte(); skipPadding3();
+						pGBc_instance->GBc_state.rtc.rtcFields.rtc_DL = readByte(); skipPadding3();
+						pGBc_instance->GBc_state.rtc.rtcFields.rtc_DH.rtcDHMemory = readByte(); skipPadding3();
+
+						// --- Restore Latched RTC Fields ---
+						pGBc_instance->GBc_state.rtcLatched.rtcFields.rtc_S = readByte(); skipPadding3();
+						pGBc_instance->GBc_state.rtcLatched.rtcFields.rtc_M = readByte(); skipPadding3();
+						pGBc_instance->GBc_state.rtcLatched.rtcFields.rtc_H = readByte(); skipPadding3();
+						pGBc_instance->GBc_state.rtcLatched.rtcFields.rtc_DL = readByte(); skipPadding3();
+						pGBc_instance->GBc_state.rtcLatched.rtcFields.rtc_DH.rtcDHMemory = readByte(); skipPadding3();
+
+						// --- Read 8-byte timestamp ---
+						uint64_t unixSTS = read64LE();
+
+						// Get current time in seconds
+						uint64_t unixCTS = static_cast<uint64_t>(
+							std::chrono::duration_cast<std::chrono::seconds>(
+								std::chrono::system_clock::now().time_since_epoch()
+							).count()
+							);
+
+						// Get diff
+						auto totalSeconds = unixCTS - unixSTS;
+
+						pGBc_instance->GBc_state.rtc.rtcFields.rtc_S += totalSeconds % 60;
+						pGBc_instance->GBc_state.rtc.rtcFields.rtc_M += (totalSeconds / 60) % 60;
+						pGBc_instance->GBc_state.rtc.rtcFields.rtc_H += (totalSeconds / 3600) % 24;
+						auto days = totalSeconds / 86400;
+
+						if (pGBc_instance->GBc_state.rtc.rtcFields.rtc_S >= 60)
+						{
+							pGBc_instance->GBc_state.rtc.rtcFields.rtc_S -= 60;
+							pGBc_instance->GBc_state.rtc.rtcFields.rtc_M++;
+						}
+						if (pGBc_instance->GBc_state.rtc.rtcFields.rtc_M >= 60)
+						{
+							pGBc_instance->GBc_state.rtc.rtcFields.rtc_M -= 60;
+							pGBc_instance->GBc_state.rtc.rtcFields.rtc_H++;
+						}
+						if (pGBc_instance->GBc_state.rtc.rtcFields.rtc_H >= 24)
+						{
+							pGBc_instance->GBc_state.rtc.rtcFields.rtc_H -= 24;
+							days++;
+						}
+						while (days)
+						{
+							++pGBc_instance->GBc_state.rtc.rtcFields.rtc_DL;
+
+							// If DL overflows
+							if (pGBc_instance->GBc_state.rtc.rtcFields.rtc_DL == RESET)
+							{
+								if (pGBc_instance->GBc_state.rtc.rtcFields.rtc_DH.rtcDHFields.DAYCOUNTER_MSB)
+								{
+									pGBc_instance->GBc_state.rtc.rtcFields.rtc_DH.rtcDHFields.DAYCOUNTER_MSB = RESET;
+									pGBc_instance->GBc_state.rtc.rtcFields.rtc_DH.rtcDHFields.DAYCOUNTER_CARRY = SET;
+								}
+								else
+								{
+									pGBc_instance->GBc_state.rtc.rtcFields.rtc_DH.rtcDHFields.DAYCOUNTER_MSB = SET;
+								}
+							}
+							--days;
+						}
+					}
+					else if (isHUC3())
+					{
+						auto& rtc = pGBc_emuStatus->huc3Rtc;
+
+						constexpr size_t HUC3_RTC_DUMP_SIZE = 128 + 1 + 8; // rtcMem + rtcSeconds + timestamp
+						std::vector<uint8_t> buffer(HUC3_RTC_DUMP_SIZE);
+
+						inSRAM.read(reinterpret_cast<char*>(buffer.data()), HUC3_RTC_DUMP_SIZE);
+
+						if (inSRAM.gcount() == HUC3_RTC_DUMP_SIZE)
+						{
+							// Restore rtcMem
+							memcpy(rtc.rtcMem, buffer.data(), 0x80);
+
+							// Restore rtcSeconds
+							rtc.rtcSeconds = buffer[0x80];
+
+							// Read saved unix timestamp
+							uint64_t unixSTS = 0;
+							std::memcpy(&unixSTS, &buffer[0x81], 8);
+
+							// Compute elapsed seconds since save
+							uint64_t unixCTS = static_cast<uint64_t>(
+								std::chrono::duration_cast<std::chrono::seconds>(
+									std::chrono::system_clock::now().time_since_epoch()
+								).count());
+
+							uint64_t elapsed = (unixCTS > unixSTS) ? (unixCTS - unixSTS) : 0;
+
+							// Apply elapsed time to live counters ($10–$15) + rtcSeconds
+							uint16_t minutes = ((uint16_t)rtc.rtcMem[0x10] << 8)
+								| ((uint16_t)rtc.rtcMem[0x11] << 4)
+								| rtc.rtcMem[0x12];
+							uint16_t days = ((uint16_t)rtc.rtcMem[0x13] << 8)
+								| ((uint16_t)rtc.rtcMem[0x14] << 4)
+								| rtc.rtcMem[0x15];
+
+							// Add elapsed seconds
+							uint64_t totalSeconds = (uint64_t)days * 86400 + (uint64_t)minutes * 60 + rtc.rtcSeconds + elapsed;
+
+							rtc.rtcSeconds = (BYTE)(totalSeconds % 60);
+							uint64_t totalMinutes = totalSeconds / 60;
+							minutes = (uint16_t)(totalMinutes % 1440);
+							days = (uint16_t)((totalMinutes / 1440) & 0xFFF);
+
+							rtc.rtcMem[0x10] = (minutes >> 8) & 0x0F;
+							rtc.rtcMem[0x11] = (minutes >> 4) & 0x0F;
+							rtc.rtcMem[0x12] = (minutes >> 0) & 0x0F;
+							rtc.rtcMem[0x13] = (days >> 8) & 0x0F;
+							rtc.rtcMem[0x14] = (days >> 4) & 0x0F;
+							rtc.rtcMem[0x15] = (days >> 0) & 0x0F;
+						}
+					}
 				}
 			}
 		}
@@ -7921,13 +8281,22 @@ void GBc_t::loadQuirks()
 			std::cout << ex.what() << std::endl;
 		}
 
-		_ENABLE_AUDIO_HPF = to_bool(pt.get<std::string>("gb-gbc._enable_audio_hpf"));
+		_ENABLE_AUDIO_HPF = to_bool(pt.get<std::string>("gb-gbc._enable_audio_hpf", _ENABLE_AUDIO_HPF ? "true" : "false"));
 
 		auto currentPaletteID = pGBc_instance->GBc_state.gb_palette;
-		currEnGbPalette = configToGbPaletteID.at(pt.get<std::string>("gb-gbc._force_gb_palette"));
+		auto gbPaletteStr = pt.get<std::string>("gb-gbc._force_gb_palette", "");
+		if (!gbPaletteStr.empty() && configToGbPaletteID.count(gbPaletteStr))
+		{
+			currEnGbPalette = configToGbPaletteID.at(gbPaletteStr);
+		}
 		pGBc_instance->GBc_state.gb_palette = currEnGbPalette;
+
 		auto colorCorrectionCurrentStatus = pGBc_instance->GBc_state.gbc_palette;
-		currEnGbcPalette = ((to_bool(pt.get<std::string>("gb-gbc._enable_cgb_color_correction")) == YES) ? PALETTE_ID::PALETTE_2 : PALETTE_ID::PALETTE_1); // Palette 2 is with color correction enabled
+		auto cgbCorrStr = pt.get<std::string>("gb-gbc._enable_cgb_color_correction", "");
+		if (!cgbCorrStr.empty())
+		{
+			currEnGbcPalette = (to_bool(cgbCorrStr) == YES) ? PALETTE_ID::PALETTE_2 : PALETTE_ID::PALETTE_1;
+		}
 		pGBc_instance->GBc_state.gbc_palette = currEnGbcPalette;
 
 		if ((pGBc_instance->GBc_state.gb_palette != currentPaletteID)
@@ -8490,6 +8859,52 @@ byte GBc_t::readRawMemory(uint16_t address
 				}
 			}
 
+			if (isMBC7() && isRAMBankEnabled()) MASQ_UNLIKELY
+			{
+				auto& e = pGBc_emuStatus->mbc7Regs;
+
+				switch (address & 0xF0F0)
+				{
+				case 0xA020:
+				{
+					RETURN e.accX.fields.ax2xAccXLo;
+				}
+				case 0xA030:
+				{
+					RETURN e.accX.fields.ax3xAccXHi;
+				}
+				case 0xA040:
+				{
+					RETURN e.accY.fields.ax4xAccYLo;
+				}
+				case 0xA050:
+				{
+					RETURN e.accY.fields.ax5xAccYHi;
+				}
+				case 0xA060:
+				{
+					RETURN e.accZ.fields.ax6xAccZLo;
+				}
+				case 0xA070:
+				{
+					RETURN e.accZ.fields.ax7xAccZHi;
+				}
+				case 0xA080:
+				{
+					RETURN(uint8_t)(
+						((e.eepromDO ? 1u : 0u)) |  // bit 0: DO
+						((e.eepromDI ? 1u : 0u) << 1) |  // bit 1: DI (echoed back)
+						((e.eepromCLK ? 1u : 0u) << 6) |  // bit 6: CLK (echoed back)
+						((e.eepromCS ? 1u : 0u) << 7)    // bit 7: CS (echoed back)
+						);
+				}
+				default:
+				{
+					RETURN 0xFF;
+				}
+				}
+			}
+
 			address -= 0xA000;
 
 			// Refer 13.3 of https://gekkio.fi/files/gb-docs/gbctr.pdf
@@ -8507,63 +8922,47 @@ byte GBc_t::readRawMemory(uint16_t address
 					&&
 					((BYTE)(other1 & 0x0F) == (BYTE)(getRAMBankNumber())))
 				{
-					RETURN TO_UINT8(modedData);
+					BYTE data = TO_UINT8(modedData);
+					if (isHUC3()) MASQ_UNLIKELY data |= 0x80;
+					RETURN TO_UINT8(data);
 				}
 				else
 				{
-					if (isMBC7()) MASQ_UNLIKELY
-					{
-						auto& e = pGBc_emuStatus->mbc7Regs;
-
-						switch (address & 0xF0F0)
-						{
-						case 0xA020:
-						{
-							RETURN e.accX.fields.ax2xAccXLo;
-						}
-						case 0xA030:
-						{
-							RETURN e.accX.fields.ax3xAccXHi;
-						}
-						case 0xA040:
-						{
-							RETURN e.accY.fields.ax4xAccYLo;
-						}
-						case 0xA050:
-						{
-							RETURN e.accY.fields.ax5xAccYHi;
-						}
-						case 0xA060:
-						{
-							RETURN e.accZ.fields.ax6xAccZLo;
-						}
-						case 0xA070:
-						{
-							RETURN e.accZ.fields.ax7xAccZHi;
-						}
-						case 0xA080:
-						{
-							RETURN(uint8_t)(
-								((e.eepromDO ? 1u : 0u)) |  // bit 0: DO
-								((e.eepromDI ? 1u : 0u) << 1) |  // bit 1: DI (echoed back)
-								((e.eepromCLK ? 1u : 0u) << 6) |  // bit 6: CLK (echoed back)
-								((e.eepromCS ? 1u : 0u) << 7)    // bit 7: CS (echoed back)
-								);
-						}
-						default:
-						{
-							RETURN 0xFF;
-						}
-						}
-					}
-					else
-					{
-						RETURN pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[getRAMBankNumber()][address];
-					}
+					// All 8 bits are read properly unlike what pandocs mentions; needed for the HUC3 games
+					RETURN pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[getRAMBankNumber()][address];
 				}
 			}
 			else
 			{
+				if (isHUC1()) MASQ_UNLIKELY
+				{
+					RETURN pGBc_emuStatus->huc1IrSignalRx? 0xC1 : 0xC0;
+				}
+				else if (isHUC3()) MASQ_UNLIKELY
+				{
+					switch (pGBc_emuStatus->huc3Mode)
+					{
+
+					case HUC3_MODES::RTC_R:
+					{
+						BYTE data = ((pGBc_emuStatus->huc3Rtc.command << FOUR) & 0x70) | (pGBc_emuStatus->huc3Rtc.result & 0x0F);
+						data |= 0x80;
+						RETURN data;
+					}
+					case HUC3_MODES::RTC_RW:
+					{
+						RETURN 0x80 | 0x01; // Always ready
+					}
+					case HUC3_MODES::IR:
+					{
+						RETURN pGBc_emuStatus->huc3IrSignalRx ? 0xC1 : 0xC0;
+					}
+					default:
+					{
+						RETURN 0xFF;
+					}
+					}
+				}
 				WARN("RAM Banking is not enabled!");
 				RETURN 0xFF;
 			}
@@ -9348,6 +9747,123 @@ byte GBc_t::readRawMemory(uint16_t address
 	}
 }
 
+// Refer https://gbdev.gg8.se/forums/viewtopic.php?id=744
+void GBc_t::executeHUC3ExtendedCommand()
+{
+	auto& rtc = pGBc_emuStatus->huc3Rtc;
+	switch (rtc.argument)
+	{
+	case 0x0: // Copy live counters ($10–$15) -> staging ($00–$06)
+	{
+		for (int i = 0; i < 3; i++) rtc.rtcMem[i] = rtc.rtcMem[0x10 + i]; // minutes LSN-first
+		for (int i = 0; i < 3; i++) rtc.rtcMem[0x03 + i] = rtc.rtcMem[0x13 + i]; // days LSN-first
+		rtc.rtcMem[0x06] = rtc.rtcSeconds & 0x0F;
+		BREAK;
+	}
+	case 0x1: // Copy staging ($00–$06) -> live counters ($10–$15), adjust event time
+	{
+		if (rtc.rtcMem[0x06] != 1 || (rtc.rtcMem[0x07] & 0x01))
+		{
+			BREAK;
+		}
+
+		// Capture old time (LSN at lower index)
+		uint16_t oldMinutes = ((uint16_t)rtc.rtcMem[0x12] << 8) | ((uint16_t)rtc.rtcMem[0x11] << 4) | rtc.rtcMem[0x10];
+		uint16_t oldDays = ((uint16_t)rtc.rtcMem[0x15] << 8) | ((uint16_t)rtc.rtcMem[0x14] << 4) | rtc.rtcMem[0x13];
+
+		// Apply staging to live
+		for (int i = 0; i < 3; i++) rtc.rtcMem[0x10 + i] = rtc.rtcMem[i];
+		for (int i = 0; i < 3; i++) rtc.rtcMem[0x13 + i] = rtc.rtcMem[0x03 + i];
+		rtc.rtcSeconds = rtc.rtcMem[0x06] & 0x0F;
+
+		// New time (LSN at lower index)
+		uint16_t newMinutes = ((uint16_t)rtc.rtcMem[0x12] << 8) | ((uint16_t)rtc.rtcMem[0x11] << 4) | rtc.rtcMem[0x10];
+		uint16_t newDays = ((uint16_t)rtc.rtcMem[0x15] << 8) | ((uint16_t)rtc.rtcMem[0x14] << 4) | rtc.rtcMem[0x13];
+
+		// Delta in total minutes
+		int32_t delta = ((int32_t)newDays * 1440 + newMinutes) - ((int32_t)oldDays * 1440 + oldMinutes);
+
+		// Adjust event time at $58–$5D by same delta (LSN at lower index)
+		uint16_t evtMin = ((uint16_t)rtc.rtcMem[0x5A] << 8) | ((uint16_t)rtc.rtcMem[0x59] << 4) | rtc.rtcMem[0x58];
+		uint16_t evtDays = ((uint16_t)rtc.rtcMem[0x5D] << 8) | ((uint16_t)rtc.rtcMem[0x5C] << 4) | rtc.rtcMem[0x5B];
+
+		int32_t evtTotal = (int32_t)evtDays * 1440 + evtMin + delta;
+		if (evtTotal < 0)
+		{
+			evtTotal = 0;
+		}
+
+		uint16_t newEvtDays = (uint16_t)(evtTotal / 1440) & 0xFFF;
+		uint16_t newEvtMin = (uint16_t)(evtTotal % 1440);
+
+		rtc.rtcMem[0x58] = (newEvtMin >> 0) & 0x0F;
+		rtc.rtcMem[0x59] = (newEvtMin >> 4) & 0x0F;
+		rtc.rtcMem[0x5A] = (newEvtMin >> 8) & 0x0F;
+		rtc.rtcMem[0x5B] = (newEvtDays >> 0) & 0x0F;
+		rtc.rtcMem[0x5C] = (newEvtDays >> 4) & 0x0F;
+		rtc.rtcMem[0x5D] = (newEvtDays >> 8) & 0x0F;
+
+		rtc.rtcMem[0x06] = 0;
+		rtc.rtcSeconds = 0;
+		BREAK;
+	}
+	case 0x2: // Status — must return $1 or games won't start
+	{
+		rtc.result = 0x1;
+		BREAK;
+	}
+	case 0xE: // Tone generator
+	{
+		// TODO: tone generation
+		BREAK;
+	}
+	default: BREAK;
+	}
+}
+
+// Refer https://gbdev.gg8.se/forums/viewtopic.php?id=744
+void GBc_t::executeHUC3Command()
+{
+	auto& rtc = pGBc_emuStatus->huc3Rtc;
+	const BYTE idx = rtc.rtcMemIdx & 0x7F;
+
+	switch (rtc.command)
+	{
+	case 0x0: // Read, no increment
+		rtc.result = rtc.rtcMem[idx];
+		BREAK;
+	case 0x1: // Read value and increment address
+		rtc.result = rtc.rtcMem[idx];
+		rtc.rtcMemIdx = (rtc.rtcMemIdx + 1) & 0x7F;
+		BREAK;
+
+	case 0x2: // Write, no increment
+	case 0x3: // Write value and increment address
+		if (rtc.rtcMemIdx < 0x07 || rtc.rtcMemIdx > 0x1F)
+			rtc.rtcMem[idx] = rtc.argument;
+		if (rtc.command == 0x3)
+			rtc.rtcMemIdx = (rtc.rtcMemIdx + 1) & 0x7F;
+		BREAK;
+
+	case 0x4: // Set address LSN
+		rtc.rtcMemIdx = (rtc.rtcMemIdx & 0xF0) | (rtc.argument & 0x0F);
+		BREAK;
+
+	case 0x5: // Set address MSN
+		rtc.rtcMemIdx = (rtc.rtcMemIdx & 0x0F) | ((rtc.argument & 0x0F) << FOUR);
+		BREAK;
+
+	case 0x6: // Extended command — argument selects sub-command
+		executeHUC3ExtendedCommand();
+		BREAK;
+
+	default:
+	{
+		BREAK;
+	}
+	}
+}
+
 void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE source)
 {
 #if (ENABLE_SM83_SST == YES)
@@ -9493,14 +10009,14 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 			{
 				if (address <= 0x1FFF)
 				{
-					if (isMBC1() || isMBC2() || isMBC3() || isMBC5() || isMBC7())
+					if (isMBC1() || isMBC2() || isMBC3() || isMBC5() || isMBC7() || isHUC1() || isHUC3())
 					{
 						pGBc_emuStatus->dataWrittenToMBCReg0 = data;
 					}
 				}
 				else if (address <= 0x2FFF)
 				{
-					if (isMBC1() || isMBC3() || isMBC5() || isMBC7())
+					if (isMBC1() || isMBC3() || isMBC5() || isMBC7() || isHUC1() || isHUC3())
 					{
 						pGBc_emuStatus->dataWrittenToMBCReg1 = data;
 					}
@@ -9511,7 +10027,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 				}
 				else if (address <= 0x3FFF)
 				{
-					if (isMBC1() || isMBC3() || isMBC7())
+					if (isMBC1() || isMBC3() || isMBC7() || isHUC1() || isHUC3())
 					{
 						pGBc_emuStatus->dataWrittenToMBCReg1 = data;
 					}
@@ -9526,7 +10042,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 				}
 				else if (address <= 0x5FFF)
 				{
-					if (isMBC1() || isMBC3() || isMBC7())
+					if (isMBC1() || isMBC3() || isMBC7() || isHUC1() || isHUC3())
 					{
 						pGBc_emuStatus->dataWrittenToMBCReg2 = data;
 					}
@@ -9537,33 +10053,9 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 				}
 				else if (address <= 0x7FFF)
 				{
-					if (isMBC1() || isMBC3())
+					if (isMBC1() || isMBC3() || isHUC1() || isHUC3())
 					{
 						pGBc_emuStatus->dataWrittenToMBCReg3 = data;
-					}
-				}
-				else if ((address >= 0xA000) && (address <= 0xBFFF))
-				{
-					if (isMBC3())
-					{
-						pGBc_emuStatus->dataWrittenToMBCReg4 = data;
-					}
-
-					// 0xA000 - 0xAFFF
-					if (address <= 0xAFFF)
-					{
-						if (isMBC7())
-						{
-							pGBc_emuStatus->dataWrittenToMBCReg3 = data;
-						}
-					}
-					// 0xB000 - 0xBFFF
-					else
-					{
-						if (isMBC7())
-						{
-							pGBc_emuStatus->dataWrittenToMBCReg4 = data;
-						}
 					}
 				}
 			}
@@ -9571,7 +10063,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 			// --- 0x0000 - 0x1FFF : RAM/RTC enable ---
 			if (address <= 0x1FFF)
 			{
-				if (isMBC1() || isMBC2() || isMBC3() || isMBC5() || isMBC7())
+				if (isMBC1() || isMBC2() || isMBC3() || isMBC5() || isMBC7() || isHUC1() || isHUC3())
 				{
 					// MBC2 special handling
 					if (isMBC2())
@@ -9594,31 +10086,90 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 						RETURN;
 					}
 
-					// MBC1/3/5/7 RAM or RTC enable
-					if ((data & 0x0F) == 0x0A)
+					// HUC1 special handling
+					if (isHUC1())
 					{
-						enableRAMBank();
-						if (isMBC3())
+						if (data == 0x0E)
 						{
-							enableRTCAccess();
+							pGBc_emuStatus->isHuc1IrMode = YES;
+							disableRAMBank();
 						}
-						if (isMBC7()) MASQ_UNLIKELY
+						else
 						{
-							pGBc_emuStatus->isMBC7RamEn1 = YES;
+							pGBc_emuStatus->isHuc1IrMode = NO;
+							pGBc_emuStatus->huc1EnableIrTx = NO;
+							enableRAMBank();
 						}
+						RETURN;
 					}
-					else
+
+					// HUC3 special handling
+					if (isHUC3())
 					{
-						disableRAMBank();
-						if (isMBC3())
+						switch (data & 0x0F)
 						{
+						case 0x0:
+						{
+							pGBc_emuStatus->huc3Mode = HUC3_MODES::RAM_RO; 
+							enableRAMBank();  
 							disableRTCAccess();
+							BREAK;
 						}
-						if (isMBC7()) MASQ_UNLIKELY
+						case 0xA:
 						{
-							pGBc_emuStatus->isMBC7RamEn1 = NO;
+							pGBc_emuStatus->huc3Mode = HUC3_MODES::RAM_RW; 
+							enableRAMBank();  
+							disableRTCAccess();
+							BREAK;
 						}
+						case 0xB:
+						{
+							pGBc_emuStatus->huc3Mode = HUC3_MODES::RTC_W;  
+							disableRAMBank(); 
+							enableRTCAccess();
+							BREAK;
+						}
+						case 0xC:
+						{
+							pGBc_emuStatus->huc3Mode = HUC3_MODES::RTC_R;  
+							disableRAMBank(); 
+							enableRTCAccess();
+							BREAK;
+						}
+						case 0xD:
+						{
+							pGBc_emuStatus->huc3Mode = HUC3_MODES::RTC_RW; 
+							disableRAMBank(); 
+							enableRTCAccess();
+							BREAK;
+						}
+						case 0xE:
+						{
+							pGBc_emuStatus->huc3Mode = HUC3_MODES::IR;     
+							disableRAMBank(); 
+							disableRTCAccess();
+							BREAK;
+						}
+						default:
+						{
+							pGBc_emuStatus->huc3Mode = HUC3_MODES::UNKNOWN;
+							disableRAMBank(); 
+							disableRTCAccess();
+							BREAK;
+						}
+						}
+						RETURN;
 					}
+
+					// MBC1/3/5/7 RAM or RTC enable
+					const FLAG ramEnable = ((data & 0x0F) == 0x0A);
+					ramEnable ? enableRAMBank() : disableRAMBank();
+					if (isMBC3())
+					{
+						ramEnable ? enableRTCAccess() : disableRTCAccess();
+						RETURN;
+					}
+					if (isMBC7()) MASQ_UNLIKELY pGBc_emuStatus->isMBC7RamEn1 = ramEnable ? YES : NO;
 					RETURN;
 				}
 			}
@@ -9626,7 +10177,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 			// --- 0x2000 - 0x3FFF : ROM bank lower bits ---
 			else if (address <= 0x3FFF)
 			{
-				if (isMBC1() || isMBC2() || isMBC3() || isMBC5())
+				if (isMBC1() || isMBC2() || isMBC3() || isMBC5() || isMBC7() || isHUC1() || isHUC3())
 				{
 					auto ROMBankNumber = getROMBankNumber();
 
@@ -9658,11 +10209,12 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 						RETURN;
 					}
 
-					else if (isMBC3())
+					else if (isMBC3() || isMBC7() || isHUC1() || isHUC3())
 					{
-						ROMBankNumber = data & 0xFF; // MBC30 support
-						if (ROMBankNumber == ZERO) ROMBankNumber = ONE;
-						ROMBankNumber &= (getNumberOfROMBanksUsed() - ONE); // Ensure that rom bank number is within the maximum supported for the game
+						uint8_t bankMask = isMBC7() ? 0x7F : isHUC1() ? 0x3F : isHUC3() ? 0x7F : 0xFF; // MBC30 uses full 8 bits
+						ROMBankNumber = data & bankMask;
+						if (!isHUC3() && ROMBankNumber == ZERO) ROMBankNumber = ONE; // HuC3 allows bank 0
+						ROMBankNumber &= (getNumberOfROMBanksUsed() - ONE); // Clamp to ROM size
 						setROMBankNumber(ROMBankNumber);
 						RETURN;
 					}
@@ -9683,13 +10235,6 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 						setROMBankNumber(ROMBankNumber);
 						RETURN;
 					}
-
-					else if (isMBC7())
-					{
-						ROMBankNumber |= (data & 0xFF); // set the ROM bank number
-						ROMBankNumber &= (getNumberOfROMBanksUsed() - ONE); // Ensure that rom bank number is within the maximum supported for the game
-						setROMBankNumber(ROMBankNumber);
-					}
 				}
 			}
 
@@ -9706,15 +10251,14 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 					{
 						// Since we came back to ROM mode, fix the RAM bank number to 0
 						setRAMBankNumber(ZERO);
-						RETURN;
 					}
 					// set the RAM bank number
 					else
 					{
 						auto ramBankNumber = (data & 0x03) & (getNumberOfRAMBanksUsed() - ONE);
 						setRAMBankNumber(ramBankNumber);
-						RETURN;
 					}
+					RETURN;
 				}
 				// change RAM bank number or RTC register number for MBC3
 				else if (isMBC3())
@@ -9730,11 +10274,14 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 						setRTCRegisterNumber(TO_UINT8(data));
 						shouldMapRTCToExternalRAM(YES);
 					}
+
+					RETURN;
 				}
-				// set the RAM bank number for MBC5
-				else if (isMBC5())
+				// set the RAM bank number for MBC5/HUC1
+				else if (isMBC5() || isHUC1() || isHUC3())
 				{
-					auto ramBankNumber = (data & 0x0F) & (getNumberOfRAMBanksUsed() - ONE);
+					uint8_t bankMask = isMBC5() ? 0x0F : 0x03;
+					auto ramBankNumber = (data & bankMask) & (getNumberOfRAMBanksUsed() - ONE);
 					setRAMBankNumber(ramBankNumber);
 					RETURN;
 				}
@@ -9755,6 +10302,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 							pGBc_emuStatus->isMBC7RamEn2 = NO;
 						}
 					}
+					RETURN;
 				}
 			}
 
@@ -9764,7 +10312,6 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 				if (isMBC1())
 				{
 					(data & 0x01) ? setRAMModeInMBC1() : setROMModeIfMBC1();
-					RETURN;
 				}
 				// latch clock data for mbc3
 				else if (isMBC3())
@@ -9782,9 +10329,8 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 						}
 					}
 				}
+				RETURN;
 			}
-
-			RETURN;
 		}
 
 		// writing to ROM is invalid
@@ -9825,12 +10371,269 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 		// writing to banked RAM
 		if (address >= EXTERNAL_RAM_START_ADDRESS && address <= EXTERNAL_RAM_END_ADDRESS)
 		{
+			// Below if block needed for MBC block in BESS specifications
+			if (ENABLED)
+			{
+				if (isMBC3() || isHUC1() || isHUC3())
+				{
+					pGBc_emuStatus->dataWrittenToMBCReg4 = data;
+				}
+
+				// 0xA000 - 0xAFFF
+				if (address <= 0xAFFF)
+				{
+					if (isMBC7())
+					{
+						pGBc_emuStatus->dataWrittenToMBCReg3 = data;
+					}
+				}
+				// 0xB000 - 0xBFFF
+				else
+				{
+					if (isMBC7())
+					{
+						pGBc_emuStatus->dataWrittenToMBCReg4 = data;
+					}
+				}
+			}
+
 			if (isMBC3())
 			{
 				if (isRTCMappedToExternalRAM() == YES)
 				{
 					writeToRTCRegisterIfApplicable(TO_UINT8(data));
 					RETURN;
+				}
+			}
+
+			if (isHUC1() && pGBc_emuStatus->isHuc1IrMode == YES)
+			{
+				// --- 0xA000 - 0xBFFF : HuC1 ---
+				pGBc_emuStatus->huc1EnableIrTx = (pGBc_emuStatus->isHuc1IrMode == YES) ? (data == 0x01) : NO;
+				RETURN;
+			}
+			else if (isHUC3() && pGBc_emuStatus->huc3Mode != HUC3_MODES::RAM_RW)
+			{
+				// --- 0xA000 - 0xBFFF : HuC3 ---
+				switch (pGBc_emuStatus->huc3Mode)
+				{
+				case HUC3_MODES::RTC_W:
+				{
+					pGBc_emuStatus->huc3Rtc.command = (data & 0x70) >> FOUR;
+					pGBc_emuStatus->huc3Rtc.argument = (data & 0x0F);
+					RETURN;
+				}
+				case HUC3_MODES::RTC_RW:
+				{
+					if ((data & 0x01) == RESET)
+					{
+						executeHUC3Command();
+					}
+					RETURN;
+				}
+				case HUC3_MODES::IR:
+				{
+					pGBc_emuStatus->huc3EnableIrTx = (data == 0x01) ? YES : NO;
+					RETURN;
+				}
+				default:
+				{
+					RETURN;
+				}
+				}
+				RETURN;
+			}
+
+			if (isMBC7() && isRAMBankEnabled()) MASQ_UNLIKELY
+			{
+				switch (address & 0xF0F0)
+				{
+				case 0xA000:
+				{
+					if (data == 0x55)
+					{
+						pGBc_emuStatus->mbc7Regs.accX.raw = 0x8000;
+						pGBc_emuStatus->mbc7Regs.accY.raw = 0x8000;
+						pGBc_emuStatus->mbc7Regs.accZ.raw = 0xFF00;
+						pGBc_emuStatus->mbc7Regs.isErased = YES;
+					}
+					BREAK;
+				}
+				case 0xA010:
+				{
+					if (data == 0xAA && pGBc_emuStatus->mbc7Regs.isErased == YES)
+					{
+						pGBc_emuStatus->mbc7Regs.isErased = CLEAR;
+
+						float mx, my;
+						float nmx, nmy;
+						if (getMouseRelPosIfDocked(&mx, &my, getScreenWidth(), getScreenHeight()))
+						{
+							// Clamp to GB screen bounds
+							signed x = (signed)ImMax(ImMin((int)mx, static_cast<int>(getScreenWidth())), 0);
+							signed y = (signed)ImMax(ImMin((int)my, static_cast<int>(getScreenHeight())), 0);
+							const float midx = static_cast<float>((getScreenWidth() >> TWO));
+							const float midy = static_cast<float>((getScreenHeight() >> TWO));
+
+							// Raw normalized position [-1.0, 1.0]
+							nmx = ((x - midx) / -midx);
+							nmy = ((y - midy) / -midy);
+
+							// Apply sensitivity and clamp back to [-1.0, 1.0]
+							const float sensitivity = _ACCELEROMETER_SENSITIVITY; // >1.0 = more sensitive, <1.0 = less sensitive
+							nmx = ImClamp(nmx * sensitivity, -1.0f, 1.0f);
+							nmy = ImClamp(nmy * sensitivity, -1.0f, 1.0f);
+
+							// Refer to https://gbdev.io/pandocs/MBC7.html#a000-afff---ram-registers-readwrite
+							pGBc_emuStatus->mbc7Regs.accX.raw = static_cast<uint16_t>(0x81D0 + 0x70 * nmx);
+							pGBc_emuStatus->mbc7Regs.accY.raw = static_cast<uint16_t>(0x81D0 + 0x70 * nmy);
+						}
+					}
+					BREAK;
+				}
+				case 0xA080:
+				{
+					auto& e = pGBc_emuStatus->mbc7Regs;
+
+					e.eepromCS = (data & 0x80) ? YES : NO;
+					e.eepromDI = (data & 0x02) ? YES : NO;
+
+					// If CS is asserted
+					if (e.eepromCS)
+					{
+						// Rising edge of CLK
+						if (!e.eepromCLK && (data & 0x40))
+						{
+							// Shift out read data MSB first
+							e.eepromDO = (e.eepromReadBits >> 15) & 1;
+							e.eepromReadBits <<= 1;
+							e.eepromReadBits |= 1; // fill with 1s after shifting out
+
+							if (e.eepromArgBitsLeft == 0)
+							{
+								// Shift in command bits
+								e.eepromCommand <<= 1;
+								e.eepromCommand |= e.eepromDI ? 1 : 0;
+
+								if (e.eepromCommand & 0x400) // 11 bits received (1 start + 10 command)
+								{
+									switch ((e.eepromCommand >> 6) & 0xF)
+									{
+										// READ (10 xAAAAAAA)
+									case 0x8: case 0x9: case 0xA: case 0xB:
+									{
+										e.eepromReadBits = MBC7_EEPROM_WORD(e.eepromCommand & 0x7F);
+										e.eepromCommand = 0;
+										BREAK;
+									}
+									// EWEN (0011 xxxxxx)
+									case 0x3:
+									{
+										e.eepromWriteEnabled = YES;
+										e.eepromCommand = 0;
+										BREAK;
+									}
+									// EWDS (0000 xxxxxx)
+									case 0x0:
+									{
+										e.eepromWriteEnabled = NO;
+										e.eepromCommand = 0;
+										BREAK;
+									}
+									// WRITE (01 xAAAAAAA) - need 16 more bits
+									case 0x4: case 0x5: case 0x6: case 0x7:
+									{
+										if (e.eepromWriteEnabled)
+										{
+											MBC7_EEPROM_WORD(e.eepromCommand & 0x7F) = 0x0000;
+										}
+										e.eepromArgBitsLeft = 16;
+										// Don't clear command — needed to identify WRITE vs WRAL below
+										BREAK;
+									}
+									// ERASE (11 xAAAAAAA)
+									case 0xC: case 0xD: case 0xE: case 0xF:
+									{
+										if (e.eepromWriteEnabled)
+										{
+											MBC7_EEPROM_WORD(e.eepromCommand & 0x7F) = 0xFFFF;
+											e.eepromReadBits = 0x3FFF; // settling time
+										}
+										e.eepromCommand = 0;
+										BREAK;
+									}
+									// ERAL (0010 xxxxxx)
+									case 0x2:
+									{
+										if (e.eepromWriteEnabled)
+										{
+											memset(
+												pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[0],
+												0xFF,
+												0x100); // 256 bytes
+											e.eepromReadBits = 0x00FF; // settling time
+										}
+										e.eepromCommand = 0;
+										BREAK;
+									}
+									// WRAL (0001 xxxxxx) - need 16 more bits
+									case 0x1:
+									{
+										if (e.eepromWriteEnabled)
+										{
+											memset(
+												pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[0],
+												0x00,
+												0x100);
+										}
+										e.eepromArgBitsLeft = 16;
+										// Don't clear command
+										BREAK;
+									}
+									default: BREAK;
+									}
+								}
+							}
+							else
+							{
+								// Shifting in extra data bits for WRITE or WRAL
+								e.eepromArgBitsLeft--;
+								e.eepromDO = YES; // RDY/BUSY line, high = busy
+
+								if (e.eepromDI)
+								{
+									uint16_t bit = (uint16_t)(1 << e.eepromArgBitsLeft);
+
+									if (e.eepromCommand & 0x100) // WRITE
+									{
+										MBC7_EEPROM_WORD(e.eepromCommand & 0x7F) |= bit;
+									}
+									else // WRAL
+									{
+										for (uint8_t i = 0; i < 0x7F; i++)
+										{
+											MBC7_EEPROM_WORD(i) |= bit;
+										}
+									}
+								}
+
+								if (e.eepromArgBitsLeft == 0) // Done
+								{
+									// Emulate settling time; WRITE takes longer than WRAL
+									e.eepromReadBits = (e.eepromCommand & 0x100) ? 0x00FF : 0x3FFF;
+									e.eepromCommand = 0;
+								}
+							}
+						}
+					}
+
+					e.eepromCLK = (data & 0x40) ? YES : NO;
+					BREAK;
+				}
+				default:
+				{
+					BREAK;
+				}
 				}
 			}
 
@@ -9845,197 +10648,8 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 
 			if (isRAMBankEnabled() == YES)
 			{
-				if (isMBC7()) MASQ_UNLIKELY
-				{
-					switch (address & 0xF0F0)
-					{
-					case 0xA000:
-					{
-						if (data == 0x55)
-						{
-							pGBc_emuStatus->mbc7Regs.accX.raw = 0x8000;
-							pGBc_emuStatus->mbc7Regs.accY.raw = 0x8000;
-							pGBc_emuStatus->mbc7Regs.accZ.raw = 0xFF00;
-							pGBc_emuStatus->mbc7Regs.isErased = YES;
-						}
-						BREAK;
-					}
-					case 0xA010:
-					{
-						if (data == 0xAA && pGBc_emuStatus->mbc7Regs.isErased == YES)
-						{
-							pGBc_emuStatus->mbc7Regs.isErased = CLEAR;
-
-							float mx, my;
-							float nmx, nmy;
-							if (getMouseRelPosIfDocked(&mx, &my, getScreenWidth(), getScreenHeight()))
-							{
-								// Clamp to GB screen bounds
-								signed x = (signed)ImMax(ImMin((int)mx, static_cast<int>(getScreenWidth())), 0);
-								signed y = (signed)ImMax(ImMin((int)my, static_cast<int>(getScreenHeight())), 0);
-
-								const float midx = static_cast<float>((getScreenWidth() >> TWO));
-								const float midy = static_cast<float>((getScreenHeight() >> TWO));
-
-								nmx = ((x - midx) / -midx);
-								nmy = ((y - midy) / -midy);
-
-								// Refer to https://gbdev.io/pandocs/MBC7.html#a000-afff---ram-registers-readwrite
-								pGBc_emuStatus->mbc7Regs.accX.raw = static_cast <uint16_t>(0x81D0 + 0x70 * nmx);
-								pGBc_emuStatus->mbc7Regs.accY.raw = static_cast <uint16_t>(0x81D0 + 0x70 * nmy);
-							}
-						}
-						BREAK;
-					}
-					case 0xA080:
-					{
-						auto& e = pGBc_emuStatus->mbc7Regs;
-
-						e.eepromCS = (data & 0x80) ? YES : NO;
-						e.eepromDI = (data & 0x02) ? YES : NO;
-
-						// If CS is asserted
-						if (e.eepromCS)
-						{
-							// Rising edge of CLK
-							if (!e.eepromCLK && (data & 0x40))
-							{
-								// Shift out read data MSB first
-								e.eepromDO = (e.eepromReadBits >> 15) & 1;
-								e.eepromReadBits <<= 1;
-								e.eepromReadBits |= 1; // fill with 1s after shifting out
-
-								if (e.eepromArgBitsLeft == 0)
-								{
-									// Shift in command bits
-									e.eepromCommand <<= 1;
-									e.eepromCommand |= e.eepromDI ? 1 : 0;
-
-									if (e.eepromCommand & 0x400) // 11 bits received (1 start + 10 command)
-									{
-										switch ((e.eepromCommand >> 6) & 0xF)
-										{
-											// READ (10 xAAAAAAA)
-										case 0x8: case 0x9: case 0xA: case 0xB:
-										{
-											e.eepromReadBits = MBC7_EEPROM_WORD(e.eepromCommand & 0x7F);
-											e.eepromCommand = 0;
-											BREAK;
-										}
-										// EWEN (0011 xxxxxx)
-										case 0x3:
-										{
-											e.eepromWriteEnabled = YES;
-											e.eepromCommand = 0;
-											BREAK;
-										}
-										// EWDS (0000 xxxxxx)
-										case 0x0:
-										{
-											e.eepromWriteEnabled = NO;
-											e.eepromCommand = 0;
-											BREAK;
-										}
-										// WRITE (01 xAAAAAAA) - need 16 more bits
-										case 0x4: case 0x5: case 0x6: case 0x7:
-										{
-											if (e.eepromWriteEnabled)
-											{
-												MBC7_EEPROM_WORD(e.eepromCommand & 0x7F) = 0x0000;
-											}
-											e.eepromArgBitsLeft = 16;
-											// Don't clear command — needed to identify WRITE vs WRAL below
-											BREAK;
-										}
-										// ERASE (11 xAAAAAAA)
-										case 0xC: case 0xD: case 0xE: case 0xF:
-										{
-											if (e.eepromWriteEnabled)
-											{
-												MBC7_EEPROM_WORD(e.eepromCommand & 0x7F) = 0xFFFF;
-												e.eepromReadBits = 0x3FFF; // settling time
-											}
-											e.eepromCommand = 0;
-											BREAK;
-										}
-										// ERAL (0010 xxxxxx)
-										case 0x2:
-										{
-											if (e.eepromWriteEnabled)
-											{
-												memset(
-													pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[0],
-													0xFF,
-													0x100); // 256 bytes
-												e.eepromReadBits = 0x00FF; // settling time
-											}
-											e.eepromCommand = 0;
-											BREAK;
-										}
-										// WRAL (0001 xxxxxx) - need 16 more bits
-										case 0x1:
-										{
-											if (e.eepromWriteEnabled)
-											{
-												memset(
-													pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[0],
-													0x00,
-													0x100);
-											}
-											e.eepromArgBitsLeft = 16;
-											// Don't clear command
-											BREAK;
-										}
-										default: BREAK;
-										}
-									}
-								}
-								else
-								{
-									// Shifting in extra data bits for WRITE or WRAL
-									e.eepromArgBitsLeft--;
-									e.eepromDO = YES; // RDY/BUSY line, high = busy
-
-									if (e.eepromDI)
-									{
-										uint16_t bit = (uint16_t)(1 << e.eepromArgBitsLeft);
-
-										if (e.eepromCommand & 0x100) // WRITE
-										{
-											MBC7_EEPROM_WORD(e.eepromCommand & 0x7F) |= bit;
-										}
-										else // WRAL
-										{
-											for (uint8_t i = 0; i < 0x7F; i++)
-											{
-												MBC7_EEPROM_WORD(i) |= bit;
-											}
-										}
-									}
-
-									if (e.eepromArgBitsLeft == 0) // Done
-									{
-										// Emulate settling time; WRITE takes longer than WRAL
-										e.eepromReadBits = (e.eepromCommand & 0x100) ? 0x00FF : 0x3FFF;
-										e.eepromCommand = 0;
-									}
-								}
-							}
-						}
-
-						e.eepromCLK = (data & 0x40) ? YES : NO;
-						BREAK;
-					}
-					default:
-					{
-						BREAK;
-					}
-					}
-				}
-				else
-				{
-					pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[getRAMBankNumber()][address] = data;
-				}
+				// All 8 bits are written properly unlike what pandocs mentions; needed for the HUC3 games
+				pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[getRAMBankNumber()][address] = data;
 			}
 			else
 			{
