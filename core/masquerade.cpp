@@ -2003,17 +2003,17 @@ public:
 									if (ImGui::BeginMenu("File"))
 									{
 										//ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(184, 134, 11, 255));
-										if (ImGui::BeginMenu("Open Game Of Life"))
+										if (ImGui::BeginMenu("Open Game Of Life##OpenGameOfLife"))
 										{
 											//ImGui::PopStyleColor();
-											if (ImGui::MenuItem("Create New"))
+											if (ImGui::MenuItem("Create New##CreateNew"))
 											{
 												dynamicDragNDropAndMenuSelect.push_back("dummy.gol");
 #ifdef __EMSCRIPTEN__
 												SavePersistentFSComplete = YES;
 #endif
 											}
-											if (ImGui::MenuItem("Open GOL"))
+											if (ImGui::MenuItem("Open GOL##OpenGOL"))
 											{
 												romSelect(ROM::GAME_OF_LIFE);
 											}
@@ -2024,7 +2024,7 @@ public:
 											//ImGui::PopStyleColor();
 										}
 										ImGui::Separator();
-										if (ImGui::BeginMenu("Open Chip-8/S-Chip/XO-Chip/Modern-Chip8"))
+										if (ImGui::BeginMenu("Open Chip-8/S-Chip/XO-Chip/Modern-Chip8##OpenChip-8/S-Chip/XO-Chip/Modern-Chip8"))
 										{
 											auto menuOption = [&](const char* label, const char* key)
 												{
@@ -2055,49 +2055,49 @@ public:
 											ImGui::EndMenu();
 										}
 										ImGui::Separator();
-										if (ImGui::MenuItem("Open Space Invaders"))
+										if (ImGui::MenuItem("Open Space Invaders##OpenSI"))
 										{
 											romSelect(ROM::SPACE_INVADERS);
 										}
-										if (ImGui::BeginMenu("Open Pacman/Ms Pacman"))
+										if (ImGui::BeginMenu("Open Pacman/Ms Pacman##OpenPacman"))
 										{
-											if (ImGui::MenuItem("Open Midway/Namco Pacman"))
+											if (ImGui::MenuItem("Open Midway/Namco Pacman##OpenPacmanVar"))
 											{
 												romSelect(ROM::PAC_MAN);
 											}
-											if (ImGui::MenuItem("Open Ms Pacman"))
+											if (ImGui::MenuItem("Open Ms Pacman##OpenMsPacman"))
 											{
 												romSelect(ROM::MS_PAC_MAN);
 											}
 											ImGui::EndMenu();
 										}
 										ImGui::Separator();
-										if (ImGui::MenuItem("Open NES"))
+										if (ImGui::MenuItem("Open NES##OpenNES"))
 										{
 											romSelect(ROM::NES);
 										}
-										if (ImGui::BeginMenu("Open GB/GBC"))
+										if (ImGui::BeginMenu("Open GB/GBC##OpenGB/GBC"))
 										{
-											if (ImGui::MenuItem("Open GB"))
+											if (ImGui::MenuItem("Open GB##OpenGB"))
 											{
 												romSelect(ROM::GAME_BOY);
 											}
-											if (ImGui::MenuItem("Open GBC"))
+											if (ImGui::MenuItem("Open GBC##OpenGBC"))
 											{
 												romSelect(ROM::GAME_BOY_COLOR);
 											}
 											ImGui::EndMenu();
 										}
-										if (ImGui::MenuItem("Open GBA"))
+										if (ImGui::MenuItem("Open GBA##OpenGBA"))
 										{
 											romSelect(ROM::GAME_BOY_ADVANCE);
 										}
 										ImGui::Separator();
-										if (ImGui::BeginMenu("Open Recent"))
+										if (ImGui::BeginMenu("Open Recent##OpenRecent"))
 										{
 											if (recentlyOpenedList.empty())
 											{
-												ImGui::MenuItem("Nothing to display");			
+												ImGui::MenuItem("Nothing to display##Nothingtodisplay");			
 											}
 											else
 											{
@@ -2135,7 +2135,7 @@ public:
 
 												ImGui::Separator();
 												//ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(184, 134, 11, 255));
-												if (ImGui::MenuItem("Clear the recently opened item history"))
+												if (ImGui::MenuItem("Clear the recently opened item history##ClearHistory"))
 												{
 													recentlyOpenedList.clear();
 												}
@@ -2161,7 +2161,7 @@ public:
 									{
 										if (ImGui::BeginMenu("Bios"))
 										{
-											if (ImGui::BeginMenu("GB Bios"))
+											if (ImGui::BeginMenu("GB Bios##GBBios"))
 											{
 												static FLAG isTicked = to_bool(config.get<std::string>("gb-gbc._use_dmg_bios", "true"));
 												if (ImGui::MenuItem("Load##GB Bios", NULL, NO, inEnscriptenMode == NO))
@@ -2176,7 +2176,7 @@ public:
 												}
 												ImGui::EndMenu();
 											}
-											if (ImGui::BeginMenu("GBC Bios"))
+											if (ImGui::BeginMenu("GBC Bios##GBCBios"))
 											{
 												static FLAG isTicked = to_bool(config.get<std::string>("gb-gbc._use_cgb_bios", "true"));
 												if (ImGui::MenuItem("Load##GBC Bios", NULL, NO, inEnscriptenMode == NO))
@@ -2191,7 +2191,7 @@ public:
 												}
 												ImGui::EndMenu();
 											}
-											if (ImGui::BeginMenu("GBA Bios"))
+											if (ImGui::BeginMenu("GBA Bios##GBABios"))
 											{
 												static FLAG isTicked = to_bool(config.get<std::string>("gba._use_gba_bios", "true"));
 												if (ImGui::MenuItem("Load##GBA Bios", NULL, NO, inEnscriptenMode == NO))
@@ -2227,9 +2227,9 @@ public:
 											}
 											current_instance->setEmulationVolume((float)volume);
 											ImGui::Separator();
-											if (ImGui::BeginMenu("Space Invaders"))
+											if (ImGui::BeginMenu("Space Invaders##SpaceInvaders"))
 											{
-												if (ImGui::BeginMenu("Load Space Invaders WAV", inEnscriptenMode == NO))
+												if (ImGui::BeginMenu("Load Space Invaders WAV##LoadSpaceInvadersWAV", inEnscriptenMode == NO))
 												{
 													const char* items[][2] = {
 														{ "UFO",              "UFO" },
@@ -2269,28 +2269,27 @@ public:
 										}
 										if (ImGui::BeginMenu("Video"))
 										{
-											if (ImGui::MenuItem("Aspect Ratio", NULL, maintainAspectRatio))
+											if (ImGui::MenuItem("Aspect Ratio##AspectRatio", NULL, maintainAspectRatio))
 											{
 												maintainAspectRatio = (maintainAspectRatio == YES ? NO : YES);
 												config.put<FLAG>("mods._MAINTAIN_ASPECT_RATIO", maintainAspectRatio);
 												boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
 											}
-											if (ImGui::BeginMenu("Scaling / Shaders"))
+											if (ImGui::BeginMenu("Shaders"))
 											{
-												int selection = TO_UINT(currEnVFilter);
-												ImGui::RadioButton("Nearest", &selection, TO_UINT(VIDEO_FILTERS::NEAREST_FILTER));
+												static int selection = TO_INT(currEnVFilter);
+												ImGui::RadioButton("Nearest", &selection, TO_INT(VIDEO_FILTERS::NEAREST_FILTER));
 #ifdef __EMSCRIPTEN__
 												ImGui::BeginDisabled();
 #endif
-												ImGui::RadioButton("Bilinear", &selection, TO_UINT(VIDEO_FILTERS::BILINEAR_FILTER));
-												ImGui::RadioButton("LCD", &selection, TO_UINT(VIDEO_FILTERS::LCD_FILTER));
+												ImGui::RadioButton("Bilinear", &selection, TO_INT(VIDEO_FILTERS::BILINEAR_FILTER));
+												ImGui::RadioButton("LCD", &selection, TO_INT(VIDEO_FILTERS::LCD_FILTER));
 #ifdef __EMSCRIPTEN__
 												ImGui::EndDisabled();
 #endif
 												ImGui::BeginDisabled();
-												ImGui::RadioButton("CRT", &selection, TO_UINT(VIDEO_FILTERS::CRT_FILTER));
+												ImGui::RadioButton("CRT", &selection, TO_INT(VIDEO_FILTERS::CRT_FILTER));
 												ImGui::EndDisabled();
-
 												if (currEnVFilter != (VIDEO_FILTERS)selection)
 												{
 													config.put<std::string>("mods._VIDEO_EFFECTS", vFiltersToConfig.at((VIDEO_FILTERS)selection));
@@ -2302,13 +2301,13 @@ public:
 											ImGui::Separator();
 											if (ImGui::BeginMenu("GB"))
 											{
-												if (ImGui::BeginMenu("GB Color Palette"))
+												if (ImGui::BeginMenu("GB Color Palette##gb_palette_menu"))
 												{
-													int selection = TO_UINT(currEnGbPalette);
-													ImGui::RadioButton("GearBoy", &selection, TO_UINT(PALETTE_ID::PALETTE_1));
-													ImGui::RadioButton("Black/White", &selection, TO_UINT(PALETTE_ID::PALETTE_2));
-													ImGui::RadioButton("SameBoy", &selection, TO_UINT(PALETTE_ID::PALETTE_3));
-													ImGui::RadioButton("BGB", &selection, TO_UINT(PALETTE_ID::PALETTE_4));
+													static int selection = TO_INT(currEnGbPalette);
+													ImGui::RadioButton("GearBoy", &selection, TO_INT(PALETTE_ID::PALETTE_1));
+													ImGui::RadioButton("Black/White", &selection, TO_INT(PALETTE_ID::PALETTE_2));
+													ImGui::RadioButton("SameBoy", &selection, TO_INT(PALETTE_ID::PALETTE_3));
+													ImGui::RadioButton("BGB", &selection, TO_INT(PALETTE_ID::PALETTE_4));
 													if (currEnGbPalette != (PALETTE_ID)selection)
 													{
 														config.put<std::string>("gb-gbc._force_gb_palette", gbPaletteIDToConfig.at((PALETTE_ID)selection));
@@ -2375,10 +2374,10 @@ public:
 											{
 												//ImGui::PopStyleColor();
 											}
-											if (ImGui::BeginMenu("Chip8 Family"))
+											if (ImGui::BeginMenu("Chip8 Family##Chip8Family"))
 											{
 												static FLAG isTicked = to_bool(config.get<std::string>("chip8._enable_c8_db", "false"));
-												if (ImGui::MenuItem("Enable ROM Database", NULL, isTicked))
+												if (ImGui::MenuItem("Enable ROM Database##EnableROMDatabase", NULL, isTicked))
 												{
 													isTicked = !isTicked;
 													config.put("chip8._enable_c8_db", isTicked);
@@ -2386,7 +2385,7 @@ public:
 												}
 												ImGui::EndMenu();
 											}
-											if (ImGui::BeginMenu("Space Invaders"))
+											if (ImGui::BeginMenu("Space Invaders##SpaceInvaders"))
 											{
 												static FLAG DIP[FOUR] =
 												{
@@ -2493,19 +2492,23 @@ public:
 											ImGui::EndMenu();
 										}
 										ImGui::Separator();
-										ImGui::MenuItem("Logger Configuration", NULL, NO, NO);
-										if (ImGui::MenuItem("Logger Console", NULL, showLoggerWin))
+										ImGui::MenuItem("Logger Configuration##LoggerConfiguration", NULL, NO, NO);
+										if (ImGui::MenuItem("Logger Console##LoggerConsole", NULL, showLoggerWin))
 										{
 											showLoggerWin = (showLoggerWin == NO) ? YES : NO;
 										}
 										ImGui::Separator();
 										if (ImGui::BeginMenu("Theme"))
 										{
-											ImGui::Combo("##Theme", &currentEmuTheme, "Dark\0Light\0Black\0", 0);
-											if (currentEmuTheme != previousEmuTheme)
+											const char* themes[] = { "Dark", "Light", "Black" };
+											for (int i = 0; i < IM_ARRAYSIZE(themes); i++)
 											{
-												config.put<std::string>("mods._EMULATOR_THEME", emuThemesToConfig.at((EMULATOR_THEME)currentEmuTheme));
-												boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
+												if (ImGui::MenuItem(themes[i], NULL, currentEmuTheme == i))
+												{
+													currentEmuTheme = i;
+													config.put<std::string>("mods._EMULATOR_THEME", emuThemesToConfig.at((EMULATOR_THEME)i));
+													boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
+												}
 											}
 											ImGui::EndMenu();
 										}
@@ -2513,7 +2516,7 @@ public:
 									}
 									if (ImGui::BeginMenu("Help"))
 									{
-										if (ImGui::MenuItem("Masquerade-OTA for updates!"))
+										if (ImGui::MenuItem("Masquerade-OTA for updates!##OTA"))
 										{
 #ifndef __EMSCRIPTEN__
 #if DEACTIVATED

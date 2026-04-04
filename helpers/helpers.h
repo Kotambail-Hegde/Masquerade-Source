@@ -352,6 +352,7 @@
 #define TO_UINT16									static_cast<uint16_t>
 #define TO_UINT32									static_cast<uint32_t>
 #define TO_UINT										static_cast<unsigned>
+#define TO_INT										static_cast<int>
 
 #define CONTINUE									continue
 #define BREAK										break
