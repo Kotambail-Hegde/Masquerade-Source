@@ -5763,6 +5763,8 @@ private:
 
 	void ppuTick();
 
+	void joypadTick();
+
 private:
 
 	void requestInterrupts(GBA_INTERRUPT interrupt);

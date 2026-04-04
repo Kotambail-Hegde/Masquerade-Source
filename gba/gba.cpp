@@ -212,19 +212,18 @@ GBA_t::GBA_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 	this->pt = config;
 
 #ifndef __EMSCRIPTEN__
-	_SAVE_LOCATION = pt.get<std::string>("gba._save_location");
+	_SAVE_LOCATION = pt.get<std::string>("gba._save_location", "");
+	if (_SAVE_LOCATION.empty())
+	{
+		FATAL("Could not locate the save directory");
+	}
 #else
 	_SAVE_LOCATION = "assets/saves";
 #endif
-
 	// check if directory mentioned by "_SAVE_LOCATION" exists, if not we need to explicitly create it
 	ifNoDirectoryThenCreate(_SAVE_LOCATION);
-
-	_LOAD_GBA_BIOS = to_bool(config.get<std::string>("gba._load_gba_bios"));
-	_ENABLE_GBA_BIOS = to_bool(config.get<std::string>("gba._use_gba_bios"));
-
-	_LOAD_GBA_BIOS = to_bool(config.get<std::string>("gba._load_gba_bios"));
-	_ENABLE_GBA_BIOS = to_bool(config.get<std::string>("gba._use_gba_bios"));
+	_LOAD_GBA_BIOS = to_bool(config.get<std::string>("gba._load_gba_bios", _LOAD_GBA_BIOS ? "true" : "false"));
+	_ENABLE_GBA_BIOS = to_bool(config.get<std::string>("gba._use_gba_bios", _ENABLE_GBA_BIOS ? "true" : "false"));
 
 	if (_LOAD_GBA_BIOS == YES && _ENABLE_GBA_BIOS == NO)
 	{
@@ -3817,6 +3816,11 @@ void GBA_t::ppuTick()
 {
 	processPPU(ONE);
 }
+
+void GBA_t::joypadTick()
+{
+	DO_NOTHING;
+}
 #pragma endregion CYCLE_ACCURATE
 
 #pragma region CYCLE_COUNT_ACCURATE
@@ -5359,7 +5363,7 @@ void GBA_t::initializeAudio()
 	pGBA_peripherals->mSOUNDBIASHalfWord.mSOUNDBIASHalfWord = 0x200;
 
 	// Setup the volume for audio
-	pGBA_audio->emulatorVolume = pt.get<std::float_t>("gba._volume");
+	pGBA_audio->emulatorVolume = pt.get<std::float_t>("gba._volume", 0.1f);
 	SDL_SetAudioDeviceGain(SDL_GetAudioStreamDevice(audioStream), pGBA_audio->emulatorVolume);
 }
 
@@ -6041,7 +6045,11 @@ FLAG GBA_t::initializeEmulator()
 
 		std::string shaderPath;
 #ifndef __EMSCRIPTEN__
-		shaderPath = pt.get<std::string>("internal._working_directory");
+		shaderPath = pt.get<std::string>("internal._working_directory", "");
+		if (shaderPath.empty())
+		{
+			FATAL("Could not locate the shaders");
+		}
 #else
 		shaderPath = "assets/internal";
 #endif

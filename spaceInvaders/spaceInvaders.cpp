@@ -42,13 +42,17 @@ spaceInvaders_t::spaceInvaders_t(int nFiles, std::array<std::string, MAX_NUMBER_
 		SETBIT(ENABLE_LOGS, LOG_VERBOSITY_EVENT);
 
 		INFO("Running in sst Cpu Test Mode!");
-		_JSON_LOCATION = pt.get<std::string>("spaceinvaders._sst_location");
+
+		_JSON_LOCATION = pt.get<std::string>("spaceinvaders._sst_location", "");
+		if (_JSON_LOCATION.empty())
+		{
+			FATAL("Could not locate the sst directory");
+		}
 
 #if (ENABLE_I8080_SST == YES)
 		ROM_TYPE = ROM::TEST_SST;
 #else
 		FATAL("SSTs are not supported in this build");
-		RETURN;
 #endif
 	}
 	else if (nFiles == TEST_ROMS)
@@ -62,11 +66,16 @@ spaceInvaders_t::spaceInvaders_t(int nFiles, std::array<std::string, MAX_NUMBER_
 	}
 
 #ifndef __EMSCRIPTEN__
-	_SAVE_LOCATION = pt.get<std::string>("spaceinvaders._save_location");
+	_SAVE_LOCATION = pt.get<std::string>("spaceinvaders._save_location", "");
+	if (_SAVE_LOCATION.empty())
+	{
+		FATAL("Could not locate the save directory");
+	}
 #else
 	_SAVE_LOCATION = "assets/saves";
 #endif
-	_TEST_NUMBER = pt.get<std::int32_t>("spaceinvaders._test_to_run");
+
+	_TEST_NUMBER = pt.get<std::int32_t>("spaceinvaders._test_to_run", 0);
 
 	// check if directory mentioned by "_SAVE_LOCATION" exists, if not we need to explicitly create it
 	ifNoDirectoryThenCreate(_SAVE_LOCATION);
@@ -1127,21 +1136,28 @@ FLAG spaceInvaders_t::initializeEmulator()
 		SDL_AudioSpec AudioSettings{ SDL_AUDIO_F32, ONE, TO_UINT(EMULATED_AUDIO_SAMPLING_RATE_FOR_SPACEINVADERS) };
 
 #if (SPACE_INVADERS_AUDIO_AS_STATIC_BUFFERS == NO)
-		SDL_LoadWAV((pt.get<std::string>("spaceinvaders._ufo")).c_str(), &AudioSettings, &UFO, &UFO_length);
-		SDL_LoadWAV((pt.get<std::string>("spaceinvaders._shot")).c_str(), &AudioSettings, &Shot, &Shot_length);
-		SDL_LoadWAV((pt.get<std::string>("spaceinvaders._player_dies")).c_str(), &AudioSettings, &PlayerDies, &PlayerDies_length);
-		SDL_LoadWAV((pt.get<std::string>("spaceinvaders._invader_dies")).c_str(), &AudioSettings, &InvaderDies, &InvaderDies_length);
-		SDL_LoadWAV((pt.get<std::string>("spaceinvaders._fleet_movement_1")).c_str(), &AudioSettings, &FleetMovement1, &FleetMovement1_length);
-		SDL_LoadWAV((pt.get<std::string>("spaceinvaders._fleet_movement_2")).c_str(), &AudioSettings, &FleetMovement2, &FleetMovement2_length);
-		SDL_LoadWAV((pt.get<std::string>("spaceinvaders._fleet_movement_3")).c_str(), &AudioSettings, &FleetMovement3, &FleetMovement3_length);
-		SDL_LoadWAV((pt.get<std::string>("spaceinvaders._fleet_movement_4")).c_str(), &AudioSettings, &FleetMovement4, &FleetMovement4_length);
-		SDL_LoadWAV((pt.get<std::string>("spaceinvaders._ufo_hit")).c_str(), &AudioSettings, &UFOHit, &UFOHit_length);
+		auto loadWAV = [&](const std::string& key, SDL_AudioSpec& spec, Uint8*& buf, Uint32& len)
+			{
+				auto path = pt.get<std::string>(key, "");
+				if (!path.empty())
+					SDL_LoadWAV(path.c_str(), &spec, &buf, &len);
+			};
+
+		loadWAV("spaceinvaders._ufo", AudioSettings, UFO, UFO_length);
+		loadWAV("spaceinvaders._shot", AudioSettings, Shot, Shot_length);
+		loadWAV("spaceinvaders._player_dies", AudioSettings, PlayerDies, PlayerDies_length);
+		loadWAV("spaceinvaders._invader_dies", AudioSettings, InvaderDies, InvaderDies_length);
+		loadWAV("spaceinvaders._fleet_movement_1", AudioSettings, FleetMovement1, FleetMovement1_length);
+		loadWAV("spaceinvaders._fleet_movement_2", AudioSettings, FleetMovement2, FleetMovement2_length);
+		loadWAV("spaceinvaders._fleet_movement_3", AudioSettings, FleetMovement3, FleetMovement3_length);
+		loadWAV("spaceinvaders._fleet_movement_4", AudioSettings, FleetMovement4, FleetMovement4_length);
+		loadWAV("spaceinvaders._ufo_hit", AudioSettings, UFOHit, UFOHit_length);
 #endif
 
 		audioStream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &AudioSettings, NULL, NULL);
 		SDL_ResumeAudioDevice(SDL_GetAudioStreamDevice(audioStream));
 
-		pSi_instance->si_state.audio.emulatorVolume = pt.get<std::float_t>("spaceinvaders._volume");
+		pSi_instance->si_state.audio.emulatorVolume = pt.get<std::float_t>("spaceinvaders._volume", 0.1f);
 		SDL_SetAudioDeviceGain(SDL_GetAudioStreamDevice(audioStream), pSi_instance->si_state.audio.emulatorVolume);
 
 #if (GL_FIXED_FUNCTION_PIPELINE == YES) && !defined(IMGUI_IMPL_OPENGL_ES2) && !defined(IMGUI_IMPL_OPENGL_ES3)
@@ -1241,7 +1257,11 @@ FLAG spaceInvaders_t::initializeEmulator()
 
 		std::string shaderPath;
 #ifndef __EMSCRIPTEN__
-		shaderPath = pt.get<std::string>("internal._working_directory");
+		shaderPath = pt.get<std::string>("internal._working_directory", "");
+		if (shaderPath.empty())
+		{
+			FATAL("Could not locate the shaders");
+		}
 #else
 		shaderPath = "assets/internal";
 #endif
