@@ -410,6 +410,8 @@ private:
 		MBC7,
 		HUC1,
 		HUC3,
+		WISDOM_TREE,
+		INVALID_MBC
 	};
 
 	const std::unordered_map<uint16_t, MBCType> kMBCTypeMap = 
@@ -2276,7 +2278,11 @@ private:
 	{
 		RETURN pGBc_emuStatus->activeMBC == MBCType::HUC3;
 	}
-	void setMBCType(uint16_t mbcType);
+	MASQ_INLINE FLAG isWT() const
+	{
+		RETURN pGBc_emuStatus->activeMBC == MBCType::WISDOM_TREE;
+	}
+	void setMBCType(uint16_t mbcType, MBCType force = MBCType::INVALID_MBC);
 	void setROMBankType(uint16_t romBankType);
 	void setROMBankNumber(uint16_t romBankNumber);
 	uint16_t getROMBankNumber();

@@ -926,8 +926,14 @@ void GBc_t::latchRTCRegisters()
 	}
 }
 
-void GBc_t::setMBCType(uint16_t mbcType) 
+void GBc_t::setMBCType(uint16_t mbcType, MBCType force)
 {
+	if (force != MBCType::INVALID_MBC)
+	{
+		pGBc_emuStatus->activeMBC = force;
+		RETURN;
+	}
+
 	auto it = kMBCTypeMap.find(mbcType);
 
 	if (it == kMBCTypeMap.end())
@@ -967,23 +973,31 @@ uint16_t GBc_t::getROMBankNumber()
 
 uint16_t GBc_t::getNumberOfROMBanksUsed()
 {
+	uint16_t banks = RESET;
 	switch (pGBc_emuStatus->romBank)
 	{
-	case ROMBankType::ROM_32K:   RETURN 2;
-	case ROMBankType::ROM_64K:   RETURN 4;
-	case ROMBankType::ROM_128K:  RETURN 8;
-	case ROMBankType::ROM_256K:  RETURN 16;
-	case ROMBankType::ROM_512K:  RETURN 32;
-	case ROMBankType::ROM_1M:    RETURN 64;
-	case ROMBankType::ROM_2M:    RETURN 128;
-	case ROMBankType::ROM_4M:    RETURN 256;
-	case ROMBankType::ROM_8M:    RETURN 512;
-	case ROMBankType::ROM_1_1M:  RETURN 72;
-	case ROMBankType::ROM_1_2M:  RETURN 80;
-	case ROMBankType::ROM_1_5M:  RETURN 96;
+	case ROMBankType::ROM_32K:   banks = 2; BREAK;
+	case ROMBankType::ROM_64K:   banks = 4; BREAK;
+	case ROMBankType::ROM_128K:  banks = 8; BREAK;
+	case ROMBankType::ROM_256K:  banks = 16; BREAK;
+	case ROMBankType::ROM_512K:  banks = 32; BREAK;
+	case ROMBankType::ROM_1M:    banks = 64; BREAK;
+	case ROMBankType::ROM_2M:    banks = 128; BREAK;
+	case ROMBankType::ROM_4M:    banks = 256; BREAK;
+	case ROMBankType::ROM_8M:    banks = 512; BREAK;
+	case ROMBankType::ROM_1_1M:  banks = 72; BREAK;
+	case ROMBankType::ROM_1_2M:  banks = 80; BREAK;
+	case ROMBankType::ROM_1_5M:  banks = 96; BREAK;
 
-	default: RETURN ZERO;
+	default: banks = 0; BREAK;
 	}
+
+	if (isWT())
+	{
+		banks >>= ONE; // divide by 2 as WT uses 32KB banks instead of 16KB
+	}
+
+	RETURN banks;
 }
 
 void GBc_t::setROMModeIfMBC1()
@@ -7812,7 +7826,7 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 			{
 				WARN("ROM size mentioned in header doesn't match the actual ROM size");
 				pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_fields.romSize = (BYTE)(ceil(log2(actualRomSize)) - FIVE);
-				INFO(" Actual ROM Size : %d KB\n", 32 << pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_fields.romSize);
+				LOG(" Actual ROM Size : %d KB\n", 32 << pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_fields.romSize);
 			}
 			LOG(" RAM Size : %2.2X", pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_fields.ramSize);
 			LOG(" LIC Code : %s", cartridgeLicName());
@@ -7854,66 +7868,79 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 			initMBC();
 			setMBCType(pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_fields.cartridgeType);
 
-			// indicate the ROM banking type if applicable
-			setROMBankType(pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_fields.romSize);
-
-			// indicate the RAM banking type if applicable
-			setRAMBankType(pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_fields.ramSize);
-
-			// set the GB to ROM Mode if MBC1
-			if (isMBC1())
+			// -----------------------------------------------------------------------
+			// Wisdom Tree mapper detection
+			// -----------------------------------------------------------------------
 			{
-				setROMModeIfMBC1();
+				auto& header = pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields
+					.romBank_00.romBank00_Fields
+					.cartridge_header.cartridge_header_fields;
+
+				// Read original header bytes before any patching
+				const uint8_t originalCartridgeType = pGBc_instance->GBc_state.entireRom.entireRomMemory[0x0147];
+				const uint8_t originalRomSize = pGBc_instance->GBc_state.entireRom.entireRomMemory[0x0148];
+				const uint8_t originalDestCode = pGBc_instance->GBc_state.entireRom.entireRomMemory[0x014A];
+
+				bool isWisdomTree = false;
+
+				// Method 1: Title == "WISDOM TREE" (NUL may replace space),
+				//           OR title is entirely NULL,
+				//           $0147 == 0x00, $0148 == 0x00, actual ROM size > 32 KB
+				{
+					static const char expected[] = "WISDOM TREE"; // 11 chars
+					const uint8_t* title = header.title.title;
+
+					// Case 1: Entirely NULL title
+					bool allNull = true;
+					for (int i = 0; i < 11; ++i)
+					{
+						if (title[i] != 0x00)
+						{
+							allNull = false; BREAK;
+						}
+					}
+
+					// Case 2: "WISDOM TREE" with space or NUL at index 6
+					bool wisdomTreeTitle = false;
+					if (!allNull)
+					{
+						wisdomTreeTitle = true;
+						for (int i = 0; i < 11; ++i)
+						{
+							uint8_t t = title[i];
+							uint8_t e = static_cast<uint8_t>(expected[i]);
+							// Allow 0x00 as a substitute for the space character
+							if (t != e && !(e == 0x20 && t == 0x00))
+							{
+								wisdomTreeTitle = false;
+								BREAK;
+							}
+						}
+					}
+
+					if ((allNull || wisdomTreeTitle)
+						&& originalCartridgeType == 0x00
+						&& originalRomSize == 0x00
+						&& pAbsolute_GBc_instance->absolute_GBc_state.aboutRom.codeRomSize > 0x8000) // > 32 KB
+					{
+						isWisdomTree = true;
+					}
+				}
+
+				// Method 2: $0147 == 0xC0  &&  $014A == 0xD1
+				if (!isWisdomTree
+					&& originalCartridgeType == 0xC0
+					&& originalDestCode == 0xD1)
+				{
+					isWisdomTree = true;
+				}
+
+				if (isWisdomTree)
+				{
+					INFO("Wisdom Tree mapper detected");
+					setMBCType(NULL, MBCType::WISDOM_TREE);
+				}
 			}
-
-			// setup defaults if MBC7
-			if (isMBC7())
-			{
-				auto& e = pGBc_emuStatus->mbc7Regs;
-
-				e.accX.raw = 0x8000;
-				e.accY.raw = 0x8000;
-				e.accZ.raw = 0xFF00;
-				e.isErased = NO;
-
-				// EEPROM pin state
-				e.eepromCS = NO;
-				e.eepromCLK = NO;
-				e.eepromDI = NO;
-				e.eepromDO = YES;
-
-				// EEPROM logic state
-				e.eepromWriteEnabled = NO;   // 93LC56 powers on write-disabled (EWDS state)
-				e.eepromCommand = 0;
-				e.eepromArgBitsLeft = 0;
-				e.eepromReadBits = 0;
-
-				// EEPROM memory content — erased state is 0xFF
-				memset(
-					pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[0],
-					0xFF,
-					0x100); // 256 bytes
-			}
-
-			if (isHUC3())
-			{
-				std::memset(&pGBc_emuStatus->huc3Rtc, RESET, sizeof(pGBc_emuStatus->huc3Rtc));
-			}
-
-			// disable ram banking for now
-			disableRAMBank();
-
-			// initialize the ROM Bank number to ONE (ROM BANK 0 for 0x4000 to 0x7FFF doesn't make sense) until game overrides it if necessary
-			setROMBankNumber(ONE);
-
-			// initialize the RAM Bank number to ZERO (2K external RAM) as this is basic for all MBCs
-			setRAMBankNumber(ZERO);
-
-			// initialize the VRAM Bank number to ZERO
-			setVRAMBankNumber(ZERO);
-
-			// initialize the WRAM Bank number to ONE
-			setWRAMBankNumber(ONE);
 
 			// initialize the JoyPad state
 			pGBc_peripherals->P1_JOYP.joyPadMemory = 0xCF; // lower nibble set to all ones indicate, no selection and no keys being active; reserved bits are set as well
@@ -7923,66 +7950,134 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 			// Needed for Initial D Gaiden (Japan) (SGB Enhanced).gb, otherwise game wrongly detects a save file and crashes
 			memset(pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks, 0xFF, sizeof(pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks));
 
-			// load SRAM + RTC (if applicable)
+			// indicate the ROM banking type if applicable
+			setROMBankType(pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_fields.romSize);
 
-			BYTE cartridgeType = pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_fields.cartridgeType;
+			// indicate the RAM banking type if applicable
+			setRAMBankType(pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_fields.ramSize);
 
-			switch (cartridgeType)
+			if (isWT())
 			{
-			case 0x03: // MBC1+RAM+BATTERY
-			case 0x06: // MBC2+BATTERY
-			case 0x09: // ROM+RAM+BATTERY
-			case 0x0D: // MMM01+RAM+BATTERY
-			case 0x0F: // MBC3+TIMER+BATTERY
-			case 0x10: // MBC3+TIMER+RAM+BATTERY
-			case 0x13: // MBC3+RAM+BATTERY
-			case 0x1B: // MBC5+RAM+BATTERY
-			case 0x1E: // MBC5+RUMBLE+RAM+BATTERY
-			case 0x22: // MBC7+SENSOR+RUMBLE+RAM+BATTERY
-			case 0xFD: // BANDAI TAMA5 (has battery-backed features)
-			case 0xFE: // HuC3 (RTC -> battery-backed)
-			case 0xFF: // HuC1+RAM+BATTERY
-				pGBc_emuStatus->isBatteryAvailable = YES;
-				BREAK;
-			default:
-				pGBc_emuStatus->isBatteryAvailable = NO;
-				BREAK;
-			}
-
-			// MBC3+TIMER+BATTERY or MBC3+TIMER+RAM+BATTERY 2 or HuC3
-			if (cartridgeType == 0x0F || cartridgeType == 0x10 || cartridgeType == 0xFE)
-			{
-				pGBc_emuStatus->isRTCAvailable = YES;
+				DO_NOTHING;
 			}
 			else
 			{
-				pGBc_emuStatus->isRTCAvailable = NO;
-			}
+				// set the GB to ROM Mode if MBC1
+				if (isMBC1())
+				{
+					setROMModeIfMBC1();
+				}
 
-			switch (cartridgeType)
-			{
-			case 0x02: // MBC1+RAM
-			case 0x03: // MBC1+RAM+BATTERY
-			case 0x06: // MBC2+BATTERY
-			case 0x08: // ROM+RAM
-			case 0x09: // ROM+RAM+BATTERY
-			case 0x0C: // MMM01+RAM
-			case 0x0D: // MMM01+RAM+BATTERY
-			case 0x10: // MBC3+TIMER+RAM+BATTERY
-			case 0x12: // MBC3+RAM
-			case 0x13: // MBC3+RAM+BATTERY
-			case 0x1A: // MBC5+RAM
-			case 0x1B: // MBC5+RAM+BATTERY
-			case 0x1D: // MBC5+RUMBLE+RAM
-			case 0x1E: // MBC5+RUMBLE+RAM+BATTERY
-			case 0x22: // MBC7+SENSOR+RUMBLE+RAM+BATTERY
-			case 0xFE: // HuC3
-			case 0xFF: // HuC1+RAM+BATTERY
-				pGBc_emuStatus->isCartRAMAvailable = YES;
-				BREAK;
-			default:
-				pGBc_emuStatus->isCartRAMAvailable = NO;
-				BREAK;
+				// setup defaults if MBC7
+				if (isMBC7())
+				{
+					auto& e = pGBc_emuStatus->mbc7Regs;
+
+					e.accX.raw = 0x8000;
+					e.accY.raw = 0x8000;
+					e.accZ.raw = 0xFF00;
+					e.isErased = NO;
+
+					// EEPROM pin state
+					e.eepromCS = NO;
+					e.eepromCLK = NO;
+					e.eepromDI = NO;
+					e.eepromDO = YES;
+
+					// EEPROM logic state
+					e.eepromWriteEnabled = NO;   // 93LC56 powers on write-disabled (EWDS state)
+					e.eepromCommand = 0;
+					e.eepromArgBitsLeft = 0;
+					e.eepromReadBits = 0;
+
+					// EEPROM memory content — erased state is 0xFF
+					memset(
+						pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[0],
+						0xFF,
+						0x100); // 256 bytes
+				}
+
+				if (isHUC3())
+				{
+					std::memset(&pGBc_emuStatus->huc3Rtc, RESET, sizeof(pGBc_emuStatus->huc3Rtc));
+				}
+
+				// disable ram banking for now
+				disableRAMBank();
+
+				// initialize the ROM Bank number to ONE (ROM BANK 0 for 0x4000 to 0x7FFF doesn't make sense) until game overrides it if necessary
+				setROMBankNumber(ONE);
+
+				// initialize the RAM Bank number to ZERO (2K external RAM) as this is basic for all MBCs
+				setRAMBankNumber(ZERO);
+
+				// initialize the VRAM Bank number to ZERO
+				setVRAMBankNumber(ZERO);
+
+				// initialize the WRAM Bank number to ONE
+				setWRAMBankNumber(ONE);
+
+				// load SRAM + RTC (if applicable)
+
+				BYTE cartridgeType = pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_fields.cartridgeType;
+
+				switch (cartridgeType)
+				{
+				case 0x03: // MBC1+RAM+BATTERY
+				case 0x06: // MBC2+BATTERY
+				case 0x09: // ROM+RAM+BATTERY
+				case 0x0D: // MMM01+RAM+BATTERY
+				case 0x0F: // MBC3+TIMER+BATTERY
+				case 0x10: // MBC3+TIMER+RAM+BATTERY
+				case 0x13: // MBC3+RAM+BATTERY
+				case 0x1B: // MBC5+RAM+BATTERY
+				case 0x1E: // MBC5+RUMBLE+RAM+BATTERY
+				case 0x22: // MBC7+SENSOR+RUMBLE+RAM+BATTERY
+				case 0xFD: // BANDAI TAMA5 (has battery-backed features)
+				case 0xFE: // HuC3 (RTC -> battery-backed)
+				case 0xFF: // HuC1+RAM+BATTERY
+					pGBc_emuStatus->isBatteryAvailable = YES;
+					BREAK;
+				default:
+					pGBc_emuStatus->isBatteryAvailable = NO;
+					BREAK;
+				}
+
+				// MBC3+TIMER+BATTERY or MBC3+TIMER+RAM+BATTERY 2 or HuC3
+				if (cartridgeType == 0x0F || cartridgeType == 0x10 || cartridgeType == 0xFE)
+				{
+					pGBc_emuStatus->isRTCAvailable = YES;
+				}
+				else
+				{
+					pGBc_emuStatus->isRTCAvailable = NO;
+				}
+
+				switch (cartridgeType)
+				{
+				case 0x02: // MBC1+RAM
+				case 0x03: // MBC1+RAM+BATTERY
+				case 0x06: // MBC2+BATTERY
+				case 0x08: // ROM+RAM
+				case 0x09: // ROM+RAM+BATTERY
+				case 0x0C: // MMM01+RAM
+				case 0x0D: // MMM01+RAM+BATTERY
+				case 0x10: // MBC3+TIMER+RAM+BATTERY
+				case 0x12: // MBC3+RAM
+				case 0x13: // MBC3+RAM+BATTERY
+				case 0x1A: // MBC5+RAM
+				case 0x1B: // MBC5+RAM+BATTERY
+				case 0x1D: // MBC5+RUMBLE+RAM
+				case 0x1E: // MBC5+RUMBLE+RAM+BATTERY
+				case 0x22: // MBC7+SENSOR+RUMBLE+RAM+BATTERY
+				case 0xFE: // HuC3
+				case 0xFF: // HuC1+RAM+BATTERY
+					pGBc_emuStatus->isCartRAMAvailable = YES;
+					BREAK;
+				default:
+					pGBc_emuStatus->isCartRAMAvailable = NO;
+					BREAK;
+				}
 			}
 
 			if (isBatteryAvailable())
@@ -8764,11 +8859,18 @@ byte GBc_t::readRawMemory(uint16_t address
 		// reading from ROM
 		if (address >= ROM_00_START_ADDRESS && address <= ROM_00_END_ADDRESS)
 		{
-			auto ROMBankNumber = ZERO;
+			uint16_t ROMBankNumber = ZERO;
+
 			if (isMBC1() && getROMOrRAMModeInMBC1() == MBC1_RAM_MODE)
 			{
 				ROMBankNumber = (pGBc_emuStatus->currentROMBankNumber.mbc1Fields.mbcBank2Reg << FIVE);
 				ROMBankNumber &= (getNumberOfROMBanksUsed() - ONE);
+			}
+
+			// ROM 00 ($0000-$3FFF)
+			if (isWT()) MASQ_UNLIKELY
+			{
+				ROMBankNumber = getROMBankNumber() << ONE; // 32KB bank N -> 16KB bank 2N
 			}
 
 			if ((ceGBGBC->interceptCPURead(address, &modedData, &other1))
@@ -8786,18 +8888,26 @@ byte GBc_t::readRawMemory(uint16_t address
 		// reading from banked ROM
 		if (address >= ROM_NN_START_ADDRESS && address <= ROM_NN_END_ADDRESS)
 		{
+			uint16_t ROMBankNumber = getROMBankNumber();
+
 			auto originalAddress = address;
 			address -= 0x4000;
 
+			// ROM NN ($4000-$7FFF)
+			if (isWT()) MASQ_UNLIKELY
+			{
+				ROMBankNumber = (getROMBankNumber() << ONE) | ONE; // -> 16KB bank 2N+1
+			}
+
 			if ((ceGBGBC->interceptCPURead(originalAddress, &modedData, &other1))
 				&&
-				((BYTE)other1 == pGBc_instance->GBc_state.entireRom.romMemoryBanks.mROMBanks[getROMBankNumber()][address]))
+				((BYTE)other1 == pGBc_instance->GBc_state.entireRom.romMemoryBanks.mROMBanks[ROMBankNumber][address]))
 			{
 				RETURN TO_UINT8(modedData);
 			}
 			else
 			{
-				RETURN pGBc_instance->GBc_state.entireRom.romMemoryBanks.mROMBanks[getROMBankNumber()][address];
+				RETURN pGBc_instance->GBc_state.entireRom.romMemoryBanks.mROMBanks[ROMBankNumber][address];
 			}
 		}
 
@@ -10060,6 +10170,13 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 				}
 			}
 
+			if (isWT())
+			{
+				uint16_t ROMBankNumber = address & 0x7F;
+				setROMBankNumber(ROMBankNumber);
+				RETURN;
+			}
+
 			// --- 0x0000 - 0x1FFF : RAM/RTC enable ---
 			if (address <= 0x1FFF)
 			{
@@ -10331,12 +10448,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 				}
 				RETURN;
 			}
-		}
-
-		// writing to ROM is invalid
-		if (address <= ROM_NN_START_ADDRESS)
-		{
-			WARN("Attempting to write to Read Only Memory 0x%X", address);
+		
 			RETURN;
 		}
 
