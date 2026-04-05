@@ -184,7 +184,8 @@ static uint32_t gameboy_texture;
 static uint32_t matrix_texture;
 static uint32_t matrix[16] = { 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0x000000FF, 0x000000FF, 0x000000FF, 0x000000FF };
 
-static GLuint ghost_texture;
+static GLuint ghost_texture[2];
+static uint32_t ghost_index = 0;
 static GLuint ghost_fbo;
 static GLuint shaderProgramGhost;
 static float  ghost_decay = 0.0f;  // 0.0 = off, ~0.6 = DMG feel, ~0.4 = GBC (less ghosting)
@@ -6429,26 +6430,41 @@ void GBc_t::displayCompleteScreen()
 
 	// Choose filtering mode (NEAREST or LINEAR)
 	GLint filter = (currEnVFilter == VIDEO_FILTERS::BILINEAR_FILTER) ? GL_LINEAR : GL_NEAREST;
-	GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter));
-	GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter));
 
-	// 1b. Ghost pass ï¿½ exponential decay blend of gameboy_texture into ghost_texture.
+	// Apply filtering only when it changes (optimization)
+	static GLint prevFilterGB = -1;
+	if (filter != prevFilterGB)
+	{
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter));
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter));
+		prevFilterGB = filter;
+	}
+
+	// 1b. Ghost pass – exponential decay blend of gameboy_texture into ghost_texture.
 	//     Runs at native GB/GBC resolution (160x144 or 160x144 GBC) before upscaling.
-	//     ghost_texture is NOT cleared between frames ï¿½ that persistence is the effect.
+	//     ghost_texture is NOT cleared between frames – that persistence is the effect.
 	if (ghost_decay > 0.0f)
 	{
+		uint32_t read = ghost_index;
+		uint32_t write = ghost_index ^ 1;
+
 		GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, ghost_fbo));
+
+		// Attach WRITE target (critical fix)
+		GL_CALL(glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, ghost_texture[write], 0));
+
 		GL_CALL(glViewport(0, 0, getScreenWidth(), getScreenHeight()));
-		// !! No glClear here ï¿½ intentional: previous ghost content must survive !!
 
 		GL_CALL(glUseProgram(shaderProgramGhost));
 
+		// Current frame
 		GL_CALL(glActiveTexture(GL_TEXTURE0));
 		GL_CALL(glBindTexture(GL_TEXTURE_2D, gameboy_texture));
 		GL_CALL(glUniform1i(glGetUniformLocation(shaderProgramGhost, "u_Current"), 0));
 
+		// Previous ghost
 		GL_CALL(glActiveTexture(GL_TEXTURE1));
-		GL_CALL(glBindTexture(GL_TEXTURE_2D, ghost_texture));
+		GL_CALL(glBindTexture(GL_TEXTURE_2D, ghost_texture[read]));
 		GL_CALL(glUniform1i(glGetUniformLocation(shaderProgramGhost, "u_Ghost"), 1));
 
 		GL_CALL(glUniform1f(glGetUniformLocation(shaderProgramGhost, "u_Decay"), ghost_decay));
@@ -6456,9 +6472,12 @@ void GBc_t::displayCompleteScreen()
 		GL_CALL(glBindVertexArray(fullscreenVAO));
 		GL_CALL(glDrawArrays(GL_TRIANGLES, 0, 6));
 		GL_CALL(glBindVertexArray(0));
-		GL_CALL(glUseProgram(0));
 
+		GL_CALL(glUseProgram(0));
 		GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, 0));
+
+		// Swap
+		ghost_index ^= 1;
 	}
 
 	// 2. Render into framebuffer (masquerade_texture target)
@@ -6470,12 +6489,32 @@ void GBc_t::displayCompleteScreen()
 	// Pass 1: Render base texture (ghosted or raw Game Boy framebuffer)
 	GL_CALL(glUseProgram(shaderProgramBasic));
 	GL_CALL(glActiveTexture(GL_TEXTURE0));
-	GL_CALL(glBindTexture(GL_TEXTURE_2D, (ghost_decay > 0.0f) ? ghost_texture : gameboy_texture));
+
+	// Select source texture ONCE
+	GLuint srcTex = (ghost_decay > 0.0f) ? ghost_texture[ghost_index] : gameboy_texture;
+
+	// Apply filtering only when it changes (for source texture)
+	static GLint prevFilterSrc = -1;
+	static GLuint prevSrcTex = 0;
+
+	GL_CALL(glBindTexture(GL_TEXTURE_2D, srcTex));
+
+	if (filter != prevFilterSrc || srcTex != prevSrcTex)
+	{
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter));
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter));
+		prevFilterSrc = filter;
+		prevSrcTex = srcTex;
+	}
+
+	// Set uniform
 	GL_CALL(glUniform1i(glGetUniformLocation(shaderProgramBasic, "u_Texture"), 0));
 
+	// Draw
 	GL_CALL(glBindVertexArray(fullscreenVAO));
 	GL_CALL(glDrawArrays(GL_TRIANGLES, 0, 6));
 	GL_CALL(glBindVertexArray(0));
+
 	GL_CALL(glUseProgram(0));
 
 	// 3. Optional: LCD matrix overlay (dot matrix)
@@ -6513,8 +6552,15 @@ void GBc_t::displayCompleteScreen()
 	GL_CALL(glBindTexture(GL_TEXTURE_2D, masquerade_texture));
 
 	filter = (currEnVFilter == VIDEO_FILTERS::LCD_FILTER) ? GL_LINEAR : GL_NEAREST;
-	GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter));
-	GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter));
+
+	// Apply filtering only when it changes
+	static GLint prevFilterFinal = -1;
+	if (filter != prevFilterFinal)
+	{
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter));
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter));
+		prevFilterFinal = filter;
+	}
 #endif
 }
 
@@ -7156,20 +7202,24 @@ FLAG GBc_t::initializeEmulator()
 		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT));
 		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT));
 
-		// 4b. Ghost accumulator texture (native GB/GBC resolution, NOT scaled)
-		//     This persists between frames to simulate LCD phosphor decay.
-		GL_CALL(glGenTextures(1, &ghost_texture));
-		GL_CALL(glBindTexture(GL_TEXTURE_2D, ghost_texture));
-		GL_CALL(glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, getScreenWidth(), getScreenHeight(), 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr));
-		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST));
-		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST));
-		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
-		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
+		// 4b. Ghost accumulator textures (PING-PONG)
+		GL_CALL(glGenTextures(2, ghost_texture));
 
-		// 4c. Ghost FBO (renders blend result back into ghost_texture each frame)
+		for (int i = 0; i < 2; i++)
+		{
+			GL_CALL(glBindTexture(GL_TEXTURE_2D, ghost_texture[i]));
+			GL_CALL(glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, getScreenWidth(), getScreenHeight(), 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr));
+			GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST));
+			GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST));
+			GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
+			GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
+		}
+
+		// Start index
+		ghost_index = 0;
+
+		// 4c. Ghost FBO (no permanent attachment!)
 		GL_CALL(glGenFramebuffers(1, &ghost_fbo));
-		GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, ghost_fbo));
-		GL_CALL(glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, ghost_texture, 0));
 
 		if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
 		{
