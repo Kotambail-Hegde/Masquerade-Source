@@ -972,6 +972,16 @@ uint16_t GBc_t::getROMBankNumber()
 	RETURN ((pGBc_emuStatus->currentROMBankNumber.raw) % (getNumberOfROMBanksUsed()));
 }
 
+void GBc_t::setROMBankNumberB(uint16_t romBankNumber)
+{
+	pGBc_emuStatus->currentROMBankNumberB = romBankNumber;
+}
+
+uint16_t GBc_t::getROMBankNumberB()
+{
+	RETURN ((pGBc_emuStatus->currentROMBankNumberB) % (getNumberOfROMBanksUsed()));
+}
+
 uint16_t GBc_t::getNumberOfROMBanksUsed()
 {
 	uint16_t banks = RESET;
@@ -993,9 +1003,14 @@ uint16_t GBc_t::getNumberOfROMBanksUsed()
 	default: banks = 0; BREAK;
 	}
 
-	if (isWT())
+	if (isWT()) MASQ_UNLIKELY
 	{
 		banks >>= ONE; // divide by 2 as WT uses 32KB banks instead of 16KB
+	}
+
+	if (isMBC6()) MASQ_UNLIKELY
+	{
+		banks <<= ONE; // multiple by 2 as MBC6 uses 8KB banks instead of 16KB
 	}
 
 	RETURN banks;
@@ -1085,6 +1100,16 @@ void GBc_t::setRAMBankNumber(uint8_t ramBankNumber)
 	pGBc_emuStatus->currentRAMBankNumber = ramBankNumber;
 }
 
+uint8_t GBc_t::getRAMBankNumberB()
+{
+	RETURN pGBc_emuStatus->currentRAMBankNumberB;
+}
+
+void GBc_t::setRAMBankNumberB(uint8_t ramBankNumber)
+{
+	pGBc_emuStatus->currentRAMBankNumberB = ramBankNumber;
+}
+
 uint8_t GBc_t::getNumberOfRAMBanksUsed()
 {
 	if (isMBC2() || isMBC7() || isCartRAMAvailable() == NO)
@@ -1092,17 +1117,26 @@ uint8_t GBc_t::getNumberOfRAMBanksUsed()
 		RETURN ONE;
 	}
 
+	uint8_t banks = RESET;
+
 	switch (pGBc_emuStatus->ramBank)
 	{
-	case RAMBankType::NO_BANK:  RETURN ONE;
-	case RAMBankType::RAM_2K:   RETURN ONE;
-	case RAMBankType::RAM_8K:   RETURN ONE;
-	case RAMBankType::RAM_32K:  RETURN FOUR;
-	case RAMBankType::RAM_128K: RETURN SIXTEEN;
-	case RAMBankType::RAM_64K:  RETURN EIGHT;
+	case RAMBankType::NO_BANK:  banks = ONE; BREAK;
+	case RAMBankType::RAM_2K:   banks = ONE; BREAK;
+	case RAMBankType::RAM_8K:   banks = ONE; BREAK;
+	case RAMBankType::RAM_32K:  banks = FOUR; BREAK;
+	case RAMBankType::RAM_128K: banks = SIXTEEN; BREAK;
+	case RAMBankType::RAM_64K:  banks = EIGHT; BREAK;
 
-	default: RETURN ZERO;
+	default: banks = ZERO; BREAK;
 	}
+
+	if (isMBC6()) MASQ_UNLIKELY
+	{
+		banks <<= ONE; // multiple by 2 as MBC6 uses 4KB banks instead of 8KB
+	}
+
+	RETURN banks;
 }
 
 uint8_t GBc_t::getVRAMBankNumber()
@@ -7918,6 +7952,12 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 			initMBC();
 			setMBCType(pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_fields.cartridgeType);
 
+			// Read original header bytes before any patching
+			const uint8_t originalCartridgeType = pGBc_instance->GBc_state.entireRom.entireRomMemory[0x0147];
+			const uint8_t originalRomSize = pGBc_instance->GBc_state.entireRom.entireRomMemory[0x0148];
+			const uint8_t originalRamSize = pGBc_instance->GBc_state.entireRom.entireRomMemory[0x0149];
+			const uint8_t originalDestCode = pGBc_instance->GBc_state.entireRom.entireRomMemory[0x014A];
+
 			// -----------------------------------------------------------------------
 			// Wisdom Tree mapper detection
 			// -----------------------------------------------------------------------
@@ -7925,11 +7965,6 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 				auto& header = pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields
 					.romBank_00.romBank00_Fields
 					.cartridge_header.cartridge_header_fields;
-
-				// Read original header bytes before any patching
-				const uint8_t originalCartridgeType = pGBc_instance->GBc_state.entireRom.entireRomMemory[0x0147];
-				const uint8_t originalRomSize = pGBc_instance->GBc_state.entireRom.entireRomMemory[0x0148];
-				const uint8_t originalDestCode = pGBc_instance->GBc_state.entireRom.entireRomMemory[0x014A];
 
 				bool isWisdomTree = false;
 
@@ -8018,6 +8053,30 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 					setROMModeIfMBC1();
 				}
 
+				// setup defaults if MBC6
+				if (isMBC6())
+				{
+					auto& e = pGBc_emuStatus->mbc6;
+
+					e.flashEnable = NO;
+					e.flashEnSec0AndHidden = NO;
+					e.isFlashForA = NO;
+					e.isFlashForB = NO;
+					e.flashCmdState = 0;
+
+					// FLASH memory content — erased state is 0xFF
+					memset(
+						e.flash.raw,
+						0xFF,
+						sizeof(e.flash)); // 8 MBits
+
+					// FLASH Hidden memory content — erased state is 0xFF
+					memset(
+						e.flashHidden,
+						0xFF,
+						sizeof(e.flashHidden)); // 256 bytes
+				}
+
 				// setup defaults if MBC7
 				if (isMBC7())
 				{
@@ -8058,8 +8117,14 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 				// initialize the ROM Bank number to ONE (ROM BANK 0 for 0x4000 to 0x7FFF doesn't make sense) until game overrides it if necessary
 				setROMBankNumber(ONE);
 
+				// for mbc6
+				setROMBankNumberB(TWO);
+
 				// initialize the RAM Bank number to ZERO (2K external RAM) as this is basic for all MBCs
 				setRAMBankNumber(ZERO);
+
+				// for mbc6
+				setRAMBankNumberB(ONE);
 
 				// initialize the VRAM Bank number to ZERO
 				setVRAMBankNumber(ZERO);
@@ -8127,6 +8192,11 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 				default:
 					pGBc_emuStatus->isCartRAMAvailable = NO;
 					BREAK;
+				}
+
+				if (isMBC6() && originalRamSize > RESET)
+				{
+					pGBc_emuStatus->isCartRAMAvailable = YES;
 				}
 			}
 
@@ -8914,7 +8984,7 @@ byte GBc_t::readRawMemory(uint16_t address
 			if (isMBC1() && getROMOrRAMModeInMBC1() == MBC1_RAM_MODE)
 			{
 				ROMBankNumber = (pGBc_emuStatus->currentROMBankNumber.mbc1Fields.mbcBank2Reg << FIVE);
-				ROMBankNumber &= (getNumberOfROMBanksUsed() - ONE);
+				ROMBankNumber %= getNumberOfROMBanksUsed();
 			}
 
 			// ROM 00 ($0000-$3FFF)
@@ -8941,13 +9011,86 @@ byte GBc_t::readRawMemory(uint16_t address
 			uint16_t ROMBankNumber = getROMBankNumber();
 
 			auto originalAddress = address;
-			address -= 0x4000;
+
+			if (isMBC6()) MASQ_UNLIKELY
+			{
+				// Refer https://gbdev.io/pandocs/MBC6.html
+				// Maximum Flash bank is 0x7F, refer // Refer https://gbdev.io/pandocs/MBC6.html#4000-5fff--romflash-bank-a-00-7f-readwrite-for-flash-read-only-for-rom
+				// Bank A = $4000-$5FFF, Bank B = $6000-$7FFF; each bank is 8 KB (0x2000)
+
+				constexpr uint32_t FLASH_BANK_SIZE = 0x100000 / 0x80;
+				const uint8_t flashState = pGBc_emuStatus->mbc6.flashCmdState;
+	
+				if (originalAddress <= 0x5FFF) // Bank A window
+				{
+					address -= 0x4000;
+					if (pGBc_emuStatus->mbc6.isFlashForA)
+					{
+						uint32_t flashAddr = (uint32_t)ROMBankNumber * FLASH_BANK_SIZE + address;
+
+						if (flashState == 13) // ID mode: JEDEC ID at offsets 0 and 1 within any bank
+						{
+							switch (flashAddr & 0x0F)
+							{
+							case 0: RETURN 0xC2; // Manufacturer ID (Fujitsu/AMD)
+							case 1: RETURN 0x81; // Device ID (AM29F008B)
+							default: RETURN 0xFF;
+							}
+						}
+						else if (flashState == 14) // Read hidden region
+						{
+							RETURN pGBc_emuStatus->mbc6.flashHidden[flashAddr & 0xFF];
+						}
+						else
+						{
+							RETURN(flashAddr < sizeof(pGBc_emuStatus->mbc6.flash)) ? pGBc_emuStatus->mbc6.flash.raw[flashAddr] : 0xFF;
+						}
+					}
+					else
+					{
+						RETURN pGBc_instance->GBc_state.entireRom.romMemoryBanks.mROMBanks8KB[ROMBankNumber][address];
+					}
+				}
+				else
+				{
+					address -= 0x6000;
+					uint16_t ROMBankNumberB = getROMBankNumberB();
+					if (pGBc_emuStatus->mbc6.isFlashForB)
+					{
+						uint32_t flashAddr = (uint32_t)ROMBankNumberB * FLASH_BANK_SIZE + address;
+
+						if (flashState == 13) // ID mode
+						{
+							switch (flashAddr & 0x0F)
+							{
+							case 0: RETURN 0xC2;
+							case 1: RETURN 0x81;
+							default: RETURN 0xFF;
+							}
+						}
+						else if (flashState == 14) // Read hidden region
+						{
+							RETURN pGBc_emuStatus->mbc6.flashHidden[flashAddr & 0xFF];
+						}
+						else
+						{
+							RETURN(flashAddr < sizeof(pGBc_emuStatus->mbc6.flash)) ? pGBc_emuStatus->mbc6.flash.raw[flashAddr] : 0xFF;
+						}
+					}
+					else
+					{
+						RETURN pGBc_instance->GBc_state.entireRom.romMemoryBanks.mROMBanks8KB[ROMBankNumberB][address];
+					}
+				}
+			}
 
 			// ROM NN ($4000-$7FFF)
 			if (isWT()) MASQ_UNLIKELY
 			{
 				ROMBankNumber = (getROMBankNumber() << ONE) | ONE; // -> 16KB bank 2N+1
 			}
+
+			address -= 0x4000;
 
 			if ((ceGBGBC->interceptCPURead(originalAddress, &modedData, &other1))
 				&&
@@ -9003,6 +9146,22 @@ byte GBc_t::readRawMemory(uint16_t address
 		if (address >= EXTERNAL_RAM_START_ADDRESS && address <= EXTERNAL_RAM_END_ADDRESS)
 		{
 			auto originalAddress = address;
+
+			if (isMBC6()) MASQ_UNLIKELY
+			{
+				if (address <= 0xAFFF)
+				{
+					uint8_t RAMBankNumber = getRAMBankNumber();
+					address -= 0xA000;
+					RETURN pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks4KB[RAMBankNumber][address];
+				}
+				else
+				{
+					uint8_t RAMBankNumberB = getRAMBankNumberB();
+					address -= 0xB000;
+					RETURN pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks4KB[RAMBankNumberB][address];
+				}
+			}
 
 			if (isMBC3())
 			{
@@ -10024,6 +10183,369 @@ void GBc_t::executeHUC3Command()
 	}
 }
 
+// Refer https://gbdev.io/pandocs/MBC6.html#flash-commands
+//
+// Three separate protection flags:
+//   mbc6.flashEnable           : set by reg $0C00-$0FFF ($01) — global gate for all flash writes
+//   mbc6.flashEnSec0AndHidden: set by reg $1000       ($01) — additional gate for sector 0 and hidden region
+//   mbc6.flashProtSec0         : set by flash commands  ($20/$40) — hardware protection for sector 0 erase
+//
+// Flash command state machine states:
+//  0  = IDLE
+//  1  = UNLOCK1_DONE       (received $AA at flash_0x4555)
+//  2  = CMD                (received $55 at flash_0x2AAA, awaiting command byte at flash_0x4555)
+//  3  = PROGRAM            ($A0 received - next write programs one flash byte)
+//  4  = ERASE_UNLOCK1      ($80 received - awaiting second-sequence $AA at flash_0x4555)
+//  5  = ERASE_UNLOCK2      (awaiting second-sequence $55 at flash_0x2AAA)
+//  6  = ERASE_CMD          (awaiting $10 chip-erase at flash_0x4555 OR $30 sector-erase anywhere)
+//  7  = SPECIAL_UNLOCK1    ($60 received - awaiting second-sequence $AA at flash_0x4555)
+//  8  = SPECIAL_UNLOCK2    (awaiting second-sequence $55 at flash_0x2AAA)
+//  9  = SPECIAL_CMD        (awaiting $04/$20/$40/$E0 at flash_0x4555)
+// 10  = RH_UNLOCK1         ($77 received - awaiting second-sequence $AA at flash_0x4555)
+// 11  = RH_UNLOCK2         (awaiting second-sequence $55 at flash_0x2AAA)
+// 12  = RH_CMD             (awaiting second $77 at flash_0x4555 to enter read-hidden mode)
+// 13  = ID_MODE            ($90 - reads return JEDEC ID $C2/$81; $F0 exits)
+// 14  = READ_HIDDEN_MODE   (reads return hidden region bytes; $F0 exits)
+// 15  = PROGRAM_HIDDEN     ($E0 setup done - next write programs one hidden-region byte)
+
+void GBc_t::processMBC6FlashWrite(uint16_t cpuAddr, BYTE data)
+{
+	auto& mbc6 = pGBc_emuStatus->mbc6;
+
+	// Gate 1: global flash write-enable (register $0C00-$0FFF)
+	if (!mbc6.flashEnable)
+	{
+		RETURN;
+	}
+
+	// Compute absolute flash address from the current bank/window mapping.
+	// Bank A = $4000-$5FFF (8 KB), Bank B = $6000-$7FFF (8 KB)
+	uint32_t flashAddr;
+	if (cpuAddr <= 0x5FFF) // Bank A window
+	{
+		if (!mbc6.isFlashForA) RETURN;
+		flashAddr = (uint32_t)getROMBankNumber() * 0x2000 + (cpuAddr - 0x4000);
+	}
+	else // Bank B window (0x6000–0x7FFF)
+	{
+		if (!mbc6.isFlashForB) RETURN;
+		flashAddr = (uint32_t)getROMBankNumberB() * 0x2000 + (cpuAddr - 0x6000);
+	}
+
+	// $F0 exits ANY state unconditionally (software reset), accepted at any address
+	if (data == 0xF0)
+	{
+		mbc6.flashCmdState = 0;
+		RETURN;
+	}
+
+	// Unlock reference addresses (pandocs "2:Y555" and "1:XAAA"):
+	//   bank2 * 0x2000 + 0x555 = 0x4555
+	//   bank1 * 0x2000 + 0xAAA = 0x2AAA
+	constexpr uint32_t FLASH_ADDR_5555 = 0x4555;
+	constexpr uint32_t FLASH_ADDR_2AAA = 0x2AAA;
+	constexpr uint32_t SECTOR_SIZE = 0x20000; // 128 KiB
+	constexpr uint32_t FLASH_SIZE = 0x100000; // 1 MiB
+
+	switch (mbc6.flashCmdState)
+	{
+
+	// -------------------------------------------------------------------------
+	// State 0: IDLE
+	// -------------------------------------------------------------------------
+	case 0:
+	{
+		if (data == 0xAA && flashAddr == FLASH_ADDR_5555)
+		{
+			mbc6.flashCmdState = 1;
+		}
+		// Any other write is silently ignored
+		BREAK;
+	}
+
+	// -------------------------------------------------------------------------
+	// State 1: UNLOCK1_DONE - waiting for second unlock byte
+	// -------------------------------------------------------------------------
+	case 1:
+	{
+		if (data == 0x55 && flashAddr == FLASH_ADDR_2AAA)
+		{
+			mbc6.flashCmdState = 2;
+		}
+		else
+		{
+			// broken sequence
+			mbc6.flashCmdState = 0;
+		}
+		BREAK;
+	}
+
+	// -------------------------------------------------------------------------
+	// State 2: CMD - command byte must arrive at flash_0x4555
+	// -------------------------------------------------------------------------
+	case 2:
+	{
+		if (flashAddr != FLASH_ADDR_5555)
+		{
+			mbc6.flashCmdState = 0; BREAK;
+		}
+
+		switch (data)
+		{
+		case 0xA0: mbc6.flashCmdState = 3;  BREAK; // Program mode
+		case 0x80: mbc6.flashCmdState = 4;  BREAK; // Erase - needs second unlock
+		case 0x60: mbc6.flashCmdState = 7;  BREAK; // Special - needs second unlock
+		case 0x77: mbc6.flashCmdState = 10; BREAK; // Read hidden - needs second unlock
+		case 0x90: mbc6.flashCmdState = 13; BREAK; // ID mode (no second unlock needed)
+		default:   mbc6.flashCmdState = 0;  BREAK;
+		}
+		BREAK;
+	}
+
+	// -------------------------------------------------------------------------
+	// State 3: PROGRAM - write data to flash at flashAddr (NOR: bits can only go 1->0)
+	// -------------------------------------------------------------------------
+	case 3:
+	{
+		// Gate 2: sector 0 writes need flashEnSec0AndHidden
+		if (flashAddr < SECTOR_SIZE && !mbc6.flashEnSec0AndHidden)
+		{
+			mbc6.flashCmdState = 0;
+			BREAK;
+		}
+		if (flashAddr < sizeof(mbc6.flash))
+		{
+			mbc6.flash.raw[flashAddr] &= data;
+		}
+		mbc6.flashCmdState = 0;
+		BREAK;
+	}
+
+	// -------------------------------------------------------------------------
+	// States 4-6: ERASE second unlock + command
+	// -------------------------------------------------------------------------
+	case 4: // ERASE_UNLOCK1: expecting $AA at flash_0x4555
+	{
+		if (data == 0xAA && flashAddr == FLASH_ADDR_5555)
+		{
+			mbc6.flashCmdState = 5;
+		}
+		else
+		{
+			mbc6.flashCmdState = 0;
+		}
+		BREAK;
+	}
+	case 5: // ERASE_UNLOCK2: expecting $55 at flash_0x2AAA
+	{
+		if (data == 0x55 && flashAddr == FLASH_ADDR_2AAA)
+		{
+			mbc6.flashCmdState = 6;
+		}
+		else
+		{
+			mbc6.flashCmdState = 0;
+		}
+		BREAK;
+	}
+	case 6: // ERASE COMMAND
+	{
+		if (data == 0x10 && flashAddr == 0x5555)
+		{
+			// Chip erase: erase entire 1 MiB.
+			// Sector 0 requires flashEnSec0AndHidden AND flashProtSec0 must be clear.
+			const FLAG sec0WriteOk = mbc6.flashEnSec0AndHidden && !mbc6.flashProtSec0;
+
+			if (sec0WriteOk)
+			{
+				// Erase everything including sector 0
+				memset(mbc6.flash.raw, 0xFF, sizeof(mbc6.flash));
+			}
+			else
+			{
+				// Skip sector 0, erase sectors 1 - 7 only
+				for (int s = 1; s < 8; ++s)
+				{
+					memset(mbc6.flash.sector[s], 0xFF, sizeof(mbc6.flash.sector[s]));
+				}
+			}
+		}
+		else if (data == 0x30)
+		{
+			// Sector erase: erase the 128 KiB sector containing flashAddr
+			uint32_t sectorIdx = flashAddr / SECTOR_SIZE;
+			if (sectorIdx < 8)
+			{
+				const FLAG isSector0 = (sectorIdx == 0);
+
+				if (isSector0 && (!mbc6.flashEnSec0AndHidden || mbc6.flashProtSec0))
+				{
+					// Sector 0: blocked — either write-enable not set or hardware-protected
+				}
+				else
+				{
+					memset(mbc6.flash.sector[sectorIdx], 0xFF, sizeof(mbc6.flash.sector[sectorIdx]));
+				}
+			}
+		}
+		// Any other byte is an unrecognised erase command, no-op
+		mbc6.flashCmdState = 0;
+		BREAK;
+	}
+
+	// -------------------------------------------------------------------------
+	// States 7-9: SPECIAL ($60) second unlock + command
+	// -------------------------------------------------------------------------
+	case 7: // SPECIAL_UNLOCK1
+	{
+		if (data == 0xAA && flashAddr == FLASH_ADDR_5555)
+		{
+			mbc6.flashCmdState = 8;
+		}
+		else
+		{
+			mbc6.flashCmdState = 0;
+		}
+		BREAK;
+	}
+	case 8: // SPECIAL_UNLOCK2
+	{
+		if (data == 0x55 && flashAddr == FLASH_ADDR_2AAA)
+		{
+			mbc6.flashCmdState = 9;
+		}
+		else
+		{
+			mbc6.flashCmdState = 0;
+		}
+		BREAK;
+	}
+	case 9: // SPECIAL_CMD - all must arrive at flash_0x4555
+	{
+		if (flashAddr != FLASH_ADDR_5555)
+		{
+			mbc6.flashCmdState = 0; BREAK;
+		}
+
+		switch (data)
+		{
+		case 0x04: // Erase hidden region* (256 bytes -> 0xFF)
+		{
+			if (mbc6.flashEnSec0AndHidden)
+			{
+				memset(mbc6.flashHidden, 0xFF, sizeof(mbc6.flashHidden));
+			}
+			mbc6.flashCmdState = 0;
+			BREAK;
+		}
+		case 0x40: // Unprotect sector 0* - sector 0 can now be erased
+		{
+			TODO("Is flashProtSec0 dependent on flashEnSec0AndHidden ?");
+			if (mbc6.flashEnSec0AndHidden)
+			{
+				mbc6.flashProtSec0 = NO;
+			}
+			mbc6.flashCmdState = 0;
+			BREAK;
+		}
+		case 0x20: // Protect sector 0* - sector 0 is protected from erase
+		{
+			TODO("Is flashProtSec0 dependent on flashEnSec0AndHidden ?");
+			if (mbc6.flashEnSec0AndHidden)
+			{
+				mbc6.flashProtSec0 = YES;
+			}
+			mbc6.flashCmdState = 0;
+			BREAK;
+		}
+		case 0xE0: // Program mode for hidden region*
+		{
+			TODO("Is enterring program hidden itself protected via flashEnSec0AndHidden or just the writes ?");
+			if (mbc6.flashEnSec0AndHidden)
+			{
+				mbc6.flashCmdState = 15; // PROGRAM_HIDDEN
+			}
+			BREAK;
+		}
+		default:
+			mbc6.flashCmdState = 0;
+			BREAK;
+		}
+		BREAK;
+	}
+
+	// -------------------------------------------------------------------------
+	// States 10-12: READ HIDDEN ($77) second unlock + final $77
+	// -------------------------------------------------------------------------
+	case 10: // RH_UNLOCK1
+	{
+		if (data == 0xAA && flashAddr == FLASH_ADDR_5555)
+		{
+			mbc6.flashCmdState = 11;
+		}
+		else
+		{
+			mbc6.flashCmdState = 0;
+		}
+		BREAK;
+	}
+	case 11: // RH_UNLOCK2
+	{
+		if (data == 0x55 && flashAddr == FLASH_ADDR_2AAA)
+		{
+			mbc6.flashCmdState = 12;
+		}
+		else
+		{
+			mbc6.flashCmdState = 0;
+		}
+		BREAK;
+	}
+	case 12: // RH_CMD: second $77 at flash_0x4555 activates read-hidden mode
+	{
+		if (data == 0x77 && flashAddr == FLASH_ADDR_5555)
+		{
+			// READ_HIDDEN_MODE now active
+			mbc6.flashCmdState = 14;
+		}
+		else
+		{
+			mbc6.flashCmdState = 0;
+		}
+		BREAK;
+	}
+
+	// -------------------------------------------------------------------------
+	// States 13-14: ID_MODE and READ_HIDDEN_MODE
+	// Only $F0 (handled above) exits these modes; all other writes are ignored
+	// -------------------------------------------------------------------------
+	case 13: // ID_MODE - reads intercepted in readRawMemory
+	case 14: // READ_HIDDEN_MODE - reads intercepted in readRawMemory
+	{
+		// No write effect; $F0 already handled unconditionally at the top
+		BREAK;
+	}
+
+	// -------------------------------------------------------------------------
+	// State 15: PROGRAM_HIDDEN - write one byte to the 256-byte hidden region
+	// -------------------------------------------------------------------------
+	case 15:
+	{
+		if (mbc6.flashEnSec0AndHidden)
+		{
+			// Use the low byte of the flash address as the offset into the hidden region
+			uint32_t hiddenOffset = flashAddr & 0xFF;
+			mbc6.flashHidden[hiddenOffset] &= data; // NOR flash: bits can only go 1->0
+		}
+		mbc6.flashCmdState = 0;
+		BREAK;
+	}
+	default:
+		mbc6.flashCmdState = 0;
+		BREAK;
+	}
+}
+
 void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE source)
 {
 #if (ENABLE_SM83_SST == YES)
@@ -10167,63 +10689,161 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 			// Below if block needed for MBC block in BESS specifications
 			if (ENABLED)
 			{
-				if (address <= 0x1FFF)
+				if (isWT()) MASQ_UNLIKELY
 				{
-					if (isMBC1() || isMBC2() || isMBC3() || isMBC5() || isMBC7() || isHUC1() || isHUC3())
+					pGBc_emuStatus->dataWrittenToMBCReg0 = data;
+				}
+				else if (isMBC6()) MASQ_UNLIKELY
+				{
+					if (address <= 0x03FF)
 					{
 						pGBc_emuStatus->dataWrittenToMBCReg0 = data;
 					}
-				}
-				else if (address <= 0x2FFF)
-				{
-					if (isMBC1() || isMBC3() || isMBC5() || isMBC7() || isHUC1() || isHUC3())
+					else if (address <= 0x07FF)
 					{
 						pGBc_emuStatus->dataWrittenToMBCReg1 = data;
 					}
-					else if (isMBC2())
-					{
-						pGBc_emuStatus->dataWrittenToMBCReg0 = data;
-					}
-				}
-				else if (address <= 0x3FFF)
-				{
-					if (isMBC1() || isMBC3() || isMBC7() || isHUC1() || isHUC3())
-					{
-						pGBc_emuStatus->dataWrittenToMBCReg1 = data;
-					}
-					else if (isMBC2())
-					{
-						pGBc_emuStatus->dataWrittenToMBCReg0 = data;
-					}
-					else if (isMBC5())
+					else if (address <= 0x0BFF)
 					{
 						pGBc_emuStatus->dataWrittenToMBCReg2 = data;
 					}
-				}
-				else if (address <= 0x5FFF)
-				{
-					if (isMBC1() || isMBC3() || isMBC7() || isHUC1() || isHUC3())
-					{
-						pGBc_emuStatus->dataWrittenToMBCReg2 = data;
-					}
-					else if (isMBC5())
+					else if (address <= 0x0FFF)
 					{
 						pGBc_emuStatus->dataWrittenToMBCReg3 = data;
 					}
-				}
-				else if (address <= 0x7FFF)
-				{
-					if (isMBC1() || isMBC3() || isHUC1() || isHUC3())
+					else if (address == 0x1000)
 					{
-						pGBc_emuStatus->dataWrittenToMBCReg3 = data;
+						pGBc_emuStatus->dataWrittenToMBCReg4 = data;
+					}
+					else if (address >= 0x2000 && address <= 0x27FF)
+					{
+						pGBc_emuStatus->dataWrittenToMBCReg5 = data;
+					}
+					else if (address <= 0x2FFF)
+					{
+						pGBc_emuStatus->dataWrittenToMBCReg6 = data;
+					}
+					else if (address <= 0x37FF)
+					{
+						pGBc_emuStatus->dataWrittenToMBCReg7 = data;
+					}
+					else if (address <= 0x3FFF)
+					{
+						pGBc_emuStatus->dataWrittenToMBCReg8 = data;
+					}
+				}
+				else
+				{
+					if (address <= 0x1FFF)
+					{
+						if (isMBC1() || isMBC2() || isMBC3() || isMBC5() || isMBC7() || isHUC1() || isHUC3())
+						{
+							pGBc_emuStatus->dataWrittenToMBCReg0 = data;
+						}
+					}
+					else if (address <= 0x2FFF)
+					{
+						if (isMBC1() || isMBC3() || isMBC5() || isMBC7() || isHUC1() || isHUC3())
+						{
+							pGBc_emuStatus->dataWrittenToMBCReg1 = data;
+						}
+						else if (isMBC2())
+						{
+							pGBc_emuStatus->dataWrittenToMBCReg0 = data;
+						}
+					}
+					else if (address <= 0x3FFF)
+					{
+						if (isMBC1() || isMBC3() || isMBC7() || isHUC1() || isHUC3())
+						{
+							pGBc_emuStatus->dataWrittenToMBCReg1 = data;
+						}
+						else if (isMBC2())
+						{
+							pGBc_emuStatus->dataWrittenToMBCReg0 = data;
+						}
+						else if (isMBC5())
+						{
+							pGBc_emuStatus->dataWrittenToMBCReg2 = data;
+						}
+					}
+					else if (address <= 0x5FFF)
+					{
+						if (isMBC1() || isMBC3() || isMBC7() || isHUC1() || isHUC3())
+						{
+							pGBc_emuStatus->dataWrittenToMBCReg2 = data;
+						}
+						else if (isMBC5())
+						{
+							pGBc_emuStatus->dataWrittenToMBCReg3 = data;
+						}
+					}
+					else if (address <= 0x7FFF)
+					{
+						if (isMBC1() || isMBC3() || isHUC1() || isHUC3())
+						{
+							pGBc_emuStatus->dataWrittenToMBCReg3 = data;
+						}
 					}
 				}
 			}
 
-			if (isWT())
+			if (isWT()) MASQ_UNLIKELY
 			{
 				uint16_t ROMBankNumber = address & 0x7F;
 				setROMBankNumber(ROMBankNumber);
+				RETURN;
+			}
+
+			if (isMBC6()) MASQ_UNLIKELY
+			{
+				if (address <= 0x03FF)
+				{
+					const FLAG ramEnable = ((data & 0x0F) == 0x0A);
+					ramEnable ? enableRAMBank() : disableRAMBank();
+				}
+				else if (address <= 0x07FF)
+				{
+					uint8_t ramBankNumber = data % getNumberOfRAMBanksUsed();
+					setRAMBankNumber(ramBankNumber);
+				}
+				else if (address <= 0x0BFF)
+				{
+					uint8_t ramBankNumber = data % getNumberOfRAMBanksUsed();
+					setRAMBankNumberB(ramBankNumber);
+				}
+				else if (address <= 0x0FFF)
+				{
+					pGBc_emuStatus->mbc6.flashEnable = (data & 0x01) ? YES : NO;
+				}
+				else if (address == 0x1000)
+				{
+					pGBc_emuStatus->mbc6.flashEnSec0AndHidden = (data & 0x01) ? YES : NO;
+				}
+				else if (address >= 0x2000 && address <= 0x27FF)
+				{
+					uint16_t ROMBankNumber = data % getNumberOfROMBanksUsed();
+					setROMBankNumber(ROMBankNumber);
+				}
+				else if (address <= 0x2FFF)
+				{
+					pGBc_emuStatus->mbc6.isFlashForA = (data == 0x08) ? YES : NO;
+				}
+				else if (address <= 0x37FF)
+				{
+					uint16_t ROMBankNumber = data % getNumberOfROMBanksUsed();
+					setROMBankNumberB(ROMBankNumber);
+				}
+				else if (address <= 0x3FFF)
+				{
+					pGBc_emuStatus->mbc6.isFlashForB = (data == 0x08) ? YES : NO;
+				}
+				// Refer https://gbdev.io/pandocs/MBC6.html#flash-commands
+				else if (address <= 0x7FFF)
+				{
+					processMBC6FlashWrite(address, data);
+				}
+
 				RETURN;
 			}
 
@@ -10247,7 +10867,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 							pGBc_emuStatus->isMBC2ROMMode = YES;
 							auto ROMBankNumber = (data & 0x0F);
 							if (ROMBankNumber == ZERO) ROMBankNumber = ONE;
-							ROMBankNumber &= (getNumberOfROMBanksUsed() - ONE);
+							ROMBankNumber %= getNumberOfROMBanksUsed();
 							setROMBankNumber(ROMBankNumber);
 						}
 						RETURN;
@@ -10370,7 +10990,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 							pGBc_emuStatus->isMBC2ROMMode = YES;
 							ROMBankNumber = data & 0x0F;
 							if (ROMBankNumber == ZERO) ROMBankNumber = ONE;
-							ROMBankNumber &= (getNumberOfROMBanksUsed() - ONE);
+							ROMBankNumber %= getNumberOfROMBanksUsed();
 							setROMBankNumber(ROMBankNumber);
 						}
 						RETURN;
@@ -10381,7 +11001,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 						uint8_t bankMask = isMBC7() ? 0x7F : isHUC1() ? 0x3F : isHUC3() ? 0x7F : 0xFF; // MBC30 uses full 8 bits
 						ROMBankNumber = data & bankMask;
 						if (!isHUC3() && ROMBankNumber == ZERO) ROMBankNumber = ONE; // HuC3 allows bank 0
-						ROMBankNumber &= (getNumberOfROMBanksUsed() - ONE); // Clamp to ROM size
+						ROMBankNumber %= getNumberOfROMBanksUsed(); // Clamp to ROM size
 						setROMBankNumber(ROMBankNumber);
 						RETURN;
 					}
@@ -10398,7 +11018,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 							ROMBankNumber &= 0xFF; // clear the 9th bit of the current ROM bank number
 							ROMBankNumber |= ((data & 0x01) << EIGHT); // set the 0th bit of incoming data to the 9th bit of the current ROM bank number
 						}
-						ROMBankNumber &= (getNumberOfROMBanksUsed() - ONE); // Ensure that rom bank number is within the maximum supported for the game
+						ROMBankNumber %= getNumberOfROMBanksUsed(); // Ensure that rom bank number is within the maximum supported for the game
 						setROMBankNumber(ROMBankNumber);
 						RETURN;
 					}
@@ -10422,7 +11042,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 					// set the RAM bank number
 					else
 					{
-						auto ramBankNumber = (data & 0x03) & (getNumberOfRAMBanksUsed() - ONE);
+						uint8_t ramBankNumber = (data & 0x03) % (getNumberOfRAMBanksUsed());
 						setRAMBankNumber(ramBankNumber);
 					}
 					RETURN;
@@ -10432,7 +11052,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 				{
 					if (data <= 0x07)
 					{
-						auto ramBankNumber = data & (getNumberOfRAMBanksUsed() - ONE);
+						uint8_t ramBankNumber = data % (getNumberOfRAMBanksUsed());
 						setRAMBankNumber(ramBankNumber);
 						shouldMapRTCToExternalRAM(NO);
 					}
@@ -10448,7 +11068,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 				else if (isMBC5() || isHUC1() || isHUC3())
 				{
 					uint8_t bankMask = isMBC5() ? 0x0F : 0x03;
-					auto ramBankNumber = (data & bankMask) & (getNumberOfRAMBanksUsed() - ONE);
+					uint8_t ramBankNumber = (data & bankMask) % (getNumberOfRAMBanksUsed());
 					setRAMBankNumber(ramBankNumber);
 					RETURN;
 				}
@@ -10556,6 +11176,24 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 					{
 						pGBc_emuStatus->dataWrittenToMBCReg4 = data;
 					}
+				}
+			}
+
+			if (isMBC6()) MASQ_UNLIKELY
+			{
+				if (address <= 0xAFFF)
+				{
+					uint8_t RAMBankNumber = getRAMBankNumber();
+					address -= 0xA000;
+					pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks4KB[RAMBankNumber][address] = data;
+					RETURN;
+				}
+				else
+				{
+					uint8_t RAMBankNumberB = getRAMBankNumberB();
+					address -= 0xB000;
+					pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks4KB[RAMBankNumberB][address] = data;
+					RETURN;
 				}
 			}
 

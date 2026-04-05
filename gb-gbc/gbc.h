@@ -407,6 +407,7 @@ private:
 		MBC2, 
 		MBC3, 
 		MBC5, 
+		MBC6,
 		MBC7,
 		HUC1,
 		HUC3,
@@ -421,6 +422,7 @@ private:
 		{0x05, MBCType::MBC2}, {0x06, MBCType::MBC2},
 		{0x0F, MBCType::MBC3}, {0x10, MBCType::MBC3}, {0x11, MBCType::MBC3},{0x12, MBCType::MBC3}, {0x13, MBCType::MBC3},
 		{0x19, MBCType::MBC5}, {0x1A, MBCType::MBC5}, {0x1B, MBCType::MBC5},{0x1C, MBCType::MBC5}, {0x1D, MBCType::MBC5}, {0x1E, MBCType::MBC5},
+		{0x20, MBCType::MBC6},
 		{0x22, MBCType::MBC7},
 		{0xFE, MBCType::HUC3},
 		{0xFF, MBCType::HUC1},
@@ -1672,6 +1674,10 @@ private:
 		byte dataWrittenToMBCReg2;
 		byte dataWrittenToMBCReg3;
 		byte dataWrittenToMBCReg4;
+		byte dataWrittenToMBCReg5;
+		byte dataWrittenToMBCReg6;
+		byte dataWrittenToMBCReg7;
+		byte dataWrittenToMBCReg8;
 		FLAG isMBC2ROMMode;
 		FLAG isMBC1Mode1;
 		MBCType activeMBC;
@@ -1686,6 +1692,7 @@ private:
 			} mbc1Fields;
 			uint16_t raw;
 		} currentROMBankNumber;
+		uint16_t currentROMBankNumberB;
 		struct
 		{
 			union
@@ -1748,9 +1755,26 @@ private:
 		uint8_t currentRAMBankNumber;
 		uint8_t currentVRAMBankNumber;
 		uint8_t currentWRAMBankNumber;
+		uint8_t currentRAMBankNumberB;
 		uint16_t serialMaxClockPerTransfer;
 		uint16_t serialMasterByteShiftCount;
 		uint16_t serialSlaveByteShiftCount;
+		struct
+		{
+			FLAG flashEnable;
+			FLAG flashProtSec0; // for Protect/Unprotect Sector 0 flash commands
+			FLAG flashEnSec0AndHidden;
+			FLAG isFlashForA;
+			FLAG isFlashForB;
+			union
+			{
+				BYTE raw[0x100000];
+				BYTE sector[8][0x20000];
+				BYTE bank[0x80][0x2000]; // 0x2000 is same as the ROM bank size for MBC6!
+			} flash;
+			BYTE flashHidden[256];
+			uint8_t flashCmdState; // 0=IDLE, 1=UNLOCK1, 2=UNLOCK2, 3=PROGRAM, 4=ERASE_SETUP, 5=ERASE_UNLOCK1, 6=ERASE_CMD
+		} mbc6;
 		FLAG isBatteryAvailable;
 		FLAG isCartRAMAvailable;
 		FLAG isRTCAvailable;
@@ -1807,9 +1831,10 @@ private:
 	} emulatorStatus_t;
 
 	// Data stored in all the ROM memory banks of the cartridge
-	typedef struct
+	typedef union
 	{
 		uint8_t mROMBanks[0x200][0x4000];
+		uint8_t mROMBanks8KB[0x400][0x2000];
 	} romMemoryBanks_t;
 
 	typedef union
@@ -1819,9 +1844,10 @@ private:
 	} entireRom_t;
 
 	// Data stored in all the RAM memory banks of the cartridge
-	typedef struct
+	typedef union
 	{
 		uint8_t mRAMBanks[0x80][0x2000];
+		uint8_t mRAMBanks4KB[0x100][0x1000];
 	} ramMemoryBanks_t;
 
 	typedef union
@@ -2266,6 +2292,10 @@ private:
 	{
 		RETURN pGBc_emuStatus->activeMBC == MBCType::MBC5;
 	}
+	MASQ_INLINE FLAG isMBC6() const
+	{
+		RETURN pGBc_emuStatus->activeMBC == MBCType::MBC6;
+	}
 	MASQ_INLINE FLAG isMBC7() const
 	{
 		RETURN pGBc_emuStatus->activeMBC == MBCType::MBC7;
@@ -2303,6 +2333,17 @@ private:
 	void setVRAMBankNumber(uint8_t vramBankNumber);
 	uint8_t getWRAMBankNumber();
 	void setWRAMBankNumber(uint8_t wramBankNumber);
+
+	// For MBC6
+	void setROMBankNumberB(uint16_t romBankNumber);
+	uint16_t getROMBankNumberB();
+	uint8_t getRAMBankNumberB();
+	void setRAMBankNumberB(uint8_t ramBankNumber);
+
+public:
+
+	// For MBC6
+	void processMBC6FlashWrite(uint16_t cpuAddr, BYTE data);
 
 public:
 
