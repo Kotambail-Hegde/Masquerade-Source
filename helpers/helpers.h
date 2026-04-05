@@ -1834,6 +1834,53 @@ typedef struct
 extern unsigned long crcTable[256];
 extern double bufferForFIR[2048];
 
+// CRC-32; Refer : https://en.wikipedia.org/wiki/Computation_of_cyclic_redundancy_checks#CRC-32_example
+
+static uint32_t crc32_table[256];
+static int crc32_table_initialized = 0;
+
+// Generate lookup table
+MASQ_INLINE void crc32_init(void)
+{
+	for (uint32_t i = 0; i < 256; ++i)
+	{
+		uint32_t crc = i;
+		for (uint32_t j = 0; j < 8; ++j)
+		{
+			if (crc & 1)
+			{
+				crc = (crc >> 1) ^ 0xEDB88320;
+			}
+			else
+			{
+				crc >>= 1;
+			}
+		}
+		crc32_table[i] = crc;
+	}
+
+	crc32_table_initialized = 1;
+}
+
+// Main API
+MASQ_INLINE uint32_t crc32_compute(const uint8_t* data, size_t length)
+{
+	if (!crc32_table_initialized)
+	{
+		crc32_init();
+	}
+
+	uint32_t crc = 0xFFFFFFFF;
+
+	for (size_t i = 0; i < length; ++i)
+	{
+		uint8_t index = (uint8_t)((crc ^ data[i]) & 0xFF);
+		crc = (crc >> 8) ^ crc32_table[index];
+	}
+
+	RETURN crc ^ 0xFFFFFFFF;
+}
+
 //
 
 MASQ_INLINE void createLUTForCRC()

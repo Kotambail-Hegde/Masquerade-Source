@@ -1003,7 +1003,7 @@ uint16_t GBc_t::getNumberOfROMBanksUsed()
 	default: banks = 0; BREAK;
 	}
 
-	if (isWT()) MASQ_UNLIKELY
+	if (isWT() || isM161()) MASQ_UNLIKELY
 	{
 		banks >>= ONE; // divide by 2 as WT uses 32KB banks instead of 16KB
 	}
@@ -7952,6 +7952,19 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 			initMBC();
 			setMBCType(pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_fields.cartridgeType);
 
+			// run crc32 to check for few weird roms
+			crc32_init();
+			uint32_t crc_32 = crc32_compute(pGBc_instance->GBc_state.entireRom.entireRomMemory, pAbsolute_GBc_instance->absolute_GBc_state.aboutRom.codeRomSize);
+			switch (crc_32)
+			{
+			case 0x0C38A775:
+			{
+				setMBCType(NULL, MBCType::M161);
+				BREAK;
+			}
+			default: BREAK;
+			}
+
 			// Read original header bytes before any patching
 			const uint8_t originalCartridgeType = pGBc_instance->GBc_state.entireRom.entireRomMemory[0x0147];
 			const uint8_t originalRomSize = pGBc_instance->GBc_state.entireRom.entireRomMemory[0x0148];
@@ -8041,7 +8054,7 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 			// indicate the RAM banking type if applicable
 			setRAMBankType(pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_fields.ramSize);
 
-			if (isWT())
+			if (isWT() || isM161())
 			{
 				DO_NOTHING;
 			}
@@ -8988,7 +9001,7 @@ byte GBc_t::readRawMemory(uint16_t address
 			}
 
 			// ROM 00 ($0000-$3FFF)
-			if (isWT()) MASQ_UNLIKELY
+			if (isWT() || isM161()) MASQ_UNLIKELY
 			{
 				ROMBankNumber = getROMBankNumber() << ONE; // 32KB bank N -> 16KB bank 2N
 			}
@@ -9085,7 +9098,7 @@ byte GBc_t::readRawMemory(uint16_t address
 			}
 
 			// ROM NN ($4000-$7FFF)
-			if (isWT()) MASQ_UNLIKELY
+			if (isWT() || isM161()) MASQ_UNLIKELY
 			{
 				ROMBankNumber = (getROMBankNumber() << ONE) | ONE; // -> 16KB bank 2N+1
 			}
@@ -10689,7 +10702,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 			// Below if block needed for MBC block in BESS specifications
 			if (ENABLED)
 			{
-				if (isWT()) MASQ_UNLIKELY
+				if (isWT() || isM161()) MASQ_UNLIKELY
 				{
 					pGBc_emuStatus->dataWrittenToMBCReg0 = data;
 				}
@@ -10791,6 +10804,14 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 			if (isWT()) MASQ_UNLIKELY
 			{
 				uint16_t ROMBankNumber = address & 0x7F;
+				setROMBankNumber(ROMBankNumber);
+				RETURN;
+			}
+
+			if (isM161() && pGBc_emuStatus->m161OneBankSwitchDone == NO) MASQ_UNLIKELY
+			{
+				pGBc_emuStatus->m161OneBankSwitchDone = YES;
+				uint16_t ROMBankNumber = data & 0x07;
 				setROMBankNumber(ROMBankNumber);
 				RETURN;
 			}

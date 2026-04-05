@@ -409,6 +409,7 @@ private:
 		MBC5, 
 		MBC6,
 		MBC7,
+		M161,
 		HUC1,
 		HUC3,
 		WISDOM_TREE,
@@ -1775,6 +1776,7 @@ private:
 			BYTE flashHidden[256];
 			uint8_t flashCmdState; // 0=IDLE, 1=UNLOCK1, 2=UNLOCK2, 3=PROGRAM, 4=ERASE_SETUP, 5=ERASE_UNLOCK1, 6=ERASE_CMD
 		} mbc6;
+		FLAG m161OneBankSwitchDone;
 		FLAG isBatteryAvailable;
 		FLAG isCartRAMAvailable;
 		FLAG isRTCAvailable;
@@ -2299,6 +2301,10 @@ private:
 	MASQ_INLINE FLAG isMBC7() const
 	{
 		RETURN pGBc_emuStatus->activeMBC == MBCType::MBC7;
+	}
+	MASQ_INLINE FLAG isM161() const
+	{
+		RETURN pGBc_emuStatus->activeMBC == MBCType::M161;
 	}
 	MASQ_INLINE FLAG isHUC1() const
 	{
