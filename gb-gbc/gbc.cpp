@@ -17,8 +17,8 @@
 
 #define ONE_MCYCLE_IN_T_CYCLES							(FOUR)
 
-#define MBC1_ROM_MODE									(false)
-#define MBC1_RAM_MODE									(true)
+#define MBC_SIMPLE_MODE									(false)
+#define MBC_ADVANCED_MODE								(true)
 
 #define ROM_00_START_ADDRESS							0x0000
 #define DMG_BIOS_START_ADDRESS							0x0000
@@ -1005,7 +1005,7 @@ uint16_t GBc_t::getNumberOfROMBanksUsed()
 
 	if (isWT() || isM161()) MASQ_UNLIKELY
 	{
-		banks >>= ONE; // divide by 2 as WT uses 32KB banks instead of 16KB
+		banks >>= ONE; // divide by 2 as these MBCs uses 32KB banks instead of 16KB
 	}
 
 	if (isMBC6()) MASQ_UNLIKELY
@@ -1016,11 +1016,11 @@ uint16_t GBc_t::getNumberOfROMBanksUsed()
 	RETURN banks;
 }
 
-void GBc_t::setROMModeIfMBC1()
+void GBc_t::setSimpleModeInMBC1()
 {
 	if (isMBC1())
 	{
-		pGBc_emuStatus->isMBC1Mode1 = MBC1_ROM_MODE;
+		pGBc_emuStatus->isMBC1Mode1 = MBC_SIMPLE_MODE;
 	}
 	else
 	{
@@ -1028,11 +1028,11 @@ void GBc_t::setROMModeIfMBC1()
 	}
 }
 
-void GBc_t::setRAMModeInMBC1()
+void GBc_t::setAdvancedModeInMBC1()
 {
 	if (isMBC1())
 	{
-		pGBc_emuStatus->isMBC1Mode1 = MBC1_RAM_MODE;
+		pGBc_emuStatus->isMBC1Mode1 = MBC_ADVANCED_MODE;
 	}
 	else
 	{
@@ -1040,7 +1040,7 @@ void GBc_t::setRAMModeInMBC1()
 	}
 }
 
-FLAG GBc_t::getROMOrRAMModeInMBC1()
+FLAG GBc_t::getMBCModeInMBC1()
 {
 	if (isMBC1())
 	{
@@ -6474,9 +6474,9 @@ void GBc_t::displayCompleteScreen()
 		prevFilterGB = filter;
 	}
 
-	// 1b. Ghost pass – exponential decay blend of gameboy_texture into ghost_texture.
+	// 1b. Ghost pass ï¿½ exponential decay blend of gameboy_texture into ghost_texture.
 	//     Runs at native GB/GBC resolution (160x144 or 160x144 GBC) before upscaling.
-	//     ghost_texture is NOT cleared between frames – that persistence is the effect.
+	//     ghost_texture is NOT cleared between frames ï¿½ that persistence is the effect.
 	if (ghost_decay > 0.0f)
 	{
 		uint32_t read = ghost_index;
@@ -8063,7 +8063,7 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 				// set the GB to ROM Mode if MBC1
 				if (isMBC1())
 				{
-					setROMModeIfMBC1();
+					setSimpleModeInMBC1();
 				}
 
 				// setup defaults if MBC6
@@ -8077,13 +8077,13 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 					e.isFlashForB = NO;
 					e.flashCmdState = 0;
 
-					// FLASH memory content — erased state is 0xFF
+					// FLASH memory content ï¿½ erased state is 0xFF
 					memset(
 						e.flash.raw,
 						0xFF,
 						sizeof(e.flash)); // 8 MBits
 
-					// FLASH Hidden memory content — erased state is 0xFF
+					// FLASH Hidden memory content ï¿½ erased state is 0xFF
 					memset(
 						e.flashHidden,
 						0xFF,
@@ -8112,7 +8112,7 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 					e.eepromArgBitsLeft = 0;
 					e.eepromReadBits = 0;
 
-					// EEPROM memory content — erased state is 0xFF
+					// EEPROM memory content ï¿½ erased state is 0xFF
 					memset(
 						pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[0],
 						0xFF,
@@ -8390,7 +8390,7 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 
 							uint64_t elapsed = (unixCTS > unixSTS) ? (unixCTS - unixSTS) : 0;
 
-							// Apply elapsed time to live counters ($10–$15) + rtcSeconds
+							// Apply elapsed time to live counters ($10ï¿½$15) + rtcSeconds
 							uint16_t minutes = ((uint16_t)rtc.rtcMem[0x10] << 8)
 								| ((uint16_t)rtc.rtcMem[0x11] << 4)
 								| rtc.rtcMem[0x12];
@@ -8994,14 +8994,16 @@ byte GBc_t::readRawMemory(uint16_t address
 		{
 			uint16_t ROMBankNumber = ZERO;
 
-			if (isMBC1() && getROMOrRAMModeInMBC1() == MBC1_RAM_MODE)
+			if (isMBC1() && getMBCModeInMBC1() == MBC_ADVANCED_MODE)
 			{
-				ROMBankNumber = (pGBc_emuStatus->currentROMBankNumber.mbc1Fields.mbcBank2Reg << FIVE);
+				// Refer https://gbdev.io/pandocs/MBC1.html#00003fff--rom-bank-x0-read-only
+				// Allowed banks are $20/$40/$60 which is obtained by 2 bit Upper ROM Bank number 
+				ROMBankNumber = pGBc_emuStatus->currentROMBankNumber.mbc1Fields.romBankHi_ramBank << FIVE;
 				ROMBankNumber %= getNumberOfROMBanksUsed();
 			}
 
 			// ROM 00 ($0000-$3FFF)
-			if (isWT() || isM161()) MASQ_UNLIKELY
+			else if (isWT() || isM161()) MASQ_UNLIKELY
 			{
 				ROMBankNumber = getROMBankNumber() << ONE; // 32KB bank N -> 16KB bank 2N
 			}
@@ -9098,7 +9100,7 @@ byte GBc_t::readRawMemory(uint16_t address
 			}
 
 			// ROM NN ($4000-$7FFF)
-			if (isWT() || isM161()) MASQ_UNLIKELY
+			else if (isWT() || isM161()) MASQ_UNLIKELY
 			{
 				ROMBankNumber = (getROMBankNumber() << ONE) | ONE; // -> 16KB bank 2N+1
 			}
@@ -9158,7 +9160,7 @@ byte GBc_t::readRawMemory(uint16_t address
 		// reading from banked external RAM
 		if (address >= EXTERNAL_RAM_START_ADDRESS && address <= EXTERNAL_RAM_END_ADDRESS)
 		{
-			auto originalAddress = address;
+			uint16_t originalAddress = address;
 
 			if (isMBC6()) MASQ_UNLIKELY
 			{
@@ -9245,6 +9247,14 @@ byte GBc_t::readRawMemory(uint16_t address
 				address &= (0x200 - ONE);
 			}
 
+			uint8_t ramBank = getRAMBankNumber();
+
+			/*
+			* Note that for MBC1, in simple mode, RAM banking is disabled and hence bank 0 should be used
+			* This is already taken care in writeRawMemory while handling writes for 0x4000 - 0x5FFF in MBC1
+			* Hence, ramBank need not be reset here again.
+			*/ 
+
 			if (isRAMBankEnabled() == YES)
 			{
 				if ((ceGBGBC->interceptCPURead(originalAddress, &modedData, &other1))
@@ -9252,7 +9262,7 @@ byte GBc_t::readRawMemory(uint16_t address
 					//&&
 					//((BYTE)(other1 >> FOUR) == EIGHT)
 					&&
-					((BYTE)(other1 & 0x0F) == (BYTE)(getRAMBankNumber())))
+					((BYTE)(other1 & 0x0F) == (BYTE)(ramBank)))
 				{
 					BYTE data = TO_UINT8(modedData);
 					if (isHUC3()) MASQ_UNLIKELY data |= 0x80;
@@ -9261,7 +9271,7 @@ byte GBc_t::readRawMemory(uint16_t address
 				else
 				{
 					// All 8 bits are read properly unlike what pandocs mentions; needed for the HUC3 games
-					RETURN pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[getRAMBankNumber()][address];
+					RETURN pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[ramBank][address];
 				}
 			}
 			else
@@ -10085,14 +10095,14 @@ void GBc_t::executeHUC3ExtendedCommand()
 	auto& rtc = pGBc_emuStatus->huc3Rtc;
 	switch (rtc.argument)
 	{
-	case 0x0: // Copy live counters ($10–$15) -> staging ($00–$06)
+	case 0x0: // Copy live counters ($10ï¿½$15) -> staging ($00ï¿½$06)
 	{
 		for (int i = 0; i < 3; i++) rtc.rtcMem[i] = rtc.rtcMem[0x10 + i]; // minutes LSN-first
 		for (int i = 0; i < 3; i++) rtc.rtcMem[0x03 + i] = rtc.rtcMem[0x13 + i]; // days LSN-first
 		rtc.rtcMem[0x06] = rtc.rtcSeconds & 0x0F;
 		BREAK;
 	}
-	case 0x1: // Copy staging ($00–$06) -> live counters ($10–$15), adjust event time
+	case 0x1: // Copy staging ($00ï¿½$06) -> live counters ($10ï¿½$15), adjust event time
 	{
 		if (rtc.rtcMem[0x06] != 1 || (rtc.rtcMem[0x07] & 0x01))
 		{
@@ -10115,7 +10125,7 @@ void GBc_t::executeHUC3ExtendedCommand()
 		// Delta in total minutes
 		int32_t delta = ((int32_t)newDays * 1440 + newMinutes) - ((int32_t)oldDays * 1440 + oldMinutes);
 
-		// Adjust event time at $58–$5D by same delta (LSN at lower index)
+		// Adjust event time at $58ï¿½$5D by same delta (LSN at lower index)
 		uint16_t evtMin = ((uint16_t)rtc.rtcMem[0x5A] << 8) | ((uint16_t)rtc.rtcMem[0x59] << 4) | rtc.rtcMem[0x58];
 		uint16_t evtDays = ((uint16_t)rtc.rtcMem[0x5D] << 8) | ((uint16_t)rtc.rtcMem[0x5C] << 4) | rtc.rtcMem[0x5B];
 
@@ -10139,7 +10149,7 @@ void GBc_t::executeHUC3ExtendedCommand()
 		rtc.rtcSeconds = 0;
 		BREAK;
 	}
-	case 0x2: // Status — must return $1 or games won't start
+	case 0x2: // Status ï¿½ must return $1 or games won't start
 	{
 		rtc.result = 0x1;
 		BREAK;
@@ -10185,7 +10195,7 @@ void GBc_t::executeHUC3Command()
 		rtc.rtcMemIdx = (rtc.rtcMemIdx & 0x0F) | ((rtc.argument & 0x0F) << FOUR);
 		BREAK;
 
-	case 0x6: // Extended command — argument selects sub-command
+	case 0x6: // Extended command ï¿½ argument selects sub-command
 		executeHUC3ExtendedCommand();
 		BREAK;
 
@@ -10199,9 +10209,9 @@ void GBc_t::executeHUC3Command()
 // Refer https://gbdev.io/pandocs/MBC6.html#flash-commands
 //
 // Three separate protection flags:
-//   mbc6.flashEnable           : set by reg $0C00-$0FFF ($01) — global gate for all flash writes
-//   mbc6.flashEnSec0AndHidden: set by reg $1000       ($01) — additional gate for sector 0 and hidden region
-//   mbc6.flashProtSec0         : set by flash commands  ($20/$40) — hardware protection for sector 0 erase
+//   mbc6.flashEnable           : set by reg $0C00-$0FFF ($01) ï¿½ global gate for all flash writes
+//   mbc6.flashEnSec0AndHidden: set by reg $1000       ($01) ï¿½ additional gate for sector 0 and hidden region
+//   mbc6.flashProtSec0         : set by flash commands  ($20/$40) ï¿½ hardware protection for sector 0 erase
 //
 // Flash command state machine states:
 //  0  = IDLE
@@ -10239,7 +10249,7 @@ void GBc_t::processMBC6FlashWrite(uint16_t cpuAddr, BYTE data)
 		if (!mbc6.isFlashForA) RETURN;
 		flashAddr = (uint32_t)getROMBankNumber() * 0x2000 + (cpuAddr - 0x4000);
 	}
-	else // Bank B window (0x6000–0x7FFF)
+	else // Bank B window (0x6000ï¿½0x7FFF)
 	{
 		if (!mbc6.isFlashForB) RETURN;
 		flashAddr = (uint32_t)getROMBankNumberB() * 0x2000 + (cpuAddr - 0x6000);
@@ -10393,7 +10403,7 @@ void GBc_t::processMBC6FlashWrite(uint16_t cpuAddr, BYTE data)
 
 				if (isSector0 && (!mbc6.flashEnSec0AndHidden || mbc6.flashProtSec0))
 				{
-					// Sector 0: blocked — either write-enable not set or hardware-protected
+					// Sector 0: blocked ï¿½ either write-enable not set or hardware-protected
 				}
 				else
 				{
@@ -10975,9 +10985,11 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 					if (isMBC3())
 					{
 						ramEnable ? enableRTCAccess() : disableRTCAccess();
-						RETURN;
 					}
-					if (isMBC7()) MASQ_UNLIKELY pGBc_emuStatus->isMBC7RamEn1 = ramEnable ? YES : NO;
+					else if (isMBC7()) MASQ_UNLIKELY
+					{
+						pGBc_emuStatus->isMBC7RamEn1 = ramEnable ? YES : NO;
+					}
 					RETURN;
 				}
 			}
@@ -10992,9 +11004,12 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 					if (isMBC1())
 					{
 						// Refer : https://gekkio.fi/files/gb-docs/gbctr.pdf
-						pGBc_emuStatus->currentROMBankNumber.mbc1Fields.mbcBank1Reg = data & 0x1F;
-						if (pGBc_emuStatus->currentROMBankNumber.mbc1Fields.mbcBank1Reg == ZERO)
-							pGBc_emuStatus->currentROMBankNumber.mbc1Fields.mbcBank1Reg = ONE;
+						pGBc_emuStatus->currentROMBankNumber.mbc1Fields.romBankLo = data & 0x1F;
+						if (pGBc_emuStatus->currentROMBankNumber.mbc1Fields.romBankLo == ZERO)
+						{
+							pGBc_emuStatus->currentROMBankNumber.mbc1Fields.romBankLo = ONE;
+						}
+						pGBc_emuStatus->currentROMBankNumber.mbc1Fields.romBankLo %= getNumberOfROMBanksUsed();
 						RETURN;
 					}
 
@@ -11052,12 +11067,12 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 				if (isMBC1())
 				{
 					// Refer : https://gekkio.fi/files/gb-docs/gbctr.pdf
-					pGBc_emuStatus->currentROMBankNumber.mbc1Fields.mbcBank2Reg = data & 0x03;
+					pGBc_emuStatus->currentROMBankNumber.mbc1Fields.romBankHi_ramBank = data & 0x03;
 
 					// change higher bits of ROM bank number
-					if (getROMOrRAMModeInMBC1() == MBC1_ROM_MODE)
+					if (getMBCModeInMBC1() == MBC_SIMPLE_MODE)
 					{
-						// Since we came back to ROM mode, fix the RAM bank number to 0
+						// In simple mode, RAM banking is disabled, hence reset the RAM bank number
 						setRAMBankNumber(ZERO);
 					}
 					// set the RAM bank number
@@ -11119,7 +11134,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 			{
 				if (isMBC1())
 				{
-					(data & 0x01) ? setRAMModeInMBC1() : setROMModeIfMBC1();
+					(data & 0x01) ? setAdvancedModeInMBC1() : setSimpleModeInMBC1();
 				}
 				// latch clock data for mbc3
 				else if (isMBC3())
@@ -11369,7 +11384,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 											MBC7_EEPROM_WORD(e.eepromCommand & 0x7F) = 0x0000;
 										}
 										e.eepromArgBitsLeft = 16;
-										// Don't clear command — needed to identify WRITE vs WRAL below
+										// Don't clear command ï¿½ needed to identify WRITE vs WRAL below
 										BREAK;
 									}
 									// ERASE (11 xAAAAAAA)

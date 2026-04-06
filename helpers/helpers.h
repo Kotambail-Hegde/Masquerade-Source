@@ -356,6 +356,7 @@
 
 #define CONTINUE									continue
 #define BREAK										break
+#define FALLTHROUGH									((void)0)
 
 #ifdef __EMSCRIPTEN__
 #define GL_ASSERT(x)								if (!(x));

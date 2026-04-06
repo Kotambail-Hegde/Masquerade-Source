@@ -1687,8 +1687,8 @@ private:
 		{
 			struct
 			{
-				uint16_t mbcBank1Reg : FIVE; // bits 0 - 4
-				uint16_t mbcBank2Reg : TWO;	// bits 5 - 6
+				uint16_t romBankLo : FIVE; // bits 0 - 4
+				uint16_t romBankHi_ramBank : TWO;	// bits 5 - 6
 				uint16_t pad : NINE; // bits 7 - 16
 			} mbc1Fields;
 			uint16_t raw;
@@ -2323,9 +2323,9 @@ private:
 	void setROMBankNumber(uint16_t romBankNumber);
 	uint16_t getROMBankNumber();
 	uint16_t getNumberOfROMBanksUsed();
-	void setROMModeIfMBC1();
-	void setRAMModeInMBC1();
-	FLAG getROMOrRAMModeInMBC1();
+	void setSimpleModeInMBC1();
+	void setAdvancedModeInMBC1();
+	FLAG getMBCModeInMBC1();
 
 	void enableRAMBank();
 	void disableRAMBank();
