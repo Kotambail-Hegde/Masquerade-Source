@@ -409,6 +409,7 @@ private:
 		MBC5, 
 		MBC6,
 		MBC7,
+		MMM01,
 		M161,
 		HUC1,
 		HUC3,
@@ -1663,6 +1664,13 @@ private:
 		UNKNOWN	= 0xF
 	};
 
+	enum class MMM01_MODES
+	{
+		UNMAPPED = 0x0,
+		MAPPED = 0x1,
+		UNKNOWN = 0xF
+	};
+
 	typedef struct
 	{
 		STAT_INTR_SRC STAT_src;
@@ -1691,6 +1699,13 @@ private:
 				uint16_t romBankHi_ramBank : TWO;	// bits 5 - 6
 				uint16_t pad : NINE; // bits 7 - 16
 			} mbc1Fields;
+			struct
+			{
+				uint16_t romBankLo : FIVE; // bits 0 - 4
+				uint16_t romBankMid_ramBankLo : TWO;	// bits 5 - 6
+				uint16_t romBankHi : TWO;	// bits 7 - 8
+				uint16_t pad : SEVEN; // bits 9 - 16
+			} mmm01Fields;
 			uint16_t raw;
 		} currentROMBankNumber;
 		uint16_t currentROMBankNumberB;
@@ -1776,6 +1791,18 @@ private:
 			BYTE flashHidden[256];
 			uint8_t flashCmdState; // 0=IDLE, 1=UNLOCK1, 2=UNLOCK2, 3=PROGRAM, 4=ERASE_SETUP, 5=ERASE_UNLOCK1, 6=ERASE_CMD
 		} mbc6;
+		struct
+		{
+			FLAG isMMM01Mode1;
+			BYTE ramBankMask;
+			BYTE romBankMask;
+			BYTE ramBankLo;
+			BYTE ramBankHi;
+			FLAG writeDisable;
+			FLAG muxEnabled;
+			BYTE mux0RomBankMid; // stores the romBankMid before mux was enabled
+			MMM01_MODES mmm01Mode;
+		} mmm01;
 		FLAG m161OneBankSwitchDone;
 		FLAG isBatteryAvailable;
 		FLAG isCartRAMAvailable;
@@ -2302,6 +2329,10 @@ private:
 	{
 		RETURN pGBc_emuStatus->activeMBC == MBCType::MBC7;
 	}
+	MASQ_INLINE FLAG isMMM01() const
+	{
+		RETURN pGBc_emuStatus->activeMBC == MBCType::MMM01;
+	}
 	MASQ_INLINE FLAG isM161() const
 	{
 		RETURN pGBc_emuStatus->activeMBC == MBCType::M161;
@@ -2327,6 +2358,10 @@ private:
 	void setAdvancedModeInMBC1();
 	FLAG getMBCModeInMBC1();
 
+	void setSimpleModeInMMM01();
+	void setAdvancedModeInMMM01();
+	FLAG getMBCModeInMMM01();
+
 	void enableRAMBank();
 	void disableRAMBank();
 	FLAG isRAMBankEnabled();
@@ -2350,6 +2385,11 @@ public:
 
 	// For MBC6
 	void processMBC6FlashWrite(uint16_t cpuAddr, BYTE data);
+
+public:
+
+	// For MMM01
+	void updateMMM01RamBanking();
 
 public:
 
