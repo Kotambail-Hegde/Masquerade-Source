@@ -9246,7 +9246,16 @@ byte GBc_t::readRawMemory(uint16_t address
 					}
 					else
 					{
-						RETURN pGBc_instance->GBc_state.entireRom.romMemoryBanks.mROMBanks8KB[ROMBankNumber][address];
+						if ((ceGBGBC->interceptCPURead(originalAddress, &modedData, &other1))
+							&&
+							((BYTE)other1 == pGBc_instance->GBc_state.entireRom.romMemoryBanks.mROMBanks8KB[ROMBankNumber][address]))
+						{
+							RETURN TO_UINT8(modedData);
+						}
+						else
+						{
+							RETURN pGBc_instance->GBc_state.entireRom.romMemoryBanks.mROMBanks8KB[ROMBankNumber][address];
+						}
 					}
 				}
 				else
@@ -9272,12 +9281,21 @@ byte GBc_t::readRawMemory(uint16_t address
 						}
 						else
 						{
-							RETURN(flashAddr < sizeof(pGBc_emuStatus->mbc6.flash)) ? pGBc_emuStatus->mbc6.flash.raw[flashAddr] : 0xFF;
+							RETURN (flashAddr < sizeof(pGBc_emuStatus->mbc6.flash)) ? pGBc_emuStatus->mbc6.flash.raw[flashAddr] : 0xFF;
 						}
 					}
 					else
 					{
-						RETURN pGBc_instance->GBc_state.entireRom.romMemoryBanks.mROMBanks8KB[ROMBankNumberB][address];
+						if ((ceGBGBC->interceptCPURead(originalAddress, &modedData, &other1))
+							&&
+							((BYTE)other1 == pGBc_instance->GBc_state.entireRom.romMemoryBanks.mROMBanks8KB[ROMBankNumberB][address]))
+						{
+							RETURN TO_UINT8(modedData);
+						}
+						else
+						{
+							RETURN pGBc_instance->GBc_state.entireRom.romMemoryBanks.mROMBanks8KB[ROMBankNumberB][address];
+						}
 					}
 				}
 			}
@@ -9388,30 +9406,57 @@ byte GBc_t::readRawMemory(uint16_t address
 				{
 					uint8_t RAMBankNumber = getRAMBankNumber();
 					address -= 0xA000;
-					RETURN pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks4KB[RAMBankNumber][address];
+
+					if ((ceGBGBC->interceptCPURead(originalAddress, &modedData, &other1))
+						// NOTE: Below check is not needed I guess as only option is "1" or "8" to differentiate bank; Below bank number check is sufficient
+						//&&
+						//((BYTE)(other1 >> FOUR) == EIGHT)
+						&&
+						((BYTE)(other1 & 0x0F) == (BYTE)(RAMBankNumber)))
+					{
+						BYTE data = TO_UINT8(modedData);
+						RETURN TO_UINT8(data);
+					}
+					else
+					{
+						RETURN pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks4KB[RAMBankNumber][address];
+					}
 				}
 				else
 				{
 					uint8_t RAMBankNumberB = getRAMBankNumberB();
 					address -= 0xB000;
-					RETURN pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks4KB[RAMBankNumberB][address];
+					if ((ceGBGBC->interceptCPURead(originalAddress, &modedData, &other1))
+						// NOTE: Below check is not needed I guess as only option is "1" or "8" to differentiate bank; Below bank number check is sufficient
+						//&&
+						//((BYTE)(other1 >> FOUR) == EIGHT)
+						&&
+						((BYTE)(other1 & 0x0F) == (BYTE)(RAMBankNumberB)))
+					{
+						BYTE data = TO_UINT8(modedData);
+						RETURN TO_UINT8(data);
+					}
+					else
+					{
+						RETURN pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks4KB[RAMBankNumberB][address];
+					}
 				}
 			}
 
-				if (isMBC3())
+			if (isMBC3())
+			{
+				if (isRTCMappedToExternalRAM() == YES)
 				{
-					if (isRTCMappedToExternalRAM() == YES)
+					if (readFromRTCRegisterIfApplicable() != INVALID)
 					{
-						if (readFromRTCRegisterIfApplicable() != INVALID)
-						{
-							RETURN(BYTE)readFromRTCRegisterIfApplicable();
-						}
-						else
-						{
-							FATAL("RTC Invalid Read");
-						}
+						RETURN(BYTE)readFromRTCRegisterIfApplicable();
+					}
+					else
+					{
+						FATAL("RTC Invalid Read");
 					}
 				}
+			}
 
 			if (isMBC7() && isRAMBankEnabled()) MASQ_UNLIKELY
 			{
@@ -9484,9 +9529,7 @@ byte GBc_t::readRawMemory(uint16_t address
 					&&
 					((BYTE)(other1 & 0x0F) == (BYTE)(ramBank)))
 				{
-					BYTE data = TO_UINT8(modedData);
-					if (isHUC3()) MASQ_UNLIKELY data |= 0x80;
-					RETURN TO_UINT8(data);
+					RETURN TO_UINT8(modedData);
 				}
 				else
 				{
