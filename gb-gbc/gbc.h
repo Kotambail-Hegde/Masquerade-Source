@@ -404,6 +404,7 @@ private:
 	{
 		NONE, 
 		MBC1, 
+		MBC1M, 
 		MBC2, 
 		MBC3, 
 		MBC5, 
@@ -1701,6 +1702,12 @@ private:
 			} mbc1Fields;
 			struct
 			{
+				uint16_t romBankLo : FOUR; // bits 0 - 3
+				uint16_t romBankHi_ramBank : TWO;	// bits 4 - 5
+				uint16_t pad : TEN; // bits 76 - 16
+			} mbc1mFields;
+			struct
+			{
 				uint16_t romBankLo : FIVE; // bits 0 - 4
 				uint16_t romBankMid_ramBankLo : TWO;	// bits 5 - 6
 				uint16_t romBankHi : TWO;	// bits 7 - 8
@@ -2308,6 +2315,10 @@ private:
 	MASQ_INLINE FLAG isMBC1() const
 	{
 		RETURN pGBc_emuStatus->activeMBC == MBCType::MBC1;
+	}
+	MASQ_INLINE FLAG isMBC1M() const
+	{
+		RETURN pGBc_emuStatus->activeMBC == MBCType::MBC1M;
 	}
 	MASQ_INLINE FLAG isMBC2() const
 	{

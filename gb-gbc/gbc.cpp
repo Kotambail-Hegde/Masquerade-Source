@@ -1008,17 +1008,17 @@ uint16_t GBc_t::getNumberOfROMBanksUsed()
 		banks >>= ONE; // divide by 2 as these MBCs uses 32KB banks instead of 16KB
 	}
 
-		if (isMBC6()) MASQ_UNLIKELY
-		{
-			banks <<= ONE; // multiple by 2 as MBC6 uses 8KB banks instead of 16KB
-		}
+	if (isMBC6()) MASQ_UNLIKELY
+	{
+		banks <<= ONE; // multiple by 2 as MBC6 uses 8KB banks instead of 16KB
+	}
 
 	RETURN banks;
 }
 
 void GBc_t::setSimpleModeInMBC1()
 {
-	if (isMBC1())
+	if (isMBC1() || isMBC1M())
 	{
 		pGBc_emuStatus->isMBC1Mode1 = MBC_SIMPLE_MODE;
 	}
@@ -1030,7 +1030,7 @@ void GBc_t::setSimpleModeInMBC1()
 
 void GBc_t::setAdvancedModeInMBC1()
 {
-	if (isMBC1())
+	if (isMBC1() || isMBC1M())
 	{
 		pGBc_emuStatus->isMBC1Mode1 = MBC_ADVANCED_MODE;
 	}
@@ -1042,7 +1042,7 @@ void GBc_t::setAdvancedModeInMBC1()
 
 FLAG GBc_t::getMBCModeInMBC1()
 {
-	if (isMBC1())
+	if (isMBC1() || isMBC1M())
 	{
 		RETURN pGBc_emuStatus->isMBC1Mode1;
 	}
@@ -8119,6 +8119,61 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 				}
 			}
 
+			// -----------------------------------------------------------------------
+			// MBC1 Multicart (MBC1M) detection
+			// -----------------------------------------------------------------------
+			// Refer to https://gekkio.fi/files/gb-docs/gbctr.pdf (Detecting multicarts)
+			if (isMBC1())
+			{
+				static const uint8_t kNintendoLogo[48] =
+				{
+					0xCE, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B,
+					0x03, 0x73, 0x00, 0x83, 0x00, 0x0C, 0x00, 0x0D,
+					0x00, 0x08, 0x11, 0x1F, 0x88, 0x89, 0x00, 0x0E,
+					0xDC, 0xCC, 0x6E, 0xE6, 0xDD, 0xDD, 0xD9, 0x99,
+					0xBB, 0xBB, 0x67, 0x63, 0x6E, 0x0E, 0xEC, 0xCC,
+					0xDD, 0xDC, 0x99, 0x9F, 0xBB, 0xB9, 0x33, 0x3E
+				};
+
+				// Only meaningful for large ROMs (>= 4 banks)
+				if (totalBanks >= 4)
+				{
+					uint32_t validLogoCount = 0;
+
+					uint32_t stride = totalBanks / 4;
+
+					// Clamp to minimum realistic spacing
+					if (stride < 4)
+					{
+						stride = 4;
+					}
+
+					for (uint32_t bank2 = 0; bank2 < 4; ++bank2)
+					{
+						uint32_t bankIndex = bank2 * stride;
+
+						if (bankIndex >= totalBanks)
+						{
+							BREAK;
+						}
+
+						uint8_t* bankPtr = pGBc_instance->GBc_state.entireRom.romMemoryBanks.mROMBanks[bankIndex];
+
+						if (memcmp(&bankPtr[0x0104], kNintendoLogo, 48) == 0)
+						{
+							validLogoCount++;
+						}
+					}
+
+					// Heuristic: at least 2 valid logos -> multicart
+					if (validLogoCount >= 2)
+					{
+						LOG("MBC1 multicart detected");
+						setMBCType(NULL, MBCType::MBC1M);
+					}
+				}
+			}
+
 			// initialize the JoyPad state
 			pGBc_peripherals->P1_JOYP.joyPadMemory = 0xCF; // lower nibble set to all ones indicate, no selection and no keys being active; reserved bits are set as well
 
@@ -8140,7 +8195,7 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 			else
 			{
 				// set the GB to ROM Mode if MBC1
-				if (isMBC1())
+				if (isMBC1() || isMBC1M())
 				{
 					setSimpleModeInMBC1();
 				}
@@ -9083,11 +9138,18 @@ byte GBc_t::readRawMemory(uint16_t address
 		{
 			uint16_t ROMBankNumber = ZERO;
 
-			if (isMBC1() && getMBCModeInMBC1() == MBC_ADVANCED_MODE)
+			if ((isMBC1() || isMBC1M()) && getMBCModeInMBC1() == MBC_ADVANCED_MODE)
 			{
-				// Refer https://gbdev.io/pandocs/MBC1.html#00003fff--rom-bank-x0-read-only
-				// Allowed banks are $20/$40/$60 which is obtained by 2 bit Upper ROM Bank number 
-				ROMBankNumber = pGBc_emuStatus->currentROMBankNumber.mbc1Fields.romBankHi_ramBank << FIVE;
+				if (isMBC1M())
+				{
+					ROMBankNumber = pGBc_emuStatus->currentROMBankNumber.mbc1mFields.romBankHi_ramBank << FOUR;
+				}
+				else
+				{
+					// Refer https://gbdev.io/pandocs/MBC1.html#00003fff--rom-bank-x0-read-only
+					// Allowed banks are $20/$40/$60 which is obtained by 2 bit Upper ROM Bank number 
+					ROMBankNumber = pGBc_emuStatus->currentROMBankNumber.mbc1Fields.romBankHi_ramBank << FIVE;
+				}
 				ROMBankNumber %= getNumberOfROMBanksUsed();
 			}
 
@@ -10935,14 +10997,14 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 				{
 					if (address <= 0x1FFF)
 					{
-						if (isMBC1() || isMBC2() || isMBC3() || isMBC5() || isMBC7() || isHUC1() || isHUC3() || isMMM01())
+						if (isMBC1() || isMBC1M() || isMBC2() || isMBC3() || isMBC5() || isMBC7() || isHUC1() || isHUC3() || isMMM01())
 						{
 							pGBc_emuStatus->dataWrittenToMBCReg0 = data;
 						}
 					}
 					else if (address <= 0x2FFF)
 					{
-						if (isMBC1() || isMBC3() || isMBC5() || isMBC7() || isHUC1() || isHUC3() || isMMM01())
+						if (isMBC1() || isMBC1M() || isMBC3() || isMBC5() || isMBC7() || isHUC1() || isHUC3() || isMMM01())
 						{
 							pGBc_emuStatus->dataWrittenToMBCReg1 = data;
 						}
@@ -10953,7 +11015,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 					}
 					else if (address <= 0x3FFF)
 					{
-						if (isMBC1() || isMBC3() || isMBC7() || isHUC1() || isHUC3() || isMMM01())
+						if (isMBC1() || isMBC1M() || isMBC3() || isMBC7() || isHUC1() || isHUC3() || isMMM01())
 						{
 							pGBc_emuStatus->dataWrittenToMBCReg1 = data;
 						}
@@ -10968,7 +11030,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 					}
 					else if (address <= 0x5FFF)
 					{
-						if (isMBC1() || isMBC3() || isMBC7() || isHUC1() || isHUC3() || isMMM01())
+						if (isMBC1() || isMBC1M() || isMBC3() || isMBC7() || isHUC1() || isHUC3() || isMMM01())
 						{
 							pGBc_emuStatus->dataWrittenToMBCReg2 = data;
 						}
@@ -10979,7 +11041,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 					}
 					else if (address <= 0x7FFF)
 					{
-						if (isMBC1() || isMBC3() || isHUC1() || isHUC3() || isMMM01())
+						if (isMBC1() || isMBC1M() || isMBC3() || isHUC1() || isHUC3() || isMMM01())
 						{
 							pGBc_emuStatus->dataWrittenToMBCReg3 = data;
 						}
@@ -11057,7 +11119,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 			// --- 0x0000 - 0x1FFF : RAM/RTC enable ---
 			if (address <= 0x1FFF)
 			{
-				if (isMBC1() || isMBC2() || isMBC3() || isMBC5() || isMBC7() || isHUC1() || isHUC3() || isMMM01())
+				if (isMBC1() || isMBC1M() || isMBC2() || isMBC3() || isMBC5() || isMBC7() || isHUC1() || isHUC3() || isMMM01())
 				{
 					// MBC2 special handling
 					if (isMBC2())
@@ -11155,7 +11217,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 						RETURN;
 					}
 
-					// MBC1/3/5/7/MMM01 RAM or RTC enable
+					// MBC1/1M/3/5/7/MMM01 RAM or RTC enable
 					const FLAG ramEnable = ((data & 0x0F) == 0x0A);
 					ramEnable ? enableRAMBank() : disableRAMBank();
 					if (isMBC3())
@@ -11187,19 +11249,34 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 			// --- 0x2000 - 0x3FFF : ROM bank lower bits ---
 			else if (address <= 0x3FFF)
 			{
-				if (isMBC1() || isMBC2() || isMBC3() || isMBC5() || isMBC7() || isHUC1() || isHUC3() || isMMM01())
+				if (isMBC1() || isMBC1M() || isMBC2() || isMBC3() || isMBC5() || isMBC7() || isHUC1() || isHUC3() || isMMM01())
 				{
 					auto ROMBankNumber = getROMBankNumber();
 
-					if (isMBC1())
+					if (isMBC1() || isMBC1M())
 					{
 						// Refer : https://gekkio.fi/files/gb-docs/gbctr.pdf
-						pGBc_emuStatus->currentROMBankNumber.mbc1Fields.romBankLo = data & 0x1F;
-						if (pGBc_emuStatus->currentROMBankNumber.mbc1Fields.romBankLo == ZERO)
+						if (isMBC1M())
 						{
-							pGBc_emuStatus->currentROMBankNumber.mbc1Fields.romBankLo = ONE;
+							// 4 bits
+							pGBc_emuStatus->currentROMBankNumber.mbc1mFields.romBankLo = data & 0xF;
+							// Has mostly same circuitry as mbc1, but last bit is left floating...
+							if ((data & 0x1F) == ZERO)
+							{
+								pGBc_emuStatus->currentROMBankNumber.mbc1mFields.romBankLo = ONE;
+							}
+							pGBc_emuStatus->currentROMBankNumber.mbc1mFields.romBankLo %= getNumberOfROMBanksUsed();
 						}
-						pGBc_emuStatus->currentROMBankNumber.mbc1Fields.romBankLo %= getNumberOfROMBanksUsed();
+						else
+						{
+							// 5 bits
+							pGBc_emuStatus->currentROMBankNumber.mbc1Fields.romBankLo = data & 0x1F;
+							if (pGBc_emuStatus->currentROMBankNumber.mbc1Fields.romBankLo == ZERO)
+							{
+								pGBc_emuStatus->currentROMBankNumber.mbc1Fields.romBankLo = ONE;
+							}
+							pGBc_emuStatus->currentROMBankNumber.mbc1Fields.romBankLo %= getNumberOfROMBanksUsed();
+						}
 						RETURN;
 					}
 
@@ -11275,10 +11352,17 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 			// --- 0x4000 - 0x5FFF : RAM bank or upper ROM bits ---
 			else if (address <= 0x5FFF)
 			{
-				if (isMBC1())
+				if (isMBC1() || isMBC1M())
 				{
 					// Refer : https://gekkio.fi/files/gb-docs/gbctr.pdf
-					pGBc_emuStatus->currentROMBankNumber.mbc1Fields.romBankHi_ramBank = data & 0x03;
+					if (isMBC1M())
+					{
+						pGBc_emuStatus->currentROMBankNumber.mbc1mFields.romBankHi_ramBank = data & 0x03;
+					}
+					else
+					{
+						pGBc_emuStatus->currentROMBankNumber.mbc1Fields.romBankHi_ramBank = data & 0x03;
+					}
 
 					// change higher bits of ROM bank number
 					if (getMBCModeInMBC1() == MBC_SIMPLE_MODE)
@@ -11361,7 +11445,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 			// --- 0x6000 - 0x7FFF : MBC1 mode select / MBC3 latch ---
 			else if (address <= 0x7FFF)
 			{
-				if (isMBC1())
+				if (isMBC1() || isMBC1M())
 				{
 					(data & 0x01) ? setAdvancedModeInMBC1() : setSimpleModeInMBC1();
 				}
