@@ -1973,7 +1973,7 @@ public:
 							// - When io.WantCaptureKeyboard is true, do not dispatch keyboard input data to your main application, or clear/overwrite your copy of the keyboard data.
 							// Generally you may always pass all inputs to dear imgui, and hide them from your application based on those two flags.
 							SDL_Event event;
-							if (SDL_PollEvent(&event))
+							while (SDL_PollEvent(&event))
 							{
 								handleSDLEvent(event);
 							}
@@ -2097,7 +2097,7 @@ public:
 										{
 											if (recentlyOpenedList.empty())
 											{
-												ImGui::MenuItem("Nothing to display##Nothingtodisplay");			
+												ImGui::MenuItem("Nothing to display##Nothingtodisplay");
 											}
 											else
 											{
@@ -2576,7 +2576,7 @@ public:
 											ImVec2 winSize = ImGui::GetWindowSize();
 											ImVec2 winMax = ImVec2(shiftedWinPos.x + winSize.x, shiftedWinPos.y + winSize.y);
 
-											// Draw window background (optional � usually already drawn by ImGui)
+											// Draw window background (optional — usually already drawn by ImGui)
 											ImU32 bgColor = ImGui::GetColorU32(ImGuiCol_ChildBg);
 											// We use winPos instead of shiftedWinPos as we want this to color the new space created after the shift happened
 											drawList->AddRectFilled(winPos, winMax, bgColor);
@@ -2619,7 +2619,7 @@ public:
 										const FLAG displayX = NO;
 										for (auto it = recentlyOpenedList.begin(); it != recentlyOpenedList.end(); )
 										{
-											FLAG done = NO;
+											FLAG itemSelected = NO;
 
 											const std::filesystem::path filePath = it->c_str();
 
@@ -2665,7 +2665,7 @@ public:
 													{
 														INFO("%s", filePath.string().c_str());
 														dynamicDragNDropAndMenuSelect.push_back(filePath.string());
-														done = YES;
+														itemSelected = YES;
 													}
 													else if (ImGui::IsMouseClicked(ImGuiMouseButton_Right))
 													{
@@ -2705,7 +2705,7 @@ public:
 												{
 													INFO("%s", filePath.string().c_str());
 													dynamicDragNDropAndMenuSelect.push_back(filePath.string());
-													done = YES;
+													itemSelected = YES;
 												}
 												ImGui::PopStyleColor(2);
 
@@ -2778,7 +2778,7 @@ public:
 													{
 														INFO("%s", filePath.string().c_str());
 														dynamicDragNDropAndMenuSelect.push_back(filePath.string());
-														done = YES;
+														itemSelected = YES;
 													}
 													else if (ImGui::IsMouseClicked(ImGuiMouseButton_Right))
 													{
@@ -2818,7 +2818,7 @@ public:
 											++ii;
 											++it;
 
-											if (done)
+											if (itemSelected)
 											{
 												BREAK;
 											}
@@ -3180,7 +3180,27 @@ public:
 									static std::string dgg, dgs, gamegenie, gameshark;
 									static FLAG gg[2][MAX_CHEAT_COUNT_PER_ENGINE] = { NO };
 									static FLAG gs[2][MAX_CHEAT_COUNT_PER_ENGINE] = { NO };
-									static int32_t selectedCEMode;
+
+									// FIX: explicitly initialize selectedCEMode; leaving it uninitialised
+									//      produces a garbage radio-button selection on the very first frame.
+									static int32_t selectedCEMode = TO_UINT(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE);
+
+									// FIX: reset all per-game cheat UI state when the loaded game changes so
+									//      that checkbox ticks, code strings, and the selected engine from a
+									//      previous session do not bleed into a newly loaded game.
+									static EMULATION_ID lastEmuID = EMULATION_ID::DEFAULT_ID;
+									if (current_instance->getEmulationID() != lastEmuID)
+									{
+										lastEmuID = current_instance->getEmulationID();
+										memset(gg, NO, sizeof(gg));
+										memset(gs, NO, sizeof(gs));
+										dgg.clear();
+										dgs.clear();
+										gamegenie.clear();
+										gameshark.clear();
+										selectedCEMode = TO_UINT(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE);
+									}
+
 									ImGui::RadioButton("GameGenie", &selectedCEMode, TO_UINT(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE));
 									ImGui::RadioButton("GameShark", &selectedCEMode, TO_UINT(CheatEngine_t::CHEATING_ENGINE::GAMESHARK));
 									ceMAS->setCheatEngineMode((CheatEngine_t::CHEATING_ENGINE)selectedCEMode, current_instance->getEmulationID());
@@ -3236,21 +3256,27 @@ public:
 											{
 												if (ImGui::BeginTabItem("GameGenie"))
 												{
-													//ceMAS->listAllTheCheats(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, gg);
-
 													INC8 ii = RESET;
+
+													// FIX: collect the key to delete outside the range-for loop.
+													//      Erasing from the underlying container during iteration
+													//      invalidates the iterator and is undefined behaviour.
+													std::string ggKeyToDelete;
+
 													for (auto& [key, value] : ceMAS->getCheatList(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE))
 													{
 														if (ii < MAX_CHEAT_COUNT_PER_ENGINE)
 														{
-															if (ceMAS->getCheatEngineMode() != CheatEngine_t::CHEATING_ENGINE::GAMEGENIE)
+															// FIX: only apply enable/disable logic when the engine
+															//      mode actually matches; previously the code blanked
+															//      gg[][] whenever the mode was wrong, so switching
+															//      back to GG showed all cheats as unchecked even if
+															//      they were still active in the engine.
+															if (ceMAS->getCheatEngineMode() == CheatEngine_t::CHEATING_ENGINE::GAMEGENIE)
 															{
-																gg[PREV][ii] = NO;
-																gg[CURR][ii] = NO;
-															}
-															else
-															{
-																if (gg[PREV][ii] != gg[1][ii])
+																// FIX: use the CURR constant instead of the hardcoded
+																//      literal '1', which silently breaks if CURR != 1.
+																if (gg[PREV][ii] != gg[CURR][ii])
 																{
 																	gg[PREV][ii] = gg[CURR][ii];
 																	if (gg[CURR][ii] == NO)
@@ -3278,12 +3304,19 @@ public:
 																gg[CURR][ii] = NO;
 																if (ceMAS->getCheatEngineMode() == CheatEngine_t::CHEATING_ENGINE::GAMEGENIE)
 																{
-																	ceMAS->deleteCheat(key);
-																	ceMAS->getCheatList(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE).erase(key);
+																	ggKeyToDelete = key;
 																}
 															}
 															ii++;
 														}
+													}
+
+													// FIX: perform the erase after the loop so the iterator is
+													//      never invalidated mid-traversal.
+													if (!ggKeyToDelete.empty())
+													{
+														ceMAS->deleteCheat(ggKeyToDelete);
+														ceMAS->getCheatList(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE).erase(ggKeyToDelete);
 													}
 
 													ImGui::EndTabItem();
@@ -3294,21 +3327,21 @@ public:
 											{
 												if (ImGui::BeginTabItem("GameShark"))
 												{
-													//ceMAS->listAllTheCheats(CheatEngine_t::CHEATING_ENGINE::GAMESHARK, gg);
-
 													INC8 ii = RESET;
+
+													// FIX: same deferred-erase pattern as GameGenie above.
+													std::string gsKeyToDelete;
+
 													for (auto& [key, value] : ceMAS->getCheatList(CheatEngine_t::CHEATING_ENGINE::GAMESHARK))
 													{
 														if (ii < MAX_CHEAT_COUNT_PER_ENGINE)
 														{
-															if (ceMAS->getCheatEngineMode() != CheatEngine_t::CHEATING_ENGINE::GAMESHARK)
+															// FIX: guard on mode match; don't blank gs[][] on mismatch
+															//      so GS checkbox state survives a mode round-trip.
+															if (ceMAS->getCheatEngineMode() == CheatEngine_t::CHEATING_ENGINE::GAMESHARK)
 															{
-																gs[PREV][ii] = NO;
-																gs[CURR][ii] = NO;
-															}
-															else
-															{
-																if (gs[PREV][ii] != gs[1][ii])
+																// FIX: use CURR constant, not the hardcoded literal '1'.
+																if (gs[PREV][ii] != gs[CURR][ii])
 																{
 																	gs[PREV][ii] = gs[CURR][ii];
 																	if (gs[CURR][ii] == NO)
@@ -3336,13 +3369,19 @@ public:
 																gs[CURR][ii] = NO;
 																if (ceMAS->getCheatEngineMode() == CheatEngine_t::CHEATING_ENGINE::GAMESHARK)
 																{
-																	ceMAS->deleteCheat(key);
-																	ceMAS->getCheatList(CheatEngine_t::CHEATING_ENGINE::GAMESHARK).erase(key);
+																	gsKeyToDelete = key;
 																}
 															}
 
 															ii++;
 														}
+													}
+
+													// FIX: deferred erase after loop completes.
+													if (!gsKeyToDelete.empty())
+													{
+														ceMAS->deleteCheat(gsKeyToDelete);
+														ceMAS->getCheatList(CheatEngine_t::CHEATING_ENGINE::GAMESHARK).erase(gsKeyToDelete);
 													}
 
 													ImGui::EndTabItem();
