@@ -5118,8 +5118,15 @@ void NES_t::displayCompleteScreen()
 
 	// Choose filtering mode (NEAREST or LINEAR)
 	GLint filter = (currEnVFilter == VIDEO_FILTERS::BILINEAR_FILTER) ? GL_LINEAR : GL_NEAREST;
-	GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter));
-	GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter));
+
+	// Apply filtering only when it changes (optimization)
+	static GLint prevFilterNES = -1;
+	if (filter != prevFilterNES)
+	{
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter));
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter));
+		prevFilterNES = filter;
+	}
 
 	// 2. Render nes_texture into framebuffer (masquerade_texture target)
 	GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, frame_buffer));
@@ -5129,7 +5136,23 @@ void NES_t::displayCompleteScreen()
 	// Pass 1: Render base texture (Game Boy framebuffer)
 	GL_CALL(glUseProgram(shaderProgramBasic));
 	GL_CALL(glActiveTexture(GL_TEXTURE0));
+
+	// Bind once (no redundant state changes)
 	GL_CALL(glBindTexture(GL_TEXTURE_2D, nes_texture));
+
+	// Ensure correct filter is applied only when needed
+	static GLint prevFilterSrcNES = -1;
+	static GLuint prevTexNES = 0;
+
+	if (filter != prevFilterSrcNES || prevTexNES != nes_texture)
+	{
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter));
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter));
+		prevFilterSrcNES = filter;
+		prevTexNES = nes_texture;
+	}
+
+	// Set uniform
 	GL_CALL(glUniform1i(glGetUniformLocation(shaderProgramBasic, "u_Texture"), 0));
 
 	GL_CALL(glBindVertexArray(fullscreenVAO));
@@ -5172,8 +5195,15 @@ void NES_t::displayCompleteScreen()
 	GL_CALL(glBindTexture(GL_TEXTURE_2D, masquerade_texture));
 
 	filter = (currEnVFilter == VIDEO_FILTERS::LCD_FILTER) ? GL_LINEAR : GL_NEAREST;
-	GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter));
-	GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter));
+
+	// Apply filtering only when it changes
+	static GLint prevFilterFinalNES = -1;
+	if (filter != prevFilterFinalNES)
+	{
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter));
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter));
+		prevFilterFinalNES = filter;
+	}
 #endif
 }
 

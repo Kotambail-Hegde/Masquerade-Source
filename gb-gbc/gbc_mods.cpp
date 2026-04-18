@@ -563,7 +563,7 @@ bool GBc_t::bessSaveState(uint8_t id)
 			BESS_BLOCK_MBC->mbc[0x06] = mbc_reg & 0xFF;
 			BESS_BLOCK_MBC->mbc[0x07] = (mbc_reg >> EIGHT) & 0xFF;
 			BESS_BLOCK_MBC->mbc[0x08] = pGBc_instance->GBc_state.emulatorStatus.dataWrittenToMBCReg1;
-			//BESS_BLOCK_MBC->mbc[0x08] = pGBc_instance->GBc_state.emulatorStatus.currentROMBankNumber.mbc1Fields.mbcBank1Reg;
+			//BESS_BLOCK_MBC->mbc[0x08] = pGBc_instance->GBc_state.emulatorStatus.currentROMBankNumber.mbc1Fields.romBankLo;
 			mbc_reg = 0x6000;
 			BESS_BLOCK_MBC->mbc[0x03] = mbc_reg & 0xFF;
 			BESS_BLOCK_MBC->mbc[0x04] = (mbc_reg >> EIGHT) & 0xFF;
@@ -573,7 +573,7 @@ bool GBc_t::bessSaveState(uint8_t id)
 			BESS_BLOCK_MBC->mbc[0x09] = mbc_reg & 0xFF;
 			BESS_BLOCK_MBC->mbc[0x0A] = (mbc_reg >> EIGHT) & 0xFF;
 			BESS_BLOCK_MBC->mbc[0x0B] = pGBc_instance->GBc_state.emulatorStatus.dataWrittenToMBCReg2;
-			//BESS_BLOCK_MBC->mbc[0x0B] = pGBc_instance->GBc_state.emulatorStatus.currentROMBankNumber.mbc1Fields.mbcBank2Reg;
+			//BESS_BLOCK_MBC->mbc[0x0B] = pGBc_instance->GBc_state.emulatorStatus.currentROMBankNumber.mbc1Fields.romBankHi;
 		}
 		else if (isMBC2())
 		{

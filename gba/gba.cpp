@@ -5214,8 +5214,15 @@ void GBA_t::displayCompleteScreen()
 
 		// Choose filtering mode (NEAREST or LINEAR)
 		GLint filter = (currEnVFilter == VIDEO_FILTERS::BILINEAR_FILTER) ? GL_LINEAR : GL_NEAREST;
-		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter));
-		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter));
+
+		// Apply filtering only when it changes (optimization)
+		static GLint prevFilterGBA = -1;
+		if (filter != prevFilterGBA)
+		{
+			GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter));
+			GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter));
+			prevFilterGBA = filter;
+		}
 
 		// 2. Render gameboyAdvance_texture into framebuffer (masquerade_texture target)
 		GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, frame_buffer));
@@ -5225,7 +5232,23 @@ void GBA_t::displayCompleteScreen()
 		// Pass 1: Render base texture (Game Boy framebuffer)
 		GL_CALL(glUseProgram(shaderProgramBasic));
 		GL_CALL(glActiveTexture(GL_TEXTURE0));
+
+		// Bind once (no redundant state changes)
 		GL_CALL(glBindTexture(GL_TEXTURE_2D, gameboyAdvance_texture));
+
+		// Ensure correct filter is applied only when needed
+		static GLint prevFilterSrcGBA = -1;
+		static GLuint prevTexGBA = 0;
+
+		if (filter != prevFilterSrcGBA || prevTexGBA != gameboyAdvance_texture)
+		{
+			GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter));
+			GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter));
+			prevFilterSrcGBA = filter;
+			prevTexGBA = gameboyAdvance_texture;
+		}
+
+		// Set uniform
 		GL_CALL(glUniform1i(glGetUniformLocation(shaderProgramBasic, "u_Texture"), 0));
 
 		GL_CALL(glBindVertexArray(fullscreenVAO));
@@ -5268,8 +5291,15 @@ void GBA_t::displayCompleteScreen()
 		GL_CALL(glBindTexture(GL_TEXTURE_2D, masquerade_texture));
 
 		filter = (currEnVFilter == VIDEO_FILTERS::LCD_FILTER) ? GL_LINEAR : GL_NEAREST;
-		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter));
-		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter));
+
+		// Apply filtering only when it changes
+		static GLint prevFilterFinalGBA = -1;
+		if (filter != prevFilterFinalGBA)
+		{
+			GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter));
+			GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter));
+			prevFilterFinalGBA = filter;
+		}
 #endif
 	}
 }

@@ -404,12 +404,18 @@ private:
 	{
 		NONE, 
 		MBC1, 
+		MBC1M, 
 		MBC2, 
 		MBC3, 
 		MBC5, 
+		MBC6,
 		MBC7,
+		MMM01,
+		M161,
 		HUC1,
 		HUC3,
+		WISDOM_TREE,
+		INVALID_MBC
 	};
 
 	const std::unordered_map<uint16_t, MBCType> kMBCTypeMap = 
@@ -419,6 +425,7 @@ private:
 		{0x05, MBCType::MBC2}, {0x06, MBCType::MBC2},
 		{0x0F, MBCType::MBC3}, {0x10, MBCType::MBC3}, {0x11, MBCType::MBC3},{0x12, MBCType::MBC3}, {0x13, MBCType::MBC3},
 		{0x19, MBCType::MBC5}, {0x1A, MBCType::MBC5}, {0x1B, MBCType::MBC5},{0x1C, MBCType::MBC5}, {0x1D, MBCType::MBC5}, {0x1E, MBCType::MBC5},
+		{0x20, MBCType::MBC6},
 		{0x22, MBCType::MBC7},
 		{0xFE, MBCType::HUC3},
 		{0xFF, MBCType::HUC1},
@@ -1658,6 +1665,13 @@ private:
 		UNKNOWN	= 0xF
 	};
 
+	enum class MMM01_MODES
+	{
+		UNMAPPED = 0x0,
+		MAPPED = 0x1,
+		UNKNOWN = 0xF
+	};
+
 	typedef struct
 	{
 		STAT_INTR_SRC STAT_src;
@@ -1670,6 +1684,10 @@ private:
 		byte dataWrittenToMBCReg2;
 		byte dataWrittenToMBCReg3;
 		byte dataWrittenToMBCReg4;
+		byte dataWrittenToMBCReg5;
+		byte dataWrittenToMBCReg6;
+		byte dataWrittenToMBCReg7;
+		byte dataWrittenToMBCReg8;
 		FLAG isMBC2ROMMode;
 		FLAG isMBC1Mode1;
 		MBCType activeMBC;
@@ -1678,12 +1696,26 @@ private:
 		{
 			struct
 			{
-				uint16_t mbcBank1Reg : FIVE; // bits 0 - 4
-				uint16_t mbcBank2Reg : TWO;	// bits 5 - 6
+				uint16_t romBankLo : FIVE; // bits 0 - 4
+				uint16_t romBankHi_ramBank : TWO;	// bits 5 - 6
 				uint16_t pad : NINE; // bits 7 - 16
 			} mbc1Fields;
+			struct
+			{
+				uint16_t romBankLo : FOUR; // bits 0 - 3
+				uint16_t romBankHi_ramBank : TWO;	// bits 4 - 5
+				uint16_t pad : TEN; // bits 76 - 16
+			} mbc1mFields;
+			struct
+			{
+				uint16_t romBankLo : FIVE; // bits 0 - 4
+				uint16_t romBankMid_ramBankLo : TWO;	// bits 5 - 6
+				uint16_t romBankHi : TWO;	// bits 7 - 8
+				uint16_t pad : SEVEN; // bits 9 - 16
+			} mmm01Fields;
 			uint16_t raw;
 		} currentROMBankNumber;
+		uint16_t currentROMBankNumberB;
 		struct
 		{
 			union
@@ -1746,9 +1778,39 @@ private:
 		uint8_t currentRAMBankNumber;
 		uint8_t currentVRAMBankNumber;
 		uint8_t currentWRAMBankNumber;
+		uint8_t currentRAMBankNumberB;
 		uint16_t serialMaxClockPerTransfer;
 		uint16_t serialMasterByteShiftCount;
 		uint16_t serialSlaveByteShiftCount;
+		struct
+		{
+			FLAG flashEnable;
+			FLAG flashProtSec0; // for Protect/Unprotect Sector 0 flash commands
+			FLAG flashEnSec0AndHidden;
+			FLAG isFlashForA;
+			FLAG isFlashForB;
+			union
+			{
+				BYTE raw[0x100000];
+				BYTE sector[8][0x20000];
+				BYTE bank[0x80][0x2000]; // 0x2000 is same as the ROM bank size for MBC6!
+			} flash;
+			BYTE flashHidden[256];
+			uint8_t flashCmdState; // 0=IDLE, 1=UNLOCK1, 2=UNLOCK2, 3=PROGRAM, 4=ERASE_SETUP, 5=ERASE_UNLOCK1, 6=ERASE_CMD
+		} mbc6;
+		struct
+		{
+			FLAG isMMM01Mode1;
+			BYTE ramBankMask;
+			BYTE romBankMask;
+			BYTE ramBankLo;
+			BYTE ramBankHi;
+			FLAG writeDisable;
+			FLAG muxEnabled;
+			BYTE mux0RomBankMid; // stores the romBankMid before mux was enabled
+			MMM01_MODES mmm01Mode;
+		} mmm01;
+		FLAG m161OneBankSwitchDone;
 		FLAG isBatteryAvailable;
 		FLAG isCartRAMAvailable;
 		FLAG isRTCAvailable;
@@ -1805,9 +1867,10 @@ private:
 	} emulatorStatus_t;
 
 	// Data stored in all the ROM memory banks of the cartridge
-	typedef struct
+	typedef union
 	{
 		uint8_t mROMBanks[0x200][0x4000];
+		uint8_t mROMBanks8KB[0x400][0x2000];
 	} romMemoryBanks_t;
 
 	typedef union
@@ -1817,9 +1880,10 @@ private:
 	} entireRom_t;
 
 	// Data stored in all the RAM memory banks of the cartridge
-	typedef struct
+	typedef union
 	{
 		uint8_t mRAMBanks[0x80][0x2000];
+		uint8_t mRAMBanks4KB[0x100][0x1000];
 	} ramMemoryBanks_t;
 
 	typedef union
@@ -2252,6 +2316,10 @@ private:
 	{
 		RETURN pGBc_emuStatus->activeMBC == MBCType::MBC1;
 	}
+	MASQ_INLINE FLAG isMBC1M() const
+	{
+		RETURN pGBc_emuStatus->activeMBC == MBCType::MBC1M;
+	}
 	MASQ_INLINE FLAG isMBC2() const
 	{
 		RETURN pGBc_emuStatus->activeMBC == MBCType::MBC2;
@@ -2264,9 +2332,21 @@ private:
 	{
 		RETURN pGBc_emuStatus->activeMBC == MBCType::MBC5;
 	}
+	MASQ_INLINE FLAG isMBC6() const
+	{
+		RETURN pGBc_emuStatus->activeMBC == MBCType::MBC6;
+	}
 	MASQ_INLINE FLAG isMBC7() const
 	{
 		RETURN pGBc_emuStatus->activeMBC == MBCType::MBC7;
+	}
+	MASQ_INLINE FLAG isMMM01() const
+	{
+		RETURN pGBc_emuStatus->activeMBC == MBCType::MMM01;
+	}
+	MASQ_INLINE FLAG isM161() const
+	{
+		RETURN pGBc_emuStatus->activeMBC == MBCType::M161;
 	}
 	MASQ_INLINE FLAG isHUC1() const
 	{
@@ -2276,14 +2356,22 @@ private:
 	{
 		RETURN pGBc_emuStatus->activeMBC == MBCType::HUC3;
 	}
-	void setMBCType(uint16_t mbcType);
+	MASQ_INLINE FLAG isWT() const
+	{
+		RETURN pGBc_emuStatus->activeMBC == MBCType::WISDOM_TREE;
+	}
+	void setMBCType(uint16_t mbcType, MBCType force = MBCType::INVALID_MBC);
 	void setROMBankType(uint16_t romBankType);
 	void setROMBankNumber(uint16_t romBankNumber);
 	uint16_t getROMBankNumber();
 	uint16_t getNumberOfROMBanksUsed();
-	void setROMModeIfMBC1();
-	void setRAMModeInMBC1();
-	FLAG getROMOrRAMModeInMBC1();
+	void setSimpleModeInMBC1();
+	void setAdvancedModeInMBC1();
+	FLAG getMBCModeInMBC1();
+
+	void setSimpleModeInMMM01();
+	void setAdvancedModeInMMM01();
+	FLAG getMBCModeInMMM01();
 
 	void enableRAMBank();
 	void disableRAMBank();
@@ -2297,6 +2385,22 @@ private:
 	void setVRAMBankNumber(uint8_t vramBankNumber);
 	uint8_t getWRAMBankNumber();
 	void setWRAMBankNumber(uint8_t wramBankNumber);
+
+	// For MBC6
+	void setROMBankNumberB(uint16_t romBankNumber);
+	uint16_t getROMBankNumberB();
+	uint8_t getRAMBankNumberB();
+	void setRAMBankNumberB(uint8_t ramBankNumber);
+
+public:
+
+	// For MBC6
+	void processMBC6FlashWrite(uint16_t cpuAddr, BYTE data);
+
+public:
+
+	// For MMM01
+	void updateMMM01RamBanking();
 
 public:
 
