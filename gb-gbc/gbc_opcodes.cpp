@@ -1740,82 +1740,87 @@ void GBc_t::runCPUPipeline()
 	}
 	case 0x10:
 	{
-		auto handleCGBSpeedSwitch = [&]()
-			{
-				if (ROM_TYPE == ROM::GAME_BOY_COLOR)
-				{
-					pGBc_peripherals->KEY1.KEY1Fields.PrepareSpeedSwitch = RESET;
-
-					toggleCGBSpeedMode();
-
-					if (isCGBDoubleSpeedEnabled() == NO)
-					{
-						CPUINFO("CGB Double Speed : Disabled");
-						pGBc_peripherals->KEY1.KEY1Fields.CurrentSpeed = ZERO;
-					}
-					else
-					{
-						CPUINFO("CGB Double Speed : Enabled");
-						pGBc_peripherals->KEY1.KEY1Fields.CurrentSpeed = ONE;
-					}
-				}
-			};
-
-		FLAG isSpeedSwitchRequested = (ROM_TYPE == ROM::GAME_BOY_COLOR) && (pGBc_peripherals->KEY1.KEY1Fields.PrepareSpeedSwitch == SET);
-		FLAG isInterruptPending = isInterruptReadyToBeServed();
-		FLAG isIMEEnabled = pGBc_instance->GBc_state.emulatorStatus.interruptMasterEn;
-
-		// If a button is being held (1 -> not pressed)
-		if ((pGBc_peripherals->P1_JOYP.joyPadMemory & 0x0F) != 0x0F)
+#if (ENABLE_SM83_SST == YES)
+		if (ROM_TYPE != ROM::TEST_SST)
+#endif
 		{
-			if (isInterruptPending == NO)
-			{
-				cpuTickM();
-				INCREMENT_PC_BY_ONE();
-				pGBc_instance->GBc_state.emulatorStatus.isCPUHalted = YES;
-				pGBc_instance->GBc_state.emulatorStatus.isCPUJustHalted = YES;
-			}
-		}
-		// None of the buttons are held
-		else
-		{
-			if (isSpeedSwitchRequested == YES)
-			{
-				if (isInterruptPending == YES)
+			auto handleCGBSpeedSwitch = [&]()
 				{
-					if (isIMEEnabled == YES)
+					if (ROM_TYPE == ROM::GAME_BOY_COLOR)
 					{
-						handleCGBSpeedSwitch(); // API checks whether CGB or not before switch speed
-						pGBc_peripherals->DIV.divMemory = RESET;
+						pGBc_peripherals->KEY1.KEY1Fields.PrepareSpeedSwitch = RESET;
+
+						toggleCGBSpeedMode();
+
+						if (isCGBDoubleSpeedEnabled() == NO)
+						{
+							CPUINFO("CGB Double Speed : Disabled");
+							pGBc_peripherals->KEY1.KEY1Fields.CurrentSpeed = ZERO;
+						}
+						else
+						{
+							CPUINFO("CGB Double Speed : Enabled");
+							pGBc_peripherals->KEY1.KEY1Fields.CurrentSpeed = ONE;
+						}
 					}
-					else
-					{
-						FATAL("CPU glitch because of STOP");
-					}
-				}
-				else
-				{
-					cpuTickM();
-					INCREMENT_PC_BY_ONE();
-					pGBc_instance->GBc_state.emulatorStatus.isCPUHalted = YES;
-					pGBc_instance->GBc_state.emulatorStatus.isCPUJustHalted = YES;
-					CPUTODO("Pandocs mentions \"exitHaltInTCycles\" = 0x20000, but sameboy uses 0x20008, and we pass the speed switch tests with 0x20008");
-					// Refer (Pandocs) : https://gbdev.io/pandocs/Reducing_Power_Consumption.html?highlight=STOP#the-bizarre-case-of-the-game-boy-stop-instruction-before-even-considering-timing
-					// Refer (Sameboy) : https://github.com/LIJI32/SameBoy/blob/master/Core/sm83_cpu.c#L434
-					pGBc_instance->GBc_state.emulatorStatus.exitHaltInTCycles = 0x20008;
-					pGBc_peripherals->DIV.divMemory = RESET;
-					handleCGBSpeedSwitch(); // API checks whether CGB or not before switch speed
-				}
-			}
-			else
+				};
+
+			FLAG isSpeedSwitchRequested = (ROM_TYPE == ROM::GAME_BOY_COLOR) && (pGBc_peripherals->KEY1.KEY1Fields.PrepareSpeedSwitch == SET);
+			FLAG isInterruptPending = isInterruptReadyToBeServed();
+			FLAG isIMEEnabled = pGBc_instance->GBc_state.emulatorStatus.interruptMasterEn;
+
+			// If a button is being held (1 -> not pressed)
+			if ((pGBc_peripherals->P1_JOYP.joyPadMemory & 0x0F) != 0x0F)
 			{
 				if (isInterruptPending == NO)
 				{
 					cpuTickM();
 					INCREMENT_PC_BY_ONE();
+					pGBc_instance->GBc_state.emulatorStatus.isCPUHalted = YES;
+					pGBc_instance->GBc_state.emulatorStatus.isCPUJustHalted = YES;
 				}
-				pGBc_instance->GBc_state.emulatorStatus.isCPUStopped = YES;
-				pGBc_peripherals->DIV.divMemory = RESET;
+			}
+			// None of the buttons are held
+			else
+			{
+				if (isSpeedSwitchRequested == YES)
+				{
+					if (isInterruptPending == YES)
+					{
+						if (isIMEEnabled == YES)
+						{
+							handleCGBSpeedSwitch(); // API checks whether CGB or not before switch speed
+							pGBc_peripherals->DIV.divMemory = RESET;
+						}
+						else
+						{
+							FATAL("CPU glitch because of STOP");
+						}
+					}
+					else
+					{
+						cpuTickM();
+						INCREMENT_PC_BY_ONE();
+						pGBc_instance->GBc_state.emulatorStatus.isCPUHalted = YES;
+						pGBc_instance->GBc_state.emulatorStatus.isCPUJustHalted = YES;
+						CPUTODO("Pandocs mentions \"exitHaltInTCycles\" = 0x20000, but sameboy uses 0x20008, and we pass the speed switch tests with 0x20008");
+						// Refer (Pandocs) : https://gbdev.io/pandocs/Reducing_Power_Consumption.html?highlight=STOP#the-bizarre-case-of-the-game-boy-stop-instruction-before-even-considering-timing
+						// Refer (Sameboy) : https://github.com/LIJI32/SameBoy/blob/master/Core/sm83_cpu.c#L434
+						pGBc_instance->GBc_state.emulatorStatus.exitHaltInTCycles = 0x20008;
+						pGBc_peripherals->DIV.divMemory = RESET;
+						handleCGBSpeedSwitch(); // API checks whether CGB or not before switch speed
+					}
+				}
+				else
+				{
+					if (isInterruptPending == NO)
+					{
+						cpuTickM();
+						INCREMENT_PC_BY_ONE();
+					}
+					pGBc_instance->GBc_state.emulatorStatus.isCPUStopped = YES;
+					pGBc_peripherals->DIV.divMemory = RESET;
+				}
 			}
 		}
 

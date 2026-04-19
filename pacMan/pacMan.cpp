@@ -3226,7 +3226,7 @@ FLAG pacMan_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 	pPacMan_instance->pacMan_state.display.isVblank = NO;
 
 #if (ENABLE_Z80_SST == YES)
-	if (ROM_TYPE == ROM::TEST_SST)
+	if (ROM_TYPE == ROM::TEST_SST)  MASQ_UNLIKELY
 	{
 		static FLAG SST_DEBUG_PRINT = NO;
 		const COUNTER32 init_test_opcode = 0x00;
@@ -3239,8 +3239,12 @@ FLAG pacMan_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 		FLAG edMode = NO;
 		FLAG ddMode = NO;
 		FLAG fdMode = NO;
+
 		while (FOREVER)
 		{
+			// --------------------------------------------------------
+			// Debug print control
+			// --------------------------------------------------------
 			if ((init_test_opcode != ZERO) && (opcode == init_test_opcode))
 			{
 				SST_DEBUG_PRINT = YES;
@@ -3297,618 +3301,591 @@ FLAG pacMan_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 					cbMode = YES;
 				}
 			}
-
-			// Opcodes that needs to be excluded from tests
+			// --------------------------------------------------------
+			// Skip undefined opcodes
+			// --------------------------------------------------------
 			if (!cbMode && !edMode && !ddMode && !fdMode)
 			{
-				while (
-					opcode == 0xD3
-					|| opcode == 0xDB
-					)
+				while (opcode == 0xD3 || opcode == 0xDB)
 				{
 					++opcode;
 				}
 			}
 
 			auto unimplementedED = [](uint8_t value)
-				{
-					static constexpr std::array<uint8_t, 222> unimplementedED = {
-						0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0A,0x0B,0x0C,0x0D,0x0E,0x0F,
-						0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,0x18,0x19,0x1A,0x1B,0x1C,0x1D,0x1E,0x1F,
-						0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x27,0x28,0x29,0x2A,0x2B,0x2C,0x2D,0x2E,0x2F,
-						0x30,0x31,0x32,0x33,0x34,0x35,0x36,0x37,0x38,0x39,0x3A,0x3B,0x3C,0x3D,0x3E,0x3F,
-						0x40,0x41,0x45,0x48,0x49,0x4C,0x4D,0x4E,0x50,0x51,0x54,0x55,0x58,0x59,0x5C,0x5D,
-						0x60,0x61,0x64,0x65,0x66,0x68,0x69,0x6C,0x6D,0x6E,0x70,0x71,0x74,0x75,0x76,0x77,
-						0x78,0x79,0x7C,0x7D,0x7E,0x7F,0x80,0x81,0x82,0x83,0x84,0x85,0x86,0x87,0x88,0x89,
-						0x8A,0x8B,0x8C,0x8D,0x8E,0x8F,0x90,0x91,0x92,0x93,0x94,0x95,0x96,0x97,0x98,0x99,
-						0x9A,0x9B,0x9C,0x9D,0x9E,0x9F,0xA2,0xA3,0xA4,0xA5,0xA6,0xA7,0xAA,0xAB,0xAC,0xAD,
-						0xAE,0xAF,0xB2,0xB3,0xB4,0xB5,0xB6,0xB7,0xBA,0xBB,0xBC,0xBD,0xBE,0xBF,0xC0,0xC1,
-						0xC2,0xC3,0xC4,0xC5,0xC6,0xC7,0xC8,0xC9,0xCA,0xCB,0xCC,0xCD,0xCE,0xCF,0xD0,0xD1,
-						0xD2,0xD3,0xD4,0xD5,0xD6,0xD7,0xD8,0xD9,0xDA,0xDB,0xDC,0xDD,0xDE,0xDF,0xE0,0xE1,
-						0xE2,0xE3,0xE4,0xE5,0xE6,0xE7,0xE8,0xE9,0xEA,0xEB,0xEC,0xED,0xEE,0xEF,0xF0,0xF1,
-						0xF2,0xF3,0xF4,0xF5,0xF6,0xF7,0xF8,0xF9,0xFA,0xFB,0xFC,0xFD,0xFE,0xFF
-					};
-
-					RETURN std::binary_search(unimplementedED.begin(), unimplementedED.end(), value);
+			{
+				static constexpr std::array<uint8_t, 222> unimplementedED = {
+					0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0A,0x0B,0x0C,0x0D,0x0E,0x0F,
+					0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,0x18,0x19,0x1A,0x1B,0x1C,0x1D,0x1E,0x1F,
+					0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x27,0x28,0x29,0x2A,0x2B,0x2C,0x2D,0x2E,0x2F,
+					0x30,0x31,0x32,0x33,0x34,0x35,0x36,0x37,0x38,0x39,0x3A,0x3B,0x3C,0x3D,0x3E,0x3F,
+					0x40,0x41,0x45,0x48,0x49,0x4C,0x4D,0x4E,0x50,0x51,0x54,0x55,0x58,0x59,0x5C,0x5D,
+					0x60,0x61,0x64,0x65,0x66,0x68,0x69,0x6C,0x6D,0x6E,0x70,0x71,0x74,0x75,0x76,0x77,
+					0x78,0x79,0x7C,0x7D,0x7E,0x7F,0x80,0x81,0x82,0x83,0x84,0x85,0x86,0x87,0x88,0x89,
+					0x8A,0x8B,0x8C,0x8D,0x8E,0x8F,0x90,0x91,0x92,0x93,0x94,0x95,0x96,0x97,0x98,0x99,
+					0x9A,0x9B,0x9C,0x9D,0x9E,0x9F,0xA2,0xA3,0xA4,0xA5,0xA6,0xA7,0xAA,0xAB,0xAC,0xAD,
+					0xAE,0xAF,0xB2,0xB3,0xB4,0xB5,0xB6,0xB7,0xBA,0xBB,0xBC,0xBD,0xBE,0xBF,0xC0,0xC1,
+					0xC2,0xC3,0xC4,0xC5,0xC6,0xC7,0xC8,0xC9,0xCA,0xCB,0xCC,0xCD,0xCE,0xCF,0xD0,0xD1,
+					0xD2,0xD3,0xD4,0xD5,0xD6,0xD7,0xD8,0xD9,0xDA,0xDB,0xDC,0xDD,0xDE,0xDF,0xE0,0xE1,
+					0xE2,0xE3,0xE4,0xE5,0xE6,0xE7,0xE8,0xE9,0xEA,0xEB,0xEC,0xED,0xEE,0xEF,0xF0,0xF1,
+					0xF2,0xF3,0xF4,0xF5,0xF6,0xF7,0xF8,0xF9,0xFA,0xFB,0xFC,0xFD,0xFE,0xFF
 				};
+				RETURN std::binary_search(unimplementedED.begin(), unimplementedED.end(), value);
+			};
 
 			if (edMode == YES)
 			{
 				while (unimplementedED(subopcode))
-				{
 					++subopcode;
-				}
 			}
 
 			auto unimplementedDDFD = [](uint8_t value)
-				{
-					static constexpr std::array<uint8_t, 149> unimplementedDDFD = {
-						0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
-						0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x27,
-						0x28, 0x2F, 0x30, 0x31, 0x32, 0x33, 0x37, 0x38, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F, 0x76, 0x80,
-						0x81, 0x82, 0x83, 0x87, 0x88, 0x89, 0x8A, 0x8B, 0x8F, 0x90, 0x91, 0x92, 0x93, 0x97, 0x98, 0x99,
-						0x9A, 0x9B, 0x9F, 0xA0, 0xA1, 0xA2, 0xA3, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAF, 0xB0, 0xB1, 0xB2,
-						0xB3, 0xB7, 0xB8, 0xB9, 0xBA, 0xBB, 0xBF, 0xC0, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8,
-						0xC9, 0xCA, 0xCC, 0xCD, 0xCE, 0xCF, 0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8, 0xD9,
-						0xDA, 0xDB, 0xDC, 0xDD, 0xDE, 0xDF, 0xE0, 0xE2, 0xE4, 0xE6, 0xE7, 0xE8, 0xEA, 0xEB, 0xEC, 0xED,
-						0xEE, 0xEF, 0xF0, 0xF1, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6, 0xF7, 0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD,
-						0xFE, 0xFF
-					};
-
-					return std::binary_search(unimplementedDDFD.begin(), unimplementedDDFD.end(), value);
+			{
+				static constexpr std::array<uint8_t, 149> unimplementedDDFD = {
+					0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
+					0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x27,
+					0x28, 0x2F, 0x30, 0x31, 0x32, 0x33, 0x37, 0x38, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F, 0x76, 0x80,
+					0x81, 0x82, 0x83, 0x87, 0x88, 0x89, 0x8A, 0x8B, 0x8F, 0x90, 0x91, 0x92, 0x93, 0x97, 0x98, 0x99,
+					0x9A, 0x9B, 0x9F, 0xA0, 0xA1, 0xA2, 0xA3, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAF, 0xB0, 0xB1, 0xB2,
+					0xB3, 0xB7, 0xB8, 0xB9, 0xBA, 0xBB, 0xBF, 0xC0, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8,
+					0xC9, 0xCA, 0xCC, 0xCD, 0xCE, 0xCF, 0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8, 0xD9,
+					0xDA, 0xDB, 0xDC, 0xDD, 0xDE, 0xDF, 0xE0, 0xE2, 0xE4, 0xE6, 0xE7, 0xE8, 0xEA, 0xEB, 0xEC, 0xED,
+					0xEE, 0xEF, 0xF0, 0xF1, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6, 0xF7, 0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD,
+					0xFE, 0xFF
 				};
+				return std::binary_search(unimplementedDDFD.begin(), unimplementedDDFD.end(), value);
+			};
 
 			if (ddMode == YES || fdMode == YES)
 			{
 				while (unimplementedDDFD(subopcode))
 				{
 					++subopcode;
-
-					if (subopcode == 0xCB)
-					{
-						cbMode = YES;
-					}
+					if (subopcode == 0xCB) cbMode = YES;
 				}
 			}
 
-			// Get the input
-			std::string testCaseName = std::format("{:02x}", opcode);
+			// --------------------------------------------------------
+			// Build file path
+			// --------------------------------------------------------
+			std::string opcodeStr = std::format("{:02x}", opcode);
+			std::filesystem::path fullPath;
+
 			if (!cbMode && !edMode && !ddMode && !fdMode)
 			{
-				testCaseName = _JSON_LOCATION + "\\" + testCaseName + ".json";
-				//std::string testCaseName = _JSON_LOCATION + "\\" +  "test.json";
+				fullPath = std::filesystem::path(_JSON_LOCATION) / (opcodeStr + ".json");
+			}
+			else if ((ddMode == YES || fdMode == YES) && cbMode == YES)
+			{
+				std::string subStr = std::format("{:02x}", subopcode);
+				std::string subL2Str = std::format("{:02x}", subopcodeL2);
+				fullPath = std::filesystem::path(_JSON_LOCATION) / (opcodeStr + " " + subStr + " __ " + subL2Str + ".json");
 			}
 			else
 			{
-				if ((ddMode == YES || fdMode == YES) && cbMode == YES)
-				{
-					std::string subtestCaseName = std::format("{:02x}", subopcode);
-					std::string subtestCaseNameL2 = std::format("{:02x}", subopcodeL2);
-					testCaseName = _JSON_LOCATION + "\\" + testCaseName + " " + subtestCaseName + " __ " + subtestCaseNameL2 + ".json";
-					//std::string testCaseName = _JSON_LOCATION + "\\" +  "test.json";
-				}
-				else
-				{
-					std::string subtestCaseName = std::format("{:02x}", subopcode);
-					testCaseName = _JSON_LOCATION + "\\" + testCaseName + " " + subtestCaseName + ".json";
-					//std::string testCaseName = _JSON_LOCATION + "\\" +  "test.json";
-				}
+				std::string subStr = std::format("{:02x}", subopcode);
+				fullPath = std::filesystem::path(_JSON_LOCATION) / (opcodeStr + " " + subStr + ".json");
 			}
 
 			LOG_NEW_LINE;
-			INFO("Running : %s\n", testCaseName.c_str());
-			try
-			{
-				boost::property_tree::read_json(testCaseName, testCase);
-			}
-			catch (std::exception& ex)
-			{
-				std::cout << ex.what() << std::endl;
-				RETURN false;
-			}
+			INFO("Running : %s\n", fullPath.string().c_str());
 
-			// Test the CPU!
-
-			// Itterate over each test case in the JSON array
-			for (const auto& item : testCase)
+			// --------------------------------------------------------
+			// Read entire file into string, then parse with RapidJSON
+			// --------------------------------------------------------
 			{
-				volatile bool quitThisRun = NO;
-
-				// Accessing top-level fields
-				std::string name = item.second.get<std::string>("name");
-				if (SST_DEBUG_PRINT)
+				std::ifstream ifs(fullPath);
+				if (!ifs.is_open())
 				{
-					std::cout << "Name: " << name << std::endl;
+					WARN("Failed to open %s", fullPath.string().c_str());
+					goto next_opcode_z80;
 				}
 
-				// Accessing initial state
-				auto initial = item.second.get_child("initial");
-				int initial_pc = initial.get<int>("pc");
-				int initial_sp = initial.get<int>("sp");
-				int initial_a = initial.get<int>("a");
-				int initial_b = initial.get<int>("b");
-				int initial_c = initial.get<int>("c");
-				int initial_d = initial.get<int>("d");
-				int initial_e = initial.get<int>("e");
-				int initial_f = initial.get<int>("f");
-				int initial_h = initial.get<int>("h");
-				int initial_l = initial.get<int>("l");
-				int initial_i = initial.get<int>("i");
-				int initial_r = initial.get<int>("r");
-				int initial_ei = initial.get<int>("ei");
-				int initial_wz = initial.get<int>("wz");
-				int initial_ix = initial.get<int>("ix");
-				int initial_iy = initial.get<int>("iy");
-				int initial_af_ = initial.get<int>("af_");
-				int initial_bc_ = initial.get<int>("bc_");
-				int initial_de_ = initial.get<int>("de_");
-				int initial_hl_ = initial.get<int>("hl_");
-				int initial_im = initial.get<int>("im");
-				int initial_p = initial.get<int>("p");
-				int initial_q = initial.get<int>("q");
-				int initial_iff1 = initial.get<int>("iff1");
-				int initial_iff2 = initial.get<int>("iff2");
+				std::string jsonStr((std::istreambuf_iterator<char>(ifs)),
+					std::istreambuf_iterator<char>());
+				ifs.close();
 
-				if (SST_DEBUG_PRINT)
+				rapidjson::Document testCase;
+				testCase.Parse(jsonStr.c_str());
+
+				if (testCase.HasParseError())
 				{
-					std::cout << "Initial PC: " << initial_pc << ", SP: " << initial_sp
-						<< ", A: " << initial_a << ", B: " << initial_b
-						<< ", C: " << initial_c << ", D: " << initial_d
-						<< ", E: " << initial_e << ", F: " << initial_f
-						<< ", H: " << initial_h << ", L: " << initial_l
-						<< ", I: " << initial_i << ", R: " << initial_r
-						<< ", EI: " << initial_ei << ", WZ: " << initial_wz
-						<< ", IX: " << initial_ix << ", IY: " << initial_iy
-						<< ", AF': " << initial_af_ << ", BC': " << initial_bc_
-						<< ", DE': " << initial_de_ << ", HL': " << initial_hl_
-						<< ", IM: " << initial_im << ", P: " << initial_p
-						<< ", Q: " << initial_q << ", IFF1: " << initial_iff1
-						<< ", IFF2: " << initial_iff2
-						<< std::endl;
+					WARN("Failed to parse %s: error code %u at offset %zu",
+						fullPath.string().c_str(),
+						(unsigned)testCase.GetParseError(),
+						testCase.GetErrorOffset());
+					goto next_opcode_z80;
 				}
 
-				pPacMan_registers->pc = initial_pc;
-				pPacMan_registers->sp = initial_sp;
-
-				// Main registers
-				pPacMan_registers->af.aAndFRegisters.a = initial_a;
-				pPacMan_registers->af.aAndFRegisters.f.flagMemory = initial_f;
-
-				pPacMan_registers->bc.bAndCRegisters.b = initial_b;
-				pPacMan_registers->bc.bAndCRegisters.c = initial_c;
-
-				pPacMan_registers->de.dAndERegisters.d = initial_d;
-				pPacMan_registers->de.dAndERegisters.e = initial_e;
-
-				pPacMan_registers->hl.hAndLRegisters.h = initial_h;
-				pPacMan_registers->hl.hAndLRegisters.l = initial_l;
-
-				// Index registers
-				pPacMan_registers->ix.ix_u16memory = initial_ix;
-				pPacMan_registers->iy.iy_u16memory = initial_iy;
-
-				// Special registers
-				pPacMan_registers->i = initial_i;
-				pPacMan_registers->r = initial_r;
-				MASQ_UNUSED(initial_ei);
-				pPacMan_instance->pacMan_state.interruptMode = (INTERRUPT_MODE)initial_im;
-				pPacMan_registers->wz = initial_wz;
-
-				// Shadow registers
-				pPacMan_registers->shadow_af.aAndFRegisters.a = (initial_af_ >> 8) & 0xFF;
-				pPacMan_registers->shadow_af.aAndFRegisters.f.flagMemory = initial_af_ & 0xFF;
-
-				pPacMan_registers->shadow_bc.bAndCRegisters.b = (initial_bc_ >> 8) & 0xFF;
-				pPacMan_registers->shadow_bc.bAndCRegisters.c = initial_bc_ & 0xFF;
-
-				pPacMan_registers->shadow_de.dAndERegisters.d = (initial_de_ >> 8) & 0xFF;
-				pPacMan_registers->shadow_de.dAndERegisters.e = initial_de_ & 0xFF;
-
-				pPacMan_registers->shadow_hl.hAndLRegisters.h = (initial_hl_ >> 8) & 0xFF;
-				pPacMan_registers->shadow_hl.hAndLRegisters.l = initial_hl_ & 0xFF;
-
-				// Other registers
-				pPacMan_registers->p = initial_p;
-				pPacMan_registers->q = initial_q;
-
-				// Other interrupt-related registers
-				pPacMan_registers->iff1 = initial_iff1;
-				pPacMan_registers->iff2 = initial_iff2;
-
-				// Accessing RAM in initial state
-				if (SST_DEBUG_PRINT)
+				if (!testCase.IsArray())
 				{
-					std::cout << "Initial RAM:" << std::endl;
+					WARN("%s does not contain a JSON array", fullPath.string().c_str());
+					goto next_opcode_z80;
 				}
-				for (const auto& ram_entry : initial.get_child("ram"))
+
+				// --------------------------------------------------------
+				// Iterate each test case in the JSON array
+				// --------------------------------------------------------
+				for (rapidjson::SizeType itemIdx = 0; itemIdx < testCase.Size(); ++itemIdx)
 				{
-					auto it = ram_entry.second.begin();
-					int address = it->second.get_value<int>(); // First element is the address
-					++it; // Move to the second element
-					int value = it->second.get_value<int>(); // Second element is the value
+					const rapidjson::Value& item = testCase[itemIdx];
+					volatile bool quitThisRun = NO;
+
+					// ================= NAME =================
+					std::string name = (item.HasMember("name") && item["name"].IsString())
+						? item["name"].GetString() : "";
+
+					if (SST_DEBUG_PRINT)
+						std::cout << "Name: " << name << std::endl;
+
+					// ================= INITIAL =================
+					if (!item.HasMember("initial") || !item["initial"].IsObject())
+					{
+						WARN("Test '%s' missing 'initial' object", name.c_str());
+						CONTINUE;
+					}
+
+					const rapidjson::Value& initialJson = item["initial"];
+
+					int initial_pc = initialJson.HasMember("pc") ? initialJson["pc"].GetInt() : 0;
+					int initial_sp = initialJson.HasMember("sp") ? initialJson["sp"].GetInt() : 0;
+					int initial_a = initialJson.HasMember("a") ? initialJson["a"].GetInt() : 0;
+					int initial_b = initialJson.HasMember("b") ? initialJson["b"].GetInt() : 0;
+					int initial_c = initialJson.HasMember("c") ? initialJson["c"].GetInt() : 0;
+					int initial_d = initialJson.HasMember("d") ? initialJson["d"].GetInt() : 0;
+					int initial_e = initialJson.HasMember("e") ? initialJson["e"].GetInt() : 0;
+					int initial_f = initialJson.HasMember("f") ? initialJson["f"].GetInt() : 0;
+					int initial_h = initialJson.HasMember("h") ? initialJson["h"].GetInt() : 0;
+					int initial_l = initialJson.HasMember("l") ? initialJson["l"].GetInt() : 0;
+					int initial_i = initialJson.HasMember("i") ? initialJson["i"].GetInt() : 0;
+					int initial_r = initialJson.HasMember("r") ? initialJson["r"].GetInt() : 0;
+					int initial_ei = initialJson.HasMember("ei") ? initialJson["ei"].GetInt() : 0;
+					int initial_wz = initialJson.HasMember("wz") ? initialJson["wz"].GetInt() : 0;
+					int initial_ix = initialJson.HasMember("ix") ? initialJson["ix"].GetInt() : 0;
+					int initial_iy = initialJson.HasMember("iy") ? initialJson["iy"].GetInt() : 0;
+					int initial_af_ = initialJson.HasMember("af_") ? initialJson["af_"].GetInt() : 0;
+					int initial_bc_ = initialJson.HasMember("bc_") ? initialJson["bc_"].GetInt() : 0;
+					int initial_de_ = initialJson.HasMember("de_") ? initialJson["de_"].GetInt() : 0;
+					int initial_hl_ = initialJson.HasMember("hl_") ? initialJson["hl_"].GetInt() : 0;
+					int initial_im = initialJson.HasMember("im") ? initialJson["im"].GetInt() : 0;
+					int initial_p = initialJson.HasMember("p") ? initialJson["p"].GetInt() : 0;
+					int initial_q = initialJson.HasMember("q") ? initialJson["q"].GetInt() : 0;
+					int initial_iff1 = initialJson.HasMember("iff1") ? initialJson["iff1"].GetInt() : 0;
+					int initial_iff2 = initialJson.HasMember("iff2") ? initialJson["iff2"].GetInt() : 0;
+
 					if (SST_DEBUG_PRINT)
 					{
-						std::cout << "  Address: " << address << ", Value: " << value << std::endl;
+						std::cout << "Initial PC: " << initial_pc << ", SP: " << initial_sp
+							<< ", A: " << initial_a << ", B: " << initial_b
+							<< ", C: " << initial_c << ", D: " << initial_d
+							<< ", E: " << initial_e << ", F: " << initial_f
+							<< ", H: " << initial_h << ", L: " << initial_l
+							<< ", I: " << initial_i << ", R: " << initial_r
+							<< ", EI: " << initial_ei << ", WZ: " << initial_wz
+							<< ", IX: " << initial_ix << ", IY: " << initial_iy
+							<< ", AF': " << initial_af_ << ", BC': " << initial_bc_
+							<< ", DE': " << initial_de_ << ", HL': " << initial_hl_
+							<< ", IM: " << initial_im << ", P: " << initial_p
+							<< ", Q: " << initial_q << ", IFF1: " << initial_iff1
+							<< ", IFF2: " << initial_iff2
+							<< std::endl;
 					}
-					pPacMan_memory->pacManRawMemory[address] = value;
-				}
 
-				// Run the CPU
-				performOperation();
+					pPacMan_registers->pc = initial_pc;
+					pPacMan_registers->sp = initial_sp;
 
-				// Internal cycles are padded with previous address
-				while (pPacMan_instance->pacMan_state.others.tomHarte.cycles.cyclePerInst != RESET)
-				{
-					auto index = pPacMan_instance->pacMan_state.others.tomHarte.cycles.indexer;
-					pPacMan_instance->pacMan_state.others.tomHarte.cycles.cycles[index].address
-						= pPacMan_instance->pacMan_state.others.tomHarte.cycles.cycles[index - ONE].address;
-					pPacMan_instance->pacMan_state.others.tomHarte.cycles.cycles[index].isRead = NO;
-					pPacMan_instance->pacMan_state.others.tomHarte.cycles.cycles[index].isWrite = NO;
-					pPacMan_instance->pacMan_state.others.tomHarte.cycles.cycles[index].data = RESET;
-					++pPacMan_instance->pacMan_state.others.tomHarte.cycles.indexer;
-					--pPacMan_instance->pacMan_state.others.tomHarte.cycles.cyclePerInst;
-				}
+					pPacMan_registers->af.aAndFRegisters.a = initial_a;
+					pPacMan_registers->af.aAndFRegisters.f.flagMemory = initial_f;
+					pPacMan_registers->bc.bAndCRegisters.b = initial_b;
+					pPacMan_registers->bc.bAndCRegisters.c = initial_c;
+					pPacMan_registers->de.dAndERegisters.d = initial_d;
+					pPacMan_registers->de.dAndERegisters.e = initial_e;
+					pPacMan_registers->hl.hAndLRegisters.h = initial_h;
+					pPacMan_registers->hl.hAndLRegisters.l = initial_l;
 
-				// Accessing final state
-				auto final = item.second.get_child("final");
-				int final_pc = final.get<int>("pc");
-				int final_sp = final.get<int>("sp");
-				int final_a = final.get<int>("a");
-				int final_b = final.get<int>("b");
-				int final_c = final.get<int>("c");
-				int final_d = final.get<int>("d");
-				int final_e = final.get<int>("e");
-				int final_f = final.get<int>("f");
-				int final_h = final.get<int>("h");
-				int final_l = final.get<int>("l");
-				int final_i = final.get<int>("i");
-				int final_r = final.get<int>("r");
-				int final_ei = final.get<int>("ei");
-				int final_wz = final.get<int>("wz");
-				int final_ix = final.get<int>("ix");
-				int final_iy = final.get<int>("iy");
-				int final_af_ = final.get<int>("af_");
-				int final_bc_ = final.get<int>("bc_");
-				int final_de_ = final.get<int>("de_");
-				int final_hl_ = final.get<int>("hl_");
-				int final_im = final.get<int>("im");
-				int final_p = final.get<int>("p");
-				int final_q = final.get<int>("q");
-				int final_iff1 = final.get<int>("iff1");
-				int final_iff2 = final.get<int>("iff2");
+					pPacMan_registers->ix.ix_u16memory = initial_ix;
+					pPacMan_registers->iy.iy_u16memory = initial_iy;
 
-				if (SST_DEBUG_PRINT)
-				{
-					std::cout << "Final PC: " << final_pc << ", SP: " << final_sp
-						<< ", A: " << final_a << ", B: " << final_b
-						<< ", C: " << final_c << ", D: " << final_d
-						<< ", E: " << final_e << ", F: " << final_f
-						<< ", H: " << final_h << ", L: " << final_l
-						<< ", I: " << final_i << ", R: " << final_r
-						<< ", EI: " << final_ei << ", WZ: " << final_wz
-						<< ", IX: " << final_ix << ", IY: " << final_iy
-						<< ", AF': " << final_af_ << ", BC': " << final_bc_
-						<< ", DE': " << final_de_ << ", HL': " << final_hl_
-						<< ", IM: " << final_im << ", P: " << final_p
-						<< ", Q: " << final_q << ", IFF1: " << final_iff1
-						<< ", IFF2: " << final_iff2
-						<< std::endl;
-				}
+					pPacMan_registers->i = initial_i;
+					pPacMan_registers->r = initial_r;
+					MASQ_UNUSED(initial_ei);
+					pPacMan_instance->pacMan_state.interruptMode = (INTERRUPT_MODE)initial_im;
+					pPacMan_registers->wz = initial_wz;
 
-				if (pPacMan_registers->pc != final_pc)
-				{
-					WARN("PC Mismatch");
-					quitThisRun = YES;
-				}
-				if (pPacMan_registers->sp != final_sp)
-				{
-					WARN("SP Mismatch");
-					quitThisRun = YES;
-				}
-				if (pPacMan_registers->af.aAndFRegisters.a != final_a)
-				{
-					WARN("A Mismatch");
-					quitThisRun = YES;
-				}
-				if (pPacMan_registers->bc.bAndCRegisters.b != final_b)
-				{
-					WARN("B Mismatch");
-					quitThisRun = YES;
-				}
-				if (pPacMan_registers->bc.bAndCRegisters.c != final_c)
-				{
-					WARN("C Mismatch");
-					quitThisRun = YES;
-				}
-				if (pPacMan_registers->de.dAndERegisters.d != final_d)
-				{
-					WARN("D Mismatch");
-					quitThisRun = YES;
-				}
-				if (pPacMan_registers->de.dAndERegisters.e != final_e)
-				{
-					WARN("E Mismatch");
-					quitThisRun = YES;
-				}
-				if (pPacMan_registers->af.aAndFRegisters.f.flagMemory != final_f)
-				{
-					WARN("F Mismatch");
-					quitThisRun = YES;
-				}
-				if (pPacMan_registers->hl.hAndLRegisters.h != final_h)
-				{
-					WARN("H Mismatch");
-					quitThisRun = YES;
-				}
-				if (pPacMan_registers->hl.hAndLRegisters.l != final_l)
-				{
-					WARN("L Mismatch");
-					quitThisRun = YES;
-				}
-				if (pPacMan_registers->i != final_i)
-				{
-					WARN("I Mismatch");
-					quitThisRun = YES;
-				}
-				if (pPacMan_registers->r != final_r)
-				{
-					WARN("R Mismatch");
-					quitThisRun = YES;
-				}
-				MASQ_UNUSED(final_ei);
-				if (pPacMan_instance->pacMan_state.interruptMode != (INTERRUPT_MODE)final_im)
-				{
-					WARN("IM Mismatch");
-					quitThisRun = YES;
-				}
-				if (pPacMan_registers->wz != final_wz)
-				{
-					WARN("WZ Mismatch");
-					quitThisRun = YES;
-				}
-				if (pPacMan_registers->ix.ix_u16memory != final_ix)
-				{
-					WARN("IX Mismatch");
-					quitThisRun = YES;
-				}
-				if (pPacMan_registers->iy.iy_u16memory != final_iy)
-				{
-					WARN("IY Mismatch");
-					quitThisRun = YES;
-				}
-				if (pPacMan_registers->shadow_af.af_u16memory != final_af_)
-				{
-					WARN("Shadow AF Mismatch");
-					quitThisRun = YES;
-				}
-				if (pPacMan_registers->shadow_bc.bc_u16memory != final_bc_)
-				{
-					WARN("Shadow BC Mismatch");
-					quitThisRun = YES;
-				}
-				if (pPacMan_registers->shadow_de.de_u16memory != final_de_)
-				{
-					WARN("Shadow DE Mismatch");
-					quitThisRun = YES;
-				}
-				if (pPacMan_registers->shadow_hl.hl_u16memory != final_hl_)
-				{
-					WARN("Shadow HL Mismatch");
-					quitThisRun = YES;
-				}
-				if (pPacMan_registers->p != final_p)
-				{
-					WARN("P Mismatch");
-					quitThisRun = YES;
-				}
-				if (pPacMan_registers->q != final_q)
-				{
-					WARN("Q Mismatch");
-					quitThisRun = YES;
-				}
-				if (pPacMan_registers->iff1 != final_iff1)
-				{
-					WARN("IFF1 Mismatch");
-					quitThisRun = YES;
-				}
-				if (pPacMan_registers->iff2 != final_iff2)
-				{
-					WARN("IFF2 Mismatch");
-					quitThisRun = YES;
-				}
+					pPacMan_registers->shadow_af.aAndFRegisters.a = (initial_af_ >> 8) & 0xFF;
+					pPacMan_registers->shadow_af.aAndFRegisters.f.flagMemory = initial_af_ & 0xFF;
+					pPacMan_registers->shadow_bc.bAndCRegisters.b = (initial_bc_ >> 8) & 0xFF;
+					pPacMan_registers->shadow_bc.bAndCRegisters.c = initial_bc_ & 0xFF;
+					pPacMan_registers->shadow_de.dAndERegisters.d = (initial_de_ >> 8) & 0xFF;
+					pPacMan_registers->shadow_de.dAndERegisters.e = initial_de_ & 0xFF;
+					pPacMan_registers->shadow_hl.hAndLRegisters.h = (initial_hl_ >> 8) & 0xFF;
+					pPacMan_registers->shadow_hl.hAndLRegisters.l = initial_hl_ & 0xFF;
 
-				pPacMan_registers->pc = RESET;
-				pPacMan_registers->sp = RESET;
+					pPacMan_registers->p = initial_p;
+					pPacMan_registers->q = initial_q;
+					pPacMan_registers->iff1 = initial_iff1;
+					pPacMan_registers->iff2 = initial_iff2;
 
-				// Main registers
-				pPacMan_registers->af.aAndFRegisters.a = RESET;
-				pPacMan_registers->af.aAndFRegisters.f.flagMemory = RESET;
+					// ================= INITIAL RAM =================
+					if (SST_DEBUG_PRINT)
+						std::cout << "Initial RAM:" << std::endl;
 
-				pPacMan_registers->bc.bAndCRegisters.b = RESET;
-				pPacMan_registers->bc.bAndCRegisters.c = RESET;
+					if (initialJson.HasMember("ram") && initialJson["ram"].IsArray())
+					{
+						const rapidjson::Value& ramArray = initialJson["ram"];
+						for (rapidjson::SizeType i = 0; i < ramArray.Size(); ++i)
+						{
+							const rapidjson::Value& entry = ramArray[i];
+							if (!entry.IsArray() || entry.Size() < 2) CONTINUE;
 
-				pPacMan_registers->de.dAndERegisters.d = RESET;
-				pPacMan_registers->de.dAndERegisters.e = RESET;
+							int address = entry[0].GetInt();
+							int value = entry[1].GetInt();
 
-				pPacMan_registers->hl.hAndLRegisters.h = RESET;
-				pPacMan_registers->hl.hAndLRegisters.l = RESET;
+							if (SST_DEBUG_PRINT)
+								std::cout << "  Address: " << address << ", Value: " << value << std::endl;
 
-				pPacMan_registers->ix.ixRegisters.ixh = RESET;
-				pPacMan_registers->ix.ixRegisters.ixl = RESET;
+							pPacMan_memory->pacManRawMemory[address] = value;
+						}
+					}
 
-				pPacMan_registers->iy.iyRegisters.iyh = RESET;
-				pPacMan_registers->iy.iyRegisters.iyl = RESET;
+					// ================= RUN =================
+					performOperation();
 
-				pPacMan_registers->i = RESET;
-				pPacMan_registers->r = RESET;
+					// Internal cycles are padded with previous address
+					while (pPacMan_instance->pacMan_state.others.tomHarte.cycles.cyclePerInst != RESET)
+					{
+						auto index = pPacMan_instance->pacMan_state.others.tomHarte.cycles.indexer;
+						pPacMan_instance->pacMan_state.others.tomHarte.cycles.cycles[index].address
+							= pPacMan_instance->pacMan_state.others.tomHarte.cycles.cycles[index - ONE].address;
+						pPacMan_instance->pacMan_state.others.tomHarte.cycles.cycles[index].isRead = NO;
+						pPacMan_instance->pacMan_state.others.tomHarte.cycles.cycles[index].isWrite = NO;
+						pPacMan_instance->pacMan_state.others.tomHarte.cycles.cycles[index].data = RESET;
+						++pPacMan_instance->pacMan_state.others.tomHarte.cycles.indexer;
+						--pPacMan_instance->pacMan_state.others.tomHarte.cycles.cyclePerInst;
+					}
 
-				pPacMan_instance->pacMan_state.interruptMode = INTERRUPT_MODE::INTERRUPT_MODE_0;
+					// ================= FINAL =================
+					if (!item.HasMember("final") || !item["final"].IsObject())
+					{
+						WARN("Test '%s' missing 'final' object", name.c_str());
+						CONTINUE;
+					}
 
-				pPacMan_registers->wz = RESET;
+					const rapidjson::Value& finalJson = item["final"];
 
-				// Shadow registers
-				pPacMan_registers->shadow_af.aAndFRegisters.a = RESET;
-				pPacMan_registers->shadow_af.aAndFRegisters.f.flagMemory = RESET;
+					int final_pc = finalJson.HasMember("pc") ? finalJson["pc"].GetInt() : 0;
+					int final_sp = finalJson.HasMember("sp") ? finalJson["sp"].GetInt() : 0;
+					int final_a = finalJson.HasMember("a") ? finalJson["a"].GetInt() : 0;
+					int final_b = finalJson.HasMember("b") ? finalJson["b"].GetInt() : 0;
+					int final_c = finalJson.HasMember("c") ? finalJson["c"].GetInt() : 0;
+					int final_d = finalJson.HasMember("d") ? finalJson["d"].GetInt() : 0;
+					int final_e = finalJson.HasMember("e") ? finalJson["e"].GetInt() : 0;
+					int final_f = finalJson.HasMember("f") ? finalJson["f"].GetInt() : 0;
+					int final_h = finalJson.HasMember("h") ? finalJson["h"].GetInt() : 0;
+					int final_l = finalJson.HasMember("l") ? finalJson["l"].GetInt() : 0;
+					int final_i = finalJson.HasMember("i") ? finalJson["i"].GetInt() : 0;
+					int final_r = finalJson.HasMember("r") ? finalJson["r"].GetInt() : 0;
+					int final_ei = finalJson.HasMember("ei") ? finalJson["ei"].GetInt() : 0;
+					int final_wz = finalJson.HasMember("wz") ? finalJson["wz"].GetInt() : 0;
+					int final_ix = finalJson.HasMember("ix") ? finalJson["ix"].GetInt() : 0;
+					int final_iy = finalJson.HasMember("iy") ? finalJson["iy"].GetInt() : 0;
+					int final_af_ = finalJson.HasMember("af_") ? finalJson["af_"].GetInt() : 0;
+					int final_bc_ = finalJson.HasMember("bc_") ? finalJson["bc_"].GetInt() : 0;
+					int final_de_ = finalJson.HasMember("de_") ? finalJson["de_"].GetInt() : 0;
+					int final_hl_ = finalJson.HasMember("hl_") ? finalJson["hl_"].GetInt() : 0;
+					int final_im = finalJson.HasMember("im") ? finalJson["im"].GetInt() : 0;
+					int final_p = finalJson.HasMember("p") ? finalJson["p"].GetInt() : 0;
+					int final_q = finalJson.HasMember("q") ? finalJson["q"].GetInt() : 0;
+					int final_iff1 = finalJson.HasMember("iff1") ? finalJson["iff1"].GetInt() : 0;
+					int final_iff2 = finalJson.HasMember("iff2") ? finalJson["iff2"].GetInt() : 0;
 
-				pPacMan_registers->shadow_bc.bAndCRegisters.b = RESET;
-				pPacMan_registers->shadow_bc.bAndCRegisters.c = RESET;
-
-				pPacMan_registers->shadow_de.dAndERegisters.d = RESET;
-				pPacMan_registers->shadow_de.dAndERegisters.e = RESET;
-
-				pPacMan_registers->shadow_hl.hAndLRegisters.h = RESET;
-				pPacMan_registers->shadow_hl.hAndLRegisters.l = RESET;
-
-				pPacMan_registers->p = RESET;
-				pPacMan_registers->q = RESET;
-
-				pPacMan_registers->iff1 = RESET;
-				pPacMan_registers->iff2 = RESET;
-
-				// Accessing RAM in final state
-				if (SST_DEBUG_PRINT)
-				{
-					std::cout << "Final RAM:" << std::endl;
-				}
-
-				for (const auto& ram_entry : final.get_child("ram"))
-				{
-					auto it = ram_entry.second.begin();
-					int address = it->second.get_value<int>(); // First element is the address
-					++it; // Move to the second element
-					int value = it->second.get_value<int>(); // Second element is the value
 					if (SST_DEBUG_PRINT)
 					{
-						std::cout << "  Address: " << address << ", Value: " << value << std::endl;
+						std::cout << "Final PC: " << final_pc << ", SP: " << final_sp
+							<< ", A: " << final_a << ", B: " << final_b
+							<< ", C: " << final_c << ", D: " << final_d
+							<< ", E: " << final_e << ", F: " << final_f
+							<< ", H: " << final_h << ", L: " << final_l
+							<< ", I: " << final_i << ", R: " << final_r
+							<< ", EI: " << final_ei << ", WZ: " << final_wz
+							<< ", IX: " << final_ix << ", IY: " << final_iy
+							<< ", AF': " << final_af_ << ", BC': " << final_bc_
+							<< ", DE': " << final_de_ << ", HL': " << final_hl_
+							<< ", IM: " << final_im << ", P: " << final_p
+							<< ", Q: " << final_q << ", IFF1: " << final_iff1
+							<< ", IFF2: " << final_iff2
+							<< std::endl;
 					}
 
-					if (pPacMan_memory->pacManRawMemory[address] != value)
+					// ================= REGISTER CHECKS =================
+					if (pPacMan_registers->pc != final_pc)
 					{
-						WARN("RAM Mismatch");
-						quitThisRun = YES;
+						WARN("PC Mismatch");        quitThisRun = YES;
+					}
+					if (pPacMan_registers->sp != final_sp)
+					{
+						WARN("SP Mismatch");        quitThisRun = YES;
+					}
+					if (pPacMan_registers->af.aAndFRegisters.a != final_a)
+					{
+						WARN("A Mismatch");         quitThisRun = YES;
+					}
+					if (pPacMan_registers->bc.bAndCRegisters.b != final_b)
+					{
+						WARN("B Mismatch");         quitThisRun = YES;
+					}
+					if (pPacMan_registers->bc.bAndCRegisters.c != final_c)
+					{
+						WARN("C Mismatch");         quitThisRun = YES;
+					}
+					if (pPacMan_registers->de.dAndERegisters.d != final_d)
+					{
+						WARN("D Mismatch");         quitThisRun = YES;
+					}
+					if (pPacMan_registers->de.dAndERegisters.e != final_e)
+					{
+						WARN("E Mismatch");         quitThisRun = YES;
+					}
+					if (pPacMan_registers->af.aAndFRegisters.f.flagMemory != final_f)
+					{
+						WARN("F Mismatch");         quitThisRun = YES;
+					}
+					if (pPacMan_registers->hl.hAndLRegisters.h != final_h)
+					{
+						WARN("H Mismatch");         quitThisRun = YES;
+					}
+					if (pPacMan_registers->hl.hAndLRegisters.l != final_l)
+					{
+						WARN("L Mismatch");         quitThisRun = YES;
+					}
+					if (pPacMan_registers->i != final_i)
+					{
+						WARN("I Mismatch");         quitThisRun = YES;
+					}
+					if (pPacMan_registers->r != final_r)
+					{
+						WARN("R Mismatch");         quitThisRun = YES;
+					}
+					MASQ_UNUSED(final_ei);
+					if (pPacMan_instance->pacMan_state.interruptMode != (INTERRUPT_MODE)final_im)
+					{
+						WARN("IM Mismatch"); quitThisRun = YES;
+					}
+					if (pPacMan_registers->wz != final_wz)
+					{
+						WARN("WZ Mismatch");        quitThisRun = YES;
+					}
+					if (pPacMan_registers->ix.ix_u16memory != final_ix)
+					{
+						WARN("IX Mismatch");        quitThisRun = YES;
+					}
+					if (pPacMan_registers->iy.iy_u16memory != final_iy)
+					{
+						WARN("IY Mismatch");        quitThisRun = YES;
+					}
+					if (pPacMan_registers->shadow_af.af_u16memory != final_af_)
+					{
+						WARN("Shadow AF Mismatch"); quitThisRun = YES;
+					}
+					if (pPacMan_registers->shadow_bc.bc_u16memory != final_bc_)
+					{
+						WARN("Shadow BC Mismatch"); quitThisRun = YES;
+					}
+					if (pPacMan_registers->shadow_de.de_u16memory != final_de_)
+					{
+						WARN("Shadow DE Mismatch"); quitThisRun = YES;
+					}
+					if (pPacMan_registers->shadow_hl.hl_u16memory != final_hl_)
+					{
+						WARN("Shadow HL Mismatch"); quitThisRun = YES;
+					}
+					if (pPacMan_registers->p != final_p)
+					{
+						WARN("P Mismatch");         quitThisRun = YES;
+					}
+					if (pPacMan_registers->q != final_q)
+					{
+						WARN("Q Mismatch");         quitThisRun = YES;
+					}
+					if (pPacMan_registers->iff1 != final_iff1)
+					{
+						WARN("IFF1 Mismatch");      quitThisRun = YES;
+					}
+					if (pPacMan_registers->iff2 != final_iff2)
+					{
+						WARN("IFF2 Mismatch");      quitThisRun = YES;
 					}
 
-					pPacMan_memory->pacManRawMemory[address] = RESET;
-				}
+					// ================= RESET REGISTERS =================
+					pPacMan_registers->pc = RESET;
+					pPacMan_registers->sp = RESET;
+					pPacMan_registers->af.aAndFRegisters.a = RESET;
+					pPacMan_registers->af.aAndFRegisters.f.flagMemory = RESET;
+					pPacMan_registers->bc.bAndCRegisters.b = RESET;
+					pPacMan_registers->bc.bAndCRegisters.c = RESET;
+					pPacMan_registers->de.dAndERegisters.d = RESET;
+					pPacMan_registers->de.dAndERegisters.e = RESET;
+					pPacMan_registers->hl.hAndLRegisters.h = RESET;
+					pPacMan_registers->hl.hAndLRegisters.l = RESET;
+					pPacMan_registers->ix.ixRegisters.ixh = RESET;
+					pPacMan_registers->ix.ixRegisters.ixl = RESET;
+					pPacMan_registers->iy.iyRegisters.iyh = RESET;
+					pPacMan_registers->iy.iyRegisters.iyl = RESET;
+					pPacMan_registers->i = RESET;
+					pPacMan_registers->r = RESET;
+					pPacMan_instance->pacMan_state.interruptMode = INTERRUPT_MODE::INTERRUPT_MODE_0;
+					pPacMan_registers->wz = RESET;
+					pPacMan_registers->shadow_af.aAndFRegisters.a = RESET;
+					pPacMan_registers->shadow_af.aAndFRegisters.f.flagMemory = RESET;
+					pPacMan_registers->shadow_bc.bAndCRegisters.b = RESET;
+					pPacMan_registers->shadow_bc.bAndCRegisters.c = RESET;
+					pPacMan_registers->shadow_de.dAndERegisters.d = RESET;
+					pPacMan_registers->shadow_de.dAndERegisters.e = RESET;
+					pPacMan_registers->shadow_hl.hAndLRegisters.h = RESET;
+					pPacMan_registers->shadow_hl.hAndLRegisters.l = RESET;
+					pPacMan_registers->p = RESET;
+					pPacMan_registers->q = RESET;
+					pPacMan_registers->iff1 = RESET;
+					pPacMan_registers->iff2 = RESET;
+
+					// ================= FINAL RAM =================
+					if (SST_DEBUG_PRINT)
+					{
+						std::cout << "Final RAM:" << std::endl;
+					}
+
+					if (finalJson.HasMember("ram") && finalJson["ram"].IsArray())
+					{
+						const rapidjson::Value& ramArray = finalJson["ram"];
+						for (rapidjson::SizeType i = 0; i < ramArray.Size(); ++i)
+						{
+							const rapidjson::Value& entry = ramArray[i];
+							if (!entry.IsArray() || entry.Size() < 2) CONTINUE;
+
+							int address = entry[0].GetInt();
+							int value = entry[1].GetInt();
+
+							if (SST_DEBUG_PRINT)
+								std::cout << "  Address: " << address << ", Value: " << value << std::endl;
+
+							if (pPacMan_memory->pacManRawMemory[address] != value)
+							{
+								WARN("RAM Mismatch");
+								quitThisRun = YES;
+							}
+
+							pPacMan_memory->pacManRawMemory[address] = RESET;
+						}
+					}
 
 #if (ENABLED)
-				// Accessing cycles
-				if (SST_DEBUG_PRINT)
-				{
-					std::cout << "Cycles:" << std::endl;
-				}
-				pPacMan_instance->pacMan_state.others.tomHarte.cycles.indexer = RESET;
-				INC8 indexer = RESET;
-				for (const auto& cycle : item.second.get_child("cycles"))
-				{
-					auto it = cycle.second.begin();
-					int cycle_address = it->second.get_value<int>(); // First element
-					++it; // Move to the second element
-					int cycle_value = it->second.get_value<int>(0);
-					++it; // Move to the third element
-					std::string cycle_type = it->second.get_value<std::string>(); // Third element
+					// ================= CYCLES =================
 					if (SST_DEBUG_PRINT)
 					{
-						std::cout << "Cycle Address: " << cycle_address << ", Value: " << cycle_value << ", Type: " << cycle_type << std::endl;
+						std::cout << "Cycles:" << std::endl;
 					}
 
-					std::string temp = "----";
-					if (pPacMan_instance->pacMan_state.others.tomHarte.cycles.cycles[indexer].isWrite == YES)
+					pPacMan_instance->pacMan_state.others.tomHarte.cycles.indexer = RESET;
+					INC8 indexer = RESET;
+
+					if (item.HasMember("cycles") && item["cycles"].IsArray())
 					{
-						temp = "-wm-";
+						const rapidjson::Value& cyclesArray = item["cycles"];
+						for (rapidjson::SizeType i = 0; i < cyclesArray.Size(); ++i)
+						{
+							const rapidjson::Value& cycle = cyclesArray[i];
+							if (!cycle.IsArray() || cycle.Size() < 3) CONTINUE;
+
+							int cycle_address = cycle[0].GetInt();
+							// Z80 cycle value can be null — default to 0 when null
+							int cycle_value = (!cycle[1].IsNull()) ? cycle[1].GetInt() : 0;
+							std::string cycle_type = cycle[2].GetString();
+
+							if (SST_DEBUG_PRINT)
+							{
+								std::cout << "Cycle Address: " << cycle_address
+									<< ", Value: " << cycle_value
+									<< ", Type: " << cycle_type << std::endl;
+							}
+
+							std::string temp = "----";
+							if (pPacMan_instance->pacMan_state.others.tomHarte.cycles.cycles[indexer].isWrite == YES)
+								temp = "-wm-";
+							if (pPacMan_instance->pacMan_state.others.tomHarte.cycles.cycles[indexer].isRead == YES)
+								temp = "r-m-";
+
+							if (cycle_type.compare(temp))
+							{
+								WARN("Operation Cycle Mismatch");
+								quitThisRun = YES;
+							}
+
+							if (cycle_address != pPacMan_instance->pacMan_state.others.tomHarte.cycles.cycles[indexer].address)
+							{
+								WARN("Address Cycle Mismatch");
+								quitThisRun = YES;
+							}
+
+							if (cycle_value != pPacMan_instance->pacMan_state.others.tomHarte.cycles.cycles[indexer].data)
+							{
+								WARN("Data Cycle Mismatch");
+								quitThisRun = YES;
+							}
+
+							++indexer;
+						}
 					}
-					if (pPacMan_instance->pacMan_state.others.tomHarte.cycles.cycles[indexer].isRead == YES)
+
+					for (INC8 ii = ZERO; ii < TWENTY; ii++)
 					{
-						temp = "r-m-";
+						pPacMan_instance->pacMan_state.others.tomHarte.cycles.cycles[ii].reset();
 					}
-
-					if (cycle_type.compare(temp))
-					{
-						WARN("Operation Cycle Mismatch");
-						quitThisRun = YES;
-					}
-
-					if (cycle_address != pPacMan_instance->pacMan_state.others.tomHarte.cycles.cycles[indexer].address)
-					{
-						WARN("Address Cycle Mismatch");
-						quitThisRun = YES;
-					}
-
-					if (cycle_value != pPacMan_instance->pacMan_state.others.tomHarte.cycles.cycles[indexer].data)
-					{
-						WARN("Data Cycle Mismatch");
-						quitThisRun = YES;
-					}
-
-					++indexer;
-				}
-
-				for (INC8 ii = ZERO; ii < TWENTY; ii++)
-				{
-					pPacMan_instance->pacMan_state.others.tomHarte.cycles.cycles[ii].reset();
-				}
 #else
-				pPacMan_instance->pacMan_state.others.tomHarte.cycles.indexer = RESET;
+					pPacMan_instance->pacMan_state.others.tomHarte.cycles.indexer = RESET;
 #endif
 
-				if (quitThisRun == YES)
-				{
-					FATAL("SST Failure");
-				}
+					if (quitThisRun == YES)
+					{
+						FATAL("SST Failure");
+					}
 
-				// Update Stats
-				if (cbMode == YES)
-				{
-					++pPacMan_instance->pacMan_state.others.tomHarte.cbtestCount[subopcode];
-				}
-				if (edMode == YES)
-				{
-					++pPacMan_instance->pacMan_state.others.tomHarte.edtestCount[subopcode];
-				}
-				if (ddMode == YES)
-				{
-					++pPacMan_instance->pacMan_state.others.tomHarte.ddtestCount[subopcode];
-				}
-				if (fdMode == YES)
-				{
-					++pPacMan_instance->pacMan_state.others.tomHarte.fdtestCount[subopcode];
-				}
+					// ================= UPDATE STATS =================
+					if (cbMode == YES) ++pPacMan_instance->pacMan_state.others.tomHarte.cbtestCount[subopcode];
+					if (edMode == YES) ++pPacMan_instance->pacMan_state.others.tomHarte.edtestCount[subopcode];
+					if (ddMode == YES) ++pPacMan_instance->pacMan_state.others.tomHarte.ddtestCount[subopcode];
+					if (fdMode == YES) ++pPacMan_instance->pacMan_state.others.tomHarte.fdtestCount[subopcode];
 
-				if (!cbMode || !edMode || !ddMode || !fdMode)
-				{
-					++pPacMan_instance->pacMan_state.others.tomHarte.testCount[opcode];
-				}
+					if (!cbMode || !edMode || !ddMode || !fdMode)
+					{
+						++pPacMan_instance->pacMan_state.others.tomHarte.testCount[opcode];
+					}
 
 #if _DEBUG
-				if (pPacMan_instance->pacMan_state.others.tomHarte.testCount[0x02] == 419)
-				{
-					volatile int breakpoint = 0;
-				}
-
-				if (pPacMan_instance->pacMan_state.others.tomHarte.edtestCount[0x57] == 4)
-				{
-					volatile int breakpoint = 0;
-				}
+					if (pPacMan_instance->pacMan_state.others.tomHarte.testCount[0x02] == 419)
+					{
+						volatile int breakpoint = 0;
+					}
+					if (pPacMan_instance->pacMan_state.others.tomHarte.edtestCount[0x57] == 4)
+					{
+						volatile int breakpoint = 0;
+					}
 #endif
+				}
 			}
 
+next_opcode_z80:
 #if 1
 			// TODO: Temporary code as we have not implemented 0xDDFF, 0xFDFF and 0xEDFF
 			if (ddMode == YES || fdMode == YES)
 			{
 				if (subopcode == 0xE9)
 				{
-					ddMode = NO;
-					fdMode = NO;
+					ddMode = NO; fdMode = NO;
 				}
 			}
-
 			if (edMode == YES)
 			{
-				if (subopcode == 0xB9)
-				{
-					edMode = NO;
-				}
+				if (subopcode == 0xB9) edMode = NO;
 			}
 #endif
 
@@ -3948,7 +3925,7 @@ FLAG pacMan_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 	else
 #endif
 	{
-		if (ROM_TYPE == ROM::TEST_ROM_COM || ROM_TYPE == ROM::TEST_ROM_CIM || ROM_TYPE == ROM::TEST_ROM_TAP)
+		if (ROM_TYPE == ROM::TEST_ROM_COM || ROM_TYPE == ROM::TEST_ROM_CIM || ROM_TYPE == ROM::TEST_ROM_TAP)  MASQ_UNLIKELY
 		{
 			LOG("Starting the test\n\n");
 			pPacMan_registers->pc = 0x0100;
@@ -3969,8 +3946,6 @@ FLAG pacMan_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 
 			if (ROM_TYPE == ROM::TEST_ROM_COM)
 			{
-				// CP/M BIOS/BDOS stub to handle COM files
-
 				pPacMan_instance->pacMan_state.pacManMemory.pacManRawMemory[0x0006] = 0x00;
 				pPacMan_instance->pacMan_state.pacManMemory.pacManRawMemory[0x0007] = 0xF0;
 
@@ -3978,20 +3953,7 @@ FLAG pacMan_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 				{
 					++testROMCycles;
 
-					//if (testROMCycles == 895)
-					//{
-					//	volatile int a = 0;
-					//}
-
 					performOperation();
-
-#ifdef NDEBUG
-					//if (testROMCycles > 3227169747)
-					//{
-					//	LOG("Test number %" PRId64, testROMCycles);
-					//	LOG("Cycles till now is %" PRId64, pPacMan_cpuInstance->cpuCounter);
-					//}
-#endif
 
 					if (pPacMan_registers->pc == 0x0005)
 					{
@@ -4036,22 +3998,7 @@ FLAG pacMan_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 				{
 					++testROMCycles;
 
-					//if (testROMCycles == 3228849330)
-					//{
-					//	volatile int a = 0;
-					//}
-
 					performOperation();
-
-#ifdef NDEBUG
-					//if (testROMCycles > 3227169747)
-					//{
-					//	LOG("Test number %" PRId64, testROMCycles);
-					//	LOG("Cycles till now is %" PRId64, pPacMan_cpuInstance->cpuCounter);
-					//}
-#endif
-
-				// --- CIM handling (I/O trap at port 0)
 
 					if (pPacMan_cpuInstance->opcode == 0xDB && pPacMan_cpuInstance->port == 0)
 					{

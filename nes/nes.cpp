@@ -5375,6 +5375,7 @@ bool NES_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 		static FLAG SST_DEBUG_PRINT = NO;
 		const COUNTER32 init_test_opcode = 0x00;
 		COUNTER32 opcode = init_test_opcode;
+
 		while (FOREVER)
 		{
 			if ((init_test_opcode != ZERO) && (opcode == init_test_opcode))
@@ -5388,221 +5389,269 @@ bool NES_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 
 			if (opcode > 0xFF)
 			{
+				opcode = RESET;
 				INFO("Completed Running all Tom Harte nes6502 (v1) tests");
 				PAUSE;
 			}
 
-			// Get the input
+			// --------------------------------------------------------
+			// Build file path
+			// --------------------------------------------------------
 			std::string testCaseName = std::format("{:02x}", opcode);
-			testCaseName = _JSON_LOCATION + "\\" + testCaseName + ".json";
-			//std::string testCaseName = _JSON_LOCATION + "\\" +  "test.json";
+			std::filesystem::path fullPath = std::filesystem::path(_JSON_LOCATION) / (testCaseName + ".json");
 
 			LOG_NEW_LINE;
-			INFO("Running : %s", testCaseName.c_str());
-			try
-			{
-				boost::property_tree::read_json(testCaseName, testCase);
-			}
-			catch (std::exception& ex)
-			{
-				std::cout << ex.what() << std::endl;
-				RETURN false;
-			}
+			INFO("Running : %s", fullPath.string().c_str());
 
-			// Test the CPU!
-
-			// Itterate over each test case in the JSON array
-			for (const auto& item : testCase)
+			// --------------------------------------------------------
+			// Read entire file into string, then parse with RapidJSON
+			// --------------------------------------------------------
 			{
-				auto quitThisRun = NO;
-
-				// Accessing top-level fields
-				std::string name = item.second.get<std::string>("name");
-				if (SST_DEBUG_PRINT)
+				std::ifstream ifs(fullPath);
+				if (!ifs.is_open())
 				{
-					std::cout << "Name: " << name << std::endl;
+					WARN("Failed to open %s", fullPath.string().c_str());
+					++opcode;
+					CONTINUE;
 				}
 
-				// Accessing initial state
-				auto initial = item.second.get_child("initial");
-				int initial_pc = initial.get<int>("pc");
-				int initial_s = initial.get<int>("s");
-				int initial_a = initial.get<int>("a");
-				int initial_x = initial.get<int>("x");
-				int initial_y = initial.get<int>("y");
-				int initial_p = initial.get<int>("p");
+				std::string jsonStr((std::istreambuf_iterator<char>(ifs)),
+					std::istreambuf_iterator<char>());
+				ifs.close();
 
-				if (SST_DEBUG_PRINT)
+				rapidjson::Document testCase;
+				testCase.Parse(jsonStr.c_str());
+
+				if (testCase.HasParseError())
 				{
-					std::cout << "Initial PC: " << initial_pc << ", S: " << initial_s
-						<< ", A: " << initial_a << ", X: " << initial_x
-						<< ", Y: " << initial_y << ", P: " << initial_p << std::endl;
+					WARN("Failed to parse %s: error code %u at offset %zu",
+						fullPath.string().c_str(),
+						(unsigned)testCase.GetParseError(),
+						testCase.GetErrorOffset());
+					++opcode;
+					CONTINUE;
 				}
 
-				pNES_cpuRegisters->pc = initial_pc;
-				pNES_cpuRegisters->sp = initial_s;
-				pNES_cpuRegisters->a = initial_a;
-				pNES_cpuRegisters->x = initial_x;
-				pNES_cpuRegisters->y = initial_y;
-				pNES_cpuRegisters->p.p = initial_p;
-
-				// Accessing RAM in initial state
-				if (SST_DEBUG_PRINT)
+				if (!testCase.IsArray())
 				{
-					std::cout << "Initial RAM:" << std::endl;
+					WARN("%s does not contain a JSON array", fullPath.string().c_str());
+					++opcode;
+					CONTINUE;
 				}
-				for (const auto& ram_entry : initial.get_child("ram"))
+
+				// --------------------------------------------------------
+				// Iterate each test case in the JSON array
+				// --------------------------------------------------------
+				for (rapidjson::SizeType itemIdx = 0; itemIdx < testCase.Size(); ++itemIdx)
 				{
-					auto it = ram_entry.second.begin();
-					int address = it->second.get_value<int>(); // First element is the address
-					++it; // Move to the second element
-					int value = it->second.get_value<int>(); // Second element is the value
+					const rapidjson::Value& item = testCase[itemIdx];
+					FLAG quitThisRun = NO;
+
+					// ================= NAME =================
+					std::string name = (item.HasMember("name") && item["name"].IsString())
+						? item["name"].GetString() : "";
+
+					if (SST_DEBUG_PRINT)
+						std::cout << "Name: " << name << std::endl;
+
+					// ================= INITIAL =================
+					if (!item.HasMember("initial") || !item["initial"].IsObject())
+					{
+						WARN("Test '%s' missing 'initial' object", name.c_str());
+						CONTINUE;
+					}
+
+					const rapidjson::Value& initialJson = item["initial"];
+
+					int initial_pc = initialJson.HasMember("pc") ? initialJson["pc"].GetInt() : 0;
+					int initial_s = initialJson.HasMember("s") ? initialJson["s"].GetInt() : 0;
+					int initial_a = initialJson.HasMember("a") ? initialJson["a"].GetInt() : 0;
+					int initial_x = initialJson.HasMember("x") ? initialJson["x"].GetInt() : 0;
+					int initial_y = initialJson.HasMember("y") ? initialJson["y"].GetInt() : 0;
+					int initial_p = initialJson.HasMember("p") ? initialJson["p"].GetInt() : 0;
+
 					if (SST_DEBUG_PRINT)
 					{
-						std::cout << "  Address: " << address << ", Value: " << value << std::endl;
+						std::cout << "Initial PC: " << initial_pc << ", S: " << initial_s
+							<< ", A: " << initial_a << ", X: " << initial_x
+							<< ", Y: " << initial_y << ", P: " << initial_p << std::endl;
 					}
 
-					pNES_cpuMemory->NESRawMemory[address] = value;
-				}
+					pNES_cpuRegisters->pc = initial_pc;
+					pNES_cpuRegisters->sp = initial_s;
+					pNES_cpuRegisters->a = initial_a;
+					pNES_cpuRegisters->x = initial_x;
+					pNES_cpuRegisters->y = initial_y;
+					pNES_cpuRegisters->p.p = initial_p;
 
-				// Run the CPU
-				processSOC();
+					// ================= INITIAL RAM =================
+					if (SST_DEBUG_PRINT)
+						std::cout << "Initial RAM:" << std::endl;
 
-				// Accessing final state
-				auto final = item.second.get_child("final");
-				int final_pc = final.get<int>("pc");
-				int final_s = final.get<int>("s");
-				int final_a = final.get<int>("a");
-				int final_x = final.get<int>("x");
-				int final_y = final.get<int>("y");
-				int final_p = final.get<int>("p");
+					if (initialJson.HasMember("ram") && initialJson["ram"].IsArray())
+					{
+						const rapidjson::Value& ramArray = initialJson["ram"];
+						for (rapidjson::SizeType i = 0; i < ramArray.Size(); ++i)
+						{
+							const rapidjson::Value& entry = ramArray[i];
+							if (!entry.IsArray() || entry.Size() < 2) CONTINUE;
 
-				if (SST_DEBUG_PRINT)
-				{
-					std::cout << "Final PC: " << final_pc << ", S: " << final_s
-						<< ", A: " << final_a << ", X: " << final_x
-						<< ", Y: " << final_y << ", P: " << final_p << std::endl;
-				}
+							int address = entry[0].GetInt();
+							int value = entry[1].GetInt();
 
-				if (pNES_cpuRegisters->pc != final_pc)
-				{
-					WARN("PC Mismatch");
-					quitThisRun = YES;
-				}
-				if (pNES_cpuRegisters->sp != final_s)
-				{
-					WARN("SP Mismatch");
-					quitThisRun = YES;
-				}
-				if (pNES_cpuRegisters->a != final_a)
-				{
-					WARN("A Mismatch");
-					quitThisRun = YES;
-				}
-				if (pNES_cpuRegisters->x != final_x)
-				{
-					WARN("X Mismatch");
-					quitThisRun = YES;
-				}
-				if (pNES_cpuRegisters->y != final_y)
-				{
-					WARN("Y Mismatch");
-					quitThisRun = YES;
-				}
-				if (pNES_cpuRegisters->p.p != final_p)
-				{
-					WARN("P Mismatch");
-					quitThisRun = YES;
-				}
+							if (SST_DEBUG_PRINT)
+								std::cout << "  Address: " << address << ", Value: " << value << std::endl;
 
-				pNES_cpuRegisters->pc = RESET;
-				pNES_cpuRegisters->sp = RESET;
-				pNES_cpuRegisters->a = RESET;
-				pNES_cpuRegisters->x = RESET;
-				pNES_cpuRegisters->y = RESET;
-				pNES_cpuRegisters->p.p = RESET;
+							pNES_cpuMemory->NESRawMemory[address] = value;
+						}
+					}
 
-				// Accessing RAM in final state
-				if (SST_DEBUG_PRINT)
-				{
-					std::cout << "Final RAM:" << std::endl;
-				}
+					// ================= RUN =================
+					processSOC();
 
-				for (const auto& ram_entry : final.get_child("ram"))
-				{
-					auto it = ram_entry.second.begin();
-					int address = it->second.get_value<int>(); // First element is the address
-					++it; // Move to the second element
-					int value = it->second.get_value<int>(); // Second element is the value
+					// ================= FINAL =================
+					if (!item.HasMember("final") || !item["final"].IsObject())
+					{
+						WARN("Test '%s' missing 'final' object", name.c_str());
+						CONTINUE;
+					}
+
+					const rapidjson::Value& finalJson = item["final"];
+
+					int final_pc = finalJson.HasMember("pc") ? finalJson["pc"].GetInt() : 0;
+					int final_s = finalJson.HasMember("s") ? finalJson["s"].GetInt() : 0;
+					int final_a = finalJson.HasMember("a") ? finalJson["a"].GetInt() : 0;
+					int final_x = finalJson.HasMember("x") ? finalJson["x"].GetInt() : 0;
+					int final_y = finalJson.HasMember("y") ? finalJson["y"].GetInt() : 0;
+					int final_p = finalJson.HasMember("p") ? finalJson["p"].GetInt() : 0;
+
 					if (SST_DEBUG_PRINT)
 					{
-						std::cout << "  Address: " << address << ", Value: " << value << std::endl;
+						std::cout << "Final PC: " << final_pc << ", S: " << final_s
+							<< ", A: " << final_a << ", X: " << final_x
+							<< ", Y: " << final_y << ", P: " << final_p << std::endl;
 					}
 
-					if (pNES_cpuMemory->NESRawMemory[address] != value)
+					// ================= REGISTER CHECKS =================
+					if (pNES_cpuRegisters->pc != final_pc)
 					{
-						WARN("RAM Mismatch");
-						quitThisRun = YES;
+						FATAL("PC Mismatch"); quitThisRun = YES;
+					}
+					if (pNES_cpuRegisters->sp != final_s)
+					{
+						FATAL("SP Mismatch"); quitThisRun = YES;
+					}
+					if (pNES_cpuRegisters->a != final_a)
+					{
+						FATAL("A Mismatch");  quitThisRun = YES;
+					}
+					if (pNES_cpuRegisters->x != final_x)
+					{
+						FATAL("X Mismatch");  quitThisRun = YES;
+					}
+					if (pNES_cpuRegisters->y != final_y)
+					{
+						FATAL("Y Mismatch");  quitThisRun = YES;
+					}
+					if (pNES_cpuRegisters->p.p != final_p)
+					{
+						FATAL("P Mismatch");  quitThisRun = YES;
 					}
 
-					pNES_cpuMemory->NESRawMemory[address] = RESET;
-				}
+					pNES_cpuRegisters->pc = RESET;
+					pNES_cpuRegisters->sp = RESET;
+					pNES_cpuRegisters->a = RESET;
+					pNES_cpuRegisters->x = RESET;
+					pNES_cpuRegisters->y = RESET;
+					pNES_cpuRegisters->p.p = RESET;
 
-				// Accessing cycles
-				if (SST_DEBUG_PRINT)
-				{
-					std::cout << "Cycles:" << std::endl;
-				}
-				pNES_instance->NES_state.emulatorStatus.debugger.tomHarte.cycles.indexer = RESET;
-				INC8 indexer = RESET;
-				for (const auto& cycle : item.second.get_child("cycles"))
-				{
-					auto it = cycle.second.begin();
-					int cycle_address = it->second.get_value<int>(); // First element
-					++it; // Move to the second element
-					int cycle_value = it->second.get_value<int>(); // Second element
-					++it; // Move to the third element
-					std::string cycle_type = it->second.get_value<std::string>(); // Third element
+					// ================= FINAL RAM =================
 					if (SST_DEBUG_PRINT)
+						std::cout << "Final RAM:" << std::endl;
+
+					if (finalJson.HasMember("ram") && finalJson["ram"].IsArray())
 					{
-						std::cout << "Cycle Address: " << cycle_address << ", Value: " << cycle_value << ", Type: " << cycle_type << std::endl;
+						const rapidjson::Value& ramArray = finalJson["ram"];
+						for (rapidjson::SizeType i = 0; i < ramArray.Size(); ++i)
+						{
+							const rapidjson::Value& entry = ramArray[i];
+							if (!entry.IsArray() || entry.Size() < 2) CONTINUE;
+
+							int address = entry[0].GetInt();
+							int value = entry[1].GetInt();
+
+							if (SST_DEBUG_PRINT)
+								std::cout << "  Address: " << address << ", Value: " << value << std::endl;
+
+							if (pNES_cpuMemory->NESRawMemory[address] != value)
+							{
+								FATAL("RAM Mismatch");
+								quitThisRun = YES;
+							}
+
+							pNES_cpuMemory->NESRawMemory[address] = RESET;
+						}
 					}
 
-					if (cycle_address != pNES_instance->NES_state.emulatorStatus.debugger.tomHarte.cycles.cycles[indexer].address)
+					// ================= CYCLES =================
+					if (SST_DEBUG_PRINT)
+						std::cout << "Cycles:" << std::endl;
+
+					pNES_instance->NES_state.emulatorStatus.debugger.tomHarte.cycles.indexer = RESET;
+					INC8 indexer = RESET;
+
+					if (item.HasMember("cycles") && item["cycles"].IsArray())
 					{
-						WARN("Address Cycle Mismatch");
-						quitThisRun = YES;
+						const rapidjson::Value& cyclesArray = item["cycles"];
+						for (rapidjson::SizeType i = 0; i < cyclesArray.Size(); ++i)
+						{
+							const rapidjson::Value& cycle = cyclesArray[i];
+							if (!cycle.IsArray() || cycle.Size() < 3) CONTINUE;
+
+							int         cycle_address = cycle[0].GetInt();
+							int         cycle_value = cycle[1].GetInt();
+							std::string cycle_type = cycle[2].GetString();
+
+							if (SST_DEBUG_PRINT)
+							{
+								std::cout << "Cycle Address: " << cycle_address
+									<< ", Value: " << cycle_value
+									<< ", Type: " << cycle_type << std::endl;
+							}
+
+							if (cycle_address != pNES_instance->NES_state.emulatorStatus.debugger.tomHarte.cycles.cycles[indexer].address)
+							{
+								FATAL("Address Cycle Mismatch");
+								quitThisRun = YES;
+							}
+
+							if (cycle_value != pNES_instance->NES_state.emulatorStatus.debugger.tomHarte.cycles.cycles[indexer].data)
+							{
+								FATAL("Data Cycle Mismatch");
+								quitThisRun = YES;
+							}
+
+							std::string temp = "write";
+							if (pNES_instance->NES_state.emulatorStatus.debugger.tomHarte.cycles.cycles[indexer].isRead == YES)
+								temp = "read";
+
+							if (cycle_type.compare(temp))
+							{
+								FATAL("Operation Cycle Mismatch");
+								quitThisRun = YES;
+							}
+
+							pNES_instance->NES_state.emulatorStatus.debugger.tomHarte.cycles.cycles[indexer].reset();
+							++indexer;
+						}
 					}
 
-					if (cycle_value != pNES_instance->NES_state.emulatorStatus.debugger.tomHarte.cycles.cycles[indexer].data)
-					{
-						WARN("Data Cycle Mismatch");
-						quitThisRun = YES;
-					}
+					if (quitThisRun == YES)
+						BREAK;
 
-					std::string temp = "write";
-					if (pNES_instance->NES_state.emulatorStatus.debugger.tomHarte.cycles.cycles[indexer].isRead == YES)
-					{
-						temp = "read";
-					}
-
-					if (cycle_type.compare(temp))
-					{
-						WARN("Operation Cycle Mismatch");
-						quitThisRun = YES;
-					}
-
-					pNES_instance->NES_state.emulatorStatus.debugger.tomHarte.cycles.cycles[indexer].reset();
-					++indexer;
+					// ================= UPDATE STATS =================
+					++pNES_instance->NES_state.emulatorStatus.debugger.tomHarte.testCount[opcode];
 				}
-
-				if (quitThisRun == YES)
-				{
-					BREAK;
-				}
-
-				// Update Stats
-				++pNES_instance->NES_state.emulatorStatus.debugger.tomHarte.testCount[opcode];
 			}
 
 			++opcode;
