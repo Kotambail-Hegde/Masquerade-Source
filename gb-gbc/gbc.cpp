@@ -6771,10 +6771,12 @@ FLAG GBc_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 		COUNTER32 opcode = ZERO;
 		COUNTER32 subopcode = ZERO;
 		FLAG cbMode = NO;
+
 		while (FOREVER)
 		{
 			if (opcode > 0xFF)
 			{
+				opcode = RESET;
 				INFO("Completed Running all Tom Harte sm83 (v1) tests");
 				PAUSE;
 			}
@@ -6804,309 +6806,355 @@ FLAG GBc_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 				}
 			}
 
-			// Get the input
+			// --------------------------------------------------------
+			// Build file path
+			// --------------------------------------------------------
 			std::string testCaseName = std::format("{:02x}", opcode);
+			std::filesystem::path fullPath;
+
 			if (cbMode == NO)
 			{
-				testCaseName = _JSON_LOCATION + "\\" + testCaseName + ".json";
-				//std::string testCaseName = _JSON_LOCATION + "\\" +  "test.json";
+				fullPath = std::filesystem::path(_JSON_LOCATION) / (testCaseName + ".json");
 			}
 			else
 			{
 				std::string subtestCaseName = std::format("{:02x}", subopcode);
-				testCaseName = _JSON_LOCATION + "\\" + testCaseName + " " + subtestCaseName + ".json";
-				//std::string testCaseName = _JSON_LOCATION + "\\" +  "test.json";
+				fullPath = std::filesystem::path(_JSON_LOCATION) / (testCaseName + " " + subtestCaseName + ".json");
 			}
 
 			LOG_NEW_LINE;
-			INFO("Running : %s\n", testCaseName.c_str());
-			try
-			{
-				boost::property_tree::read_json(testCaseName, testCase);
-			}
-			catch (std::exception& ex)
-			{
-				std::cout << ex.what() << std::endl;
-				RETURN false;
-			}
+			INFO("Running : %s\n", fullPath.string().c_str());
 
-			// Test the CPU!
-
-			// Itterate over each test case in the JSON array
-			for (const auto& item : testCase)
+			// --------------------------------------------------------
+			// Read entire file into string, then parse with RapidJSON
+			// --------------------------------------------------------
 			{
-				auto quitThisRun = NO;
-
-				// Accessing top-level fields
-				std::string name = item.second.get<std::string>("name");
-				if (SST_DEBUG_PRINT)
+				std::ifstream ifs(fullPath);
+				if (!ifs.is_open())
 				{
-					std::cout << "Name: " << name << std::endl;
+					WARN("Failed to open %s", fullPath.string().c_str());
+					goto next_opcode;
 				}
 
-				// Accessing initial state
-				auto initial = item.second.get_child("initial");
-				int initial_pc = initial.get<int>("pc");
-				int initial_sp = initial.get<int>("sp");
-				int initial_a = initial.get<int>("a");
-				int initial_b = initial.get<int>("b");
-				int initial_c = initial.get<int>("c");
-				int initial_d = initial.get<int>("d");
-				int initial_e = initial.get<int>("e");
-				int initial_f = initial.get<int>("f");
-				int initial_h = initial.get<int>("h");
-				int initial_l = initial.get<int>("l");
-				//int initial_ime = initial.get<int>("ime");
-				//int initial_ie = initial.get<int>("ie");
+				std::string jsonStr((std::istreambuf_iterator<char>(ifs)),
+					std::istreambuf_iterator<char>());
+				ifs.close();
 
-				if (SST_DEBUG_PRINT)
+				rapidjson::Document testCase;
+				testCase.Parse(jsonStr.c_str());
+
+				if (testCase.HasParseError())
 				{
-					std::cout << "Initial PC: " << initial_pc << ", SP: " << initial_sp
-						<< ", A: " << initial_a << ", B: " << initial_b
-						<< ", C: " << initial_c << ", D: " << initial_d
-						<< ", E: " << initial_e << ", F: " << initial_f
-						<< ", H: " << initial_h << ", L: " << initial_l
-						//<< ", IME: " << initial_ime << ", IE: " << initial_ie 
-						<< std::endl;
+					WARN("Failed to parse %s: error code %u at offset %zu",
+						fullPath.string().c_str(),
+						(unsigned)testCase.GetParseError(),
+						testCase.GetErrorOffset());
+					goto next_opcode;
 				}
 
-				pGBc_registers->pc = initial_pc;
-				pGBc_registers->sp = initial_sp;
-				pGBc_registers->af.aAndFRegisters.a = initial_a;
-				pGBc_registers->bc.bAndCRegisters.b = initial_b;
-				pGBc_registers->bc.bAndCRegisters.c = initial_c;
-				pGBc_registers->de.dAndERegisters.d = initial_d;
-				pGBc_registers->de.dAndERegisters.e = initial_e;
-				pGBc_registers->af.aAndFRegisters.f.flagMemory = initial_f;
-				pGBc_registers->hl.hAndLRegisters.h = initial_h;
-				pGBc_registers->hl.hAndLRegisters.l = initial_l;
-
-				// Accessing RAM in initial state
-				if (SST_DEBUG_PRINT)
+				if (!testCase.IsArray())
 				{
-					std::cout << "Initial RAM:" << std::endl;
+					WARN("%s does not contain a JSON array", fullPath.string().c_str());
+					goto next_opcode;
 				}
-				for (const auto& ram_entry : initial.get_child("ram"))
+
+				// --------------------------------------------------------
+				// Iterate each test case in the JSON array
+				// --------------------------------------------------------
+				for (rapidjson::SizeType itemIdx = 0; itemIdx < testCase.Size(); ++itemIdx)
 				{
-					auto it = ram_entry.second.begin();
-					int address = it->second.get_value<int>(); // First element is the address
-					++it; // Move to the second element
-					int value = it->second.get_value<int>(); // Second element is the value
+					const rapidjson::Value& item = testCase[itemIdx];
+					FLAG quitThisRun = NO;
+
+					// ================= NAME =================
+					std::string name = (item.HasMember("name") && item["name"].IsString())
+						? item["name"].GetString() : "";
+
+					if (SST_DEBUG_PRINT)
+						std::cout << "Name: " << name << std::endl;
+
+					// ================= INITIAL =================
+					if (!item.HasMember("initial") || !item["initial"].IsObject())
+					{
+						WARN("Test '%s' missing 'initial' object", name.c_str());
+						CONTINUE;
+					}
+
+					const rapidjson::Value& initialJson = item["initial"];
+
+					int initial_pc = initialJson.HasMember("pc") ? initialJson["pc"].GetInt() : 0;
+					int initial_sp = initialJson.HasMember("sp") ? initialJson["sp"].GetInt() : 0;
+					int initial_a = initialJson.HasMember("a") ? initialJson["a"].GetInt() : 0;
+					int initial_b = initialJson.HasMember("b") ? initialJson["b"].GetInt() : 0;
+					int initial_c = initialJson.HasMember("c") ? initialJson["c"].GetInt() : 0;
+					int initial_d = initialJson.HasMember("d") ? initialJson["d"].GetInt() : 0;
+					int initial_e = initialJson.HasMember("e") ? initialJson["e"].GetInt() : 0;
+					int initial_f = initialJson.HasMember("f") ? initialJson["f"].GetInt() : 0;
+					int initial_h = initialJson.HasMember("h") ? initialJson["h"].GetInt() : 0;
+					int initial_l = initialJson.HasMember("l") ? initialJson["l"].GetInt() : 0;
+					//int initial_ime = initialJson.HasMember("ime") ? initialJson["ime"].GetInt() : 0;
+					//int initial_ie  = initialJson.HasMember("ie")  ? initialJson["ie"].GetInt()  : 0;
+
 					if (SST_DEBUG_PRINT)
 					{
-						std::cout << "  Address: " << address << ", Value: " << value << std::endl;
+						std::cout << "Initial PC: " << initial_pc << ", SP: " << initial_sp
+							<< ", A: " << initial_a << ", B: " << initial_b
+							<< ", C: " << initial_c << ", D: " << initial_d
+							<< ", E: " << initial_e << ", F: " << initial_f
+							<< ", H: " << initial_h << ", L: " << initial_l
+							//<< ", IME: " << initial_ime << ", IE: " << initial_ie
+							<< std::endl;
 					}
 
-					pGBc_memory->GBcRawMemory[address] = value;
-				}
+					pGBc_registers->pc = initial_pc;
+					pGBc_registers->sp = initial_sp;
+					pGBc_registers->af.aAndFRegisters.a = initial_a;
+					pGBc_registers->bc.bAndCRegisters.b = initial_b;
+					pGBc_registers->bc.bAndCRegisters.c = initial_c;
+					pGBc_registers->de.dAndERegisters.d = initial_d;
+					pGBc_registers->de.dAndERegisters.e = initial_e;
+					pGBc_registers->af.aAndFRegisters.f.flagMemory = initial_f;
+					pGBc_registers->hl.hAndLRegisters.h = initial_h;
+					pGBc_registers->hl.hAndLRegisters.l = initial_l;
 
-				// Run the CPU
-				processSOC();
+					// ================= INITIAL RAM =================
+					if (SST_DEBUG_PRINT)
+						std::cout << "Initial RAM:" << std::endl;
 
-				// Accessing final state
-				auto final = item.second.get_child("final");
-				int final_pc = final.get<int>("pc");
-				int final_sp = final.get<int>("sp");
-				int final_a = final.get<int>("a");
-				int final_b = final.get<int>("b");
-				int final_c = final.get<int>("c");
-				int final_d = final.get<int>("d");
-				int final_e = final.get<int>("e");
-				int final_f = final.get<int>("f");
-				int final_h = final.get<int>("h");
-				int final_l = final.get<int>("l");
-				//int final_ime = final.get<int>("ime");
-				//int final_ie = final.get<int>("ie");
+					if (initialJson.HasMember("ram") && initialJson["ram"].IsArray())
+					{
+						const rapidjson::Value& ramArray = initialJson["ram"];
+						for (rapidjson::SizeType i = 0; i < ramArray.Size(); ++i)
+						{
+							const rapidjson::Value& entry = ramArray[i];
+							if (!entry.IsArray() || entry.Size() < 2) CONTINUE;
 
-				if (SST_DEBUG_PRINT)
-				{
-					std::cout << "Final PC: " << final_pc << ", SP: " << final_sp
-						<< ", A: " << final_a << ", B: " << final_b
-						<< ", C: " << final_c << ", D: " << final_d
-						<< ", E: " << final_e << ", F: " << final_f
-						<< ", H: " << final_h << ", L: " << final_l
-						//<< ", IME: " << final_ime << ", IE: " << final_ie 
-						<< std::endl;
-				}
+							int address = entry[0].GetInt();
+							int value = entry[1].GetInt();
 
-				if (pGBc_registers->pc != final_pc)
-				{
-					WARN("PC Mismatch");
-					quitThisRun = YES;
-				}
-				if (pGBc_registers->sp != final_sp)
-				{
-					WARN("SP Mismatch");
-					quitThisRun = YES;
-				}
-				if (pGBc_registers->af.aAndFRegisters.a != final_a)
-				{
-					WARN("A Mismatch");
-					quitThisRun = YES;
-				}
-				if (pGBc_registers->bc.bAndCRegisters.b != final_b)
-				{
-					WARN("B Mismatch");
-					quitThisRun = YES;
-				}
-				if (pGBc_registers->bc.bAndCRegisters.c != final_c)
-				{
-					WARN("C Mismatch");
-					quitThisRun = YES;
-				}
-				if (pGBc_registers->de.dAndERegisters.d != final_d)
-				{
-					WARN("D Mismatch");
-					quitThisRun = YES;
-				}
-				if (pGBc_registers->de.dAndERegisters.e != final_e)
-				{
-					WARN("E Mismatch");
-					quitThisRun = YES;
-				}
-				if (pGBc_registers->af.aAndFRegisters.f.flagMemory != final_f)
-				{
-					WARN("F Mismatch");
-					quitThisRun = YES;
-				}
-				if (pGBc_registers->hl.hAndLRegisters.h != final_h)
-				{
-					WARN("H Mismatch");
-					quitThisRun = YES;
-				}
-				if (pGBc_registers->hl.hAndLRegisters.l != final_l)
-				{
-					WARN("L Mismatch");
-					quitThisRun = YES;
-				}
+							if (SST_DEBUG_PRINT)
+								std::cout << "  Address: " << address << ", Value: " << value << std::endl;
 
-				pGBc_registers->pc = RESET;
-				pGBc_registers->sp = RESET;
-				pGBc_registers->af.aAndFRegisters.a = RESET;
-				pGBc_registers->bc.bAndCRegisters.b = RESET;
-				pGBc_registers->bc.bAndCRegisters.c = RESET;
-				pGBc_registers->de.dAndERegisters.d = RESET;
-				pGBc_registers->de.dAndERegisters.e = RESET;
-				pGBc_registers->af.aAndFRegisters.f.flagMemory = RESET;
-				pGBc_registers->hl.hAndLRegisters.h = RESET;
-				pGBc_registers->hl.hAndLRegisters.l = RESET;
-				//pGBc_instance->GBc_state.emulatorStatus.interruptMasterEn = CLEAR;
-				//pGBc_memory->GBcMemoryMap.mInterruptEnable.interruptEnableMemory = RESET;
-				pGBc_instance->GBc_state.emulatorStatus.isCPUExecutionBlocked = NO;
-				pGBc_instance->GBc_state.emulatorStatus.isCPUHalted = NO;
+							pGBc_memory->GBcRawMemory[address] = value;
+						}
+					}
 
-				// Accessing RAM in final state
-				if (SST_DEBUG_PRINT)
-				{
-					std::cout << "Final RAM:" << std::endl;
-				}
+					// ================= RUN =================
+					processSOC();
 
-				for (const auto& ram_entry : final.get_child("ram"))
-				{
-					auto it = ram_entry.second.begin();
-					int address = it->second.get_value<int>(); // First element is the address
-					++it; // Move to the second element
-					int value = it->second.get_value<int>(); // Second element is the value
+					// ================= FINAL =================
+					if (!item.HasMember("final") || !item["final"].IsObject())
+					{
+						WARN("Test '%s' missing 'final' object", name.c_str());
+						CONTINUE;
+					}
+
+					const rapidjson::Value& finalJson = item["final"];
+
+					int final_pc = finalJson.HasMember("pc") ? finalJson["pc"].GetInt() : 0;
+					int final_sp = finalJson.HasMember("sp") ? finalJson["sp"].GetInt() : 0;
+					int final_a = finalJson.HasMember("a") ? finalJson["a"].GetInt() : 0;
+					int final_b = finalJson.HasMember("b") ? finalJson["b"].GetInt() : 0;
+					int final_c = finalJson.HasMember("c") ? finalJson["c"].GetInt() : 0;
+					int final_d = finalJson.HasMember("d") ? finalJson["d"].GetInt() : 0;
+					int final_e = finalJson.HasMember("e") ? finalJson["e"].GetInt() : 0;
+					int final_f = finalJson.HasMember("f") ? finalJson["f"].GetInt() : 0;
+					int final_h = finalJson.HasMember("h") ? finalJson["h"].GetInt() : 0;
+					int final_l = finalJson.HasMember("l") ? finalJson["l"].GetInt() : 0;
+					//int final_ime = finalJson.HasMember("ime") ? finalJson["ime"].GetInt() : 0;
+					//int final_ie  = finalJson.HasMember("ie")  ? finalJson["ie"].GetInt()  : 0;
+
 					if (SST_DEBUG_PRINT)
 					{
-						std::cout << "  Address: " << address << ", Value: " << value << std::endl;
+						std::cout << "Final PC: " << final_pc << ", SP: " << final_sp
+							<< ", A: " << final_a << ", B: " << final_b
+							<< ", C: " << final_c << ", D: " << final_d
+							<< ", E: " << final_e << ", F: " << final_f
+							<< ", H: " << final_h << ", L: " << final_l
+							//<< ", IME: " << final_ime << ", IE: " << final_ie
+							<< std::endl;
 					}
 
-					if (pGBc_memory->GBcRawMemory[address] != value)
+					// ================= REGISTER CHECKS =================
+					if (pGBc_registers->pc != final_pc)
 					{
-						WARN("RAM Mismatch");
-						quitThisRun = YES;
+						FATAL("PC Mismatch"); quitThisRun = YES;
+					}
+					if (pGBc_registers->sp != final_sp)
+					{
+						FATAL("SP Mismatch"); quitThisRun = YES;
+					}
+					if (pGBc_registers->af.aAndFRegisters.a != final_a)
+					{
+						FATAL("A Mismatch");  quitThisRun = YES;
+					}
+					if (pGBc_registers->bc.bAndCRegisters.b != final_b)
+					{
+						FATAL("B Mismatch");  quitThisRun = YES;
+					}
+					if (pGBc_registers->bc.bAndCRegisters.c != final_c)
+					{
+						FATAL("C Mismatch");  quitThisRun = YES;
+					}
+					if (pGBc_registers->de.dAndERegisters.d != final_d)
+					{
+						FATAL("D Mismatch");  quitThisRun = YES;
+					}
+					if (pGBc_registers->de.dAndERegisters.e != final_e)
+					{
+						FATAL("E Mismatch");  quitThisRun = YES;
+					}
+					if (pGBc_registers->af.aAndFRegisters.f.flagMemory != final_f)
+					{
+						FATAL("F Mismatch");  quitThisRun = YES;
+					}
+					if (pGBc_registers->hl.hAndLRegisters.h != final_h)
+					{
+						FATAL("H Mismatch");  quitThisRun = YES;
+					}
+					if (pGBc_registers->hl.hAndLRegisters.l != final_l)
+					{
+						FATAL("L Mismatch");  quitThisRun = YES;
 					}
 
-					pGBc_memory->GBcRawMemory[address] = RESET;
-				}
+					pGBc_registers->pc = RESET;
+					pGBc_registers->sp = RESET;
+					pGBc_registers->af.aAndFRegisters.a = RESET;
+					pGBc_registers->bc.bAndCRegisters.b = RESET;
+					pGBc_registers->bc.bAndCRegisters.c = RESET;
+					pGBc_registers->de.dAndERegisters.d = RESET;
+					pGBc_registers->de.dAndERegisters.e = RESET;
+					pGBc_registers->af.aAndFRegisters.f.flagMemory = RESET;
+					pGBc_registers->hl.hAndLRegisters.h = RESET;
+					pGBc_registers->hl.hAndLRegisters.l = RESET;
+					//pGBc_instance->GBc_state.emulatorStatus.interruptMasterEn = CLEAR;
+					//pGBc_memory->GBcMemoryMap.mInterruptEnable.interruptEnableMemory = RESET;
+					pGBc_instance->GBc_state.emulatorStatus.isCPUExecutionBlocked = NO;
+					pGBc_instance->GBc_state.emulatorStatus.isCPUHalted = NO;
+
+					// ================= FINAL RAM =================
+					if (SST_DEBUG_PRINT)
+						std::cout << "Final RAM:" << std::endl;
+
+					if (finalJson.HasMember("ram") && finalJson["ram"].IsArray())
+					{
+						const rapidjson::Value& ramArray = finalJson["ram"];
+						for (rapidjson::SizeType i = 0; i < ramArray.Size(); ++i)
+						{
+							const rapidjson::Value& entry = ramArray[i];
+							if (!entry.IsArray() || entry.Size() < 2) CONTINUE;
+
+							int address = entry[0].GetInt();
+							int value = entry[1].GetInt();
+
+							if (SST_DEBUG_PRINT)
+								std::cout << "  Address: " << address << ", Value: " << value << std::endl;
+
+							if (pGBc_memory->GBcRawMemory[address] != value)
+							{
+								FATAL("RAM Mismatch");
+								quitThisRun = YES;
+							}
+
+							pGBc_memory->GBcRawMemory[address] = RESET;
+						}
+					}
 
 #if (ENABLED)
-				// Accessing cycles
-				if (SST_DEBUG_PRINT)
-				{
-					std::cout << "Cycles:" << std::endl;
-				}
-				pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.cycles.indexer = RESET;
-				INC8 indexer = RESET;
-				INC8 prevRWIndex = RESET;
-				for (const auto& cycle : item.second.get_child("cycles"))
-				{
-					auto it = cycle.second.begin();
-					int cycle_address = it->second.get_value<int>(); // First element
-					++it; // Move to the second element
-					int cycle_value = it->second.get_value<int>(); // Second element
-					++it; // Move to the third element
-					std::string cycle_type = it->second.get_value<std::string>(); // Third element
+					// ================= CYCLES =================
 					if (SST_DEBUG_PRINT)
+						std::cout << "Cycles:" << std::endl;
+
+					pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.cycles.indexer = RESET;
+					INC8 indexer = RESET;
+					INC8 prevRWIndex = RESET;
+
+					if (item.HasMember("cycles") && item["cycles"].IsArray())
 					{
-						std::cout << "Cycle Address: " << cycle_address << ", Value: " << cycle_value << ", Type: " << cycle_type << std::endl;
+						const rapidjson::Value& cyclesArray = item["cycles"];
+						for (rapidjson::SizeType i = 0; i < cyclesArray.Size(); ++i)
+						{
+							const rapidjson::Value& cycle = cyclesArray[i];
+							if (!cycle.IsArray() || cycle.Size() < 3) CONTINUE;
+
+							int         cycle_address = cycle[0].GetInt();
+							int         cycle_value = cycle[1].GetInt();
+							std::string cycle_type = cycle[2].GetString();
+
+							if (SST_DEBUG_PRINT)
+							{
+								std::cout << "Cycle Address: " << cycle_address
+									<< ", Value: " << cycle_value
+									<< ", Type: " << cycle_type << std::endl;
+							}
+
+							std::string temp = "---";
+							if (pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.cycles.cycles[indexer].isWrite == YES)
+							{
+								temp = "-wm";
+								prevRWIndex = indexer;
+							}
+							if (pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.cycles.cycles[indexer].isRead == YES)
+							{
+								temp = "r-m";
+								prevRWIndex = indexer;
+							}
+
+							if (cycle_type.compare(temp))
+							{
+								FATAL("Operation Cycle Mismatch");
+								quitThisRun = YES;
+							}
+
+							if (cycle_address != pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.cycles.cycles[prevRWIndex].address)
+							{
+								FATAL("Address Cycle Mismatch");
+								quitThisRun = YES;
+							}
+
+							if (cycle_value != pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.cycles.cycles[prevRWIndex].data)
+							{
+								FATAL("Data Cycle Mismatch");
+								quitThisRun = YES;
+							}
+
+							++indexer;
+						}
 					}
 
-					std::string temp = "---";
-					if (pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.cycles.cycles[indexer].isWrite == YES)
+					for (INC8 ii = ZERO; ii < TWENTY; ii++)
 					{
-						temp = "-wm";
-						prevRWIndex = indexer;
+						pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.cycles.cycles[ii].reset();
 					}
-					if (pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.cycles.cycles[indexer].isRead == YES)
-					{
-						temp = "r-m";
-						prevRWIndex = indexer;
-					}
-
-					if (cycle_type.compare(temp))
-					{
-						WARN("Operation Cycle Mismatch");
-						quitThisRun = YES;
-					}
-
-					if (cycle_address != pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.cycles.cycles[prevRWIndex].address)
-					{
-						WARN("Address Cycle Mismatch");
-						quitThisRun = YES;
-					}
-
-					if (cycle_value != pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.cycles.cycles[prevRWIndex].data)
-					{
-						WARN("Data Cycle Mismatch");
-						quitThisRun = YES;
-					}
-
-					++indexer;
-				}
-
-				for (INC8 ii = ZERO; ii < TWENTY; ii++)
-				{
-					pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.cycles.cycles[ii].reset();
-				}
 #else
-				pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.cycles.indexer = RESET;
+					pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.cycles.indexer = RESET;
 #endif
 
-				if (quitThisRun == YES)
-				{
-					BREAK;
-				}
+					if (quitThisRun == YES)
+					{
+						BREAK;
+					}
 
-				// Update Stats
-				if (cbMode == NO)
-				{
-					++pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.testCount[opcode];
-				}
-				else
-				{
-					++pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.cbtestCount[subopcode];
-				}
+					// ================= UPDATE STATS =================
+					if (cbMode == NO)
+					{
+						++pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.testCount[opcode];
+					}
+					else
+					{
+						++pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.cbtestCount[subopcode];
+					}
 
 #if _DEBUG
-				if (pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.testCount[192] == 1)
-				{
-					volatile int breakpoint = 0;
-				}
+					if (pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.testCount[192] == 1)
+					{
+						volatile int breakpoint = 0;
+					}
 #endif
+				}
 			}
 
+		next_opcode:
 			if (subopcode == 0xFF)
 			{
 				cbMode = NO;
