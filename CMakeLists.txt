@@ -2,6 +2,42 @@ cmake_minimum_required(VERSION 3.24.0)
 
 project(masquerade)  # MUST come before checking CMAKE_SYSTEM_NAME
 
+## --- Master selection (empty = ALL)
+set(MASQ_ONLY "" CACHE STRING "Build ONLY these modules (semicolon separated, e.g. CHIP8;NES)")
+
+# --- List of all modules
+set(_MASQ_ALL GBA GBC NES PACMAN SI CHIP8 GOL)
+
+# --- Normalize MASQ_ONLY (handle accidental spaces)
+string(REPLACE " " "" MASQ_ONLY "${MASQ_ONLY}")
+
+# --- If MASQ_ONLY is empty → build EVERYTHING
+if(MASQ_ONLY STREQUAL "")
+    message(STATUS "MASQ_ONLY empty -> enabling ALL modules")
+
+    foreach(_mod ${_MASQ_ALL})
+        set(MASQ_ENABLE_${_mod} ON CACHE BOOL "" FORCE)
+    endforeach()
+
+else()
+    message(STATUS "MASQ_ONLY = ${MASQ_ONLY}")
+
+    # Disable everything first
+    foreach(_mod ${_MASQ_ALL})
+        set(MASQ_ENABLE_${_mod} OFF CACHE BOOL "" FORCE)
+    endforeach()
+
+    # Enable only requested modules
+    foreach(_mod ${MASQ_ONLY})
+        list(FIND _MASQ_ALL ${_mod} _idx)
+        if(_idx EQUAL -1)
+            message(FATAL_ERROR "Unknown module: ${_mod}")
+        endif()
+
+        set(MASQ_ENABLE_${_mod} ON CACHE BOOL "" FORCE)
+    endforeach()
+endif()
+
 # --- Git commit hash with dirty state (CI-safe)
 if (DEFINED GIT_COMMIT_HASH)
     # CI build (exact commit)
@@ -152,18 +188,16 @@ if(NOT EMSCRIPTEN)
     find_package(SDL3 REQUIRED)
 endif()
 
-# --- OpenGL ES for Raspberry Pi / ARM Linux
-if(CMAKE_SYSTEM_NAME  STREQUAL "Linux")
-    # Check if building for ARM architecture (Raspberry Pi)
-    if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm" OR CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
-        message(STATUS "Detected ARM architecture - using OpenGL ES 3")
-        add_compile_definitions(IMGUI_IMPL_OPENGL_ES3)
-        
-        # Link against OpenGL ES instead of desktop OpenGL
-        find_package(OpenGL REQUIRED COMPONENTS GLES3)
+# --- OpenGL: try desktop first, then fallback to OpenGL ES 3 for Linux (especially ARM)
+# --- To detect Raspberry Pi and similar devices, we check for ARM architecture instead of just OS, since you can run Linux on x86 too
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_package(OpenGL QUIET COMPONENTS OpenGL)
+    if(OpenGL_OpenGL_FOUND)
+        message(STATUS "Using desktop OpenGL")
     else()
-        message(STATUS "Detected x86/x64 architecture - using desktop OpenGL")
-        find_package(OpenGL REQUIRED COMPONENTS OpenGL)
+        message(STATUS "Desktop OpenGL not found → using OpenGL ES 3")
+        add_compile_definitions(IMGUI_IMPL_OPENGL_ES3)
+        find_package(OpenGL REQUIRED COMPONENTS GLES3)
     endif()
 endif()
 
@@ -259,45 +293,74 @@ set(CORE_SOURCES
     core/masquerade.cpp
 )
 
-# --- Emulator modules
-set(GOL_SOURCES
-    gameOfLife/gameOfLife.cpp
-)
+# --- Emulator modules (feature-controlled)
 
-set(CHIP8_SOURCES
-    chip8/chip8.cpp
-    chip8/chip8_mods.cpp
-)
+# Game of Life
+set(GOL_SOURCES "")
+if(MASQ_ENABLE_GOL)
+    list(APPEND GOL_SOURCES
+        gameOfLife/gameOfLife.cpp
+    )
+endif()
 
-set(SI_SOURCES
-    spaceInvaders/spaceInvaders.cpp
-    spaceInvaders/spaceInvaders_mods.cpp
-    spaceInvaders/spaceInvaders_opcodes.cpp
-)
+# CHIP8
+set(CHIP8_SOURCES "")
+if(MASQ_ENABLE_CHIP8)
+    list(APPEND CHIP8_SOURCES
+        chip8/chip8.cpp
+        chip8/chip8_mods.cpp
+    )
+endif()
 
-set(PACMAN_SOURCES
-    pacMan/pacMan.cpp
-    pacMan/pacMan_mods.cpp
-    pacMan/pacMan_opcodes.cpp
-)
+# Space Invaders
+set(SI_SOURCES "")
+if(MASQ_ENABLE_SI)
+    list(APPEND SI_SOURCES
+        spaceInvaders/spaceInvaders.cpp
+        spaceInvaders/spaceInvaders_mods.cpp
+        spaceInvaders/spaceInvaders_opcodes.cpp
+    )
+endif()
 
-set(NES_SOURCES
-    nes/nes.cpp
-    nes/nes_mods.cpp
-    nes/nes_opcodes.cpp
-)
+# PacMan
+set(PACMAN_SOURCES "")
+if(MASQ_ENABLE_PACMAN)
+    list(APPEND PACMAN_SOURCES
+        pacMan/pacMan.cpp
+        pacMan/pacMan_mods.cpp
+        pacMan/pacMan_opcodes.cpp
+    )
+endif()
 
-set(GBC_SOURCES
-    gb-gbc/gbc.cpp
-    gb-gbc/gbc_mods.cpp
-    gb-gbc/gbc_opcodes.cpp
-)
+# NES
+set(NES_SOURCES "")
+if(MASQ_ENABLE_NES)
+    list(APPEND NES_SOURCES
+        nes/nes.cpp
+        nes/nes_mods.cpp
+        nes/nes_opcodes.cpp
+    )
+endif()
 
-set(GBA_SOURCES
-    gba/gba.cpp
-    gba/gba_mods.cpp
-    gba/gba_opcodes.cpp
-)
+# GBC
+set(GBC_SOURCES "")
+if(MASQ_ENABLE_GBC)
+    list(APPEND GBC_SOURCES
+        gb-gbc/gbc.cpp
+        gb-gbc/gbc_mods.cpp
+        gb-gbc/gbc_opcodes.cpp
+    )
+endif()
+
+# GBA
+set(GBA_SOURCES "")
+if(MASQ_ENABLE_GBA)
+    list(APPEND GBA_SOURCES
+        gba/gba.cpp
+        gba/gba_mods.cpp
+        gba/gba_opcodes.cpp
+    )
+endif()
 
 # --- Misc modules
 set(CHEATS_SOURCES
@@ -332,8 +395,22 @@ if (NOT EMSCRIPTEN)
 endif()
 
 set(PLATFORM_SOURCES "")
-if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-    set(PLATFORM_SOURCES masquerade.rc)
+
+# --- Windows: include icon resource ONLY if RC works
+if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+
+    include(CheckLanguage)
+    check_language(RC)
+
+    if (CMAKE_RC_COMPILER)
+        enable_language(RC)
+        message(STATUS "RC compiler found: ${CMAKE_RC_COMPILER}")
+        set(PLATFORM_SOURCES masquerade.rc)
+    else()
+        message(WARNING "RC compiler not found — building without icon")
+    endif()
+
+# --- Linux: desktop + icon
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     configure_file(
         ${CMAKE_SOURCE_DIR}/masquerade.desktop.in
@@ -367,6 +444,15 @@ set(SOURCES
 
 # --- Add the executable target
 add_executable(${PROJECT_NAME} ${SOURCES})
+
+# --- ALWAYS define macros (0 or 1) → prevents compile errors
+foreach(_mod ${_MASQ_ALL})
+    if(MASQ_ENABLE_${_mod})
+        target_compile_definitions(${PROJECT_NAME} PRIVATE MASQ_ENABLE_${_mod}=1)
+    else()
+        target_compile_definitions(${PROJECT_NAME} PRIVATE MASQ_ENABLE_${_mod}=0)
+    endif()
+endforeach()
 
 # --- IDE groupings for Visual Studio / CLion
 source_group("Headers"                              FILES ${PROJECT_HEADERS})

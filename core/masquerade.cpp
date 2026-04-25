@@ -16,15 +16,28 @@
 #pragma region INCLUDES
 #include "helpers.h"
 #include "abstractEmulation.h"
-#include "chip8.h"
 #include "defaults.h"
+#if MASQ_ENABLE_GOL
 #include "gameOfLife.h"
-#include "gba.h"
-#include "gbc.h"
-#include "nes.h"
-#include "pacMan.h"
-#include "resource.h"
+#endif
+#if MASQ_ENABLE_CHIP8
+#include "chip8.h"
+#endif
+#if MASQ_ENABLE_SI
 #include "spaceInvaders.h"
+#endif
+#if MASQ_ENABLE_PACMAN
+#include "pacMan.h"
+#endif
+#if MASQ_ENABLE_NES
+#include "nes.h"
+#endif
+#if MASQ_ENABLE_GBC
+#include "gbc.h"
+#endif
+#if MASQ_ENABLE_GBA
+#include "gba.h"
+#endif
 #pragma endregion INCLUDES
 
 #pragma region STB_INCLUDES
@@ -2003,7 +2016,7 @@ public:
 									if (ImGui::BeginMenu("File"))
 									{
 										//ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(184, 134, 11, 255));
-										if (ImGui::BeginMenu("Open Game Of Life##OpenGameOfLife"))
+										if (ImGui::BeginMenu("Open Game Of Life##OpenGameOfLife", MASQ_ENABLE_GOL))
 										{
 											//ImGui::PopStyleColor();
 											if (ImGui::MenuItem("Create New##CreateNew"))
@@ -2024,7 +2037,7 @@ public:
 											//ImGui::PopStyleColor();
 										}
 										ImGui::Separator();
-										if (ImGui::BeginMenu("Open Chip-8/S-Chip/XO-Chip/Modern-Chip8##OpenChip-8/S-Chip/XO-Chip/Modern-Chip8"))
+										if (ImGui::BeginMenu("Open Chip-8/S-Chip/XO-Chip/Modern-Chip8##OpenChip-8/S-Chip/XO-Chip/Modern-Chip8", MASQ_ENABLE_CHIP8))
 										{
 											auto menuOption = [&](const char* label, const char* key)
 												{
@@ -2055,11 +2068,11 @@ public:
 											ImGui::EndMenu();
 										}
 										ImGui::Separator();
-										if (ImGui::MenuItem("Open Space Invaders##OpenSI"))
+										if (ImGui::MenuItem("Open Space Invaders##OpenSI", nullptr, false, MASQ_ENABLE_SI))
 										{
 											romSelect(ROM::SPACE_INVADERS);
 										}
-										if (ImGui::BeginMenu("Open Pacman/Ms Pacman##OpenPacman"))
+										if (ImGui::BeginMenu("Open Pacman/Ms Pacman##OpenPacman", MASQ_ENABLE_PACMAN))
 										{
 											if (ImGui::MenuItem("Open Midway/Namco Pacman##OpenPacmanVar"))
 											{
@@ -2072,11 +2085,11 @@ public:
 											ImGui::EndMenu();
 										}
 										ImGui::Separator();
-										if (ImGui::MenuItem("Open NES##OpenNES"))
+										if (ImGui::MenuItem("Open NES##OpenNES", nullptr, false, MASQ_ENABLE_NES))
 										{
 											romSelect(ROM::NES);
 										}
-										if (ImGui::BeginMenu("Open GB/GBC##OpenGB/GBC"))
+										if (ImGui::BeginMenu("Open GB/GBC##OpenGB/GBC", MASQ_ENABLE_GBC))
 										{
 											if (ImGui::MenuItem("Open GB##OpenGB"))
 											{
@@ -2088,7 +2101,7 @@ public:
 											}
 											ImGui::EndMenu();
 										}
-										if (ImGui::MenuItem("Open GBA##OpenGBA"))
+										if (ImGui::MenuItem("Open GBA##OpenGBA", nullptr, false, MASQ_ENABLE_GBA))
 										{
 											romSelect(ROM::GAME_BOY_ADVANCE);
 										}
@@ -2161,7 +2174,7 @@ public:
 									{
 										if (ImGui::BeginMenu("Bios"))
 										{
-											if (ImGui::BeginMenu("GB Bios##GBBios"))
+											if (ImGui::BeginMenu("GB Bios##GBBios", MASQ_ENABLE_GBC))
 											{
 												static FLAG isTicked = to_bool(config.get<std::string>("gb-gbc._use_dmg_bios", "true"));
 												if (ImGui::MenuItem("Load##GB Bios", NULL, NO, inEnscriptenMode == NO))
@@ -2176,7 +2189,7 @@ public:
 												}
 												ImGui::EndMenu();
 											}
-											if (ImGui::BeginMenu("GBC Bios##GBCBios"))
+											if (ImGui::BeginMenu("GBC Bios##GBCBios", MASQ_ENABLE_GBC))
 											{
 												static FLAG isTicked = to_bool(config.get<std::string>("gb-gbc._use_cgb_bios", "true"));
 												if (ImGui::MenuItem("Load##GBC Bios", NULL, NO, inEnscriptenMode == NO))
@@ -2191,7 +2204,7 @@ public:
 												}
 												ImGui::EndMenu();
 											}
-											if (ImGui::BeginMenu("GBA Bios##GBABios"))
+											if (ImGui::BeginMenu("GBA Bios##GBABios", MASQ_ENABLE_GBA))
 											{
 												static FLAG isTicked = to_bool(config.get<std::string>("gba._use_gba_bios", "true"));
 												if (ImGui::MenuItem("Load##GBA Bios", NULL, NO, inEnscriptenMode == NO))
@@ -2227,7 +2240,7 @@ public:
 											}
 											current_instance->setEmulationVolume((float)volume);
 											ImGui::Separator();
-											if (ImGui::BeginMenu("Space Invaders##SpaceInvaders"))
+											if (ImGui::BeginMenu("Space Invaders##SpaceInvaders", MASQ_ENABLE_SI))
 											{
 												if (ImGui::BeginMenu("Load Space Invaders WAV##LoadSpaceInvadersWAV", inEnscriptenMode == NO))
 												{
@@ -2299,7 +2312,7 @@ public:
 												ImGui::EndMenu();
 											}
 											ImGui::Separator();
-											if (ImGui::BeginMenu("GB"))
+											if (ImGui::BeginMenu("GB", MASQ_ENABLE_GBC))
 											{
 												if (ImGui::BeginMenu("GB Color Palette##gb_palette_menu"))
 												{
@@ -2318,7 +2331,7 @@ public:
 												}
 												ImGui::EndMenu();
 											}
-											if (ImGui::BeginMenu("GBC"))
+											if (ImGui::BeginMenu("GBC", MASQ_ENABLE_GBC))
 											{
 												static FLAG isTicked = to_bool(config.get<std::string>("gb-gbc._enable_cgb_color_correction", "true"));
 												if (ImGui::MenuItem("GBC Color Correction", "C", isTicked))
@@ -2350,7 +2363,7 @@ public:
 										if (ImGui::BeginMenu("Other Settings"))
 										{
 											//ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(184, 134, 11, 255));
-											if (ImGui::BeginMenu("Game Of Life"))
+											if (ImGui::BeginMenu("Game Of Life", MASQ_ENABLE_GOL))
 											{
 												//ImGui::PopStyleColor();
 												if (ImGui::BeginMenu("Boundary Condition"))
@@ -2374,7 +2387,7 @@ public:
 											{
 												//ImGui::PopStyleColor();
 											}
-											if (ImGui::BeginMenu("Chip8 Family##Chip8Family"))
+											if (ImGui::BeginMenu("Chip8 Family##Chip8Family", MASQ_ENABLE_CHIP8))
 											{
 												static FLAG isTicked = to_bool(config.get<std::string>("chip8._enable_c8_db", "false"));
 												if (ImGui::MenuItem("Enable ROM Database##EnableROMDatabase", NULL, isTicked))
@@ -2385,7 +2398,7 @@ public:
 												}
 												ImGui::EndMenu();
 											}
-											if (ImGui::BeginMenu("Space Invaders##SpaceInvaders"))
+											if (ImGui::BeginMenu("Space Invaders##SpaceInvaders", MASQ_ENABLE_SI))
 											{
 												static FLAG DIP[FOUR] =
 												{
@@ -2413,7 +2426,7 @@ public:
 												}
 												ImGui::EndMenu();
 											}
-											if (ImGui::BeginMenu("GB"))
+											if (ImGui::BeginMenu("GB", MASQ_ENABLE_GBC))
 											{
 												static FLAG isTicked = to_bool(config.get<std::string>("gb-gbc._force_gbc_for_gb", "false"));
 												if (ImGui::MenuItem("CGB Mode", NULL, isTicked))
@@ -3724,198 +3737,228 @@ void arrangeRoms(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM>& romsToRu
 
 abstractEmulation_t* getType(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, boost::property_tree::ptree& config, CheatEngine_t* ce)
 {
-	EMULATION_ID suspectedID = EMULATION_ID::DEFAULT_ID;
+    EMULATION_ID suspectedID = EMULATION_ID::DEFAULT_ID;
 
-	// First check if the number of ROMs passed matches any of the expected emulation platform...
+    // First check if the number of ROMs passed matches any of the expected emulation platform...
 
-	if (_numberOfRomsToEmulationPlatform.count(nFiles) == ZERO)
-	{
-		RETURN new defaults_t;
-	}
+    if (_numberOfRomsToEmulationPlatform.count(nFiles) == ZERO)
+    {
+        RETURN new defaults_t;
+    }
 
-	if (nFiles == SINGLE_ROM_FILE)
-	{
-		// Lot of Emulation Platforms have "Number Of ROM" requirements set to 1
-		// So, check based on "_numberOfRomsToEmulationPlatform" is not present inside this "if" block
+    if (nFiles == SINGLE_ROM_FILE)
+    {
+        // Lot of Emulation Platforms have "Number Of ROM" requirements set to 1
+        // So, check based on "_numberOfRomsToEmulationPlatform" is not present inside this "if" block
 
-		std::filesystem::path filepath;
-		filepath = rom[ZERO];
+        std::filesystem::path filepath;
+        filepath = rom[ZERO];
 
-		// Unknown ROM extention
-		if (_fileExtentionToEmulationPlatform.count(filepath.extension().string()) == ZERO)
-		{
-			RETURN new defaults_t;
-		}
+        // Unknown ROM extention
+        if (_fileExtentionToEmulationPlatform.count(filepath.extension().string()) == ZERO)
+        {
+            RETURN new defaults_t;
+        }
 
-		suspectedID = _fileExtentionToEmulationPlatform.find(filepath.extension().string())->second;
+        suspectedID = _fileExtentionToEmulationPlatform.find(filepath.extension().string())->second;
 
-		if (suspectedID == EMULATION_ID::CHIP8_ID)
-		{
-			RETURN new chip8_t(rom, config);
-		}
-		if (suspectedID == EMULATION_ID::NES_ID)
-		{
-			RETURN new NES_t(ONE, rom, config, ce);
-		}
-		else if (suspectedID == EMULATION_ID::GB_GBC_ID)
-		{
-			RETURN new GBc_t(ONE, rom, config, ce);
-		}
-		else if (suspectedID == EMULATION_ID::GBA_ID)
-		{
-			RETURN new GBA_t(ONE, rom, config);
-		}
-		else if (suspectedID == EMULATION_ID::GAME_OF_LIFE_ID)
-		{
-			RETURN new gameOfLife_t(config);
-		}
-		else
-		{
-			RETURN new defaults_t;
-		}
-	}
-	else if (nFiles == TEST_ROM_FILE)
-	{
-		auto emulationPlatforms = _numberOfRomsToEmulationPlatform.find(nFiles);
-		suspectedID = emulationPlatforms->second;
+#if MASQ_ENABLE_CHIP8
+        if (suspectedID == EMULATION_ID::CHIP8_ID)
+        {
+            RETURN new chip8_t(rom, config);
+        }
+#endif
+#if MASQ_ENABLE_NES
+        if (suspectedID == EMULATION_ID::NES_ID)
+        {
+            RETURN new NES_t(ONE, rom, config, ce);
+        }
+#endif
+#if MASQ_ENABLE_GBC
+        else if (suspectedID == EMULATION_ID::GB_GBC_ID)
+        {
+            RETURN new GBc_t(ONE, rom, config, ce);
+        }
+#endif
+#if MASQ_ENABLE_GBA
+        else if (suspectedID == EMULATION_ID::GBA_ID)
+        {
+            RETURN new GBA_t(ONE, rom, config);
+        }
+#endif
+#if MASQ_ENABLE_GOL
+        else if (suspectedID == EMULATION_ID::GAME_OF_LIFE_ID)
+        {
+            RETURN new gameOfLife_t(config);
+        }
+#endif
+        else
+        {
+            RETURN new defaults_t;
+        }
+    }
+    else if (nFiles == TEST_ROM_FILE)
+    {
+        auto emulationPlatforms = _numberOfRomsToEmulationPlatform.find(nFiles);
+        suspectedID = emulationPlatforms->second;
 
-		// TODO: Re-arrange the ROM list as needed by the individual emulators...
+        // TODO: Re-arrange the ROM list as needed by the individual emulators...
 
-		std::filesystem::path filepath;
-		filepath = rom[ONE];
+        std::filesystem::path filepath;
+        filepath = rom[ONE];
 
-		if ((rom[ZERO] == "-8080SST") || (toUpper(rom[ZERO]) == "-I8080SST"))
-		{
-			INFO("Setting up the 8080 SST environment");
-			RETURN new spaceInvaders_t(nFiles, rom, config);
-		}
-		else if (toUpper(rom[ZERO]) == "-Z80SST")
-		{
-			INFO("Setting up the Z80 SST environment");
-			RETURN new pacMan_t(nFiles, rom, config);
-		}
-		else if ((toUpper(rom[ZERO]) == "-R6502SST") || (toUpper(rom[ZERO]) == "-N6502SST"))
-		{
-			INFO("Setting up the Ricoh2A03 / NES6502 SST environment");
-			RETURN new NES_t(nFiles, rom, config, ce);
-		}
-		else if (toUpper(rom[ZERO]) == "-SM83SST")
-		{
-			INFO("Setting up the SM83 SST environment");
-			RETURN new GBc_t(nFiles, rom, config, ce);
-		}
-		else if (toUpper(rom[ZERO]) == "-ARM7TDMISST")
-		{
-			INFO("Setting up the ARM7TDMI SST environment");
-			RETURN new GBA_t(nFiles, rom, config);
-		}
+#if MASQ_ENABLE_SI
+        if ((rom[ZERO] == "-8080SST") || (toUpper(rom[ZERO]) == "-I8080SST"))
+        {
+            INFO("Setting up the 8080 SST environment");
+            RETURN new spaceInvaders_t(nFiles, rom, config);
+        }
+#endif
+#if MASQ_ENABLE_PACMAN
+        else if (toUpper(rom[ZERO]) == "-Z80SST")
+        {
+            INFO("Setting up the Z80 SST environment");
+            RETURN new pacMan_t(nFiles, rom, config);
+        }
+#endif
+#if MASQ_ENABLE_NES
+        else if ((toUpper(rom[ZERO]) == "-R6502SST") || (toUpper(rom[ZERO]) == "-N6502SST"))
+        {
+            INFO("Setting up the Ricoh2A03 / NES6502 SST environment");
+            RETURN new NES_t(nFiles, rom, config, ce);
+        }
+#endif
+#if MASQ_ENABLE_GBC
+        else if (toUpper(rom[ZERO]) == "-SM83SST")
+        {
+            INFO("Setting up the SM83 SST environment");
+            RETURN new GBc_t(nFiles, rom, config, ce);
+        }
+#endif
+#if MASQ_ENABLE_GBA
+        else if (toUpper(rom[ZERO]) == "-ARM7TDMISST")
+        {
+            INFO("Setting up the ARM7TDMI SST environment");
+            RETURN new GBA_t(nFiles, rom, config);
+        }
+#endif
 
-		// Unknown ROM extention
-		if (_fileExtentionToEmulationPlatform.count(filepath.extension().string()) == ZERO)
-		{
-			RETURN new defaults_t;
-		}
+        // Unknown ROM extention
+        if (_fileExtentionToEmulationPlatform.count(filepath.extension().string()) == ZERO)
+        {
+            RETURN new defaults_t;
+        }
 
-		if (_fileExtentionToEmulationPlatform.find(filepath.extension().string())->second != suspectedID)
-		{
-			INFO("ROM file is corrupted");
-			RETURN new defaults_t;
-		}
+        if (_fileExtentionToEmulationPlatform.find(filepath.extension().string())->second != suspectedID)
+        {
+            INFO("ROM file is corrupted");
+            RETURN new defaults_t;
+        }
 
-		if ((rom[ZERO] == "-8080") || (toUpper(rom[ZERO]) == "-I8080"))
-		{
-			INFO("Setting up the 8080 test environment");
-			RETURN new spaceInvaders_t(--nFiles, rom, config);
-		}
-		else if (toUpper(rom[ZERO]) == "-Z80")
-		{
-			INFO("Setting up the Z80 test environment");
-			RETURN new pacMan_t(--nFiles, rom, config);
-		}
-		else if (toUpper(rom[ZERO]) == "-6502")
-		{
-			INFO("Setting up the 6502 test environment");
-			RETURN new NES_t(--nFiles, rom, config, ce);
-		}
-		else
-		{
-			INFO("Undefined Core");
-			RETURN new defaults_t;
-		}
-	}
-	else if (nFiles == REPLAY_ROM_FILE)
-	{
-		if ((toUpper(rom[ZERO]) == "-R") || (toUpper(rom[ZERO]) == "-C"))
-		{
-			if (toUpper(rom[ONE].substr(rom[ONE].find_last_of(".") + ONE)) == "GBA")
-			{
-				if (toUpper(rom[ZERO]) == "-R")
-				{
-					FATAL("Replay Mode is not supported yet; Only Compare Mode is supported as of now")
-				}
-				else
-				{
-					INFO("Setting up the GBA environment in replay mode");
-					RETURN new GBA_t(nFiles, rom, config);
-				}
-			}
-		}
+#if MASQ_ENABLE_SI
+        if ((rom[ZERO] == "-8080") || (toUpper(rom[ZERO]) == "-I8080"))
+        {
+            INFO("Setting up the 8080 test environment");
+            RETURN new spaceInvaders_t(--nFiles, rom, config);
+        }
+#endif
+#if MASQ_ENABLE_PACMAN
+        else if (toUpper(rom[ZERO]) == "-Z80")
+        {
+            INFO("Setting up the Z80 test environment");
+            RETURN new pacMan_t(--nFiles, rom, config);
+        }
+#endif
+#if MASQ_ENABLE_NES
+        else if (toUpper(rom[ZERO]) == "-6502")
+        {
+            INFO("Setting up the 6502 test environment");
+            RETURN new NES_t(--nFiles, rom, config, ce);
+        }
+#endif
+        else
+        {
+            INFO("Undefined Core");
+            RETURN new defaults_t;
+        }
+    }
+    else if (nFiles == REPLAY_ROM_FILE)
+    {
+#if MASQ_ENABLE_GBA
+        if ((toUpper(rom[ZERO]) == "-R") || (toUpper(rom[ZERO]) == "-C"))
+        {
+            if (toUpper(rom[ONE].substr(rom[ONE].find_last_of(".") + ONE)) == "GBA")
+            {
+                if (toUpper(rom[ZERO]) == "-R")
+                {
+                    FATAL("Replay Mode is not supported yet; Only Compare Mode is supported as of now")
+                }
+                else
+                {
+                    INFO("Setting up the GBA environment in replay mode");
+                    RETURN new GBA_t(nFiles, rom, config);
+                }
+            }
+        }
+#endif
+        FATAL("Not supported yet!");
+        RETURN new defaults_t;
+    }
+    else
+    {
+        // Either of the following
+        // 1) Space Invaders
+        // 2) Pac Man (or Ms Pac Man)
+        // All 2 mentioned above have unique "Number Of ROM" requirements!
 
-		FATAL("Not supported yet!");
-		RETURN new defaults_t;
-	}
-	else
-	{
-		// Either of the following
-		// 1) Space Invaders
-		// 2) Pac Man (or Ms Pac Man)
-		// All 2 mentioned above have unique "Number Of ROM" requirements!
+        auto emulationPlatforms = _numberOfRomsToEmulationPlatform.find(nFiles);
+        suspectedID = emulationPlatforms->second;
 
-		auto emulationPlatforms = _numberOfRomsToEmulationPlatform.find(nFiles);
-		suspectedID = emulationPlatforms->second;
+        std::filesystem::path* filepath = new std::filesystem::path[nFiles];
 
-		std::filesystem::path* filepath = new std::filesystem::path[nFiles];
+        if (filepath)
+        {
+            for (int count = 0; count < nFiles; count++)
+            {
+                filepath[count] = rom[count];
 
-		if (filepath)
-		{
-			for (int count = 0; count < nFiles; count++)
-			{
-				filepath[count] = rom[count];
+                if (_fileExtentionToEmulationPlatform.count(filepath[count].extension().string()) == ZERO)
+                {
+                    delete[] filepath;
+                    RETURN new defaults_t;
+                }
 
-				if (_fileExtentionToEmulationPlatform.count(filepath[count].extension().string()) == ZERO)
-				{
-					delete[] filepath;
-					RETURN new defaults_t;
-				}
+                if (_fileExtentionToEmulationPlatform.find(filepath[count].extension().string())->second != suspectedID)
+                {
+                    INFO("Some of the ROM files are corrupted");
+                    delete[] filepath;
+                    RETURN new defaults_t;
+                }
 
-				if (_fileExtentionToEmulationPlatform.find(filepath[count].extension().string())->second != suspectedID)
-				{
-					INFO("Some of the ROM files are corrupted");
-					delete[] filepath;
-					RETURN new defaults_t;
-				}
+            }
 
-			}
+            // TODO: Re-arrange the ROM list as needed by the individual emulators...
 
-			// TODO: Re-arrange the ROM list as needed by the individual emulators...
+            delete[] filepath;
 
-			delete[] filepath;
+#if MASQ_ENABLE_SI
+            if (suspectedID == EMULATION_ID::SPACE_INVADERS_ID)
+            {
+                arrangeRoms(rom);
+                RETURN new spaceInvaders_t(nFiles, rom, config);
+            }
+#endif
+#if MASQ_ENABLE_PACMAN
+            else if (suspectedID == EMULATION_ID::PACMAN_ID)
+            {
+                arrangeRoms(rom);
+                RETURN new pacMan_t(nFiles, rom, config);
+            }
+#endif
+        }
+    }
 
-			if (suspectedID == EMULATION_ID::SPACE_INVADERS_ID)
-			{
-				arrangeRoms(rom);
-				RETURN new spaceInvaders_t(nFiles, rom, config);
-			}
-			else if (suspectedID == EMULATION_ID::PACMAN_ID)
-			{
-				arrangeRoms(rom);
-				RETURN new pacMan_t(nFiles, rom, config);
-			}
-
-		}
-	}
-
-	RETURN new defaults_t;
+    RETURN new defaults_t;
 }
 
 FLAG startMasquerade(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, ID bootType = BOOT)
