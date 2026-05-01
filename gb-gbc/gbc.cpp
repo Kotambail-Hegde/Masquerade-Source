@@ -2089,10 +2089,6 @@ void GBc_t::ppuTick()
 				// Initialize the below variable at the very first tick of the MODE_LCD_SEARCHING_OAM
 				if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == ONE)
 				{
-					// Clear the PPU mode specific STAT IRQ lines
-					pGBc_instance->GBc_state.emulatorStatus.STATInterruptSignal.STATInterruptSources.HBLANK_SIGNAL = LO;
-					pGBc_instance->GBc_state.emulatorStatus.STATInterruptSignal.STATInterruptSources.VBLANK_SIGNAL = LO;
-
 					/*
 					* As per section 8.11 of https://raw.githubusercontent.com/AntonioND/giibiiadvance/master/docs/TCAGBD.pdf
 					* STAT interrupt for line 0 happens in next M cycle when compared to lines 1 to 143
@@ -2166,6 +2162,10 @@ void GBc_t::ppuTick()
 
 				if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == ONE)
 				{
+					// Clear the PPU mode specific STAT IRQ lines
+					pGBc_instance->GBc_state.emulatorStatus.STATInterruptSignal.STATInterruptSources.HBLANK_SIGNAL = LO;
+					pGBc_instance->GBc_state.emulatorStatus.STATInterruptSignal.STATInterruptSources.VBLANK_SIGNAL = LO;
+
 					// Process LY == LYC
 					compareLYToLYC(pGBc_peripherals->LY);
 				}
