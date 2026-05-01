@@ -1,50 +1,201 @@
 cmake_minimum_required(VERSION 3.24.0)
 
-project(masquerade)  # MUST come before checking CMAKE_SYSTEM_NAME
+# =========================================================
+# RPI PICO — PRE-PROJECT SETUP
+#
+# The Pico SDK MUST be bootstrapped before project() is
+# called.  It sets CMAKE_SYSTEM_NAME=PICO and injects the
+# arm-none-eabi toolchain.  We detect -DRPI_PICO=ON here
+# and include pico_sdk_import.cmake early so that the
+# toolchain is in place when project() runs.
+#
+# Usage:
+#   cmake -DRPI_PICO=ON -DPICO_BOARD=pico_w ..
+#   (omit PICO_BOARD to default to pico_w)
+# =========================================================
+option(RPI_PICO "Build for Raspberry Pi Pico (bare-metal)" OFF)
 
-## --- Master selection (empty = ALL)
+if (RPI_PICO)
+    message(STATUS "RPI_PICO requested — bootstrapping Pico SDK before project()")
+
+    if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows" AND NOT IS_GITHUB_ACTIONS)
+        message(STATUS "Building on Windows")
+        include(${CMAKE_SOURCE_DIR}/Paths_win.cmake)
+    elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux" AND NOT IS_GITHUB_ACTIONS)
+        message(STATUS "Building on Linux")
+        include(${CMAKE_SOURCE_DIR}/Paths_lin.cmake)
+    endif()
+
+    # ---- Locate pico-vscode.cmake if the VS Code Pico extension is installed
+    # This sets PICO_SDK_PATH, toolchain version, picotool path etc.
+    if(WIN32)
+        set(_PICO_USERHOME $ENV{USERPROFILE})
+    else()
+        set(_PICO_USERHOME $ENV{HOME})
+    endif()
+
+    # Use explicit SDK path (from Paths.cmake or -D)
+    if (NOT PICO_SDK_PATH AND DEFINED ENV{PICO_SDK_PATH})
+        set(PICO_SDK_PATH "$ENV{PICO_SDK_PATH}")
+    endif()
+
+    # ---- Board selection (default: pico_w; override with -DPICO_BOARD=pico)
+    if (NOT DEFINED PICO_BOARD)
+        set(PICO_BOARD pico_w CACHE STRING "Pico board type (e.g. pico, pico_w, pico2)")
+    endif()
+    message(STATUS "  PICO_BOARD = ${PICO_BOARD}")
+
+    # ---- Pull in the Pico SDK import helper.
+    # Look for pico_sdk_import.cmake next to this CMakeLists.txt first,
+    # then fall back to the SDK copy via PICO_SDK_PATH.
+    if (NOT PICO_SDK_PATH)
+        message(FATAL_ERROR "PICO_SDK_PATH not set")
+    endif()
+
+    include(${PICO_SDK_PATH}/external/pico_sdk_import.cmake)
+
+    # ---- project() must declare ASM for Pico crt0 / boot_stage2
+    project(masquerade C CXX ASM)
+
+    # ---- Initialise the SDK (must happen after project())
+    pico_sdk_init()
+
+else()
+    # Standard desktop / Emscripten / RPI5 project — C+CXX only
+    project(masquerade)
+endif()
+
+# =========================================================
+# GCC SAFE UTF-8 + CHARSET FIX
+# =========================================================
+if (CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    add_compile_options(-finput-charset=UTF-8 -fexec-charset=UTF-8)
+endif()
+
+# =========================================================
+# FORCE SAFE RC COMPILER
+# =========================================================
+if (WIN32 AND NOT RPI_PICO)
+    find_program(CMAKE_RC_COMPILER NAMES rc.exe)
+    if (NOT CMAKE_RC_COMPILER)
+        find_program(CMAKE_RC_COMPILER NAMES llvm-rc windres)
+    endif()
+    message(STATUS "Using RC compiler: ${CMAKE_RC_COMPILER}")
+endif()
+
+# =========================================================
+# MODULE SELECTION
+# =========================================================
 set(MASQ_ONLY "" CACHE STRING "Build ONLY these modules (semicolon separated, e.g. CHIP8;NES)")
-
-# --- List of all modules
 set(_MASQ_ALL GBA GBC NES PACMAN SI CHIP8 GOL)
 
-# --- Normalize MASQ_ONLY (handle accidental spaces)
 string(REPLACE " " "" MASQ_ONLY "${MASQ_ONLY}")
 
-# --- If MASQ_ONLY is empty → build EVERYTHING
 if(MASQ_ONLY STREQUAL "")
     message(STATUS "MASQ_ONLY empty -> enabling ALL modules")
-
     foreach(_mod ${_MASQ_ALL})
         set(MASQ_ENABLE_${_mod} ON CACHE BOOL "" FORCE)
     endforeach()
-
 else()
     message(STATUS "MASQ_ONLY = ${MASQ_ONLY}")
-
-    # Disable everything first
     foreach(_mod ${_MASQ_ALL})
         set(MASQ_ENABLE_${_mod} OFF CACHE BOOL "" FORCE)
     endforeach()
-
-    # Enable only requested modules
     foreach(_mod ${MASQ_ONLY})
         list(FIND _MASQ_ALL ${_mod} _idx)
         if(_idx EQUAL -1)
             message(FATAL_ERROR "Unknown module: ${_mod}")
         endif()
-
         set(MASQ_ENABLE_${_mod} ON CACHE BOOL "" FORCE)
     endforeach()
 endif()
 
-# --- Git commit hash with dirty state (CI-safe)
+# =========================================================
+# TARGET PLATFORM SELECTION
+# =========================================================
+# RPI_PICO is already declared above (must be pre-project)
+option(EMSCRIPTEN "Build for WebAssembly (Emscripten)" OFF)
+option(RPI_5      "Build for Raspberry Pi 5 (GLES)"    OFF)
+
+# Enforce exclusivity
+if(RPI_PICO)
+    set(EMSCRIPTEN OFF CACHE BOOL "" FORCE)
+    set(RPI_5      OFF CACHE BOOL "" FORCE)
+elseif(EMSCRIPTEN)
+    set(RPI_5      OFF CACHE BOOL "" FORCE)
+    set(RPI_PICO   OFF CACHE BOOL "" FORCE)
+elseif(RPI_5)
+    set(EMSCRIPTEN OFF CACHE BOOL "" FORCE)
+    set(RPI_PICO   OFF CACHE BOOL "" FORCE)
+endif()
+
+# Compile-time platform defines
+if (EMSCRIPTEN)
+    # toolchain already defines __EMSCRIPTEN__
+elseif (RPI_5)
+    add_compile_definitions(__RPI_5__)
+elseif (RPI_PICO)
+    add_compile_definitions(__RPI_PICO__)
+endif()
+
+# =========================================================
+# PANEL BACKEND SELECTION (Pico only)
+# Usage: cmake -DRPI_PICO=ON -DPANEL_BACKEND=PICOLCD2 ..
+#        cmake -DRPI_PICO=ON -DPANEL_BACKEND=ILI ..
+# =========================================================
+if (RPI_PICO)
+    set(PANEL_BACKEND "PICOLCD2" CACHE STRING "Panel backend: PICOLCD2 | ILI9341 ")
+    message(STATUS "Panel backend: ${PANEL_BACKEND}")
+
+    set(PANEL_ABSTRACTION_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/panel/backends)
+    if (PANEL_BACKEND STREQUAL "PICOLCD2")
+        add_compile_definitions(PANEL_BACKEND_PICOLCD2)
+        set(PANEL_SOURCES
+            panel/backends/picolcd2/LCD_2in.c
+            panel/backends/picolcd2/DEV_Config.c
+            panel/backends/picolcd2/font8.c
+            panel/backends/picolcd2/font12.c
+            panel/backends/picolcd2/font16.c
+            panel/backends/picolcd2/font20.c
+            panel/backends/picolcd2/font24.c
+        )
+        set(PANEL_DRIVER_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/panel/backends/picolcd2)
+        set(PANEL_ABSTRACTION_HEADERS
+            panel/backends/picolcd2_backend.h
+        )
+        set(PANEL_DRIVER_HEADERS
+            panel/backends/picolcd2/LCD_2in.h
+            panel/backends/picolcd2/DEV_Config.h
+            panel/backends/picolcd2/Debug.h
+            panel/backends/picolcd2/fonts.h
+            panel/backends/picolcd2_backend.h
+        )
+    elseif (PANEL_BACKEND STREQUAL "ILI9341")
+        add_compile_definitions(PANEL_BACKEND_ILI9341)
+        set(PANEL_SOURCES   "")   # TODO: add ILI sources
+        set(PANEL_DRIVER_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/panel/backends/ili9341)
+        set(PANEL_ABSTRACTION_HEADERS   panel/backends/ili9341_backend.h)
+        set(PANEL_DRIVER_HEADERS   "")   # TODO: add ILI driver headers
+    else()
+        message(FATAL_ERROR "Unknown PANEL_BACKEND: ${PANEL_BACKEND}")
+    endif()
+
+    set(PICO_PANEL_HEADERS
+        panel/panel.h
+        panel/panel_interface.h
+        panel/panel_utils.h
+        ${PANEL_ABSTRACTION_HEADERS}
+        ${PANEL_DRIVER_HEADERS}
+    )
+endif()
+
+# =========================================================
+# GIT COMMIT HASH
+# =========================================================
 if (DEFINED GIT_COMMIT_HASH)
-    # CI build (exact commit)
     set(MASQ_GIT_HASH "${GIT_COMMIT_HASH}")
     message(STATUS "MASQ_GIT_HASH = ${MASQ_GIT_HASH}")
 else()
-    # Local build
     execute_process(
         COMMAND git rev-parse --short HEAD
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
@@ -52,28 +203,26 @@ else()
         OUTPUT_STRIP_TRAILING_WHITESPACE
         ERROR_QUIET
     )
-
     if (_GIT_HASH)
         execute_process(
             COMMAND git diff --quiet
             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
             RESULT_VARIABLE _GIT_DIRTY
         )
-
         if (NOT _GIT_DIRTY EQUAL 0)
             set(MASQ_GIT_HASH "${_GIT_HASH}-dirty")
         else()
             set(MASQ_GIT_HASH "${_GIT_HASH}")
         endif()
     else()
-        # Not a git repo at all (zip/tarball/manual copy)
         set(MASQ_GIT_HASH "nogit")
     endif()
 endif()
-
 add_compile_definitions(MASQ_GIT_HASH="${MASQ_GIT_HASH}")
 
-# Detect if we are running inside GitHub Actions
+# =========================================================
+# GITHUB ACTIONS DETECTION
+# =========================================================
 set(IS_GITHUB_ACTIONS FALSE)
 if(DEFINED ENV{GITHUB_ACTIONS})
     if("$ENV{GITHUB_ACTIONS}" STREQUAL "true")
@@ -81,136 +230,141 @@ if(DEFINED ENV{GITHUB_ACTIONS})
     endif()
 endif()
 
-# --- Automatically setup the required libraries path from root path
-if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows" AND NOT IS_GITHUB_ACTIONS)
+# =========================================================
+# LANGUAGE STANDARDS
+# =========================================================
+set(CMAKE_C_STANDARD   11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+
+if (RPI_PICO)
+    # Pico SDK arm-none-eabi-g++ supports C++17 reliably.
+    # C++23 support is partial on GCC 14 for ARM; use 17
+    # unless your emulator cores strictly need 23 features.
+    set(CMAKE_CXX_STANDARD 17)
+else()
+    set(CMAKE_CXX_STANDARD 23)
+endif()
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# =========================================================
+# EXTERNAL LIBRARY PATHS
+#
+# RPI_PICO: no external libs — Pico SDK provides everything
+# All other platforms: unchanged from original
+# =========================================================
+if (RPI_PICO)
+    message(STATUS "RPI_PICO -> FULL STRIP MODE — no SDL/ImGui/Boost/STB/NFD/miniz")
+    # All set to empty so no accidental linkage
+    set(SDL3_INCLUDE_DIR        "")
+    set(NFD_INCLUDE_DIR         "")
+    set(BOOST_INCLUDE_DIR       "")
+    set(STB_INCLUDE_DIR         "")
+    set(RAPID_JSON_INCLUDE_DIR  "")
+    set(IMGUI_DIR               "")
+    set(IMGUI_BACKENDS_DIR      "")
+    set(IMGUI_MISC_CPP_DIR      "")
+    set(IMGUI_EXAMPLES_LIBS_DIR "")
+
+elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows" AND NOT IS_GITHUB_ACTIONS)
     message(STATUS "Building on Windows")
     include(${CMAKE_SOURCE_DIR}/Paths_win.cmake)
-    # Boost
     set(BOOST_INCLUDE_DIR "${BOOST_ROOT}")
-    # SDL3
-    set(SDL3_CMAKE_PATH "${SDL3_ROOT}/cmake")
-    set(SDL3_LIB_PATH "${SDL3_ROOT}/lib/libSDL3.a") # For Emscripten
-    set(SDL3_INCLUDE_DIR "${SDL3_ROOT}/include")
+    set(SDL3_CMAKE_PATH   "${SDL3_ROOT}/cmake")
+    set(SDL3_LIB_PATH     "${SDL3_ROOT}/lib/libSDL3.a")
+    set(SDL3_INCLUDE_DIR  "${SDL3_ROOT}/include")
     set(CMAKE_PREFIX_PATH "${SDL3_CMAKE_PATH}")
-    # Nativefiledialog-extended
-    set(NFD_CMAKE_PATH "${NFD_ROOT}/build/lib/cmake/nfd")
-    set(nfd_DIR "${NFD_ROOT}/build/lib/cmake/nfd")
-    set(NFD_INCLUDE_DIR "${NFD_ROOT}")
+    set(NFD_CMAKE_PATH    "${NFD_ROOT}/build/lib/cmake/nfd")
+    set(nfd_DIR           "${NFD_ROOT}/build/lib/cmake/nfd")
+    set(NFD_INCLUDE_DIR   "${NFD_ROOT}")
     set(NFD_SRC_INCLUDE_DIR "${NFD_ROOT}/src/include")
     set(CMAKE_PREFIX_PATH "${NFD_CMAKE_PATH}")
+
 elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux" AND NOT IS_GITHUB_ACTIONS)
     message(STATUS "Building on Linux")
     include(${CMAKE_SOURCE_DIR}/Paths_lin.cmake)
+
 elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows" AND IS_GITHUB_ACTIONS)
-    message(STATUS "CI build (Windows) – skipping local Paths_*.cmake")
-    # Normalize paths to forward slashes
-    file(TO_CMAKE_PATH "${BOOST_ROOT}" BOOST_ROOT)
-    file(TO_CMAKE_PATH "${IMGUI_ROOT}" IMGUI_ROOT)
-    file(TO_CMAKE_PATH "${MINIZ_ROOT}" MINIZ_ROOT)
-    file(TO_CMAKE_PATH "${STB_ROOT}" STB_ROOT)
+    message(STATUS "CI build (Windows)")
+    file(TO_CMAKE_PATH "${BOOST_ROOT}"      BOOST_ROOT)
+    file(TO_CMAKE_PATH "${IMGUI_ROOT}"      IMGUI_ROOT)
+    file(TO_CMAKE_PATH "${MINIZ_ROOT}"      MINIZ_ROOT)
+    file(TO_CMAKE_PATH "${STB_ROOT}"        STB_ROOT)
     file(TO_CMAKE_PATH "${RAPID_JSON_ROOT}" RAPID_JSON_ROOT)
-    file(TO_CMAKE_PATH "${SDL3_ROOT}" SDL3_ROOT)
-    file(TO_CMAKE_PATH "${NFD_ROOT}" NFD_ROOT)
-    # Boost
-    set(BOOST_INCLUDE_DIR "${BOOST_ROOT}")
-    # SDL3
-    set(SDL3_DIR "${SDL3_ROOT}/build/lib/cmake/SDL3")
-    set(SDL3_LIB_PATH "${SDL3_ROOT}/build/lib/libSDL3.a") # For Emscripten
-    set(SDL3_INCLUDE_DIR "${SDL3_ROOT}/build/include")
+    file(TO_CMAKE_PATH "${SDL3_ROOT}"       SDL3_ROOT)
+    file(TO_CMAKE_PATH "${NFD_ROOT}"        NFD_ROOT)
+    set(BOOST_INCLUDE_DIR   "${BOOST_ROOT}")
+    set(SDL3_DIR            "${SDL3_ROOT}/build/lib/cmake/SDL3")
+    set(SDL3_LIB_PATH       "${SDL3_ROOT}/build/lib/libSDL3.a")
+    set(SDL3_INCLUDE_DIR    "${SDL3_ROOT}/build/include")
     list(APPEND CMAKE_PREFIX_PATH "${SDL3_DIR}")
-    # Nativefiledialog-extended
-    set(NFD_CMAKE_PATH "${NFD_ROOT}/build/lib/cmake/nfd")
-    set(nfd_DIR "${NFD_ROOT}/build/lib/cmake/nfd")
-    set(NFD_INCLUDE_DIR "${NFD_ROOT}")
+    set(NFD_CMAKE_PATH      "${NFD_ROOT}/build/lib/cmake/nfd")
+    set(nfd_DIR             "${NFD_ROOT}/build/lib/cmake/nfd")
+    set(NFD_INCLUDE_DIR     "${NFD_ROOT}")
     set(NFD_SRC_INCLUDE_DIR "${NFD_ROOT}/src/include")
     list(APPEND CMAKE_PREFIX_PATH "${nfd_DIR}")
+
 elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux" AND IS_GITHUB_ACTIONS)
-    message(STATUS "CI build (Linux) – skipping local Paths_*.cmake")
-    # Boost
-    set(BOOST_INCLUDE_DIR "${BOOST_ROOT}")
-    # SDL3
-    set(SDL3_DIR "${SDL3_ROOT}/build/lib/cmake/SDL3")
-    set(SDL3_LIB_PATH "${SDL3_ROOT}/build/lib/libSDL3.a") # For Emscripten
-    set(SDL3_INCLUDE_DIR "${SDL3_ROOT}/build/include")
+    message(STATUS "CI build (Linux)")
+    set(BOOST_INCLUDE_DIR   "${BOOST_ROOT}")
+    set(SDL3_DIR            "${SDL3_ROOT}/build/lib/cmake/SDL3")
+    set(SDL3_LIB_PATH       "${SDL3_ROOT}/build/lib/libSDL3.a")
+    set(SDL3_INCLUDE_DIR    "${SDL3_ROOT}/build/include")
     list(APPEND CMAKE_PREFIX_PATH "${SDL3_DIR}")
-    # Nativefiledialog-extended
-    set(NFD_CMAKE_PATH "${NFD_ROOT}/build/lib/cmake/nfd")
-    set(nfd_DIR "${NFD_ROOT}/build/lib/cmake/nfd")
-    set(NFD_INCLUDE_DIR "${NFD_ROOT}")
+    set(NFD_CMAKE_PATH      "${NFD_ROOT}/build/lib/cmake/nfd")
+    set(nfd_DIR             "${NFD_ROOT}/build/lib/cmake/nfd")
+    set(NFD_INCLUDE_DIR     "${NFD_ROOT}")
     set(NFD_SRC_INCLUDE_DIR "${NFD_ROOT}/src/include")
     list(APPEND CMAKE_PREFIX_PATH "${nfd_DIR}")
+
 else()
     message(STATUS "Unsupported OS: ${CMAKE_HOST_SYSTEM_NAME}")
 endif()
 
-# Normalize all root paths for consistent path handling across platforms
-if(DEFINED IMGUI_ROOT)
-    file(TO_CMAKE_PATH "${IMGUI_ROOT}" IMGUI_ROOT)
-endif()
-if(DEFINED MINIZ_ROOT)
-    file(TO_CMAKE_PATH "${MINIZ_ROOT}" MINIZ_ROOT)
-endif()
-if(DEFINED STB_ROOT)
-    file(TO_CMAKE_PATH "${STB_ROOT}" STB_ROOT)
-endif()
-if(DEFINED RAPID_JSON_ROOT)
-    file(TO_CMAKE_PATH "${RAPID_JSON_ROOT}" RAPID_JSON_ROOT)
-endif()
-if(DEFINED EFB_ROOT)
-    file(TO_CMAKE_PATH "${EFB_ROOT}" EFB_ROOT)
-endif()
-
-# ImGui
-set(IMGUI_DIR "${IMGUI_ROOT}")
-set(IMGUI_BACKENDS_DIR "${IMGUI_ROOT}/backends")
-set(IMGUI_MISC_CPP_DIR "${IMGUI_ROOT}/misc/cpp")
-set(IMGUI_EXAMPLES_LIBS_DIR "${IMGUI_ROOT}/examples/libs")
-# Miniz
-set(MINIZ_DIR "${MINIZ_ROOT}")
-# STB
-set(STB_INCLUDE_DIR "${STB_ROOT}/stb")
-# RapidJSON
-set(RAPID_JSON_INCLUDE_DIR "${RAPID_JSON_ROOT}/include")
-if (EMSCRIPTEN)
-# Emscripten Browser File Library
-set(EFB_INCLUDE_DIR "${EFB_ROOT}")
-endif()
-
-# --- Set language standards (C++23 globally)
-set(CMAKE_C_STANDARD 11)
-set(CMAKE_C_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_STANDARD 23)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-# --- Dependencies
-if(NOT EMSCRIPTEN)
-    find_package(nfd REQUIRED)
-    find_package(SDL3 REQUIRED)
-endif()
-
-# --- OpenGL: try desktop first, then fallback to OpenGL ES 3 for Linux (especially ARM)
-# --- To detect Raspberry Pi and similar devices, we check for ARM architecture instead of just OS, since you can run Linux on x86 too
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    find_package(OpenGL QUIET COMPONENTS OpenGL)
-    if(OpenGL_OpenGL_FOUND)
-        message(STATUS "Using desktop OpenGL")
-    else()
-        message(STATUS "Desktop OpenGL not found → using OpenGL ES 3")
-        add_compile_definitions(IMGUI_IMPL_OPENGL_ES3)
-        find_package(OpenGL REQUIRED COMPONENTS GLES3)
+# ---- Desktop-only third-party path normalisation --------
+if(NOT RPI_PICO)
+    if(DEFINED IMGUI_ROOT)
+        file(TO_CMAKE_PATH "${IMGUI_ROOT}" IMGUI_ROOT)
     endif()
-endif()
+    if(DEFINED MINIZ_ROOT)
+        file(TO_CMAKE_PATH "${MINIZ_ROOT}" MINIZ_ROOT)
+    endif()
+    if(DEFINED STB_ROOT)
+        file(TO_CMAKE_PATH "${STB_ROOT}" STB_ROOT)
+    endif()
+    if(DEFINED RAPID_JSON_ROOT)
+        file(TO_CMAKE_PATH "${RAPID_JSON_ROOT}" RAPID_JSON_ROOT)
+    endif()
+    if(DEFINED EFB_ROOT)
+        file(TO_CMAKE_PATH "${EFB_ROOT}" EFB_ROOT)
+    endif()
 
-# --- Define ImGui user config for ALL platforms with absolute path
-add_compile_definitions("IMGUI_USER_CONFIG=\"${CMAKE_SOURCE_DIR}/ui/imgui_custom_config.h\"")
+    set(IMGUI_DIR              "${IMGUI_ROOT}")
+    set(IMGUI_BACKENDS_DIR     "${IMGUI_ROOT}/backends")
+    set(IMGUI_MISC_CPP_DIR     "${IMGUI_ROOT}/misc/cpp")
+    set(IMGUI_EXAMPLES_LIBS_DIR "${IMGUI_ROOT}/examples/libs")
+    set(MINIZ_DIR              "${MINIZ_ROOT}")
+    set(STB_INCLUDE_DIR        "${STB_ROOT}/stb")
+    set(RAPID_JSON_INCLUDE_DIR "${RAPID_JSON_ROOT}/include")
+    if (EMSCRIPTEN)
+        set(EFB_INCLUDE_DIR    "${EFB_ROOT}")
+    endif()
 
-# --- Define format macros and OpenGL ES for Emscripten
-if (EMSCRIPTEN)
-    add_compile_definitions(__STDC_FORMAT_MACROS=1)
-    add_compile_definitions(IMGUI_IMPL_OPENGL_ES3)
-endif()
+    if(NOT EMSCRIPTEN)
+        find_package(nfd   REQUIRED)
+        find_package(SDL3  REQUIRED)
+    endif()
 
-# --- Common headers just for IDE visibility
+    add_compile_definitions("IMGUI_USER_CONFIG=\"${CMAKE_SOURCE_DIR}/ui/imgui_custom_config.h\"")
+
+    if (EMSCRIPTEN)
+        add_compile_definitions(__STDC_FORMAT_MACROS=1)
+        add_compile_definitions(IMGUI_IMPL_OPENGL_ES3)
+    endif()
+endif() # !RPI_PICO
+
+# =========================================================
+# HEADER LISTS  (IDE visibility)
+# =========================================================
 set(PROJECT_HEADERS
     bios/bios.h
     core/abstractEmulation.h
@@ -227,92 +381,72 @@ set(PROJECT_HEADERS
     ui/resource.h
 )
 
-# --- Third-party headers for IDE visibility only
-if(NOT EMSCRIPTEN)
-set(THIRD_PARTY_HEADERS_GLAD
-	ui/glad/glad.h
-	ui/KHR/khrplatform.h
-)
-endif()
+set(THIRD_PARTY_HEADERS "")
+set(PICO_HEADERS "")
 
-set(THIRD_PARTY_HEADERS_IMGUI
-    ${IMGUI_DIR}/imconfig.h
-    ${IMGUI_DIR}/imgui.h
-    ${IMGUI_BACKENDS_DIR}/imgui_impl_opengl3.h
-    ${IMGUI_BACKENDS_DIR}/imgui_impl_opengl3_loader.h
-    ${IMGUI_BACKENDS_DIR}/imgui_impl_sdl3.h
-    ${IMGUI_MISC_CPP_DIR}/imgui_stdlib.h
-    ${IMGUI_DIR}/imgui_internal.h
-    ${IMGUI_DIR}/imstb_rectpack.h
-    ${IMGUI_DIR}/imstb_textedit.h
-    ${IMGUI_DIR}/imstb_truetype.h
-)
-
-set(THIRD_PARTY_HEADERS_MINIZ
-    ${MINIZ_DIR}/miniz.h
-)
-
-if(NOT EMSCRIPTEN)
-# set(THIRD_PARTY_HEADERS_NFD
-#     "${NFD_SRC_INCLUDE_DIR}/nfd.hpp"
-# )
-endif()
-
-set(THIRD_PARTY_HEADERS_STB
-    "${STB_INCLUDE_DIR}/stb_image.h"
-)
-
-set(THIRD_PARTY_HEADERS_RAPID_JSON
-    "${RAPID_JSON_INCLUDE_DIR}/rapidjson/document.h"
-    "${RAPID_JSON_INCLUDE_DIR}/rapidjson/filereadstream.h"
-)
-
-if (EMSCRIPTEN)
-set(THIRD_PARTY_HEADERS_EFB
-    "${EFB_INCLUDE_DIR}/emscripten_browser_file.h"
-)
-endif()
-
-set(THIRD_PARTY_HEADERS
-    ${THIRD_PARTY_HEADERS_GLAD}
-    ${THIRD_PARTY_HEADERS_IMGUI}
-    ${THIRD_PARTY_HEADERS_MINIZ}
-    ${THIRD_PARTY_HEADERS_NFD}
-    ${THIRD_PARTY_HEADERS_STB}
-    ${THIRD_PARTY_HEADERS_RAPID_JSON}
-)
-
-if (EMSCRIPTEN)
+if (NOT RPI_PICO)
+    if(NOT EMSCRIPTEN)
+        set(THIRD_PARTY_HEADERS_GLAD
+            ui/glad/glad.h
+            ui/KHR/khrplatform.h
+        )
+    endif()
+    set(THIRD_PARTY_HEADERS_IMGUI
+        ${IMGUI_DIR}/imconfig.h
+        ${IMGUI_DIR}/imgui.h
+        ${IMGUI_BACKENDS_DIR}/imgui_impl_opengl3.h
+        ${IMGUI_BACKENDS_DIR}/imgui_impl_opengl3_loader.h
+        ${IMGUI_BACKENDS_DIR}/imgui_impl_sdl3.h
+        ${IMGUI_MISC_CPP_DIR}/imgui_stdlib.h
+        ${IMGUI_DIR}/imgui_internal.h
+        ${IMGUI_DIR}/imstb_rectpack.h
+        ${IMGUI_DIR}/imstb_textedit.h
+        ${IMGUI_DIR}/imstb_truetype.h
+    )
+    set(THIRD_PARTY_HEADERS_MINIZ     ${MINIZ_DIR}/miniz.h)
+    set(THIRD_PARTY_HEADERS_STB       "${STB_INCLUDE_DIR}/stb_image.h")
+    set(THIRD_PARTY_HEADERS_RAPID_JSON
+        "${RAPID_JSON_INCLUDE_DIR}/rapidjson/document.h"
+        "${RAPID_JSON_INCLUDE_DIR}/rapidjson/filereadstream.h"
+    )
+    if (EMSCRIPTEN)
+        set(THIRD_PARTY_HEADERS_EFB "${EFB_INCLUDE_DIR}/emscripten_browser_file.h")
+    endif()
     list(APPEND THIRD_PARTY_HEADERS
-        ${THIRD_PARTY_HEADERS_EFB}
+        ${THIRD_PARTY_HEADERS_GLAD}
+        ${THIRD_PARTY_HEADERS_IMGUI}
+        ${THIRD_PARTY_HEADERS_MINIZ}
+        ${THIRD_PARTY_HEADERS_NFD}
+        ${THIRD_PARTY_HEADERS_STB}
+        ${THIRD_PARTY_HEADERS_RAPID_JSON}
+    )
+    if (EMSCRIPTEN)
+        list(APPEND THIRD_PARTY_HEADERS ${THIRD_PARTY_HEADERS_EFB})
+    endif()
+else()
+    list(APPEND PICO_HEADERS
+        pico/pico_config.h
+        pico/pico_rom.h
+        ${PICO_PANEL_HEADERS}          # ← panel headers for IDE visibility
     )
 endif()
 
-# --- Core source files
-set(CORE_SOURCES
-    core/masquerade.cpp
-)
+# =========================================================
+# SOURCE FILE LISTS
+# =========================================================
+set(CORE_SOURCES core/masquerade.cpp)
 
-# --- Emulator modules (feature-controlled)
-
-# Game of Life
+# --- Emulator modules (feature-controlled) ---------------
 set(GOL_SOURCES "")
 if(MASQ_ENABLE_GOL)
-    list(APPEND GOL_SOURCES
-        gameOfLife/gameOfLife.cpp
-    )
+    list(APPEND GOL_SOURCES gameOfLife/gameOfLife.cpp)
 endif()
 
-# CHIP8
 set(CHIP8_SOURCES "")
 if(MASQ_ENABLE_CHIP8)
-    list(APPEND CHIP8_SOURCES
-        chip8/chip8.cpp
-        chip8/chip8_mods.cpp
-    )
+    list(APPEND CHIP8_SOURCES chip8/chip8.cpp chip8/chip8_mods.cpp)
 endif()
 
-# Space Invaders
 set(SI_SOURCES "")
 if(MASQ_ENABLE_SI)
     list(APPEND SI_SOURCES
@@ -322,7 +456,6 @@ if(MASQ_ENABLE_SI)
     )
 endif()
 
-# PacMan
 set(PACMAN_SOURCES "")
 if(MASQ_ENABLE_PACMAN)
     list(APPEND PACMAN_SOURCES
@@ -332,7 +465,6 @@ if(MASQ_ENABLE_PACMAN)
     )
 endif()
 
-# NES
 set(NES_SOURCES "")
 if(MASQ_ENABLE_NES)
     list(APPEND NES_SOURCES
@@ -342,7 +474,6 @@ if(MASQ_ENABLE_NES)
     )
 endif()
 
-# GBC
 set(GBC_SOURCES "")
 if(MASQ_ENABLE_GBC)
     list(APPEND GBC_SOURCES
@@ -352,7 +483,6 @@ if(MASQ_ENABLE_GBC)
     )
 endif()
 
-# GBA
 set(GBA_SOURCES "")
 if(MASQ_ENABLE_GBA)
     list(APPEND GBA_SOURCES
@@ -362,71 +492,62 @@ if(MASQ_ENABLE_GBA)
     )
 endif()
 
-# --- Misc modules
-set(CHEATS_SOURCES
-    cheats/cheats.cpp
-)
-
-# --- Third-party
-set(MINIZ_SOURCES
-    ${MINIZ_DIR}/miniz.c
-)
-
-set(IMGUI_SOURCES
-    ${IMGUI_DIR}/imgui.cpp
-    ${IMGUI_DIR}/imgui_demo.cpp
-    ${IMGUI_DIR}/imgui_draw.cpp
-    ${IMGUI_DIR}/imgui_tables.cpp
-    ${IMGUI_DIR}/imgui_widgets.cpp
-    ${IMGUI_BACKENDS_DIR}/imgui_impl_opengl3.cpp
-    ${IMGUI_BACKENDS_DIR}/imgui_impl_sdl3.cpp
-    ${IMGUI_MISC_CPP_DIR}/imgui_stdlib.cpp
-)
-
-# --- GLAD
-set(GLAD_SOURCES "")
-if (NOT EMSCRIPTEN)
-    # Don't include GLAD for ARM/OpenGL ES builds
-    if(NOT (CMAKE_SYSTEM_PROCESSOR MATCHES "arm" OR CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64"))
-        set(GLAD_SOURCES
-            ui/glad.c
-        )
-    endif()
-endif()
-
+# --- Desktop-only source files ---------------------------
+set(CHEATS_SOURCES  "")
+set(MINIZ_SOURCES   "")
+set(IMGUI_SOURCES   "")
+set(GLAD_SOURCES    "")
 set(PLATFORM_SOURCES "")
 
-# --- Windows: include icon resource ONLY if RC works
-if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
-
-    include(CheckLanguage)
-    check_language(RC)
-
-    if (CMAKE_RC_COMPILER)
-        enable_language(RC)
-        message(STATUS "RC compiler found: ${CMAKE_RC_COMPILER}")
-        set(PLATFORM_SOURCES masquerade.rc)
-    else()
-        message(WARNING "RC compiler not found — building without icon")
+if (NOT RPI_PICO)
+    list(APPEND CHEATS_SOURCES cheats/cheats.cpp)
+    list(APPEND MINIZ_SOURCES  ${MINIZ_DIR}/miniz.c)
+    list(APPEND IMGUI_SOURCES
+        ${IMGUI_DIR}/imgui.cpp
+        ${IMGUI_DIR}/imgui_demo.cpp
+        ${IMGUI_DIR}/imgui_draw.cpp
+        ${IMGUI_DIR}/imgui_tables.cpp
+        ${IMGUI_DIR}/imgui_widgets.cpp
+        ${IMGUI_BACKENDS_DIR}/imgui_impl_opengl3.cpp
+        ${IMGUI_BACKENDS_DIR}/imgui_impl_sdl3.cpp
+        ${IMGUI_MISC_CPP_DIR}/imgui_stdlib.cpp
+    )
+    if (NOT EMSCRIPTEN)
+        if(NOT (CMAKE_SYSTEM_PROCESSOR MATCHES "arm" OR CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64"))
+            list(APPEND GLAD_SOURCES ui/glad.c)
+        endif()
     endif()
 
-# --- Linux: desktop + icon
-elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    configure_file(
-        ${CMAKE_SOURCE_DIR}/masquerade.desktop.in
-        ${CMAKE_BINARY_DIR}/masquerade.desktop
-        @ONLY
-    )
-    install(FILES ${CMAKE_SOURCE_DIR}/assets/ui/icons/masquerade.png 
-            DESTINATION share/icons/hicolor/256x256/apps)
-    install(FILES ${CMAKE_BINARY_DIR}/masquerade.desktop 
-            DESTINATION share/applications)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        include(CheckLanguage)
+        check_language(RC)
+        if (CMAKE_RC_COMPILER)
+            enable_language(RC)
+            message(STATUS "RC compiler found: ${CMAKE_RC_COMPILER}")
+            set(PLATFORM_SOURCES masquerade.rc)
+        else()
+            message(WARNING "RC compiler not found — building without icon")
+        endif()
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        configure_file(
+            ${CMAKE_SOURCE_DIR}/masquerade.desktop.in
+            ${CMAKE_BINARY_DIR}/masquerade.desktop
+            @ONLY
+        )
+        install(FILES ${CMAKE_SOURCE_DIR}/assets/ui/icons/masquerade.png
+                DESTINATION share/icons/hicolor/256x256/apps)
+        install(FILES ${CMAKE_BINARY_DIR}/masquerade.desktop
+                DESTINATION share/applications)
+    endif()
 endif()
 
-# --- Final unified source list
+# =========================================================
+# FINAL SOURCE LIST + EXECUTABLE
+# =========================================================
 set(SOURCES
     ${PROJECT_HEADERS}
     ${THIRD_PARTY_HEADERS}
+    ${PICO_HEADERS}
     ${CORE_SOURCES}
     ${GOL_SOURCES}
     ${CHIP8_SOURCES}
@@ -442,10 +563,16 @@ set(SOURCES
     ${PLATFORM_SOURCES}
 )
 
-# --- Add the executable target
+# Panel sources added separately (only on Pico)
+if (RPI_PICO)
+    list(APPEND SOURCES ${PANEL_SOURCES})
+endif()
+
 add_executable(${PROJECT_NAME} ${SOURCES})
 
-# --- ALWAYS define macros (0 or 1) → prevents compile errors
+# =========================================================
+# EMULATOR MODULE DEFINES
+# =========================================================
 foreach(_mod ${_MASQ_ALL})
     if(MASQ_ENABLE_${_mod})
         target_compile_definitions(${PROJECT_NAME} PRIVATE MASQ_ENABLE_${_mod}=1)
@@ -454,136 +581,120 @@ foreach(_mod ${_MASQ_ALL})
     endif()
 endforeach()
 
-# --- IDE groupings for Visual Studio / CLion
-source_group("Headers"                              FILES ${PROJECT_HEADERS})
-if (NOT EMSCRIPTEN) 
-source_group("Headers\\Third-party\\GLAD"           FILES ${THIRD_PARTY_HEADERS_GLAD})
-endif() 
-source_group("Headers\\Third-party\\IMGUI"          FILES ${THIRD_PARTY_HEADERS_IMGUI})
-source_group("Headers\\Third-party\\MINIZ"          FILES ${THIRD_PARTY_HEADERS_MINIZ})
-source_group("Headers\\Third-party\\NFD"            FILES ${THIRD_PARTY_HEADERS_NFD})
-source_group("Headers\\Third-party\\STB"            FILES ${THIRD_PARTY_HEADERS_STB})
-source_group("Headers\\Third-party\\RAPID_JSON"     FILES ${THIRD_PARTY_HEADERS_RAPID_JSON})
-if (EMSCRIPTEN)
-source_group("Headers\\Third-party\\EFB"            FILES ${THIRD_PARTY_HEADERS_EFB})
-endif()     
-source_group("Sources\\Core"                        FILES ${CORE_SOURCES})
-source_group("Sources\\Game Of Life"                FILES ${GOL_SOURCES})
-source_group("Sources\\Chip8"                       FILES ${CHIP8_SOURCES})
-source_group("Sources\\Space Invaders"              FILES ${SI_SOURCES})
-source_group("Sources\\PacMan"                      FILES ${PACMAN_SOURCES})
-source_group("Sources\\NES"                         FILES ${NES_SOURCES})
-source_group("Sources\\GBC"                         FILES ${GBC_SOURCES})
-source_group("Sources\\GBA"                         FILES ${GBA_SOURCES})
-source_group("Sources\\Cheats"                      FILES ${CHEATS_SOURCES})
-if (NOT EMSCRIPTEN)     
-source_group("Sources\\Third-party\\Glad"           FILES ${GLAD_SOURCES})
-endif()     
-source_group("Sources\\Third-party\\Miniz"          FILES ${MINIZ_SOURCES})
-source_group("Sources\\Third-party\\ImGui"          FILES ${IMGUI_SOURCES})
+# =========================================================
+# IDE SOURCE GROUPS
+# =========================================================
+source_group("Headers"                                      FILES ${PROJECT_HEADERS})
+if (NOT EMSCRIPTEN)         
+source_group("Headers\\Third-party\\GLAD"                   FILES ${THIRD_PARTY_HEADERS_GLAD})
+endif()         
+source_group("Headers\\Third-party\\IMGUI"                  FILES ${THIRD_PARTY_HEADERS_IMGUI})
+source_group("Headers\\Third-party\\MINIZ"                  FILES ${THIRD_PARTY_HEADERS_MINIZ})
+source_group("Headers\\Third-party\\NFD"                    FILES ${THIRD_PARTY_HEADERS_NFD})
+source_group("Headers\\Third-party\\STB"                    FILES ${THIRD_PARTY_HEADERS_STB})
+source_group("Headers\\Third-party\\RAPID_JSON"             FILES ${THIRD_PARTY_HEADERS_RAPID_JSON})
+if (EMSCRIPTEN)         
+source_group("Headers\\Third-party\\EFB"                    FILES ${THIRD_PARTY_HEADERS_EFB})
+endif()         
+if (RPI_PICO)           
+source_group("Headers\\Pico"                                FILES ${PICO_HEADERS})
+source_group("Headers\\Panel"                               FILES ${PANEL_HEADERS})
+source_group("Headers\\Panel\\Backend"                      FILES ${PANEL_ABSTRACTION_HEADERS})
+source_group("Headers\\Panel\\Backend\\${PANEL_BACKEND}"    FILES ${PANEL_DRIVER_HEADERS})
+endif()         
+source_group("Sources\\Core"                                FILES ${CORE_SOURCES})
+source_group("Sources\\Game Of Life"                        FILES ${GOL_SOURCES})
+source_group("Sources\\Chip8"                               FILES ${CHIP8_SOURCES})
+source_group("Sources\\Space Invaders"                      FILES ${SI_SOURCES})
+source_group("Sources\\PacMan"                              FILES ${PACMAN_SOURCES})
+source_group("Sources\\NES"                                 FILES ${NES_SOURCES})
+source_group("Sources\\GBC"                                 FILES ${GBC_SOURCES})
+source_group("Sources\\GBA"                                 FILES ${GBA_SOURCES})
+source_group("Sources\\Cheats"                              FILES ${CHEATS_SOURCES})
+if (NOT EMSCRIPTEN)         
+source_group("Sources\\Third-party\\Glad"                   FILES ${GLAD_SOURCES})
+endif()         
+source_group("Sources\\Third-party\\Miniz"                  FILES ${MINIZ_SOURCES})
+source_group("Sources\\Third-party\\ImGui"                  FILES ${IMGUI_SOURCES})
+if (RPI_PICO)           
+source_group("Sources\\Panel\\Backend\\${PANEL_BACKEND}"    FILES ${PANEL_DRIVER_SOURCES})
+endif()
 
-# --- Setup target directories
-set_target_properties(${PROJECT_NAME}
-    PROPERTIES
-    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-)
+# =========================================================
+# OUTPUT DIRECTORIES
+# =========================================================
+if (NOT RPI_PICO)
+    set_target_properties(${PROJECT_NAME}
+        PROPERTIES
+        ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+    )
+endif()
 
-# --- Compiler-specific flags and options
-if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+# =========================================================
+# COMPILER FLAGS
+# =========================================================
+if (RPI_PICO)
+    # ---- Pico uses arm-none-eabi-g++ (GCC) ---------------
+    # Pico SDK already sets -mcpu=cortex-m0plus -mthumb etc.
+    # We add our standard safety flags on top.
+    target_compile_options(${PROJECT_NAME} PRIVATE
+        -fsigned-char           # char is signed (matches desktop behaviour)
+        -fno-strict-aliasing    # allow type punning
+        -fwrapv                 # signed overflow wraps
+        -fno-strict-overflow    # don't assume overflow is UB
+        -Wall
+        -Wextra
+    )
+    # Pico uses newlib which doesn't have full C++ exceptions/RTTI
+    # Disable them to save flash+RAM
+    target_compile_options(${PROJECT_NAME} PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>
+        $<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>
+    )
+
+elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     message(STATUS "CLANG/LLVM")
-
     if (EMSCRIPTEN)
         message(STATUS "Using Emscripten (Clang-based)")
-        # Force MSVC-compatible behavior
         target_compile_options(${PROJECT_NAME} PRIVATE
-            -mms-bitfields           # MS-style bitfield layout
-            -fsigned-char            # char is signed
-            -fno-strict-aliasing     # Allow type punning
-            -fwrapv                  # Signed overflow wraps
-            #-fno-strict-overflow     # Don't assume overflow is UB
-        )
+            -mms-bitfields -fsigned-char -fno-strict-aliasing -fwrapv)
     else()
-        message(STATUS "Using native Clang")
-        # Force MSVC-compatible behavior + warnings
         target_compile_options(${PROJECT_NAME} PRIVATE
-            -mms-bitfields           # MS-style bitfield layout
-            -fsigned-char            # char is signed
-            -fno-strict-aliasing     # Allow type punning
-            -fwrapv                  # Signed overflow wraps
-            -fno-strict-overflow     # Don't assume overflow is UB
-            -Wall                    # All warnings
-            -Wextra                  # Extra warnings
-            -Wpedantic               # Pedantic warnings
-            -Wconversion             # Implicit conversions
-            -Wsign-conversion        # Sign conversions
-            -Wcast-align             # Alignment casts
-        )
+            -mms-bitfields -fsigned-char -fno-strict-aliasing
+            -fwrapv -fno-strict-overflow
+            -Wall -Wextra -Wpedantic
+            -Wconversion -Wsign-conversion -Wcast-align)
     endif()
 
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     message(STATUS "GNU compiler detected")
-    
-    # Force MSVC-compatible behavior + warnings
     target_compile_options(${PROJECT_NAME} PRIVATE
-        -mms-bitfields           # MS-style bitfield layout
-        -fsigned-char            # char is signed
-        -fno-strict-aliasing     # Allow type punning
-        -fwrapv                  # Signed overflow wraps
-        -fno-strict-overflow     # Don't assume overflow is UB
-        -Wall                    # All warnings
-        -Wextra                  # Extra warnings
-        -Wpedantic               # Pedantic warnings
-        -Wconversion             # Implicit conversions
-        -Wsign-conversion        # Sign conversions
-        -Wcast-align             # Alignment casts
-    )
+        -mms-bitfields -fsigned-char -fno-strict-aliasing
+        -fwrapv -fno-strict-overflow
+        -Wall -Wextra -Wpedantic
+        -Wconversion -Wsign-conversion -Wcast-align)
 
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
-    # Intel compiler compatibility
     message(STATUS "Intel compiler detected")
 
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     message(STATUS "MSVC")
-    # Match manual Visual Studio project settings
     target_compile_options(${PROJECT_NAME} PRIVATE
         $<$<CONFIG:Debug>:/W4 /RTC1>
         $<$<CONFIG:Release>:
-            /GL                 # Whole program optimization
-            /O2                 # Maximum speed
-            /Ot                 # Favor fast code
-            /Oi                 # Intrinsic functions
-            /Oy                 # Omit frame pointers
-            /Ob2                # Inline expansion - any suitable
-            /GS-                # Buffer security check disabled
-            /GT                 # Enable Fiber-Safe Optimizations
-            /GF                 # Enable String Pooling
-            /fp:fast            # Fast floating-point model
-            /arch:AVX2          # AVX2 vectorization
-            /Qpar               # Auto-parallelization
-            /W3                 # Warning level 3
-            /WX                 # Treat warnings as errors
-            /sdl-               # Disable SDL checks
-            /Zc:__cplusplus     # Correct __cplusplus macro
-            /Zc:inline          # Remove unreferenced functions/data
-            /favor:INTEL64      # Optimize for 64-bit architecture
-            /DNDEBUG            # Ensure all asserts are gone
-            /fp:except-         # Disable Floating Point Exceptions
-            /MP                 # Multi Processor Compilation
+            /GL /O2 /Ot /Oi /Oy /Ob2 /GS- /GT /GF
+            /fp:fast /arch:AVX2 /Qpar /W3 /WX /sdl-
+            /Zc:__cplusplus /Zc:inline /favor:INTEL64
+            /DNDEBUG /fp:except- /MP
         >
     )
 endif()
 
-if(NOT EMSCRIPTEN)
-    get_target_property(SDL3_INCLUDE_DIR SDL3::Headers INTERFACE_INCLUDE_DIRECTORIES)
-    if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
-        get_target_property(SDL3_DLL SDL3::SDL3 IMPORTED_LOCATION_RELEASE)
-        get_target_property(SDL3_IMPLIB SDL3::SDL3 IMPORTED_IMPLIB_RELEASE)
-    endif()
-endif()
-
-# --- Project-specific include directories
+# =========================================================
+# INCLUDE DIRECTORIES
+# =========================================================
 target_include_directories(${PROJECT_NAME} PUBLIC
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/cheats
@@ -598,126 +709,154 @@ target_include_directories(${PROJECT_NAME} PUBLIC
     ${CMAKE_SOURCE_DIR}/nes
     ${CMAKE_SOURCE_DIR}/gb-gbc
     ${CMAKE_SOURCE_DIR}/gba
+    ${CMAKE_SOURCE_DIR}/pico
+    ${CMAKE_SOURCE_DIR}/panel
+    ${PANEL_ABSTRACTION_INCLUDE_DIR}
+    ${PANEL_DRIVER_INCLUDE_DIR}
 )
 
-# --- Third-party/common libraries
-target_include_directories(${PROJECT_NAME} PUBLIC
-    "${BOOST_INCLUDE_DIR}"
-    "${IMGUI_DIR}"
-    "${IMGUI_BACKENDS_DIR}"
-    "${IMGUI_MISC_CPP_DIR}"
-    "${IMGUI_EXAMPLES_LIBS_DIR}"
-    "${STB_INCLUDE_DIR}"
-    "${RAPID_JSON_INCLUDE_DIR}"
-    "${SDL3_INCLUDE_DIR}"
-    "${MINIZ_DIR}"
-)
-
-# --- Platform-specific include directories
-if(EMSCRIPTEN)
-    target_include_directories(${PROJECT_NAME} PUBLIC
-        "${EFB_INCLUDE_DIR}"
+if (NOT RPI_PICO)
+    target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC
+        "${BOOST_INCLUDE_DIR}"
+        "${IMGUI_DIR}"
+        "${IMGUI_BACKENDS_DIR}"
+        "${IMGUI_MISC_CPP_DIR}"
+        "${IMGUI_EXAMPLES_LIBS_DIR}"
+        "${STB_INCLUDE_DIR}"
+        "${RAPID_JSON_INCLUDE_DIR}"
+        "${SDL3_INCLUDE_DIR}"
+        "${MINIZ_DIR}"
     )
+    if(EMSCRIPTEN)
+        target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC "${EFB_INCLUDE_DIR}")
+    endif()
 endif()
 
-# --- Link Libraries
-if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+# =========================================================
+# LINK LIBRARIES
+# =========================================================
+if (RPI_PICO)
+    # ---- Pico SDK libraries --------------------------------
+    # pico_stdlib  : stdio (UART/USB), sleep_ms, time, GPIO
+    # hardware_gpio: gpio_init, gpio_set_function etc.
+    # pico_multicore: optional — add if you use core1
+    #
+    # Add hardware_* libs here as your emulator needs them.
+    target_link_libraries(${PROJECT_NAME} PRIVATE
+        pico_stdlib          # stdio + sleep + time + GPIO primitives
+        hardware_gpio        # GPIO control
+        hardware_timer       # tight_loop_contents, time_us_64
+        hardware_pwm         # PWM (audio output if needed)
+        hardware_dma         # DMA (fast pixel transfer to display)
+        hardware_spi         # SPI (display bus)
+        hardware_i2c         # I2C (if any peripherals need it)
+        hardware_irq         # IRQ support
+        hardware_clocks      # Clock configuration (e.g. set_sys_clock_khz for overclocking)
+        pico_multicore       # multicore support (optional — only if you use core1 for offloading tasks)
+    )
+
+    # ---- CYW43 (Wi-Fi / onboard LED on pico_w) -----------
+    # Only link if the board has the CYW43 chip
+    if (PICO_CYW43_SUPPORTED)
+        target_link_libraries(${PROJECT_NAME} PRIVATE
+            pico_cyw43_arch_none    # CYW43 without TCP/IP (saves RAM)
+        )
+        target_compile_definitions(${PROJECT_NAME} PRIVATE PICO_CYW43_SUPPORTED=1)
+    endif()
+
+    pico_enable_stdio_uart(${PROJECT_NAME} 1)
+    pico_enable_stdio_usb(${PROJECT_NAME} 1)   # set to 1 for USB CDC serial instead
+
+    # ---- Generate .uf2 / .bin / .hex / .map outputs ------
+    # Drop the .uf2 onto the Pico's mass-storage drive to flash
+    pico_add_extra_outputs(${PROJECT_NAME})
+
+    message(STATUS "Pico build configured:")
+    message(STATUS "  Board         : ${PICO_BOARD}")
+    message(STATUS "  Panel backend : ${PANEL_BACKEND}")
+    message(STATUS "  UART stdio    : enabled")
+    message(STATUS "  USB stdio     : enabled")
+    message(STATUS "  Extra outputs : .uf2 .bin .hex .map")
+
+    # ---------------------------------------
+    # Output directory (generator-safe)
+    # ---------------------------------------
+    if(CMAKE_CONFIGURATION_TYPES) # multi-config (VS)
+        set(PICO_OUTPUT_DIR "${CMAKE_BINARY_DIR}/bin/$<CONFIG>")
+    else() # single-config (Ninja/Make)
+        set(PICO_OUTPUT_DIR "${CMAKE_BINARY_DIR}/bin/${CMAKE_BUILD_TYPE}")
+    endif()
+
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy
+            "${CMAKE_BINARY_DIR}/${PROJECT_NAME}.uf2"
+            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/${PROJECT_NAME}.uf2"
+        COMMAND ${CMAKE_COMMAND} -E copy
+            "${CMAKE_BINARY_DIR}/${PROJECT_NAME}.bin"
+            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/${PROJECT_NAME}.bin"
+        COMMAND ${CMAKE_COMMAND} -E copy
+            "${CMAKE_BINARY_DIR}/${PROJECT_NAME}.hex"
+            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/${PROJECT_NAME}.hex"
+        COMMENT "Move Pico outputs → target dir (Debug/Release)"
+    )
+
+elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     message(STATUS "CLANG/LLVM")
     if (EMSCRIPTEN)
         message(STATUS "Using Emscripten (Clang-based)")
         set_target_properties(${PROJECT_NAME} PROPERTIES SUFFIX ".html")
         target_link_libraries(${PROJECT_NAME} PRIVATE "${SDL3_LIB_PATH}")
         target_link_options(${PROJECT_NAME} PRIVATE
-            "-std=c++23"               # Explicitly force C++23 in the linker/compiler
-            "-sUSE_SDL=3"
-            "-sFORCE_FILESYSTEM=1"
-            "-lidbfs.js"
-            "-sWASM=1"
-            "-sUSE_WEBGL2=1" 
-            "-sMIN_WEBGL_VERSION=2" 
-            "-sMAX_WEBGL_VERSION=2" 
-            "-sFULL_ES3=1" 
-            "-sWASM_BIGINT=1"
-            "-sALLOW_MEMORY_GROWTH=1"
-            "-sDISABLE_EXCEPTION_CATCHING=0"
-            "-sNO_EXIT_RUNTIME=1" 
-            "-sASSERTIONS=0"
-            "-sSAFE_HEAP=0"
-            "-sSTACK_SIZE=256MB"
-            "-sSTACK_OVERFLOW_CHECK=0"
-            "-sUSE_GLFW=0"
+            "-std=c++23" "-sUSE_SDL=3" "-sFORCE_FILESYSTEM=1" "-lidbfs.js"
+            "-sWASM=1" "-sUSE_WEBGL2=1" "-sMIN_WEBGL_VERSION=2"
+            "-sMAX_WEBGL_VERSION=2" "-sFULL_ES3=1" "-sWASM_BIGINT=1"
+            "-sALLOW_MEMORY_GROWTH=1" "-sDISABLE_EXCEPTION_CATCHING=0"
+            "-sNO_EXIT_RUNTIME=1" "-sASSERTIONS=0" "-sSAFE_HEAP=0"
+            "-sSTACK_SIZE=256MB" "-sSTACK_OVERFLOW_CHECK=0" "-sUSE_GLFW=0"
             "-sINITIAL_MEMORY=512MB"
             "-sEXPORTED_RUNTIME_METHODS=[ccall]"
             "-sEXPORTED_FUNCTIONS=[_main,_malloc,_free]"
             "--shell-file=${CMAKE_SOURCE_DIR}/shell_minimal.html"
             "--preload-file=${CMAKE_SOURCE_DIR}/assets@/assets"
-            "-O3"
-            "-flto"
-            "-msimd128"
-            "-fno-math-errno"
-            "-fno-rtti"
+            "-O3" "-flto" "-msimd128" "-fno-math-errno" "-fno-rtti"
         )
     else()
         message(STATUS "Using native Clang")
-        target_link_libraries(${PROJECT_NAME} PRIVATE
-            nfd::nfd
-            SDL3::SDL3
-        )
+        target_link_libraries(${PROJECT_NAME} PRIVATE nfd::nfd SDL3::SDL3)
     endif()
+
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     message(STATUS "GNU compiler detected")
-    if(CMAKE_SYSTEM_NAME  STREQUAL "Windows")
+    if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         message(STATUS "Linking Windows libraries")
         target_link_libraries(${PROJECT_NAME} PRIVATE
-            nfd::nfd
-            ${SDL3_IMPLIB}
-            ws2_32
-            winmm
-            user32
-            gdi32
-            opengl32
-            gdiplus
-            Shlwapi
-            dwmapi
-            stdc++fs
+            nfd::nfd ${SDL3_IMPLIB}
+            ws2_32 winmm user32 gdi32 opengl32 gdiplus Shlwapi dwmapi stdc++fs
         )
-    elseif(CMAKE_SYSTEM_NAME  STREQUAL "Linux")
-        message(STATUS "Linking Linux libraries")
-        
-        # Check if using OpenGL ES or desktop OpenGL
-        if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm" OR CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
-            message(STATUS "Linking OpenGL ES 3 libraries for ARM")
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        if (RPI_5)
+            message(STATUS "RPI_5 -> GLES (EGL backend)")
             target_link_libraries(${PROJECT_NAME} PRIVATE
-                nfd::nfd
-                SDL3::SDL3
-                OpenGL::GLES3
-                EGL
-                pthread
-                dl
-                m
-            )
+                nfd::nfd SDL3::SDL3 OpenGL::GLES3 EGL pthread dl m)
+        elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "arm" OR CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+            message(STATUS "ARM -> GLES fallback")
+            target_link_libraries(${PROJECT_NAME} PRIVATE
+                nfd::nfd SDL3::SDL3 OpenGL::GLES3 EGL pthread dl m)
         else()
-            message(STATUS "Linking desktop OpenGL libraries for x86/x64")
+            message(STATUS "Desktop Linux -> OpenGL")
             target_link_libraries(${PROJECT_NAME} PRIVATE
-                nfd::nfd
-                SDL3::SDL3
-                GL
-                pthread
-                dl
-                m
-            )
+                nfd::nfd SDL3::SDL3 GL pthread dl m)
         endif()
     endif()
     target_compile_definitions(${PROJECT_NAME} PRIVATE SDL_MAIN_HANDLED __STDC_FORMAT_MACROS)
+
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
     message(STATUS "INTEL")
     target_link_libraries(${PROJECT_NAME} LINK_PUBLIC ${PYTHON_LIBRARIES})
+
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     message(STATUS "MSVC")
-    target_link_libraries(${PROJECT_NAME} PRIVATE
-        nfd::nfd
-        "${SDL3_IMPLIB}"
-    )
+    target_link_libraries(${PROJECT_NAME} PRIVATE nfd::nfd SDL3::SDL3)
     target_link_options(${PROJECT_NAME} PRIVATE
         $<$<CONFIG:Release>:/INCREMENTAL:NO>
         $<$<CONFIG:Release>:/LTCG:PGOPTIMIZE>
@@ -727,48 +866,43 @@ elseif (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
         $<$<CONFIG:Release>:/PGD:${CMAKE_SOURCE_DIR}/assets/internal/pgo/masquerade.pgd>
     )
     target_compile_definitions(${PROJECT_NAME} PRIVATE SDL_MAIN_HANDLED __STDC_FORMAT_MACROS)
-    
-    # Add missing preprocessor definitions to match manual VS project
     target_compile_definitions(${PROJECT_NAME} PRIVATE
-        $<$<CONFIG:Release>:_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS _CRT_SECURE_NO_WARNINGS>
         $<$<CONFIG:Debug>:_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS _CRT_SECURE_NO_WARNINGS>
+        $<$<CONFIG:Release>:_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS _CRT_SECURE_NO_WARNINGS>
     )
 endif()
 
-# --- PRE/POST Build Scripts
-if (NOT EMSCRIPTEN)
-if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-add_custom_command(
-TARGET ${PROJECT_NAME} PRE_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_SOURCE_DIR}/assets/internal/pgo"
-        "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
-    COMMENT "Copying all PGO files (.pgc/.pgd) to output"
-)
-endif()
+# =========================================================
+# PRE / POST BUILD SCRIPTS (desktop only)
+# =========================================================
+if (NOT EMSCRIPTEN AND NOT RPI_PICO)
+    if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+        add_custom_command(
+            TARGET ${PROJECT_NAME} PRE_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${CMAKE_SOURCE_DIR}/assets/internal/pgo"
+                "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
+            COMMENT "Copying all PGO files (.pgc/.pgd) to output"
+        )
+    endif()
 
-add_custom_command(
-    TARGET ${PROJECT_NAME} POST_BUILD
-    # Always copy LICENSE.md
-    COMMAND ${CMAKE_COMMAND} -E copy
-        "${CMAKE_SOURCE_DIR}/LICENSE.md"
-        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/LICENSE.md"
-
-    # Always copy assets/
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_SOURCE_DIR}/assets"
-        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/assets"
-
-    COMMENT "Copying dependencies..."
-)
-
-# Windows-only copy for SDL3.dll
-if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
     add_custom_command(
         TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy
-            "${SDL3_DLL}"
-            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/SDL3.dll"
+            "${CMAKE_SOURCE_DIR}/LICENSE.md"
+            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/LICENSE.md"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/assets"
+            "$<TARGET_FILE_DIR:${PROJECT_NAME}>/assets"
+        COMMENT "Copying dependencies..."
     )
-endif()
+
+    if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
+        add_custom_command(
+            TARGET ${PROJECT_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:SDL3::SDL3>
+                $<TARGET_FILE_DIR:${PROJECT_NAME}>
+        )
+    endif()
 endif()

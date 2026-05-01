@@ -4,3 +4,4 @@ cmake_generator.bat
 Paths_lin.cmake
 Paths_win.cmake
 masquerade.aps
+.vscode/c_cpp_properties.json

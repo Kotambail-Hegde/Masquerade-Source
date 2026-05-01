@@ -49,7 +49,7 @@ public:
 
 private:
 
-	boost::property_tree::ptree pt;
+	MasqConfig_t pt;
 
 private:
 
@@ -2177,8 +2177,8 @@ PACK_END
 #pragma region INFRASTRUCTURE_METHOD_DECLARATION
 public:
 
-	GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, boost::property_tree::ptree& config, CheatEngine_t* ce);
-	void setupTheCoreOfEmulation(void* masqueradeInstance = nullptr, void* audio = nullptr, void* network = nullptr) override;
+	GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config, CheatEngine_t* ce = nullptr);
+	void setupTheCoreOfEmulation(void* masqueradeInstance = nullptr, void* audio = nullptr, void* input = nullptr, void* network = nullptr) override;
 	void sendBiosToEmulator(bios_t* bios = nullptr) override {};
 
 public:

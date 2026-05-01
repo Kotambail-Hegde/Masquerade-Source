@@ -361,7 +361,7 @@ ota_t::~ota_t() {
 // ==========================================================
 // Check for updates
 // ==========================================================
-bool ota_t::checkForUpdates(boost::property_tree::ptree& pt)
+bool ota_t::checkForUpdates(MasqConfig_t& pt)
 {
     try
     {
@@ -380,7 +380,7 @@ bool ota_t::checkForUpdates(boost::property_tree::ptree& pt)
         }
 
         std::stringstream ss(json_text);
-        boost::property_tree::ptree root;
+        MasqConfig_t root;
         boost::property_tree::read_json(ss, root);
 
         fs::path current_dir = fs::current_path();
@@ -411,7 +411,7 @@ bool ota_t::checkForUpdates(boost::property_tree::ptree& pt)
 // ==========================================================
 // Perform OTA upgrade (with new folder structure support)
 // ==========================================================
-bool ota_t::upgrade(boost::property_tree::ptree& pt)
+bool ota_t::upgrade(MasqConfig_t& pt)
 {
     try
     {
@@ -429,7 +429,7 @@ bool ota_t::upgrade(boost::property_tree::ptree& pt)
         }
 
         std::stringstream ss(json_text);
-        boost::property_tree::ptree root;
+        MasqConfig_t root;
         boost::property_tree::read_json(ss, root);
 
         fs::path current_dir = fs::current_path();

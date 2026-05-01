@@ -53,7 +53,7 @@ static double doubleInput[(uint32_t)(EMULATED_AUDIO_SAMPLING_RATE_FOR_NES / CEIL
 static double doubleOutput[(uint32_t)(EMULATED_AUDIO_SAMPLING_RATE_FOR_NES / CEIL(NES_FPS))];
 
 static std::string _JSON_LOCATION;
-static boost::property_tree::ptree testCase;
+static MasqConfig_t testCase;
 
 static uint32_t nes_texture;
 static uint32_t matrix_texture;
@@ -61,7 +61,7 @@ static uint32_t matrix[16] = { 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0
 #pragma endregion NES_SPECIFIC_DECLARATIONS
 
 #pragma region INFRASTRUCTURE_DEFINITIONS
-NES_t::NES_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, boost::property_tree::ptree& config, CheatEngine_t *ce)
+NES_t::NES_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config, CheatEngine_t *ce)
 {
 	// set log level
 #if _DEBUG
@@ -223,7 +223,7 @@ NES_t::~NES_t()
 	; // Do nothing for now!
 }
 
-void NES_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void* network)
+void NES_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void* input, void* network)
 {
 	uint8_t indexToCheck = 0;
 

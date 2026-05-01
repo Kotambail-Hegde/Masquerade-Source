@@ -71,14 +71,14 @@ static double doubleInput[(uint32_t)(PACMAN_AUDIO_SAMPLING_RATE / PACMAN_FPS)];
 static double doubleOutput[(uint32_t)(PACMAN_AUDIO_SAMPLING_RATE / PACMAN_FPS)];
 
 static std::string _JSON_LOCATION;
-static boost::property_tree::ptree testCase;
+static MasqConfig_t testCase;
 
 static uint32_t pacman_texture;
 static uint32_t matrix_texture;
 static uint32_t matrix[16] = { 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0x000000FF, 0x000000FF, 0x000000FF, 0x000000FF };
 #pragma endregion PACMAN_SPECIFIC_DECLARATIONS
 
-pacMan_t::pacMan_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, boost::property_tree::ptree& config)
+pacMan_t::pacMan_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config)
 {
 	isBiosEnabled = NO;
 	INC8 indexToCheck = RESET;
@@ -162,7 +162,7 @@ pacMan_t::pacMan_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATF
 	}
 }
 
-void pacMan_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void* network)
+void pacMan_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void* input, void* network)
 {
 	INC8 indexToCheck = RESET;
 

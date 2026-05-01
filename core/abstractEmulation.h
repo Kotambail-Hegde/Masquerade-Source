@@ -10,6 +10,7 @@
 #pragma endregion INCLUDES
 
 #pragma region MACROS
+#ifndef __RPI_PICO__
 #define PAUSE_OR_RESUME(button)\
 if (ImGui::IsKeyPressed(button) == true)\
 {\
@@ -21,6 +22,7 @@ if (ImGui::IsKeyPressed(button) == true)\
 {\
 	_MUTE_AUDIO = !_MUTE_AUDIO;\
 }
+#endif // !__RPI_PICO__
 #pragma endregion MACROS
 
 #pragma region GLOBAL_INFRASTRUCTURE_DECLARATIONS
@@ -54,6 +56,9 @@ extern FLAG _ENABLE_ACCURATE_INPUT_SAMPLING;
 
 extern FLAG isBiosEnabled;
 
+extern float _ACTUAL_FPS;
+
+#ifndef __RPI_PICO__
 extern uint32_t frame_buffer;
 extern uint32_t masquerade_texture;
 extern uint32_t shaderProgramBasic;
@@ -62,9 +67,9 @@ extern uint32_t fullscreenVAO;
 extern uint32_t fullscreenVBO;
 extern uint32_t FRAME_BUFFER_SCALE;
 
-extern float _ACTUAL_FPS;
-
 using InputHintCallback = std::function<void()>;
+#endif // !__RPI_PICO__
+
 #pragma endregion GLOBAL_INFRASTRUCTURE_DECLARATIONS
 
 #pragma region CORE
@@ -95,7 +100,7 @@ public:
 
 	virtual ~abstractEmulation_t() {};
 
-	virtual void setupTheCoreOfEmulation(void* masqueradeInstance = nullptr, void* audio = nullptr, void* network = nullptr) = 0;
+	virtual void setupTheCoreOfEmulation(void* masqueradeInstance = nullptr, void* audio = nullptr, void* input = nullptr, void* network = nullptr) = 0;
 
 public:
 
@@ -117,7 +122,7 @@ public:
 	}
 	virtual void setEmulationVolume(float volume)
 	{
-		;
+		MASQ_UNUSED(volume);
 	}
 	virtual uint32_t getScreenWidth() 
 	{
@@ -215,6 +220,7 @@ public:
 	virtual FLAG initializeEmulator() = 0;
 	virtual void destroyEmulator() = 0;
 
+#ifndef __RPI_PICO__
 public:
 	void setInputHintCallback(InputHintCallback cb) 
 	{
@@ -222,6 +228,8 @@ public:
 	}
 protected:
 	InputHintCallback inputHintCallback = nullptr;
+#endif // !__RPI_PICO__
+
 #pragma endregion EMULATOR_DEFINITIONS
 
 #pragma region CORE_DEFINITIONS

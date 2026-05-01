@@ -13,12 +13,23 @@
 #include "helpers.h"
 //
 #include "abstractEmulation.h"
+#ifdef __RPI_PICO__
+//
+#include "panel/panel.h"
+//
+#endif // __RPI_PICO__
 #pragma endregion INCLUDES
 
 #pragma region MACROS
 #define CHIP8_FPS										(60.0)
 #define EMULATED_AUDIO_SAMPLING_RATE_FOR_CHIP8			(48000.0)
 #define AUDIO_BUFFER_SIZE_FOR_XO_CHIP					(CEIL((EMULATED_AUDIO_SAMPLING_RATE_FOR_CHIP8 / CHIP8_FPS)))
+#ifdef __RPI_PICO__
+constexpr bool PICO_CHIP8_IS_STANDARD = getPicoConfigBool(787202488u);
+#define CHIP8_GFX_PLANES 								(PICO_CHIP8_IS_STANDARD ? 1 : 4)
+#else
+#define CHIP8_GFX_PLANES 4
+#endif
 #pragma endregion MACROS
 
 #pragma region CORE
@@ -39,12 +50,22 @@ public:
 	static const uint32_t memory_size = 4096;
 	const char* NAME = "Chip8";
 
+#ifdef __RPI_PICO__
+	static constexpr size_t PICO_MEMORY_SIZE =
+		(0x200 + PICO_ROM_SIZE) <= 4096 ? 4096 :   // standard CHIP-8
+		(0x200 + PICO_ROM_SIZE) <= 32768 ? 32768 :   // SCHIP territory
+		65536;    // XO-CHIP
+#endif
+
 private:
 
-	boost::property_tree::ptree pt;
+	MasqConfig_t pt;
+
+#ifndef __RPI_PICO__
 	SHA1_CUSTOM sha1;
 	std::string rom_sha1;
-	boost::property_tree::ptree prg;
+	MasqConfig_t prg;
+#endif // !__RPI_PICO__
 
 private:
 
@@ -182,23 +203,13 @@ private:
 	};
 
 	// Map CHIP8 keys to ImGui keys
-	std::pair<CHIP8_KEYS, ImGuiKey> keyMap[16] = {
-		{CHIP8_KEYS::CHIP8_ZERO,  ImGuiKey_Keypad0},
-		{CHIP8_KEYS::CHIP8_ONE,   ImGuiKey_Keypad1},
-		{CHIP8_KEYS::CHIP8_TWO,   ImGuiKey_Keypad2},
-		{CHIP8_KEYS::CHIP8_THREE, ImGuiKey_Keypad3},
-		{CHIP8_KEYS::CHIP8_FOUR,  ImGuiKey_Keypad4},
-		{CHIP8_KEYS::CHIP8_FIVE,  ImGuiKey_Keypad5},
-		{CHIP8_KEYS::CHIP8_SIX,   ImGuiKey_Keypad6},
-		{CHIP8_KEYS::CHIP8_SEVEN, ImGuiKey_Keypad7},
-		{CHIP8_KEYS::CHIP8_EIGHT, ImGuiKey_Keypad8},
-		{CHIP8_KEYS::CHIP8_NINE,  ImGuiKey_Keypad9},
-		{CHIP8_KEYS::CHIP8_A,     ImGuiKey_A},
-		{CHIP8_KEYS::CHIP8_B,     ImGuiKey_B},
-		{CHIP8_KEYS::CHIP8_C,     ImGuiKey_C},
-		{CHIP8_KEYS::CHIP8_D,     ImGuiKey_D},
-		{CHIP8_KEYS::CHIP8_E,     ImGuiKey_E},
-		{CHIP8_KEYS::CHIP8_F,     ImGuiKey_F}
+	std::array<EmuKey, 16> keyMap =
+	{
+		EmuKey::K0, EmuKey::K1, EmuKey::K2, EmuKey::K3,
+		EmuKey::K4, EmuKey::K5, EmuKey::K6, EmuKey::K7,
+		EmuKey::K8, EmuKey::K9,
+		EmuKey::KA, EmuKey::KB, EmuKey::KC, EmuKey::KD,
+		EmuKey::KE, EmuKey::KF
 	};
 
 	//0x000 - 0x1FF - Chip 8 interpreter (contains font set in emu)
@@ -217,7 +228,11 @@ private:
 
 	typedef struct
 	{
+#ifndef __RPI_PICO__
 		uint8_t memory[65536];
+#else // !__RPI_PICO__
+		uint8_t memory[PICO_MEMORY_SIZE];
+#endif
 		uint8_t rpl[SIXTEEN];
 	} ram_t;
 
@@ -229,7 +244,10 @@ private:
 		float pitch;
 		BYTE audioPattern[SIXTEEN];
 		double phase;
+		// TODO: Need to figure out how to reduce size of audioBuffer for RPI PICO
+#ifndef __RPI_PICO__
 		CHIP8_AUDIO_SAMPLE_TYPE audioBuffer[AUDIO_BUFFER_SIZE_FOR_XO_CHIP];
+#endif // !__RPI_PICO__
 	} audio_t;
 
 	typedef struct
@@ -237,14 +255,18 @@ private:
 		FLAG vblank;
 		union
 		{
-			FLAG gfx1D[4][screen_width * screen_height];
-			FLAG gfx2D[4][screen_height][screen_width];
+			FLAG gfx1D[CHIP8_GFX_PLANES][screen_width * screen_height];
+			FLAG gfx2D[CHIP8_GFX_PLANES][screen_height][screen_width];
 		} gfx;
+#ifndef __RPI_PICO__
 		union
 		{
 			Pixel imGuiBuffer1D[screen_width * screen_height];
 			Pixel imGuiBuffer2D[screen_height][screen_width];
 		} imGuiBuffer;
+#else  // __RPI_PICO__
+		uint16_t* waveshareFb;
+#endif
 		C8RES res;
 		INC32 scrollH;
 		INC32 scrollV;
@@ -301,9 +323,7 @@ private:
 		chip8_state_t chip8_state;
 		uint8_t chip8_memoryState[sizeof(chip8_state_t)];
 
-		chip8_instance_t() {
-			memset(this, 0, sizeof(chip8_instance_t));
-		}
+		chip8_instance_t() : chip8_state{} {}
 	};
 
 	typedef struct
@@ -326,10 +346,7 @@ private:
 		absolute_chip8_state_t absolute_chip8_state;
 		uint8_t chip8_absoluteMemoryState[sizeof(absolute_chip8_state_t)];
 
-		absolute_chip8_instance_t() 
-		{
-			memset(this, 0, sizeof(absolute_chip8_instance_t));
-		}
+		absolute_chip8_instance_t() : absolute_chip8_state{} {}
 	};
 
 	std::shared_ptr <absolute_chip8_instance_t> pAbsolute_chip8_instance;
@@ -345,8 +362,15 @@ PACK_END
 
 private:
 
+	IInputBackend* pInputBackend = nullptr;
+
+private:
+
+#ifndef __RPI_PICO__
 	SDL_AudioStream* audioStream = nullptr;
+	// TODO: Need to figure out how to reduce size of audioBuffer
 	CHIP8_AUDIO_SAMPLE_TYPE tone[TO_UINT(EMULATED_AUDIO_SAMPLING_RATE_FOR_CHIP8)];
+#endif // !__RPI_PICO__
 
 private:
 
@@ -362,15 +386,23 @@ private:
 
 private:
 	
+#ifndef __RPI_PICO__
 	std::deque<chip8_state_t> gamePlay;
+#endif // !__RPI_PICO__
+
+private:
+#ifdef __RPI_PICO__
+	PCTX pctx;
+#endif // __RPI_PICO__
+
 #pragma endregion EMULATION_DECLARATIONS
 
 #pragma region INFRASTRUCTURE_METHOD_DECLARATION
 public:
 
-	chip8_t(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, boost::property_tree::ptree& config);
-	void setupTheCoreOfEmulation(void* masqueradeInstance = nullptr, void* audio = nullptr, void* network = nullptr) override;
-	void sendBiosToEmulator(bios_t* bios = nullptr) override {};
+	chip8_t(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config);
+	void setupTheCoreOfEmulation(void* masqueradeInstance = nullptr, void* audio = nullptr, void* input = nullptr, void* network = nullptr) override;
+	void sendBiosToEmulator(bios_t* bios = nullptr) override { MASQ_UNUSED(bios); };
 
 public:
 
@@ -436,8 +468,8 @@ public:
 public:
 
 	// Utility to remap a key at runtime
-	void reMapKeys(CHIP8_KEYS chipKey, ImGuiKey newKey);
-	io_status getKeyStatus(ImGuiKey key);
+	void reMapKeys(CHIP8_KEYS chipKey, EmuKey newKey);
+	io_status getKeyStatus(EmuKey key);
 	void captureIO();
 
 public:
@@ -447,7 +479,7 @@ public:
 
 public:
 
-	bool processDisplay(uint32_t arg0 = NOT_USED) { RETURN NOT_USED; };
+	bool processDisplay(uint32_t arg0 = NOT_USED) { MASQ_UNUSED(arg0); RETURN NOT_USED; };
 	void scrollDisplay(INC32 H, INC32 V);
 	void displayCompleteScreen();
 	void clearCompleteScreen();
@@ -465,7 +497,7 @@ public:
 	bool rewindGamePlay() override;
 
 	int32_t getIdFromSHA1();
-	FLAG getProgramFromId(int32_t id, boost::property_tree::ptree* prg);
+	FLAG getProgramFromId(int32_t id, MasqConfig_t* prg);
 	FLAG getRomInfo();
 
 public:
@@ -477,6 +509,8 @@ public:
 
 	FLAG onKeyEvent(EmuKey key, EmuKeyAction action) override
 	{
+		MASQ_UNUSED(key);
+		MASQ_UNUSED(action);
 		RETURN YES;
 	}
 
@@ -499,9 +533,9 @@ public:
 	void setEmulatedCPUCycle(int64_t cycles);
 
 	int32_t getEmulatedCPUCyclePerEmulationLoop() { RETURN ZERO; };
-	void setEmulatedCPUCyclePerEmulationLoop(int32_t cycles) {};
-	void incrementEmulatedCPUCycle(uint32_t nCycles, bool flag1 = false) {};
-	void decrementEmulatedCPUCycle(uint32_t nCycles, bool flag1 = false) {};
+	void setEmulatedCPUCyclePerEmulationLoop(int32_t cycles) { MASQ_UNUSED(cycles); };
+	void incrementEmulatedCPUCycle(uint32_t nCycles, bool flag1 = false) {MASQ_UNUSED(nCycles); MASQ_UNUSED(flag1); };
+	void decrementEmulatedCPUCycle(uint32_t nCycles, bool flag1 = false) {MASQ_UNUSED(nCycles); MASQ_UNUSED(flag1); };
 
 private:
 
