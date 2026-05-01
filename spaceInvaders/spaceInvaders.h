@@ -40,7 +40,7 @@ public:
 
 private:
 
-	boost::property_tree::ptree pt;
+	MasqConfig_t pt;
 
 private:
 
@@ -3327,8 +3327,8 @@ private:
 #pragma region INFRASTRUCTURE_METHOD_DECLARATION
 public:
 
-	spaceInvaders_t(int nfiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, boost::property_tree::ptree& config);
-	void setupTheCoreOfEmulation(void* masqueradeInstance = nullptr, void* audio = nullptr, void* network = nullptr) override;
+	spaceInvaders_t(int nfiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config);
+	void setupTheCoreOfEmulation(void* masqueradeInstance = nullptr, void* audio = nullptr, void* input = nullptr, void* network = nullptr) override;
 	void sendBiosToEmulator(bios_t* bios = nullptr) override {};
 
 public:

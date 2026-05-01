@@ -178,7 +178,7 @@ static FLAG _FORCE_GB_FOR_GBC = NO;
 static FLAG _FORCE_GB_GFX_FOR_GBC = NO;
 static FLAG _FORCE_GBC_FOR_GB = NO;
 static std::string _JSON_LOCATION;
-static boost::property_tree::ptree testCase;
+static MasqConfig_t testCase;
 
 static uint32_t gameboy_texture;
 static uint32_t matrix_texture;
@@ -199,7 +199,7 @@ COUNTER32 OAM_STAT_TO_MODE_2_T_CYCLES = RESET;
 #pragma endregion GB_GBC_SPECIFIC_DECLARATIONS
 
 #pragma region INFRASTRUCTURE_DEFINITIONS
-GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, boost::property_tree::ptree& config, CheatEngine_t* ce)
+GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config, CheatEngine_t* ce)
 {
 	setEmulationID(EMULATION_ID::GB_GBC_ID);
 
@@ -247,7 +247,7 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 		}
 
 #ifndef __EMSCRIPTEN__
-		_SAVE_LOCATION = pt.get<std::string>("gb-gbc._save_location");
+		_SAVE_LOCATION = pt.get<std::string>("gb_gbc._save_location");
 #else
 		_SAVE_LOCATION = "assets/saves";
 #endif
@@ -255,15 +255,15 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 		// check if directory mentioned by "_SAVE_LOCATION" exists, if not we need to explicitly create it
 		ifNoDirectoryThenCreate(_SAVE_LOCATION);
 
-		_ENABLE_DMG_BIOS = to_bool(pt.get<std::string>("gb-gbc._use_dmg_bios", _ENABLE_DMG_BIOS ? "true" : "false"));
-		_ENABLE_CGB_BIOS = to_bool(pt.get<std::string>("gb-gbc._use_cgb_bios", _ENABLE_CGB_BIOS ? "true" : "false"));
-		_FORCE_GB_FOR_GBC = to_bool(pt.get<std::string>("gb-gbc._force_gb_for_gbc", _FORCE_GB_FOR_GBC ? "true" : "false"));
-		_FORCE_GB_GFX_FOR_GBC = to_bool(pt.get<std::string>("gb-gbc._force_gb_gfx_for_gbc", _FORCE_GB_GFX_FOR_GBC ? "true" : "false"));
-		_FORCE_GBC_FOR_GB = to_bool(pt.get<std::string>("gb-gbc._force_gbc_for_gb", _FORCE_GBC_FOR_GB ? "true" : "false"));
-		_ENABLE_AUDIO_HPF = to_bool(config.get<std::string>("gb-gbc._enable_audio_hpf", _ENABLE_AUDIO_HPF ? "true" : "false"));
-		_GB_GHOST_FACTOR = config.get<std::float_t>("gb-gbc._gb_ghosting", _GB_GHOST_FACTOR);
-		_GBC_GHOST_FACTOR = config.get<std::float_t>("gb-gbc._gbc_ghosting", _GBC_GHOST_FACTOR);
-		_ACCELEROMETER_SENSITIVITY = config.get<std::float_t>("gb-gbc._accelerometer_sensitivity", _ACCELEROMETER_SENSITIVITY);
+		_ENABLE_DMG_BIOS = to_bool(pt.get<std::string>("gb_gbc._use_dmg_bios", _ENABLE_DMG_BIOS ? "true" : "false"));
+		_ENABLE_CGB_BIOS = to_bool(pt.get<std::string>("gb_gbc._use_cgb_bios", _ENABLE_CGB_BIOS ? "true" : "false"));
+		_FORCE_GB_FOR_GBC = to_bool(pt.get<std::string>("gb_gbc._force_gb_for_gbc", _FORCE_GB_FOR_GBC ? "true" : "false"));
+		_FORCE_GB_GFX_FOR_GBC = to_bool(pt.get<std::string>("gb_gbc._force_gb_gfx_for_gbc", _FORCE_GB_GFX_FOR_GBC ? "true" : "false"));
+		_FORCE_GBC_FOR_GB = to_bool(pt.get<std::string>("gb_gbc._force_gbc_for_gb", _FORCE_GBC_FOR_GB ? "true" : "false"));
+		_ENABLE_AUDIO_HPF = to_bool(config.get<std::string>("gb_gbc._enable_audio_hpf", _ENABLE_AUDIO_HPF ? "true" : "false"));
+		_GB_GHOST_FACTOR = config.get<std::float_t>("gb_gbc._gb_ghosting", _GB_GHOST_FACTOR);
+		_GBC_GHOST_FACTOR = config.get<std::float_t>("gb_gbc._gbc_ghosting", _GBC_GHOST_FACTOR);
+		_ACCELEROMETER_SENSITIVITY = config.get<std::float_t>("gb_gbc._accelerometer_sensitivity", _ACCELEROMETER_SENSITIVITY);
 
 		if (ROM_TYPE == ROM::GAME_BOY && _FORCE_GBC_FOR_GB == YES)
 		{
@@ -294,7 +294,7 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 			INFO("Running in DMG mode");
 
 #ifndef __EMSCRIPTEN__
-			_BIOS_LOCATION = config.get<std::string>("gb-gbc._dmg_bios_location");
+			_BIOS_LOCATION = config.get<std::string>("gb_gbc._dmg_bios_location");
 #else
 			_BIOS_LOCATION = "assets/gb/bios/dmg_rom.bin";
 #endif
@@ -313,7 +313,7 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 			INFO("Running in CGB mode");
 
 #ifndef __EMSCRIPTEN__
-			_BIOS_LOCATION = config.get<std::string>("gb-gbc._cgb_bios_location");
+			_BIOS_LOCATION = config.get<std::string>("gb_gbc._cgb_bios_location");
 #else
 			_BIOS_LOCATION = "assets/gbc/bios/cgb_boot.bin";
 #endif
@@ -457,7 +457,7 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 	}
 }
 
-void GBc_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void* network)
+void GBc_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void* input, void* network)
 {
 	uint8_t indexToCheck = 0;
 
@@ -6684,7 +6684,7 @@ void GBc_t::setEmulationVolume(float volume)
 {
 	pGBc_instance->GBc_state.audio.emulatorVolume = volume;
 	SDL_SetAudioDeviceGain(SDL_GetAudioStreamDevice(audioStream), volume);
-	pt.put("gb-gbc._volume", volume);
+	pt.put("gb_gbc._volume", volume);
 	boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, pt);
 }
 
@@ -6720,7 +6720,7 @@ void GBc_t::initializeAudio()
 
 	// Setup the volume for audio
 
-	pGBc_instance->GBc_state.audio.emulatorVolume = pt.get<std::float_t>("gb-gbc._volume");
+	pGBc_instance->GBc_state.audio.emulatorVolume = pt.get<std::float_t>("gb_gbc._volume");
 	SDL_SetAudioDeviceGain(SDL_GetAudioStreamDevice(audioStream), pGBc_instance->GBc_state.audio.emulatorVolume);
 }
 
@@ -7238,14 +7238,14 @@ FLAG GBc_t::initializeEmulator()
 	pGBc_emuStatus->ticks.serialCounter = 0x08;
 
 	// Only the below 2 configurations are read here instead of in the constructor because "pGBc_instance" is not ready at that time...
-	auto gbPaletteStr = pt.get<std::string>("gb-gbc._force_gb_palette", "");
+	auto gbPaletteStr = pt.get<std::string>("gb_gbc._force_gb_palette", "");
 	if (!gbPaletteStr.empty() && configToGbPaletteID.count(gbPaletteStr))
 	{
 		currEnGbPalette = configToGbPaletteID.at(gbPaletteStr);
 	}
 	pGBc_instance->GBc_state.gb_palette = currEnGbPalette;
 
-	auto cgbCorrStr = pt.get<std::string>("gb-gbc._enable_cgb_color_correction", "");
+	auto cgbCorrStr = pt.get<std::string>("gb_gbc._enable_cgb_color_correction", "");
 	if (!cgbCorrStr.empty())
 	{
 		currEnGbcPalette = (to_bool(cgbCorrStr) == YES) ? PALETTE_ID::PALETTE_2 : PALETTE_ID::PALETTE_1;
@@ -8664,7 +8664,7 @@ void GBc_t::loadQuirks()
 			translateGFX(pGBc_instance->GBc_state.gb_palette, pGBc_instance->GBc_state.gb_palette, pGBc_instance->GBc_state.gbc_palette, nextPaletteID);
 			currEnGbcPalette = nextPaletteID;
 			pGBc_instance->GBc_state.gbc_palette = nextPaletteID;
-			pt.put("gb-gbc._enable_cgb_color_correction", pGBc_instance->GBc_state.gbc_palette == PALETTE_ID::PALETTE_2);
+			pt.put("gb_gbc._enable_cgb_color_correction", pGBc_instance->GBc_state.gbc_palette == PALETTE_ID::PALETTE_2);
 			boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, pt);
 		}
 	}
@@ -8683,7 +8683,7 @@ void GBc_t::loadQuirks()
 			translateGFX(pGBc_instance->GBc_state.gb_palette, nextPaletteID, pGBc_instance->GBc_state.gbc_palette, pGBc_instance->GBc_state.gbc_palette);
 			currEnGbPalette = nextPaletteID;
 			pGBc_instance->GBc_state.gb_palette = nextPaletteID;
-			pt.put<std::string>("gb-gbc._force_gb_palette", gbPaletteIDToConfig.at(nextPaletteID));
+			pt.put<std::string>("gb_gbc._force_gb_palette", gbPaletteIDToConfig.at(nextPaletteID));
 			boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, pt);
 		}
 	}
@@ -8701,10 +8701,10 @@ void GBc_t::loadQuirks()
 			std::cout << ex.what() << std::endl;
 		}
 
-		_ENABLE_AUDIO_HPF = to_bool(pt.get<std::string>("gb-gbc._enable_audio_hpf", _ENABLE_AUDIO_HPF ? "true" : "false"));
+		_ENABLE_AUDIO_HPF = to_bool(pt.get<std::string>("gb_gbc._enable_audio_hpf", _ENABLE_AUDIO_HPF ? "true" : "false"));
 
 		auto currentPaletteID = pGBc_instance->GBc_state.gb_palette;
-		auto gbPaletteStr = pt.get<std::string>("gb-gbc._force_gb_palette", "");
+		auto gbPaletteStr = pt.get<std::string>("gb_gbc._force_gb_palette", "");
 		if (!gbPaletteStr.empty() && configToGbPaletteID.count(gbPaletteStr))
 		{
 			currEnGbPalette = configToGbPaletteID.at(gbPaletteStr);
@@ -8712,7 +8712,7 @@ void GBc_t::loadQuirks()
 		pGBc_instance->GBc_state.gb_palette = currEnGbPalette;
 
 		auto colorCorrectionCurrentStatus = pGBc_instance->GBc_state.gbc_palette;
-		auto cgbCorrStr = pt.get<std::string>("gb-gbc._enable_cgb_color_correction", "");
+		auto cgbCorrStr = pt.get<std::string>("gb_gbc._enable_cgb_color_correction", "");
 		if (!cgbCorrStr.empty())
 		{
 			currEnGbcPalette = (to_bool(cgbCorrStr) == YES) ? PALETTE_ID::PALETTE_2 : PALETTE_ID::PALETTE_1;

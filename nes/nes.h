@@ -141,7 +141,7 @@ public:
 
 private:
 
-	boost::property_tree::ptree pt;
+	MasqConfig_t pt;
 
 private:
 
@@ -1316,11 +1316,11 @@ private:
 
 #pragma region INFRASTRUCTURE_DEFINITIONS
 public:
-	NES_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, boost::property_tree::ptree& config, CheatEngine_t* ce);
+	NES_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config, CheatEngine_t* ce = nullptr);
 
 	~NES_t();
 
-	void setupTheCoreOfEmulation(void* masqueradeInstance = nullptr, void* audio = nullptr, void* network = nullptr) override;
+	void setupTheCoreOfEmulation(void* masqueradeInstance = nullptr, void* audio = nullptr, void* input = nullptr, void* network = nullptr) override;
 
 	void sendBiosToEmulator(bios_t* bios = nullptr) override {};
 
@@ -1676,9 +1676,9 @@ private:
 		if (noiseReg.frequencyCounter > RESET)
 		{
 			--noiseReg.frequencyCounter;
-			}
-			else
-			{
+		}
+		else
+		{
 			noiseReg.frequencyCounter = noise.noiseFrequencyPeriod;
 
 			shiftReg.fields.fifteen = (pNES_cpuMemory->NESMemoryMap.apuAndIO.NOISE_PERIOD.LOOP_NOISE == SET)
@@ -2045,7 +2045,7 @@ private:
 				sample = static_cast<float>(apuIO.SQ1_VOL.CONSTANT_VOL == SET
 					? apuIO.SQ1_VOL.ENV_PERIOD_OR_VOL
 					: chanReg.envelope.decayLevelCounter);
-				}
+			}
 			chanReg.dacInput = sample;
 			BREAK;
 		}
@@ -2058,7 +2058,7 @@ private:
 				sample = static_cast<float>(apuIO.SQ2_VOL.CONSTANT_VOL == SET
 					? apuIO.SQ2_VOL.ENV_PERIOD_OR_VOL
 					: chanReg.envelope.decayLevelCounter);
-				}
+			}
 			chanReg.dacInput = sample;
 			BREAK;
 		}
@@ -2088,7 +2088,7 @@ private:
 				sample = static_cast<float>(apuIO.NOISE_VOL.CONSTANT_VOL == SET
 					? apuIO.NOISE_VOL.ENV_PERIOD_OR_VOL
 					: chanReg.envelope.decayLevelCounter);
-				}
+			}
 			chanReg.dacInput = sample;
 			BREAK;
 		}

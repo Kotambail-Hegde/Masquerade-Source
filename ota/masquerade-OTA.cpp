@@ -12,7 +12,7 @@ int main() {
     ota_t otaManager;
 
     // Prepare a property tree
-    boost::property_tree::ptree pt;
+    MasqConfig_t pt;
 
     try
     {

@@ -33,7 +33,7 @@ public:
 
 private:
 
-	boost::property_tree::ptree pt;
+	MasqConfig_t pt;
 
 private:
 
@@ -154,8 +154,8 @@ private:
 #pragma region INFRASTRUCTURE_METHOD_DECLARATION
 public:
 
-	gameOfLife_t(boost::property_tree::ptree& config);
-	void setupTheCoreOfEmulation(void* masqueradeInstance = nullptr, void* audio = nullptr, void* network = nullptr) override;
+	gameOfLife_t(MasqConfig_t& config);
+	void setupTheCoreOfEmulation(void* masqueradeInstance = nullptr, void* audio = nullptr, void* input = nullptr, void* network = nullptr) override;
 	void sendBiosToEmulator(bios_t* bios = nullptr) override {};
 
 public:

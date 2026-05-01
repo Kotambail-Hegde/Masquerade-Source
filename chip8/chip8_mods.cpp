@@ -1,10 +1,14 @@
 #include "chip8.h"
 
+#ifndef __RPI_PICO__
 std::string sha1_path = "/assets/c8/db/chip-8-database/database/sha1-hashes.json";
 std::string prg_path = "/assets/c8/db/chip-8-database/database/programs.json";
+#endif // __RPI_PICO__
 
 void chip8_t::loadQuirks()
 {
+#ifndef __RPI_PICO__
+
 	if (ImGui::IsKeyPressed(ImGuiKey_Q) == YES)
 	{
 		auto& quirks = pChip8_instance->chip8_state.quirks;
@@ -63,10 +67,16 @@ void chip8_t::loadQuirks()
 
 		LOG("Quirks Reloaded");
 	}
+
+#else // __RPI_PICO__
+	RETURN;
+#endif
 }
 
 FLAG chip8_t::saveState(uint8_t id)
 {
+#ifndef __RPI_PICO__
+
 	FLAG status = FALSE;
 
 	std::string saveStateNameForThisROM = rom_sha1 + ".state";
@@ -102,10 +112,17 @@ FLAG chip8_t::saveState(uint8_t id)
 	status = YES;
 
 	RETURN status;
+
+#else // __RPI_PICO__
+	MASQ_UNUSED(id);
+	RETURN FALSE;
+#endif
 }
 
 FLAG chip8_t::loadState(uint8_t id)
 {
+#ifndef __RPI_PICO__
+
 	FLAG status = FALSE;
 
 	std::string saveStateNameForThisROM = rom_sha1 + ".state";
@@ -128,10 +145,17 @@ FLAG chip8_t::loadState(uint8_t id)
 	status = YES;
 
 	RETURN status;
+
+#else // __RPI_PICO__
+	MASQ_UNUSED(id);
+	RETURN FALSE;
+#endif
 }
 
 bool chip8_t::fillGamePlayStack()
 {
+#ifndef __RPI_PICO__
+
 	// assume minimum frame rate is 60 fps
 	// so for 5 seconds worth of rewind, 300 elements is required
 	// if fps is 1000, for 5 seconds worth of rewind, 5000 elements is required
@@ -148,10 +172,16 @@ bool chip8_t::fillGamePlayStack()
 		gamePlay.push_front(pChip8_instance->chip8_state);
 		RETURN FAILURE;
 	}
+
+#else // __RPI_PICO__
+	RETURN FAILURE;
+#endif
 }
 
 bool chip8_t::rewindGamePlay()
 {
+#ifndef __RPI_PICO__
+
 	if (gamePlay.empty())
 	{
 		RETURN FAILURE;
@@ -162,13 +192,19 @@ bool chip8_t::rewindGamePlay()
 		gamePlay.pop_front();
 		RETURN SUCCESS;
 	}
+
+#else // __RPI_PICO__
+	RETURN FAILURE;
+#endif
 }
 
 //---------------- Database ----------------------//
 
 int32_t chip8_t::getIdFromSHA1()
 {
-	boost::property_tree::ptree sha1db;
+#ifndef __RPI_PICO__
+
+	MasqConfig_t sha1db;
 
 	const std::string jsonPath = _EXE_LOCATION + sha1_path;
 
@@ -210,11 +246,17 @@ int32_t chip8_t::getIdFromSHA1()
 		DEBUG("Invalid value for SHA1 entry: %s", ex.what());
 		RETURN INVALID;
 	}
+
+#else // __RPI_PICO__
+	RETURN INVALID;
+#endif
 }
 
-FLAG chip8_t::getProgramFromId(int32_t id, boost::property_tree::ptree* prg)
+FLAG chip8_t::getProgramFromId(int32_t id, MasqConfig_t* prg)
 {
-	boost::property_tree::ptree prg1db;
+#ifndef __RPI_PICO__
+
+	MasqConfig_t prg1db;
 
 	const std::string jsonPath = _EXE_LOCATION + prg_path;
 
@@ -227,7 +269,7 @@ FLAG chip8_t::getProgramFromId(int32_t id, boost::property_tree::ptree* prg)
 
 	try
 	{
-		boost::property_tree::ptree programsTree;
+		MasqConfig_t programsTree;
 		boost::property_tree::read_json(jsonPath, programsTree);
 
 		uint32_t idx = 0;
@@ -255,10 +297,18 @@ FLAG chip8_t::getProgramFromId(int32_t id, boost::property_tree::ptree* prg)
 	}
 
 	RETURN FAILURE; // ID out of bounds
+
+#else // __RPI_PICO__
+	MASQ_UNUSED(id);
+	MASQ_UNUSED(prg);
+	RETURN FAILURE;
+#endif
 }
 
 FLAG chip8_t::getRomInfo()
 {
+#ifndef __RPI_PICO__
+
 	int32_t id = getIdFromSHA1();
 	if (id != INVALID)
 	{
@@ -279,4 +329,8 @@ FLAG chip8_t::getRomInfo()
 	{
 		RETURN NO;
 	}
+
+#else // __RPI_PICO__
+	RETURN NO;
+#endif
 }

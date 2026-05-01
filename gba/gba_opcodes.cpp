@@ -2115,7 +2115,7 @@ FLAG GBA_t::SoftwareInterrupt()
 		}
 		else
 		{
-			FATAL(" Software Interrupt; Unknown Sub-Opcode")
+			FATAL(" Software Interrupt; Unknown Sub-Opcode");
 		}
 	}
 	RETURN isThisTheInstruction;

@@ -19,14 +19,14 @@
 static const uint32_t CPU_CYCLES_PER_FRAME = 16666 * TWO;	// 2 MHz
 
 static std::string _JSON_LOCATION;
-static boost::property_tree::ptree testCase;
+static MasqConfig_t testCase;
 
 static uint32_t spaceInvaders_texture;
 static uint32_t matrix_texture;
 static uint32_t matrix[16] = { 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0x000000FF, 0x000000FF, 0x000000FF, 0x000000FF };
 #pragma endregion SPACEINVADERS_SPECIFIC_DECLARATIONS
 
-spaceInvaders_t::spaceInvaders_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, boost::property_tree::ptree& config)
+spaceInvaders_t::spaceInvaders_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config)
 {
 	isBiosEnabled = NO;
 	INC8 indexToCheck = RESET;
@@ -86,7 +86,7 @@ spaceInvaders_t::spaceInvaders_t(int nFiles, std::array<std::string, MAX_NUMBER_
 	}
 }
 
-void spaceInvaders_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void* network)
+void spaceInvaders_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void* input, void* network)
 {
 	INC8 indexToCheck = RESET;
 

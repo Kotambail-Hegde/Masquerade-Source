@@ -14,7 +14,7 @@ static uint32_t matrix_texture;
 static uint32_t matrix[16] = { 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0x000000FF, 0x000000FF, 0x000000FF, 0x000000FF };
 #pragma endregion GOL_SPECIFIC_DECLARATIONS
 
-gameOfLife_t::gameOfLife_t(boost::property_tree::ptree& config)
+gameOfLife_t::gameOfLife_t(MasqConfig_t& config)
 {
 	isBiosEnabled = NO;
 
@@ -47,7 +47,7 @@ gameOfLife_t::gameOfLife_t(boost::property_tree::ptree& config)
 	ifNoDirectoryThenCreate(_SAVE_LOCATION);
 }
 
-void gameOfLife_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void* network)
+void gameOfLife_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void* input, void* network)
 {
 	if (masqueradeInstance != nullptr)
 	{

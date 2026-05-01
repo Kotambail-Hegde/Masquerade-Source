@@ -18,7 +18,7 @@ public:
 
 public:
 
-	bios_t() : biosFound(false), unMapBios(true), biosImage{0}
+	bios_t() : biosImage{0}, biosFound(false), unMapBios(true), expectedBiosSize(0)
 	{
 		;
 	}

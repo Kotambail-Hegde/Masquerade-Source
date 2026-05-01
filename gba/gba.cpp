@@ -90,7 +90,7 @@ static uint32_t matrix[16] = { 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0
 #pragma endregion GBA_SPECIFIC_DECLARATIONS
 
 #pragma region INFRASTRUCTURE_DEFINITIONS
-GBA_t::GBA_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, boost::property_tree::ptree& config)
+GBA_t::GBA_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config)
 {
 	// set log level
 #if _DEBUG
@@ -177,7 +177,7 @@ GBA_t::GBA_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 		RETURN;
 #endif
 	}
-	else if (nFiles == REPLAY_ROM_FILE)
+	else if (nFiles == COMPARE_OR_REPLAY_ROM_FILE)
 	{
 		if ((toUpper(rom[ZERO]) == "-R") || (toUpper(rom[ZERO]) == "-C"))
 		{
@@ -367,7 +367,7 @@ GBA_t::~GBA_t()
 	; // Do nothing for now!
 }
 
-void GBA_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void* network)
+void GBA_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void* input, void* network)
 {
 	uint8_t indexToCheck = 0;
 
@@ -3188,7 +3188,7 @@ void GBA_t::writeIO8(uint32_t address, BYTE data, MEMORY_ACCESS_WIDTH accessWidt
 			if (data & 0x80)
 			{
 				pGBA_cpuInstance->haltCntState = HALT_CONTROLLER::STOP;
-				FATAL("Stop Mode is not supported")
+				FATAL("Stop Mode is not supported");
 			}
 			else
 			{
@@ -3362,7 +3362,7 @@ void GBA_t::fetchAndDecode(uint32_t newPC)
 			pGBA_cpuInstance->registers.pc - TWO,
 			pGBA_cpuInstance->pipeline.decodeStageOpCode.opCode.rawOpCode,
 			pGBA_cpuInstance->registers.pc,
-			pGBA_cpuInstance->pipeline.fetchStageOpCode.opCode.rawOpCode)
+			pGBA_cpuInstance->pipeline.fetchStageOpCode.opCode.rawOpCode);
 	}
 	else if (getARMState() == STATE_TYPE::ST_ARM)
 	{
