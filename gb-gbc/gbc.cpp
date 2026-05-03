@@ -470,8 +470,14 @@ void GBc_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void*
 		if (!initializeEmulator())
 		{
 			FATAL("memory allocation failure");
+#ifndef __RPI_PICO__
 			throw std::runtime_error("memory allocation failure");
+#else	// !__RPI_PICO__
+			panic("memory allocation failure");
+#endif
 		}
+
+		pInputBackend = static_cast<IInputBackend*>(input);
 
 		loadRom(rom);
 
@@ -972,10 +978,12 @@ uint16_t GBc_t::getROMBankNumber()
 	RETURN((pGBc_emuStatus->currentROMBankNumber.raw) % (getNumberOfROMBanksUsed()));
 }
 
+#ifndef __RPI_PICO__
 void GBc_t::setROMBankNumberB(uint16_t romBankNumber)
 {
 	pGBc_emuStatus->currentROMBankNumberB = romBankNumber;
 }
+#endif // !__RPI_PICO__
 
 uint16_t GBc_t::getROMBankNumberB()
 {
@@ -1142,10 +1150,12 @@ uint8_t GBc_t::getRAMBankNumberB()
 	RETURN pGBc_emuStatus->currentRAMBankNumberB;
 }
 
+#ifndef __RPI_PICO__
 void GBc_t::setRAMBankNumberB(uint8_t ramBankNumber)
 {
 	pGBc_emuStatus->currentRAMBankNumberB = ramBankNumber;
 }
+#endif // !__RPI_PICO__
 
 uint8_t GBc_t::getNumberOfRAMBanksUsed()
 {
@@ -1525,6 +1535,7 @@ MASQ_INLINE void GBc_t::joypadTick()
 
 void GBc_t::serialTick()
 {
+#ifndef __RPI_PICO__
 	/*
 	*   Supported Rates
 	*   8192Hz		-	1KB/s	- Bit 1 cleared, Normal
@@ -1670,6 +1681,7 @@ void GBc_t::serialTick()
 			}
 		}
 	}
+#endif // !__RPI_PICO__
 }
 
 void GBc_t::rtcTick()
@@ -3942,6 +3954,8 @@ float GBc_t::getDACOutput(AUDIO_CHANNELS channel)
 float GBc_t::finHPF(float sampleIn)
 {
 	float sampleOut = MUTE_AUDIO;
+
+#ifndef __RPI_PICO__
 	static float capacitor = MUTE_AUDIO;
 
 	if (_ENABLE_AUDIO_HPF == YES)
@@ -3965,6 +3979,9 @@ float GBc_t::finHPF(float sampleIn)
 	{
 		sampleOut = sampleIn;
 	}
+#else
+	sampleOut = sampleIn;
+#endif
 
 	RETURN sampleOut;
 }
@@ -3977,6 +3994,7 @@ void GBc_t::captureDownsampledAudioSamples()
 	{
 		pGBc_instance->GBc_state.audio.downSamplingRatioCounter -= ((uint32_t)(GB_GBC_REFERENCE_CLOCK_HZ / EMULATED_AUDIO_SAMPLING_RATE_FOR_GB_GBC));
 
+#ifndef __RPI_PICO__
 		GBC_AUDIO_SAMPLE_TYPE leftSample = MUTE_AUDIO;
 		GBC_AUDIO_SAMPLE_TYPE rightSample = MUTE_AUDIO;
 
@@ -4037,7 +4055,7 @@ void GBc_t::captureDownsampledAudioSamples()
 
 		if (pGBc_instance->GBc_state.audio.accumulatedTone >= AUDIO_BUFFER_SIZE_FOR_GB_GBC)
 		{
-			if (ImGui::IsKeyPressed(ImGuiKey_KeypadAdd) == YES)
+			if (pInputBackend->isPressed(EmuKey::Kp) == YES)
 			{
 				auto gain = getEmulationVolume();
 
@@ -4054,7 +4072,7 @@ void GBc_t::captureDownsampledAudioSamples()
 
 				setEmulationVolume(gain);
 			}
-			if (ImGui::IsKeyPressed(ImGuiKey_KeypadSubtract) == YES)
+			if (pInputBackend->isPressed(EmuKey::Kn) == YES)
 			{
 				auto gain = getEmulationVolume();
 
@@ -4089,6 +4107,7 @@ void GBc_t::captureDownsampledAudioSamples()
 			}
 
 		}
+#endif // !__RPI_PICO__
 	}
 
 	RETURN;
@@ -8261,6 +8280,7 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 				// setup defaults if MBC6
 				if (isMBC6())
 				{
+#ifndef __RPI_PICO__
 					auto& e = pGBc_emuStatus->mbc6;
 
 					e.flashEnable = NO;
@@ -8280,6 +8300,9 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 						e.flashHidden,
 						0xFF,
 						sizeof(e.flashHidden)); // 256 bytes
+#else
+					FATAL("MBC6 is not supported");
+#endif
 				}
 
 				// setup defaults if MBC7
@@ -8323,13 +8346,17 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 				setROMBankNumber(ONE);
 
 				// for mbc6
+#ifndef __RPI_PICO__
 				setROMBankNumberB(TWO);
+#endif // !__RPI_PICO__
 
 				// initialize the RAM Bank number to ZERO (2K external RAM) as this is basic for all MBCs
 				setRAMBankNumber(ZERO);
 
 				// for mbc6
+#ifndef __RPI_PICO__
 				setRAMBankNumberB(ONE);
+#endif // !__RPI_PICO__
 
 				// initialize the VRAM Bank number to ZERO
 				setVRAMBankNumber(ZERO);
@@ -8666,7 +8693,7 @@ FLAG GBc_t::getRomLoadedStatus()
 
 void GBc_t::loadQuirks()
 {
-	if (ImGui::IsKeyPressed(ImGuiKey_C) == true)
+	if (pInputBackend->isPressed(EmuKey::KC) == true)
 	{
 		if (ROM_TYPE == ROM::GAME_BOY_COLOR)
 		{
@@ -8679,7 +8706,7 @@ void GBc_t::loadQuirks()
 		}
 	}
 
-	if (ImGui::IsKeyPressed(ImGuiKey_T) == true)
+	if (pInputBackend->isPressed(EmuKey::KT) == true)
 	{
 		if (ROM_TYPE == ROM::GAME_BOY)
 		{
@@ -8698,8 +8725,8 @@ void GBc_t::loadQuirks()
 		}
 	}
 
-
-	if (ImGui::IsKeyReleased(ImGuiKey_Q) == true)
+#ifndef __RPI_PICO__
+	if (pInputBackend->isPressed(EmuKey::KQ) == true)
 	{
 		// re-read CONFIG.ini
 		try
@@ -8738,6 +8765,7 @@ void GBc_t::loadQuirks()
 
 		INFO("CONFIG.ini was reloaded!");
 	}
+#endif // !__RPI_PICO__
 }
 
 #if DEACTIVATED
@@ -9271,6 +9299,7 @@ byte GBc_t::readRawMemory(uint16_t address
 
 			if (isMBC6()) MASQ_UNLIKELY
 			{
+#ifndef __RPI_PICO__
 				// Refer https://gbdev.io/pandocs/MBC6.html
 				// Maximum Flash bank is 0x7F, refer // Refer https://gbdev.io/pandocs/MBC6.html#4000-5fff--romflash-bank-a-00-7f-readwrite-for-flash-read-only-for-rom
 				// Bank A = $4000-$5FFF, Bank B = $6000-$7FFF; each bank is 8 KB (0x2000)
@@ -9340,7 +9369,7 @@ byte GBc_t::readRawMemory(uint16_t address
 						}
 						else
 						{
-							RETURN (flashAddr < sizeof(pGBc_emuStatus->mbc6.flash)) ? pGBc_emuStatus->mbc6.flash.raw[flashAddr] : 0xFF;
+							RETURN(flashAddr < sizeof(pGBc_emuStatus->mbc6.flash)) ? pGBc_emuStatus->mbc6.flash.raw[flashAddr] : 0xFF;
 						}
 					}
 					else
@@ -9357,6 +9386,9 @@ byte GBc_t::readRawMemory(uint16_t address
 						}
 					}
 				}
+#else
+				FATAL("MBC6 is not supported");
+#endif
 			}
 
 			// ROM NN ($4000-$7FFF)
@@ -9461,6 +9493,7 @@ byte GBc_t::readRawMemory(uint16_t address
 
 			if (isMBC6()) MASQ_UNLIKELY
 			{
+#ifndef __RPI_PICO__
 				if (address <= 0xAFFF)
 				{
 					uint8_t RAMBankNumber = getRAMBankNumber();
@@ -9474,6 +9507,9 @@ byte GBc_t::readRawMemory(uint16_t address
 					address -= 0xB000;
 					RETURN pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks4KB[RAMBankNumberB][address];
 				}
+#else
+				FATAL("MBC6 is not supported");
+#endif
 			}
 
 			if (isMBC3())
@@ -10461,6 +10497,7 @@ void GBc_t::executeHUC3Command()
 	}
 }
 
+#ifndef __RPI_PICO__
 // Refer https://gbdev.io/pandocs/MBC6.html#flash-commands
 //
 // Three separate protection flags:
@@ -10823,6 +10860,7 @@ void GBc_t::processMBC6FlashWrite(uint16_t cpuAddr, BYTE data)
 		BREAK;
 	}
 }
+#endif // !__RPI_PICO__
 
 void GBc_t::updateMMM01RamBanking()
 {
@@ -10991,6 +11029,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 				}
 				else if (isMBC6()) MASQ_UNLIKELY
 				{
+#ifndef __RPI_PICO__
 					if (address <= 0x03FF)
 					{
 						pGBc_emuStatus->dataWrittenToMBCReg0 = data;
@@ -11027,6 +11066,9 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 					{
 						pGBc_emuStatus->dataWrittenToMBCReg8 = data;
 					}
+#else
+					FATAL("MBC6 is not supported");
+#endif
 				}
 				else
 				{
@@ -11101,6 +11143,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 
 			if (isMBC6()) MASQ_UNLIKELY
 			{
+#ifndef __RPI_PICO__
 				if (address <= 0x03FF)
 				{
 					const FLAG ramEnable = ((data & 0x0F) == 0x0A);
@@ -11147,7 +11190,9 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 				{
 					processMBC6FlashWrite(address, data);
 				}
-
+#else
+				FATAL("MBC6 is not supported");
+#endif
 				RETURN;
 			}
 
@@ -11585,6 +11630,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 
 			if (isMBC6()) MASQ_UNLIKELY
 			{
+#ifndef __RPI_PICO__
 				if (address <= 0xAFFF)
 				{
 					uint8_t RAMBankNumber = getRAMBankNumber();
@@ -11599,16 +11645,19 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 					pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks4KB[RAMBankNumberB][address] = data;
 					RETURN;
 				}
+#else
+				FATAL("MBC6 is not supported");
+#endif
 			}
 
-				if (isMBC3())
+			if (isMBC3())
+			{
+				if (isRTCMappedToExternalRAM() == YES)
 				{
-					if (isRTCMappedToExternalRAM() == YES)
-					{
-						writeToRTCRegisterIfApplicable(TO_UINT8(data));
-						RETURN;
-					}
+					writeToRTCRegisterIfApplicable(TO_UINT8(data));
+					RETURN;
 				}
+			}
 
 			if (isHUC1() && pGBc_emuStatus->isHuc1IrMode == YES)
 			{
