@@ -7182,6 +7182,16 @@ FLAG GBc_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 		runDebugger();
 	}
 
+	if (pGBc_display->wasVblankJustTriggerred)
+	{
+		// GameShark writes at VBlank -- hardware accurate
+		auto writes = ceGBGBC->getCheatWrites(CheatEngine_t::CHEATING_ENGINE::GAMESHARK);
+		for (auto& w : writes)
+		{
+			writeRawMemory((uint16_t)w.address, (byte)w.data, MEMORY_ACCESS_SOURCE::CPU);
+		}
+	}
+
 	RETURN pGBc_display->wasVblankJustTriggerred;
 }
 
@@ -9177,8 +9187,9 @@ byte GBc_t::readRawMemory(uint16_t address
 			}
 		}
 
-		int16_t modedData = RESET;
-		int16_t other1 = RESET;
+		uint32_t modedData = 0;
+		uint32_t compareVal = 0;
+		FLAG     hasCompare = NO;
 		uint32_t index = RESET;
 
 		// reading from ROM
@@ -9239,9 +9250,9 @@ byte GBc_t::readRawMemory(uint16_t address
 				}
 			}
 
-			if ((ceGBGBC->interceptCPURead(address, &modedData, &other1))
+			if ((ceGBGBC->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
 				&&
-				((BYTE)other1 == pGBc_instance->GBc_state.entireRom.romMemoryBanks.mROMBanks[ROMBankNumber][address]))
+				(!hasCompare || (BYTE)compareVal == pGBc_instance->GBc_state.entireRom.romMemoryBanks.mROMBanks[ROMBankNumber][address]))
 			{
 				RETURN TO_UINT8(modedData);
 			}
@@ -9294,9 +9305,9 @@ byte GBc_t::readRawMemory(uint16_t address
 					}
 					else
 					{
-						if ((ceGBGBC->interceptCPURead(originalAddress, &modedData, &other1))
+						if ((ceGBGBC->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
 							&&
-							((BYTE)other1 == pGBc_instance->GBc_state.entireRom.romMemoryBanks.mROMBanks8KB[ROMBankNumber][address]))
+							(!hasCompare || (BYTE)compareVal == pGBc_instance->GBc_state.entireRom.romMemoryBanks.mROMBanks8KB[ROMBankNumber][address]))
 						{
 							RETURN TO_UINT8(modedData);
 						}
@@ -9334,9 +9345,9 @@ byte GBc_t::readRawMemory(uint16_t address
 					}
 					else
 					{
-						if ((ceGBGBC->interceptCPURead(originalAddress, &modedData, &other1))
+						if ((ceGBGBC->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
 							&&
-							((BYTE)other1 == pGBc_instance->GBc_state.entireRom.romMemoryBanks.mROMBanks8KB[ROMBankNumberB][address]))
+							(!hasCompare || (BYTE)compareVal == pGBc_instance->GBc_state.entireRom.romMemoryBanks.mROMBanks8KB[ROMBankNumberB][address]))
 						{
 							RETURN TO_UINT8(modedData);
 						}
@@ -9393,9 +9404,9 @@ byte GBc_t::readRawMemory(uint16_t address
 
 			address -= 0x4000;
 
-			if ((ceGBGBC->interceptCPURead(originalAddress, &modedData, &other1))
+			if ((ceGBGBC->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
 				&&
-				((BYTE)other1 == pGBc_instance->GBc_state.entireRom.romMemoryBanks.mROMBanks[ROMBankNumber][address]))
+				(!hasCompare || (BYTE)compareVal == pGBc_instance->GBc_state.entireRom.romMemoryBanks.mROMBanks[ROMBankNumber][address]))
 			{
 				RETURN TO_UINT8(modedData);
 			}
@@ -9455,39 +9466,13 @@ byte GBc_t::readRawMemory(uint16_t address
 					uint8_t RAMBankNumber = getRAMBankNumber();
 					address -= 0xA000;
 
-					if ((ceGBGBC->interceptCPURead(originalAddress, &modedData, &other1))
-						// NOTE: Below check is not needed I guess as only option is "1" or "8" to differentiate bank; Below bank number check is sufficient
-						//&&
-						//((BYTE)(other1 >> FOUR) == EIGHT)
-						&&
-						((BYTE)(other1 & 0x0F) == (BYTE)(RAMBankNumber)))
-					{
-						BYTE data = TO_UINT8(modedData);
-						RETURN TO_UINT8(data);
-					}
-					else
-					{
-						RETURN pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks4KB[RAMBankNumber][address];
-					}
+					RETURN pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks4KB[RAMBankNumber][address];
 				}
 				else
 				{
 					uint8_t RAMBankNumberB = getRAMBankNumberB();
 					address -= 0xB000;
-					if ((ceGBGBC->interceptCPURead(originalAddress, &modedData, &other1))
-						// NOTE: Below check is not needed I guess as only option is "1" or "8" to differentiate bank; Below bank number check is sufficient
-						//&&
-						//((BYTE)(other1 >> FOUR) == EIGHT)
-						&&
-						((BYTE)(other1 & 0x0F) == (BYTE)(RAMBankNumberB)))
-					{
-						BYTE data = TO_UINT8(modedData);
-						RETURN TO_UINT8(data);
-					}
-					else
-					{
-						RETURN pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks4KB[RAMBankNumberB][address];
-					}
+					RETURN pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks4KB[RAMBankNumberB][address];
 				}
 			}
 
@@ -9570,20 +9555,8 @@ byte GBc_t::readRawMemory(uint16_t address
 
 			if (isRAMBankEnabled() == YES)
 			{
-				if ((ceGBGBC->interceptCPURead(originalAddress, &modedData, &other1))
-					// NOTE: Below check is not needed I guess as only option is "1" or "8" to differentiate bank; Below bank number check is sufficient
-					//&&
-					//((BYTE)(other1 >> FOUR) == EIGHT)
-					&&
-					((BYTE)(other1 & 0x0F) == (BYTE)(ramBank)))
-				{
-					RETURN TO_UINT8(modedData);
-				}
-				else
-				{
-					// All 8 bits are read properly unlike what pandocs mentions; needed for the HUC3 games
-					RETURN pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[ramBank][address];
-				}
+				// All 8 bits are read properly unlike what pandocs mentions; needed for the HUC3 games
+				RETURN pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[ramBank][address];
 			}
 			else
 			{
@@ -9629,15 +9602,6 @@ byte GBc_t::readRawMemory(uint16_t address
 			// WRAM 00
 			if (address <= WORK_RAM_00_END_ADDRESS)
 			{
-				if (ceGBGBC->interceptCPURead(originalAddress, &modedData, &other1))
-				{
-					RETURN TO_UINT8(modedData);
-				}
-				else
-				{
-					RETURN pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[address];
-				}
-
 				RETURN pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[address];
 			}
 			// WRAM 01
@@ -9652,20 +9616,7 @@ byte GBc_t::readRawMemory(uint16_t address
 						// "getWRAMBankNumber()" is set by the game rom and hence, no tweaking is allowed inside the function
 						// Hence, tweaking is possible only at the interfacing between mWRAM01Banks and "getWRAMBankNumber()"
 						// Therefore, getWRAMBankNumber() is decremented once when used within mWRAM01Banks
-
-						if ((ceGBGBC->interceptCPURead(originalAddress, &modedData, &other1))
-							// NOTE: Below check is not needed I guess as only option is "1" or "9" to differentiate bank; Below bank number check is sufficient
-							//&&
-							//((BYTE)(other1 >> FOUR) == NINE)
-							&&
-							((BYTE)(other1 & 0x0F) == (BYTE)(getWRAMBankNumber())))
-						{
-							RETURN TO_UINT8(modedData);
-						}
-						else
-						{
-							RETURN pGBc_instance->GBc_state.entireWram01.wram01MemoryBanks.mWRAM01Banks[getWRAMBankNumber() - ONE][address];
-						}
+						RETURN pGBc_instance->GBc_state.entireWram01.wram01MemoryBanks.mWRAM01Banks[getWRAMBankNumber() - ONE][address];
 					}
 					else
 					{
@@ -9674,14 +9625,7 @@ byte GBc_t::readRawMemory(uint16_t address
 				}
 				else if (ROM_TYPE == ROM::GAME_BOY)
 				{
-					if (ceGBGBC->interceptCPURead(originalAddress, &modedData, &other1))
-					{
-						RETURN TO_UINT8(modedData);
-					}
-					else
-					{
-						RETURN pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[address];
-					}
+					RETURN pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[address];
 				}
 			}
 		}

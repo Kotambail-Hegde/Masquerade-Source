@@ -349,6 +349,7 @@ private:
 
 	MasqConfig_t pt;
 
+#ifndef __RPI_PICO__
 private:
 
 	uint8_t const SST_ROMS = TWO;
@@ -360,7 +361,8 @@ private:
 
 private:
 
-	void* GBAGameEngine = nullptr;
+	CheatEngine_t* ceGBA;
+#endif // !__RPI_PICO__
 #pragma endregion INFRASTRUCTURE_DECLARATIONS
 
 #pragma region ARM7TDMI_DECLARATIONS
@@ -1158,7 +1160,7 @@ private:
 
 	enum class MEMORY_ACCESS_SOURCE
 	{
-		HOST,
+		HOST, // This will be used for cheats as well
 		CPU,
 		PPU,
 		APU,
@@ -3855,7 +3857,7 @@ private:
 
 #pragma region INFRASTRUCTURE_DEFINITIONS
 public:
-	GBA_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config);
+	GBA_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config, CheatEngine_t* ce = nullptr);
 
 	~GBA_t();
 
@@ -4574,6 +4576,12 @@ private:
 		}
 		else if (IF_ADDRESS_WITHIN(address, GAMEPAK_ROM_WS0_START_ADDRESS, GAMEPAK_ROM_WS2_END_ADDRESS))
 		{
+			uint32_t modedData = RESET;
+			uint32_t compareVal = RESET;
+			FLAG     hasCompare = NO;
+
+			uint32_t originalAddress = address;
+
 			// As part of first level mirroring, OAM (0x08000000 - 0x0DFFFFFF) is mirrored in steps of GAMEPAK_ROM_SIZE 
 			address &= 0x01FFFFFF;
 
@@ -4639,22 +4647,62 @@ private:
 				stride = sizeof(GBA_WORD);
 			}
 
+			if (ENABLED)
+			{
+				uint32_t cheatData = 0; uint32_t cheatCmp = 0; FLAG cheatHasCmp = NO;
+				if ((ceGBA->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::ACTION_REPLAY_V3, originalAddress, &cheatData, &cheatCmp, &cheatHasCmp)
+					&& (!cheatHasCmp || cheatCmp == (uint32_t)dataT))
+					||
+					(ceGBA->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMESHARK, originalAddress, &cheatData, &cheatCmp, &cheatHasCmp)
+						&& (!cheatHasCmp || cheatCmp == (uint32_t)dataT)))
+					dataT = cheatData;
+			}
+
 			pGBA_memory->romLatchedAddress += stride;
 			pGBA_memory->romLatchedAddress &= pAbsolute_GBA_instance->absolute_GBA_state.aboutRom.romMaxAddressMask;
-
 			RETURN static_cast<T>(dataT);
 #else
 			if (accessWidth == MEMORY_ACCESS_WIDTH::EIGHT_BIT)
 			{
-				RETURN static_cast<T>(pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakRom.mWaitState.mWaitState0.mWaitState0Memory8bit[address]);
+				uint32_t romVal = ...mWaitState0Memory8bit[address];
+				uint32_t cheatData = 0; uint32_t cheatCmp = 0; FLAG cheatHasCmp = NO;
+
+				if ((ceGBA->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::ACTION_REPLAY_V3, originalAddress, &cheatData, &cheatCmp, &cheatHasCmp)
+					&& (!cheatHasCmp || (BYTE)cheatCmp == (BYTE)romVal))
+					||
+					(ceGBA->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMESHARK, originalAddress, &cheatData, &cheatCmp, &cheatHasCmp)
+						&& (!cheatHasCmp || (BYTE)cheatCmp == (BYTE)romVal)))
+					RETURN static_cast<T>(cheatData & 0xFF);
+
+				RETURN static_cast<T>(romVal);
 			}
 			else if (accessWidth == MEMORY_ACCESS_WIDTH::SIXTEEN_BIT)
 			{
-				RETURN static_cast<T>(pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakRom.mWaitState.mWaitState0.mWaitState0Memory16bit[address / TWO]);
+				uint32_t romVal = ...mWaitState0Memory16bit[address / TWO];
+				uint32_t cheatData = 0; uint32_t cheatCmp = 0; FLAG cheatHasCmp = NO;
+
+				if ((ceGBA->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::ACTION_REPLAY_V3, originalAddress, &cheatData, &cheatCmp, &cheatHasCmp)
+					&& (!cheatHasCmp || (uint16_t)cheatCmp == (uint16_t)romVal))
+					||
+					(ceGBA->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMESHARK, originalAddress, &cheatData, &cheatCmp, &cheatHasCmp)
+						&& (!cheatHasCmp || (uint16_t)cheatCmp == (uint16_t)romVal)))
+					RETURN static_cast<T>(cheatData & 0xFFFF);
+
+				RETURN static_cast<T>(romVal);
 			}
 			else if (accessWidth == MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT)
 			{
-				RETURN static_cast<T>(pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakRom.mWaitState.mWaitState0.mWaitState0Memory32bit[address / FOUR]);
+				uint32_t romVal = ...mWaitState0Memory32bit[address / FOUR];
+				uint32_t cheatData = 0; uint32_t cheatCmp = 0; FLAG cheatHasCmp = NO;
+
+				if ((ceGBA->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::ACTION_REPLAY_V3, originalAddress, &cheatData, &cheatCmp, &cheatHasCmp)
+					&& (!cheatHasCmp || cheatCmp == romVal))
+					||
+					(ceGBA->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMESHARK, originalAddress, &cheatData, &cheatCmp, &cheatHasCmp)
+						&& (!cheatHasCmp || cheatCmp == romVal)))
+					RETURN static_cast<T>(cheatData);
+
+				RETURN static_cast<T>(romVal);
 			}
 #endif
 		}
@@ -5344,6 +5392,30 @@ private:
 		}
 	}
 #endif
+
+public:
+
+	static MASQ_INLINE CheatEngine_t::CheatWidth toCheatWidth(MEMORY_ACCESS_WIDTH w)
+	{
+		switch (w)
+		{
+		case MEMORY_ACCESS_WIDTH::EIGHT_BIT:      RETURN CheatEngine_t::CheatWidth::U8;
+		case MEMORY_ACCESS_WIDTH::SIXTEEN_BIT:    RETURN CheatEngine_t::CheatWidth::U16;
+		case MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT:  RETURN CheatEngine_t::CheatWidth::U32;
+		default:                                  RETURN CheatEngine_t::CheatWidth::U16;
+		}
+	}
+
+	static MASQ_INLINE MEMORY_ACCESS_WIDTH toMemoryAccessWidth(CheatEngine_t::CheatWidth w)
+	{
+		switch (w)
+		{
+		case CheatEngine_t::CheatWidth::U8:   RETURN MEMORY_ACCESS_WIDTH::EIGHT_BIT;
+		case CheatEngine_t::CheatWidth::U16:  RETURN MEMORY_ACCESS_WIDTH::SIXTEEN_BIT;
+		case CheatEngine_t::CheatWidth::U32:  RETURN MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT;
+		default:                              RETURN MEMORY_ACCESS_WIDTH::SIXTEEN_BIT;
+		}
+	}
 
 private:
 
@@ -7168,8 +7240,16 @@ private:
 
 	MASQ_INLINE void SET_INITIAL_OBJ_MODE()
 	{
+		// Read OAM Attr0 (first object) via memory API
+		uint16_t attr0 = readRawMemoryInternal<uint16_t>(
+			OAM_START_ADDRESS + 0,   // object 0, attr0
+			MEMORY_ACCESS_WIDTH::SIXTEEN_BIT,
+			MEMORY_ACCESS_SOURCE::PPU,
+			MEMORY_ACCESS_TYPE::AUTOMATIC
+		);
 
-		if (pGBA_memory->mGBAMemoryMap.mOamAttributes.mOamAttribute[ZERO].mOamAttr01Word.mOamAttr0HalfWord.mOamAttr0Fields.ROTATE_SCALE_FLAG == SET)
+		// Extract ROTATE_SCALE_FLAG (bit 8)
+		if (attr0 & (1 << 8))
 		{
 			pGBA_display->currentObjectIsAffine = OBJECT_TYPE::OBJECT_IS_AFFINE;
 		}
@@ -7177,7 +7257,6 @@ private:
 		{
 			pGBA_display->currentObjectIsAffine = OBJECT_TYPE::OBJECT_IS_NOT_AFFINE;
 		}
-
 	}
 
 	MASQ_INLINE FLAG OBJ_A01_OBJ_CYCLE(ID oamID)
@@ -11452,13 +11531,27 @@ private:
 
 		auto& flash = pGBA_instance->GBA_state.emulatorStatus.backup.flash;
 		const ID currentMemoryBank = (flash.currentMemoryBank == BACKUP_FLASH_MEMORY_BANK::BANK1) ? ONE : ZERO;
+
+		// KEEP direct pointer (DO NOT REMOVE)
 		auto* flashMem = pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[currentMemoryBank];
 
 		const BACKUP_FLASH_FSM state = flash.flashFsmState;
 
+		// Helper lambda for READ via API
+		auto READ_FLASH = [&](uint32_t addr) -> uint8_t
+			{
+				RETURN readRawMemoryInternal<uint8_t>(
+					addr,
+					MEMORY_ACCESS_WIDTH::EIGHT_BIT,
+					MEMORY_ACCESS_SOURCE::HOST,
+					MEMORY_ACCESS_TYPE::AUTOMATIC,
+					YES   // IMPORTANT: LOCK = YES (avoid recursion / DMA side effects)
+				);
+			};
+
 		if (state == BACKUP_FLASH_FSM::STATE0) MASQ_LIKELY
 		{
-			if (flashMem[FLASH_ACCESS_MEMORY2 - GAMEPAK_SRAM_START_ADDRESS] == TO_UINT8(BACKUP_FLASH_CMDS::CMD_1)) MASQ_UNLIKELY
+			if (READ_FLASH(FLASH_ACCESS_MEMORY2) == TO_UINT8(BACKUP_FLASH_CMDS::CMD_1)) MASQ_UNLIKELY
 			{
 				flash.flashFsmState = BACKUP_FLASH_FSM::STATE1;
 				flashMem[FLASH_ACCESS_MEMORY2 - GAMEPAK_SRAM_START_ADDRESS] = RESET;
@@ -11466,7 +11559,7 @@ private:
 		}
 		else if (state == BACKUP_FLASH_FSM::STATE1) MASQ_UNLIKELY
 		{
-			if (flashMem[FLASH_ACCESS_MEMORY3 - GAMEPAK_SRAM_START_ADDRESS] == TO_UINT8(BACKUP_FLASH_CMDS::CMD_2)) MASQ_UNLIKELY
+			if (READ_FLASH(FLASH_ACCESS_MEMORY3) == TO_UINT8(BACKUP_FLASH_CMDS::CMD_2)) MASQ_UNLIKELY
 			{
 				flash.flashFsmState = BACKUP_FLASH_FSM::STATE2;
 				flashMem[FLASH_ACCESS_MEMORY3 - GAMEPAK_SRAM_START_ADDRESS] = RESET;
@@ -11474,7 +11567,6 @@ private:
 		}
 		else if (state == BACKUP_FLASH_FSM::STATE2) MASQ_UNLIKELY
 		{
-			// Handle 4KB erase
 			if (flash.previousFlashCommand == BACKUP_FLASH_CMDS::START_ERASE_CMD
 				&& flash.erase4kbPageNumber != INVALID) MASQ_UNLIKELY
 			{
@@ -11493,14 +11585,14 @@ private:
 			else
 			{
 				const BACKUP_FLASH_CMDS currentCmd =
-					(BACKUP_FLASH_CMDS)flashMem[FLASH_ACCESS_MEMORY2 - GAMEPAK_SRAM_START_ADDRESS];
+					(BACKUP_FLASH_CMDS)READ_FLASH(FLASH_ACCESS_MEMORY2);
 
 				flashMem[FLASH_ACCESS_MEMORY2 - GAMEPAK_SRAM_START_ADDRESS] = RESET;
 				flash.currentFlashCommand = currentCmd;
 
 				if (currentCmd == BACKUP_FLASH_CMDS::NO_OPERATION) MASQ_LIKELY
 				{
-					// Most common case - do nothing
+					// do nothing
 				}
 				else if (currentCmd == BACKUP_FLASH_CMDS::ENTER_CHIP_INDENTIFICATION_MODE) MASQ_UNLIKELY
 				{
@@ -11513,12 +11605,12 @@ private:
 
 						if (backupType == BACKUP_TYPE::FLASH64K)
 						{
-							flashMem[ZERO] = 0x32;  // Panasonic
+							flashMem[ZERO] = 0x32;
 							flashMem[ONE] = 0x1B;
 						}
 						else
 						{
-							flashMem[ZERO] = 0x62;  // Sanyo
+							flashMem[ZERO] = 0x62;
 							flashMem[ONE] = 0x13;
 						}
 					}

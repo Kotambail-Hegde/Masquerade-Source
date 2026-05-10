@@ -1700,20 +1700,18 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 					RETURN(address >> EIGHT);
 				}
 
-				int16_t modedData = RESET;
-				int16_t compareForMod = RESET;
+				uint32_t modedData = 0;
+				uint32_t compareVal = 0;
+				FLAG     hasCompare = NO;
 				uint32_t index = RESET;
 
 				switch (pNES_instance->NES_state.catridgeInfo.mapper)
 				{
 				case MAPPER::NROM:
 				{
-					if ((ceNES->interceptCPURead(address, &modedData, &compareForMod))
+					if ((ceNES->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
 						&&
-						((compareForMod == INVALID)
-							||
-							((compareForMod != INVALID)
-								&& ((BYTE)compareForMod == pNES_cpuMemory->NESMemoryMap.catridgeMappedMemory[address - UNMAPPED_START_ADDRESS]))))
+						(!hasCompare || (BYTE)compareVal == pNES_cpuMemory->NESMemoryMap.catridgeMappedMemory[address - UNMAPPED_START_ADDRESS]))
 					{
 						RETURN TO_UINT8(modedData);
 					}
@@ -1768,12 +1766,9 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 						}
 						}
 
-						if ((ceNES->interceptCPURead(address, &modedData, &compareForMod))
+						if ((ceNES->interceptCPURead(address, &modedData, &compareVal, &hasCompare))
 							&&
-							((compareForMod == INVALID)
-								||
-								((compareForMod != INVALID)
-									&& ((BYTE)compareForMod == pNES_catridgeMemory->maxCatridgePRGROM[index]))))
+							(!hasCompare || (BYTE)compareVal == pNES_catridgeMemory->maxCatridgePRGROM[index]))
 						{
 							RETURN TO_UINT8(modedData);
 						}
@@ -1794,12 +1789,9 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 					{
 						index = pNES_instance->NES_state.catridgeInfo.uxrom_002.prgBank16 * 0x4000;
 						index += ((address - CATRIDGE_ROM_BANK0_START_ADDRESS) & 0x3FFF);
-						if ((ceNES->interceptCPURead(address, &modedData, &compareForMod))
+						if ((ceNES->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
 							&&
-							((compareForMod == INVALID)
-								||
-								((compareForMod != INVALID)
-									&& ((BYTE)compareForMod == pNES_catridgeMemory->maxCatridgePRGROM[index]))))
+							(!hasCompare || (BYTE)compareVal == pNES_catridgeMemory->maxCatridgePRGROM[index]))
 						{
 							RETURN TO_UINT8(modedData);
 						}
@@ -1810,12 +1802,9 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 					}
 					if (IF_ADDRESS_WITHIN(address, CATRIDGE_ROM_BANK1_START_ADDRESS, UNMAPPED_END_ADDRESS))
 					{
-						if ((ceNES->interceptCPURead(address, &modedData, &compareForMod))
+						if ((ceNES->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
 							&&
-							((compareForMod == INVALID)
-								||
-								((compareForMod != INVALID)
-									&& ((BYTE)compareForMod == pNES_cpuMemory->NESMemoryMap.catridgeMappedMemory[address - UNMAPPED_START_ADDRESS]))))
+							(!hasCompare || (BYTE)compareVal == pNES_cpuMemory->NESMemoryMap.catridgeMappedMemory[address - UNMAPPED_START_ADDRESS]))
 						{
 							RETURN TO_UINT8(modedData);
 						}
@@ -1828,12 +1817,9 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 				}
 				case MAPPER::CNROM:
 				{
-					if ((ceNES->interceptCPURead(address, &modedData, &compareForMod))
+					if ((ceNES->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
 						&&
-						((compareForMod == INVALID)
-							||
-							((compareForMod != INVALID)
-								&& ((BYTE)compareForMod == pNES_cpuMemory->NESMemoryMap.catridgeMappedMemory[address - UNMAPPED_START_ADDRESS]))))
+						(!hasCompare || (BYTE)compareVal == pNES_cpuMemory->NESMemoryMap.catridgeMappedMemory[address - UNMAPPED_START_ADDRESS]))
 					{
 						RETURN TO_UINT8(modedData);
 					}
@@ -1900,12 +1886,9 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 							FATAL("Invalid PRG ROM address in MMC3");
 						}
 
-						if ((ceNES->interceptCPURead(address, &modedData, &compareForMod))
+						if ((ceNES->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
 							&&
-							((compareForMod == INVALID)
-								||
-								((compareForMod != INVALID)
-									&& ((BYTE)compareForMod == pNES_catridgeMemory->maxCatridgePRGROM[index]))))
+							(!hasCompare || (BYTE)compareVal == pNES_catridgeMemory->maxCatridgePRGROM[index]))
 						{
 							RETURN TO_UINT8(modedData);
 						}
@@ -1926,12 +1909,9 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 					{
 						index = pNES_instance->NES_state.catridgeInfo.axrom.prgBank * 0x8000;
 						index += ((address - CATRIDGE_ROM_BANK0_START_ADDRESS) & 0x7FFF);
-						if ((ceNES->interceptCPURead(address, &modedData, &compareForMod))
+						if ((ceNES->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
 							&&
-							((compareForMod == INVALID)
-								||
-								((compareForMod != INVALID)
-									&& ((BYTE)compareForMod == pNES_catridgeMemory->maxCatridgePRGROM[index]))))
+							(!hasCompare || (BYTE)compareVal == pNES_catridgeMemory->maxCatridgePRGROM[index]))
 						{
 							RETURN TO_UINT8(modedData);
 						}
@@ -1952,12 +1932,9 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 					{
 						index = pNES_instance->NES_state.catridgeInfo.gxrom.prgBank * 0x8000;
 						index += ((address - CATRIDGE_ROM_BANK0_START_ADDRESS) & 0x7FFF);
-						if ((ceNES->interceptCPURead(address, &modedData, &compareForMod))
+						if ((ceNES->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
 							&&
-							((compareForMod == INVALID)
-								||
-								((compareForMod != INVALID)
-									&& ((BYTE)compareForMod == pNES_catridgeMemory->maxCatridgePRGROM[index]))))
+							(!hasCompare || (BYTE)compareVal == pNES_catridgeMemory->maxCatridgePRGROM[index]))
 						{
 							RETURN TO_UINT8(modedData);
 						}
@@ -2005,9 +1982,9 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 					{
 						index = pNES_instance->NES_state.catridgeInfo.nanjing_fc001.prgRomBank.raw * 0x8000;
 						index += ((address - CATRIDGE_ROM_BANK0_START_ADDRESS) & 0x7FFF);
-						if ((ceNES->interceptCPURead(address, &modedData, &compareForMod))
-							&& compareForMod != INVALID
-							&& (BYTE)compareForMod == pNES_catridgeMemory->maxCatridgePRGROM[index])
+						if ((ceNES->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
+							&&
+							(!hasCompare || (BYTE)compareVal == pNES_catridgeMemory->maxCatridgePRGROM[index]))
 						{
 							RETURN TO_UINT8(modedData);
 						}
