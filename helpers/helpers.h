@@ -1596,7 +1596,7 @@ MASQ_INLINE FLAG getMouseRelPosIfDocked(float* xpos, float* ypos,
 // ENUMERATIONS AND STRUCTS
 // =========================================================
 
-enum class EMULATION_ID : uint8_t
+enum EMULATION_ID : uint8_t
 {
     DEFAULT_ID = 0,
     CHIP8_ID,
@@ -1791,6 +1791,37 @@ std::unordered_map<uint32_t, EMULATION_ID> const _numberOfRomsToEmulationPlatfor
     {10,  EMULATION_ID::PACMAN_ID                               },
     {13,  EMULATION_ID::PACMAN_ID                               }
 };
+
+MASQ_INLINE const char* getEmulationName(EMULATION_ID id)
+{
+    static const std::unordered_map<EMULATION_ID, const char*> map =
+    {
+        {EMULATION_ID::DEFAULT_ID, "Default"},
+        {EMULATION_ID::CHIP8_ID, "CHIP-8"},
+        {EMULATION_ID::SPACE_INVADERS_ID, "Space Invaders"},
+        {EMULATION_ID::PACMAN_ID, "Pac-Man"},
+        {EMULATION_ID::NES_ID, "NES"},
+        {EMULATION_ID::GB_GBC_ID, "Game Boy / Game Boy Color"},
+        {EMULATION_ID::SNES_ID, "SNES"},
+        {EMULATION_ID::N64_ID, "Nintendo 64"},
+        {EMULATION_ID::GBA_ID, "Game Boy Advance"},
+        {EMULATION_ID::GAMECUBE_ID, "GameCube"},
+        {EMULATION_ID::DS_ID, "Nintendo DS"},
+        {EMULATION_ID::WII_ID, "Wii"},
+        {EMULATION_ID::DS3_ID, "PlayStation 3"},
+        {EMULATION_ID::WIIU_ID, "Wii U"},
+        {EMULATION_ID::SWITCH_ID, "Nintendo Switch"},
+        {EMULATION_ID::GAME_OF_LIFE_ID, "Game of Life"},
+        {EMULATION_ID::TEST_CPU_ID, "Test CPU"},
+        {EMULATION_ID::TOTAL_ID, "Total"},
+        {EMULATION_ID::ANY_ID, "Any"},
+        {EMULATION_ID::ANY_ID_FOR_COMPARE_OR_REPLAY, "Any (Compare/Replay)"},
+        {EMULATION_ID::INVALID_ID, "Invalid"}
+    };
+
+    auto it = map.find(id);
+    RETURN (it != map.end()) ? it->second : "Unknown";
+}
 
 #else
 

@@ -2640,30 +2640,36 @@ public:
 									ImGui::Begin("Cheats", &showCheatWin, ImGuiWindowFlags_AlwaysAutoResize);
 									ImGuiInputTextFlags input_text_flags = ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll;
 									FLAG atleastOneCE = NO;
-									static std::string dgg, dgs, gamegenie, gameshark;
-									static FLAG gg[2][MAX_CHEAT_COUNT_PER_ENGINE] = { NO };
-									static FLAG gs[2][MAX_CHEAT_COUNT_PER_ENGINE] = { NO };
+									static std::string dgg, dgs, dgar, dcb, gamegenie, gameshark, actionreplay, codebreaker;
 
-									// FIX: explicitly initialize selectedCEMode
-									static int32_t selectedCEMode = TO_UINT(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE);
+									static int32_t selectedCEMode = CheatEngine_t::CHEATING_ENGINE::GAMEGENIE;
 
-									// FIX: reset all per-game cheat UI state when the loaded game changes
+									// Reset all per-game cheat UI state when the loaded game changes
 									static EMULATION_ID lastEmuID = EMULATION_ID::DEFAULT_ID;
 									if (current_instance->getEmulationID() != lastEmuID)
 									{
 										lastEmuID = current_instance->getEmulationID();
-										memset(gg, NO, sizeof(gg)); memset(gs, NO, sizeof(gs));
-										dgg.clear(); dgs.clear(); gamegenie.clear(); gameshark.clear();
-										selectedCEMode = TO_UINT(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE);
+										dgg.clear(); dgs.clear(); dgar.clear(); dcb.clear();
+										gamegenie.clear(); gameshark.clear(); actionreplay.clear(); codebreaker.clear();
+										selectedCEMode = CheatEngine_t::CHEATING_ENGINE::GAMEGENIE;
 									}
 
-									ImGui::RadioButton("GameGenie", &selectedCEMode, TO_UINT(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE));
-									ImGui::RadioButton("GameShark", &selectedCEMode, TO_UINT(CheatEngine_t::CHEATING_ENGINE::GAMESHARK));
+									bool isGBA = (current_instance->getEmulationID() == EMULATION_ID::GBA_ID);
+									bool isGBGBC = (current_instance->getEmulationID() == EMULATION_ID::GB_GBC_ID);
+
+									// Radio buttons -- AR v3 only shown for GBA
+									ImGui::RadioButton("GameGenie", &selectedCEMode, CheatEngine_t::CHEATING_ENGINE::GAMEGENIE);
+									if (isGBA || isGBGBC)
+										ImGui::RadioButton("GameShark", &selectedCEMode, CheatEngine_t::CHEATING_ENGINE::GAMESHARK);
+									if (isGBA)
+									{
+										ImGui::RadioButton("Action Replay V3", &selectedCEMode, CheatEngine_t::CHEATING_ENGINE::ACTION_REPLAY_V3);
+										ImGui::RadioButton("CodeBreaker", &selectedCEMode, CheatEngine_t::CHEATING_ENGINE::CODEBREAKER);
+									}
+
 									ceMAS->setCheatEngineMode((CheatEngine_t::CHEATING_ENGINE)selectedCEMode, current_instance->getEmulationID());
 
 									// GameGenie input
-									FLAG enable = YES;
-									if (enable)
 									{
 										atleastOneCE = YES;
 										ImGui::Text("GameGenie");
@@ -2671,7 +2677,7 @@ public:
 										if (ImGui::InputText("GG Code", &gamegenie, input_text_flags))
 										{
 											if (dgg.empty()) dgg = gamegenie;
-											selectedCEMode = TO_UINT(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE);
+											selectedCEMode = CheatEngine_t::CHEATING_ENGINE::GAMEGENIE;
 											ceMAS->setCheatEngineMode(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, current_instance->getEmulationID());
 											ceMAS->applyNewCheat(dgg, gamegenie);
 											dgg.clear(); gamegenie.clear();
@@ -2679,10 +2685,8 @@ public:
 										ImGui::Separator();
 									}
 
-									// GameShark input
-									enable = (current_instance->getEmulationID() == EMULATION_ID::GB_GBC_ID)
-										|| (current_instance->getEmulationID() == EMULATION_ID::GBA_ID);
-									if (enable)
+									// GameShark input -- GB/GBC and GBA only
+									if (isGBA || isGBGBC)
 									{
 										atleastOneCE = YES;
 										ImGui::Text("GameShark");
@@ -2690,10 +2694,38 @@ public:
 										if (ImGui::InputText("GS Code", &gameshark, input_text_flags))
 										{
 											if (dgs.empty()) dgs = gameshark;
-											selectedCEMode = TO_UINT(CheatEngine_t::CHEATING_ENGINE::GAMESHARK);
+											selectedCEMode = CheatEngine_t::CHEATING_ENGINE::GAMESHARK;
 											ceMAS->setCheatEngineMode(CheatEngine_t::CHEATING_ENGINE::GAMESHARK, current_instance->getEmulationID());
 											ceMAS->applyNewCheat(dgs, gameshark);
 											dgs.clear(); gameshark.clear();
+										}
+										ImGui::Separator();
+									}
+
+									// Action Replay V3 and Codebreaker input -- GBA only
+									if (isGBA)
+									{
+										atleastOneCE = YES;
+										ImGui::Text("Action Replay V3");
+										ImGui::InputText("AR Name", &dgar, input_text_flags);
+										if (ImGui::InputText("AR Code", &actionreplay, input_text_flags))
+										{
+											if (dgar.empty()) dgar = actionreplay;
+											selectedCEMode = CheatEngine_t::CHEATING_ENGINE::ACTION_REPLAY_V3;
+											ceMAS->setCheatEngineMode(CheatEngine_t::CHEATING_ENGINE::ACTION_REPLAY_V3, current_instance->getEmulationID());
+											ceMAS->applyNewCheat(dgar, actionreplay);
+											dgar.clear(); actionreplay.clear();
+										}
+										ImGui::Separator();
+										ImGui::Text("CodeBreaker");
+										ImGui::InputText("CB Name", &dcb, input_text_flags);
+										if (ImGui::InputText("CB Code", &codebreaker, input_text_flags))
+										{
+											if (dcb.empty()) dcb = codebreaker;
+											selectedCEMode = CheatEngine_t::CHEATING_ENGINE::CODEBREAKER;
+											ceMAS->setCheatEngineMode(CheatEngine_t::CHEATING_ENGINE::CODEBREAKER, current_instance->getEmulationID());
+											ceMAS->applyNewCheat(dcb, codebreaker);
+											dcb.clear(); codebreaker.clear();
 										}
 										ImGui::Separator();
 									}
@@ -2707,98 +2739,210 @@ public:
 											if (ImGui::BeginTabItem("GameGenie"))
 											{
 												INC8 ii = RESET;
-												std::string ggKeyToDelete; // FIX: deferred erase
-
+												std::string ggKeyToDelete;
+												auto ggState = ceMAS->getCheatEnDisList(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE);
 												for (auto& [key, value] : ceMAS->getCheatList(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE))
 												{
 													if (ii < MAX_CHEAT_COUNT_PER_ENGINE)
 													{
-														// FIX: only sync checkbox when engine mode matches
-														if (ceMAS->getCheatEngineMode() == CheatEngine_t::CHEATING_ENGINE::GAMEGENIE)
+														FLAG enabledFlag = NO;
+														if (ggState.find(key) != ggState.end())
+															enabledFlag = ggState[key];
+														bool enabledBool = (enabledFlag == YES);
+
+														uint32_t codeCount = ceMAS->getSubCodeCount(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, key);
+														if (codeCount == 0) codeCount = 1;
+
+														std::string displayLabel = value;
+														if (codeCount > 1)
+															displayLabel += " (" + std::to_string(codeCount) + " codes)";
+
+														if (ImGui::Checkbox(displayLabel.c_str(), &enabledBool))
 														{
-															if (gg[PREV][ii] != gg[CURR][ii])
+															if (enabledBool == true)
 															{
-																gg[PREV][ii] = gg[CURR][ii];
-																if (gg[CURR][ii] == NO) ceMAS->disableCheat(key);
-																else
-																{
-																	selectedCEMode = TO_UINT(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE);
-																	ceMAS->setCheatEngineMode(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, current_instance->getEmulationID());
-																	ceMAS->enableCheat(key);
-																}
+																selectedCEMode = TO_UINT(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE);
+																ceMAS->setCheatEngineMode(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, current_instance->getEmulationID());
+																ceMAS->enableCheat(key);
+															}
+															else
+															{
+																ceMAS->disableCheat(key);
 															}
 														}
-														ImGui::Checkbox(value.c_str(), &(gg[CURR][ii]));
 														ImGui::SameLine();
 														float btnW = ImGui::CalcTextSize("Delete##gg##").x + ImGui::GetStyle().FramePadding.x * 2.0f;
 														ImGui::SetCursorPosX(ImGui::GetWindowContentRegionMax().x - btnW);
 														if (ImGui::Button(std::string("Delete##gg##" + std::to_string(ii)).c_str()))
 														{
-															gg[PREV][ii] = gg[CURR][ii] = NO;
-															if (ceMAS->getCheatEngineMode() == CheatEngine_t::CHEATING_ENGINE::GAMEGENIE) ggKeyToDelete = key;
+															if (ceMAS->getCheatEngineMode() == CheatEngine_t::CHEATING_ENGINE::GAMEGENIE)
+																ggKeyToDelete = key;
 														}
 														ii++;
 													}
 												}
-												// FIX: erase after loop
 												if (!ggKeyToDelete.empty())
-												{
 													ceMAS->deleteCheat(ggKeyToDelete);
-													ceMAS->getCheatList(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE).erase(ggKeyToDelete);
-												}
 												ImGui::EndTabItem();
 											}
 
-											// GameShark tab
-											enable = (current_instance->getEmulationID() == EMULATION_ID::GB_GBC_ID)
-												|| (current_instance->getEmulationID() == EMULATION_ID::GBA_ID);
-											if (enable && ImGui::BeginTabItem("GameShark"))
+											// GameShark tab -- GB/GBC and GBA only
+											if ((isGBA || isGBGBC) && ImGui::BeginTabItem("GameShark"))
 											{
 												INC8 ii = RESET;
-												std::string gsKeyToDelete; // FIX: deferred erase
-
+												std::string gsKeyToDelete;
+												auto gsState = ceMAS->getCheatEnDisList(CheatEngine_t::CHEATING_ENGINE::GAMESHARK);
 												for (auto& [key, value] : ceMAS->getCheatList(CheatEngine_t::CHEATING_ENGINE::GAMESHARK))
 												{
 													if (ii < MAX_CHEAT_COUNT_PER_ENGINE)
 													{
-														// FIX: only sync checkbox when engine mode matches
-														if (ceMAS->getCheatEngineMode() == CheatEngine_t::CHEATING_ENGINE::GAMESHARK)
+														FLAG enabledFlag = NO;
+														if (gsState.find(key) != gsState.end())
+															enabledFlag = gsState[key];
+														bool enabledBool = (enabledFlag == YES);
+
+														uint32_t codeCount = ceMAS->getSubCodeCount(CheatEngine_t::CHEATING_ENGINE::GAMESHARK, key);
+														if (codeCount == 0) codeCount = 1;
+
+														std::string displayLabel = value;
+														if (codeCount > 1)
+															displayLabel += " (" + std::to_string(codeCount) + " codes)";
+
+														if (ImGui::Checkbox(displayLabel.c_str(), &enabledBool))
 														{
-															if (gs[PREV][ii] != gs[CURR][ii])
+															if (enabledBool == true)
 															{
-																gs[PREV][ii] = gs[CURR][ii];
-																if (gs[CURR][ii] == NO) ceMAS->disableCheat(key);
-																else
-																{
-																	selectedCEMode = TO_UINT(CheatEngine_t::CHEATING_ENGINE::GAMESHARK);
-																	ceMAS->setCheatEngineMode(CheatEngine_t::CHEATING_ENGINE::GAMESHARK, current_instance->getEmulationID());
-																	ceMAS->enableCheat(key);
-																}
+																selectedCEMode = TO_UINT(CheatEngine_t::CHEATING_ENGINE::GAMESHARK);
+																ceMAS->setCheatEngineMode(CheatEngine_t::CHEATING_ENGINE::GAMESHARK, current_instance->getEmulationID());
+																ceMAS->enableCheat(key);
+															}
+															else
+															{
+																ceMAS->disableCheat(key);
 															}
 														}
-														ImGui::Checkbox(value.c_str(), &(gs[CURR][ii]));
 														ImGui::SameLine();
 														float btnW = ImGui::CalcTextSize("Delete##gs##").x + ImGui::GetStyle().FramePadding.x * 2.0f;
 														ImGui::SetCursorPosX(ImGui::GetWindowContentRegionMax().x - btnW);
 														if (ImGui::Button(std::string("Delete##gs##" + std::to_string(ii)).c_str()))
 														{
-															gs[PREV][ii] = gs[CURR][ii] = NO;
-															if (ceMAS->getCheatEngineMode() == CheatEngine_t::CHEATING_ENGINE::GAMESHARK) gsKeyToDelete = key;
+															if (ceMAS->getCheatEngineMode() == CheatEngine_t::CHEATING_ENGINE::GAMESHARK)
+																gsKeyToDelete = key;
 														}
 														ii++;
 													}
 												}
-												// FIX: erase after loop
 												if (!gsKeyToDelete.empty())
-												{
 													ceMAS->deleteCheat(gsKeyToDelete);
-													ceMAS->getCheatList(CheatEngine_t::CHEATING_ENGINE::GAMESHARK).erase(gsKeyToDelete);
-												}
 												ImGui::EndTabItem();
 											}
+
+											// Action Replay V3 tab -- GBA only
+											if (isGBA && ImGui::BeginTabItem("Action Replay V3"))
+											{
+												INC8 ii = RESET;
+												std::string arKeyToDelete;
+												auto arState = ceMAS->getCheatEnDisList(CheatEngine_t::CHEATING_ENGINE::ACTION_REPLAY_V3);
+												for (auto& [key, value] : ceMAS->getCheatList(CheatEngine_t::CHEATING_ENGINE::ACTION_REPLAY_V3))
+												{
+													if (ii < MAX_CHEAT_COUNT_PER_ENGINE)
+													{
+														FLAG enabledFlag = NO;
+														if (arState.find(key) != arState.end())
+															enabledFlag = arState[key];
+														bool enabledBool = (enabledFlag == YES);
+
+														uint32_t codeCount = ceMAS->getSubCodeCount(CheatEngine_t::CHEATING_ENGINE::ACTION_REPLAY_V3, key);
+														if (codeCount == 0) codeCount = 1;
+
+														std::string displayLabel = value;
+														if (codeCount > 1)
+															displayLabel += " (" + std::to_string(codeCount) + " codes)";
+
+														if (ImGui::Checkbox(displayLabel.c_str(), &enabledBool))
+														{
+															if (enabledBool == true)
+															{
+																selectedCEMode = TO_UINT(CheatEngine_t::CHEATING_ENGINE::ACTION_REPLAY_V3);
+																ceMAS->setCheatEngineMode(CheatEngine_t::CHEATING_ENGINE::ACTION_REPLAY_V3, current_instance->getEmulationID());
+																ceMAS->enableCheat(key);
+															}
+															else
+															{
+																ceMAS->disableCheat(key);
+															}
+														}
+														ImGui::SameLine();
+														float btnW = ImGui::CalcTextSize("Delete##ar##").x + ImGui::GetStyle().FramePadding.x * 2.0f;
+														ImGui::SetCursorPosX(ImGui::GetWindowContentRegionMax().x - btnW);
+														if (ImGui::Button(std::string("Delete##ar##" + std::to_string(ii)).c_str()))
+														{
+															if (ceMAS->getCheatEngineMode() == CheatEngine_t::CHEATING_ENGINE::ACTION_REPLAY_V3)
+																arKeyToDelete = key;
+														}
+														ii++;
+													}
+												}
+												if (!arKeyToDelete.empty())
+													ceMAS->deleteCheat(arKeyToDelete);
+												ImGui::EndTabItem();
+											}
+
+											// CodeBreaker tab -- GBA only
+											if (isGBA && ImGui::BeginTabItem("CodeBreaker"))
+											{
+												INC8 ii = RESET;
+												std::string cbKeyToDelete;
+												auto cbState = ceMAS->getCheatEnDisList(CheatEngine_t::CHEATING_ENGINE::CODEBREAKER);
+												for (auto& [key, value] : ceMAS->getCheatList(CheatEngine_t::CHEATING_ENGINE::CODEBREAKER))
+												{
+													if (ii < MAX_CHEAT_COUNT_PER_ENGINE)
+													{
+														FLAG enabledFlag = NO;
+														if (cbState.find(key) != cbState.end())
+															enabledFlag = cbState[key];
+														bool enabledBool = (enabledFlag == YES);
+
+														uint32_t codeCount = ceMAS->getSubCodeCount(CheatEngine_t::CHEATING_ENGINE::CODEBREAKER, key);
+														if (codeCount == 0) codeCount = 1;
+
+														std::string displayLabel = value;
+														if (codeCount > 1)
+															displayLabel += " (" + std::to_string(codeCount) + " codes)";
+
+														if (ImGui::Checkbox(displayLabel.c_str(), &enabledBool))
+														{
+															if (enabledBool == true)
+															{
+																selectedCEMode = TO_UINT(CheatEngine_t::CHEATING_ENGINE::CODEBREAKER);
+																ceMAS->setCheatEngineMode(CheatEngine_t::CHEATING_ENGINE::CODEBREAKER, current_instance->getEmulationID());
+																ceMAS->enableCheat(key);
+															}
+															else
+															{
+																ceMAS->disableCheat(key);
+															}
+														}
+														ImGui::SameLine();
+														float btnW = ImGui::CalcTextSize("Delete##cb##").x + ImGui::GetStyle().FramePadding.x * 2.0f;
+														ImGui::SetCursorPosX(ImGui::GetWindowContentRegionMax().x - btnW);
+														if (ImGui::Button(std::string("Delete##cb##" + std::to_string(ii)).c_str()))
+														{
+															if (ceMAS->getCheatEngineMode() == CheatEngine_t::CHEATING_ENGINE::CODEBREAKER)
+																cbKeyToDelete = key;
+														}
+														ii++;
+													}
+												}
+												if (!cbKeyToDelete.empty())
+													ceMAS->deleteCheat(cbKeyToDelete);
+												ImGui::EndTabItem();
+											}
+
 											ImGui::EndTabBar();
 										}
 									}
+
 									ImGui::End();
 								}
 
@@ -3169,7 +3313,7 @@ abstractEmulation_t* getType(int nFiles,
 #endif
 #if MASQ_ENABLE_GBA
 		if (suspectedID == EMULATION_ID::GBA_ID)
-			RETURN new GBA_t(ONE, rom, config);
+			RETURN new GBA_t(ONE, rom, config, ce);
 #endif
 #if MASQ_ENABLE_GOL
 		if (suspectedID == EMULATION_ID::GAME_OF_LIFE_ID)

@@ -90,7 +90,7 @@ static uint32_t matrix[16] = { 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0
 #pragma endregion GBA_SPECIFIC_DECLARATIONS
 
 #pragma region INFRASTRUCTURE_DEFINITIONS
-GBA_t::GBA_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config)
+GBA_t::GBA_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config, CheatEngine_t* ce)
 {
 	// set log level
 #if _DEBUG
@@ -210,6 +210,10 @@ GBA_t::GBA_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 	}
 
 	this->pt = config;
+
+	this->ceGBA = ce;
+
+	this->ceGBA->setCheatEngineMode(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, EMULATION_ID::GBA_ID);
 
 #ifndef __EMSCRIPTEN__
 	_SAVE_LOCATION = pt.get<std::string>("gba._save_location", "");
@@ -5921,6 +5925,51 @@ FLAG GBA_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 		processSOC();
 	}
 
+	if (pGBA_display->wasVblankJustTriggered)
+	{
+		// at GBA VBlank — hardware accurate cheat writes
+		// ROM patch entries (address >= GAMEPAK_ROM_WS0_START_ADDRESS) are skipped here;
+		// those are handled by interceptCPURead in the read path.
+		for (auto engine : { CheatEngine_t::CHEATING_ENGINE::GAMESHARK,
+							 CheatEngine_t::CHEATING_ENGINE::ACTION_REPLAY_V3,
+							 CheatEngine_t::CHEATING_ENGINE::CODEBREAKER })
+		{
+			auto writes = ceGBA->getCheatWrites(engine);
+			for (auto& w : writes)
+			{
+				if (w.address >= GAMEPAK_ROM_WS0_START_ADDRESS) continue;
+
+				switch (w.width)
+				{
+				case CheatEngine_t::CheatWidth::U8:
+					writeRawMemory<uint8_t>(
+						w.address,
+						static_cast<uint8_t>(w.data),
+						MEMORY_ACCESS_WIDTH::EIGHT_BIT,
+						MEMORY_ACCESS_SOURCE::CPU,
+						MEMORY_ACCESS_TYPE::AUTOMATIC);
+					BREAK;
+				case CheatEngine_t::CheatWidth::U16:
+					writeRawMemory<uint16_t>(
+						w.address,
+						static_cast<uint16_t>(w.data),
+						MEMORY_ACCESS_WIDTH::SIXTEEN_BIT,
+						MEMORY_ACCESS_SOURCE::CPU,
+						MEMORY_ACCESS_TYPE::AUTOMATIC);
+					BREAK;
+				case CheatEngine_t::CheatWidth::U32:
+					writeRawMemory<uint32_t>(
+						w.address,
+						static_cast<uint32_t>(w.data),
+						MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT,
+						MEMORY_ACCESS_SOURCE::CPU,
+						MEMORY_ACCESS_TYPE::AUTOMATIC);
+					BREAK;
+				}
+			}
+		}
+	}
+
 	RETURN pGBA_display->wasVblankJustTriggered;
 }
 
@@ -6150,8 +6199,16 @@ void GBA_t::destroyEmulator()
 			{
 				for (uint32_t ii = ZERO; ii < sizeOfSRAMSlot; ii++)
 				{
-					BYTE ramByte = pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[banks][ii];
-					outSRAM.write(reinterpret_cast<const char*> (&ramByte), ONE);
+					uint32_t address = GAMEPAK_SRAM_START_ADDRESS + (banks * sizeOfSRAMSlot) + ii;
+
+					BYTE ramByte = readRawMemoryInternal<BYTE>(
+						address,
+						MEMORY_ACCESS_WIDTH::EIGHT_BIT,
+						MEMORY_ACCESS_SOURCE::HOST,
+						MEMORY_ACCESS_TYPE::AUTOMATIC
+					);
+
+					outSRAM.write(reinterpret_cast<const char*>(&ramByte), ONE);
 				}
 				outSRAM.flush();
 			}
