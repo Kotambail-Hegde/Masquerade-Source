@@ -25,75 +25,75 @@
 #define NES_PPU_CLOCK_HZ								NES_CPU_CLOCK_HZ * 3.0f				// Refer : https://www.nesdev.org/wiki/CPU
 
 // CPU Memory Mapping
-#define RAM_START_ADDRESS								(0x0000)
-#define ZERO_PAGE_START_ADDRESS							(RAM_START_ADDRESS)
-#define ZERO_PAGE_END_ADDRESS							(ZERO_PAGE_START_ADDRESS + 0xFF)
-#define STACK_START_ADDRESS								(ZERO_PAGE_END_ADDRESS + 1)
-#define STACK_END_ADDRESS								(STACK_START_ADDRESS + 0xFF)
-#define RAM_END_ADDRESS									(RAM_START_ADDRESS + 0x07FF)
-#define RAM_MIRROR1_START_ADDRESS						(RAM_END_ADDRESS + 1)
-#define CPU_RAM_SIZE									(RAM_END_ADDRESS + 1 - RAM_START_ADDRESS)
-#define RAM_MIRROR1_END_ADDRESS							(RAM_MIRROR1_START_ADDRESS + 0x07FF)
-#define RAM_MIRROR2_START_ADDRESS						(RAM_MIRROR1_END_ADDRESS + 1)
-#define RAM_MIRROR2_END_ADDRESS							(RAM_MIRROR2_START_ADDRESS + 0x07FF)
-#define RAM_MIRROR3_START_ADDRESS						(RAM_MIRROR2_END_ADDRESS + 1)
-#define RAM_MIRROR3_END_ADDRESS							(RAM_MIRROR3_START_ADDRESS + 0x07FF)
-#define PPU_START_ADDRESS								(RAM_MIRROR3_END_ADDRESS + 1)
-#define PPU_CTRL_ADDRESS								(0x2000)
-#define PPU_MASK_ADDRESS								(0x2001)
-#define PPU_STATUS_ADDRESS								(0x2002)
-#define OAM_ADDR_ADDRESS								(0x2003)
-#define OAM_DATA_ADDRESS								(0x2004)
-#define PPU_SCROLL_ADDRESS								(0x2005)
-#define PPU_ADDR_ADDRESS								(0x2006)
-#define PPU_DATA_ADDRESS								(0x2007)
-#define PPU_END_ADDRESS									(PPU_START_ADDRESS + 0x0007)
-#define PPU_CTRL_REG_SIZE								(PPU_END_ADDRESS + 1 - PPU_START_ADDRESS)
-#define PPU_MIRROR_START_ADDRESS						(PPU_END_ADDRESS + 1)
-#define PPU_MIRROR_END_ADDRESS							(0x3FFF)
-#define APU_AND_IO_START_ADDRESS						(PPU_MIRROR_END_ADDRESS + 1)
-#define OAM_DMA_ADDRESS									(0x4014)
-#define APU_STATUS_ADDRESS								(0x4015)
-#define JOYSTICK1_ADDRESS								(0x4016)
-#define JOYSTICK2_OR_FRAMECFG_ADDRESS					(0x4017)
-#define APU_AND_IO_END_ADDRESS							(APU_AND_IO_START_ADDRESS + 0x0017)
-#define OTHER_APU_AND_IO_START_ADDRESS					(APU_AND_IO_END_ADDRESS + 1)
-#define OTHER_APU_AND_IO_END_ADDRESS					(OTHER_APU_AND_IO_START_ADDRESS + 0x0007)
-#define UNMAPPED_START_ADDRESS							(OTHER_APU_AND_IO_END_ADDRESS + 1)
-#define CATRIDGE_RAM_START_ADDRESS						(0x6000)
-#define CATRIDGE_RAM_END_ADDRESS						(CATRIDGE_RAM_START_ADDRESS + 0x1FFF)
-#define CATRIDGE_ROM_BANK0_START_ADDRESS				(0x8000)
-#define CATRIDGE_ROM_BANK0_END_ADDRESS					(CATRIDGE_ROM_BANK0_START_ADDRESS + 0x3FFF)
-#define CATRIDGE_ROM_BANK1_START_ADDRESS				(0xC000)
-#define CATRIDGE_ROM_BANK1_END_ADDRESS					(CATRIDGE_ROM_BANK1_START_ADDRESS + 0x3FFF)
-#define NMI_VECTOR_START_ADDRESS						(0xFFFA)
-#define NMI_VECTOR_END_ADDRESS							(NMI_VECTOR_START_ADDRESS + 1)
-#define RESET_VECTOR_START_ADDRESS						(0xFFFC)
-#define RESET_VECTOR_END_ADDRESS						(RESET_VECTOR_START_ADDRESS + 1)
-#define IRQ_BRK_VECTOR_START_ADDRESS					(0xFFFE)
-#define IRQ_BRK_VECTOR_END_ADDRESS						(IRQ_BRK_VECTOR_START_ADDRESS + 1)
-#define UNMAPPED_END_ADDRESS							(0xFFFF)
+#define RAM_START_ADDRESS								(0x0000) // 0x0000
+#define ZERO_PAGE_START_ADDRESS							(RAM_START_ADDRESS) // 0x0000
+#define ZERO_PAGE_END_ADDRESS							(ZERO_PAGE_START_ADDRESS + 0xFF) // 0x00FF
+#define STACK_START_ADDRESS								(ZERO_PAGE_END_ADDRESS + 1) // 0x0100
+#define STACK_END_ADDRESS								(STACK_START_ADDRESS + 0xFF) // 0x01FF
+#define RAM_END_ADDRESS									(RAM_START_ADDRESS + 0x07FF) // 0x07FF
+#define RAM_MIRROR1_START_ADDRESS						(RAM_END_ADDRESS + 1) // 0x0800
+#define CPU_RAM_SIZE									(RAM_END_ADDRESS + 1 - RAM_START_ADDRESS) // 0x0800
+#define RAM_MIRROR1_END_ADDRESS							(RAM_MIRROR1_START_ADDRESS + 0x07FF) // 0x0FFF
+#define RAM_MIRROR2_START_ADDRESS						(RAM_MIRROR1_END_ADDRESS + 1) // 0x1000
+#define RAM_MIRROR2_END_ADDRESS							(RAM_MIRROR2_START_ADDRESS + 0x07FF) // 0x17FF
+#define RAM_MIRROR3_START_ADDRESS						(RAM_MIRROR2_END_ADDRESS + 1) // 0x1800
+#define RAM_MIRROR3_END_ADDRESS							(RAM_MIRROR3_START_ADDRESS + 0x07FF) // 0x1FFF
+#define PPU_START_ADDRESS								(RAM_MIRROR3_END_ADDRESS + 1) // 0x2000
+#define PPU_CTRL_ADDRESS								(0x2000) // 0x2000
+#define PPU_MASK_ADDRESS								(0x2001) // 0x2001
+#define PPU_STATUS_ADDRESS								(0x2002) // 0x2002
+#define OAM_ADDR_ADDRESS								(0x2003) // 0x2003
+#define OAM_DATA_ADDRESS								(0x2004) // 0x2004
+#define PPU_SCROLL_ADDRESS								(0x2005) // 0x2005
+#define PPU_ADDR_ADDRESS								(0x2006) // 0x2006
+#define PPU_DATA_ADDRESS								(0x2007) // 0x2007
+#define PPU_END_ADDRESS									(PPU_START_ADDRESS + 0x0007) // 0x2007
+#define PPU_CTRL_REG_SIZE								(PPU_END_ADDRESS + 1 - PPU_START_ADDRESS) // 0x0008
+#define PPU_MIRROR_START_ADDRESS						(PPU_END_ADDRESS + 1) // 0x2008
+#define PPU_MIRROR_END_ADDRESS							(0x3FFF) // 0x3FFF
+#define APU_AND_IO_START_ADDRESS						(PPU_MIRROR_END_ADDRESS + 1) // 0x4000
+#define OAM_DMA_ADDRESS									(0x4014) // 0x4014
+#define APU_STATUS_ADDRESS								(0x4015) // 0x4015
+#define JOYSTICK1_ADDRESS								(0x4016) // 0x4016
+#define JOYSTICK2_OR_FRAMECFG_ADDRESS					(0x4017) // 0x4017
+#define APU_AND_IO_END_ADDRESS							(APU_AND_IO_START_ADDRESS + 0x0017) // 0x4017
+#define OTHER_APU_AND_IO_START_ADDRESS					(APU_AND_IO_END_ADDRESS + 1) // 0x4018
+#define OTHER_APU_AND_IO_END_ADDRESS					(OTHER_APU_AND_IO_START_ADDRESS + 0x0007) // 0x401F
+#define UNMAPPED_START_ADDRESS							(OTHER_APU_AND_IO_END_ADDRESS + 1) // 0x4020
+#define CATRIDGE_RAM_START_ADDRESS						(0x6000) // 0x6000
+#define CATRIDGE_RAM_END_ADDRESS						(CATRIDGE_RAM_START_ADDRESS + 0x1FFF) // 0x7FFF
+#define CATRIDGE_ROM_BANK0_START_ADDRESS				(0x8000) // 0x8000
+#define CATRIDGE_ROM_BANK0_END_ADDRESS					(CATRIDGE_ROM_BANK0_START_ADDRESS + 0x3FFF) // 0xBFFF
+#define CATRIDGE_ROM_BANK1_START_ADDRESS				(0xC000) // 0xC000
+#define CATRIDGE_ROM_BANK1_END_ADDRESS					(CATRIDGE_ROM_BANK1_START_ADDRESS + 0x3FFF) // 0xFFFF
+#define NMI_VECTOR_START_ADDRESS						(0xFFFA) // 0xFFFA
+#define NMI_VECTOR_END_ADDRESS							(NMI_VECTOR_START_ADDRESS + 1) // 0xFFFB
+#define RESET_VECTOR_START_ADDRESS						(0xFFFC) // 0xFFFC
+#define RESET_VECTOR_END_ADDRESS						(RESET_VECTOR_START_ADDRESS + 1) // 0xFFFD
+#define IRQ_BRK_VECTOR_START_ADDRESS					(0xFFFE) // 0xFFFE
+#define IRQ_BRK_VECTOR_END_ADDRESS						(IRQ_BRK_VECTOR_START_ADDRESS + 1) // 0xFFFF
+#define UNMAPPED_END_ADDRESS							(0xFFFF) // 0xFFFF
 
 // PPU Memory Mapping
-#define PATTERN_TABLE0_START_ADDRESS					(0x0000)
-#define PATTERN_TABLE0_END_ADDRESS						(PATTERN_TABLE0_START_ADDRESS + 0x0FFF)
-#define PATTERN_TABLE1_START_ADDRESS					(PATTERN_TABLE0_END_ADDRESS + 1)
-#define PATTERN_TABLE1_END_ADDRESS						(PATTERN_TABLE1_START_ADDRESS + 0x0FFF)
-#define NAME_TABLE0_START_ADDRESS						(PATTERN_TABLE1_END_ADDRESS + 1)
-#define NAME_TABLE0_END_ADDRESS							(NAME_TABLE0_START_ADDRESS + 0x03FF)
-#define NAME_TABLE1_START_ADDRESS						(NAME_TABLE0_END_ADDRESS + 1)
-#define NAME_TABLE1_END_ADDRESS							(NAME_TABLE1_START_ADDRESS + 0x03FF)
-#define NAME_TABLE2_START_ADDRESS						(NAME_TABLE1_END_ADDRESS + 1)
-#define NAME_TABLE2_END_ADDRESS							(NAME_TABLE2_START_ADDRESS + 0x03FF)
-#define NAME_TABLE3_START_ADDRESS						(NAME_TABLE2_END_ADDRESS + 1)
-#define NAME_TABLE3_END_ADDRESS							(NAME_TABLE3_START_ADDRESS + 0x03FF)
-#define NAME_TABLE_SIZE									(NAME_TABLE1_END_ADDRESS + 1 - NAME_TABLE0_START_ADDRESS)
-#define PPU_UNUSED_START_ADDRESS						(NAME_TABLE3_END_ADDRESS + 1)
-#define PPU_UNUSED_END_ADDRESS							(PPU_UNUSED_START_ADDRESS + 0x0EFF)
-#define PALETTE_RAM_INDEXES_START_ADDRESS				(PPU_UNUSED_END_ADDRESS + 1)
-#define PALETTE_RAM_INDEXES_END_ADDRESS					(PALETTE_RAM_INDEXES_START_ADDRESS + 0x001F)
-#define PALETTE_RAM_INDEXES_MIRROR_START_ADDRESS		(PALETTE_RAM_INDEXES_END_ADDRESS + 1)
-#define PALETTE_RAM_INDEXES_MIRROR_END_ADDRESS			(PALETTE_RAM_INDEXES_MIRROR_START_ADDRESS + 0x00DF)
+#define PATTERN_TABLE0_START_ADDRESS					(0x0000) // 0x0000
+#define PATTERN_TABLE0_END_ADDRESS						(PATTERN_TABLE0_START_ADDRESS + 0x0FFF) // 0x0FFF
+#define PATTERN_TABLE1_START_ADDRESS					(PATTERN_TABLE0_END_ADDRESS + 1) // 0x1000
+#define PATTERN_TABLE1_END_ADDRESS						(PATTERN_TABLE1_START_ADDRESS + 0x0FFF) // 0x1FFF
+#define NAME_TABLE0_START_ADDRESS						(PATTERN_TABLE1_END_ADDRESS + 1) // 0x2000
+#define NAME_TABLE0_END_ADDRESS							(NAME_TABLE0_START_ADDRESS + 0x03FF) // 0x23FF
+#define NAME_TABLE1_START_ADDRESS						(NAME_TABLE0_END_ADDRESS + 1) // 0x2400
+#define NAME_TABLE1_END_ADDRESS							(NAME_TABLE1_START_ADDRESS + 0x03FF) // 0x27FF
+#define NAME_TABLE2_START_ADDRESS						(NAME_TABLE1_END_ADDRESS + 1) // 0x2800
+#define NAME_TABLE2_END_ADDRESS							(NAME_TABLE2_START_ADDRESS + 0x03FF) // 0x2BFF
+#define NAME_TABLE3_START_ADDRESS						(NAME_TABLE2_END_ADDRESS + 1) // 0x2C00
+#define NAME_TABLE3_END_ADDRESS							(NAME_TABLE3_START_ADDRESS + 0x03FF) // 0x2FFF
+#define NAME_TABLE_SIZE									(NAME_TABLE1_END_ADDRESS + 1 - NAME_TABLE0_START_ADDRESS) // 0x0800
+#define PPU_UNUSED_START_ADDRESS						(NAME_TABLE3_END_ADDRESS + 1) // 0x3000
+#define PPU_UNUSED_END_ADDRESS							(PPU_UNUSED_START_ADDRESS + 0x0EFF) // 0x3EFF
+#define PALETTE_RAM_INDEXES_START_ADDRESS				(PPU_UNUSED_END_ADDRESS + 1) // 0x3F00
+#define PALETTE_RAM_INDEXES_END_ADDRESS					(PALETTE_RAM_INDEXES_START_ADDRESS + 0x001F) // 0x3F1F
+#define PALETTE_RAM_INDEXES_MIRROR_START_ADDRESS		(PALETTE_RAM_INDEXES_END_ADDRESS + 1) // 0x3F20
+#define PALETTE_RAM_INDEXES_MIRROR_END_ADDRESS			(PALETTE_RAM_INDEXES_MIRROR_START_ADDRESS + 0x00DF) // 0x3FFF
 
 // Others
 #define EMULATED_AUDIO_SAMPLING_RATE_FOR_NES			(48000.0)
@@ -114,6 +114,10 @@
 #define NES_LAST_SCANLINE_PER_FRAME						(239)
 
 #define NES_IRQ_SRC_NONE								(RESET)
+
+#define NES_PPU_NTSC_FRAME_DOTS							(89342)
+
+#define NES_MAX_ROM_SIZE								(0x202000)
 #pragma endregion MACROS
 
 #pragma region CORE
@@ -876,6 +880,7 @@ private:
 			FLAG E;
 			FLAG F;
 		} nanjing_fc001;
+		FLAG isBusConflictPresent;
 	} catridgeInfo_t;
 
 	typedef struct
@@ -1207,34 +1212,115 @@ private:
 				{
 					BYTE vsUnisystem : 1; // bit  0
 					BYTE playChoice : 1; // bit  1
-					BYTE flags8_15Type : 2; // bits  2 - 3
+					BYTE nes2p0 : 2; // bits  2 - 3
 					BYTE mapperHi : 4; // bits  4 - 7
 				} fields;
 				BYTE raw;
 			} flag7;
-			BYTE prgRamSize;
 			union
 			{
 				struct
 				{
-					BYTE tvSystem : 1; // bit  0
-					BYTE reserved : 7; // bits  1 - 7
-				} fields;
-				BYTE raw;
-			} flag9;
-			union
-			{
+					BYTE prgRamSize;
+					union
+					{
+						struct
+						{
+							BYTE tvSystem : 2; // bit  0
+							BYTE reserved : 6; // bits  1 - 7
+						} fields;
+						BYTE raw;
+					} flag9;
+					union
+					{
+						struct
+						{
+							BYTE tvSystem : 2; // bit  0 - 1
+							BYTE reserved0 : 2; // bits 2 - 3
+							BYTE prgRamNotPresent : 1; // bit  4
+							BYTE busConflict : 1; // bit 5
+							BYTE reserved1 : 2; // bits 6 - 7
+						} fields;
+						BYTE raw;
+					} flag10;
+					BYTE pad[FIVE];
+				} ines;
 				struct
 				{
-					BYTE tvSystem : 2; // bit  0 - 1
-					BYTE reserved0 : 2; // bits 2 - 3
-					BYTE prgRamNotPresent : 1; // bit  4
-					BYTE busConflict : 1; // bit 5
-					BYTE reserved1 : 2; // bits 6 - 7
-				} fields;
-				BYTE raw;
-			} flag10;
-			BYTE pad[FIVE];
+					union
+					{
+						struct
+						{
+							BYTE mapperNBHi : 4; // bits  0 - 3
+							BYTE subMapper : 4; // bits 4 - 7
+						} fields;
+						BYTE raw;
+					} flag8;
+					union
+					{
+						struct
+						{
+							BYTE prgRomMSB : 4; // bits  0 - 3
+							BYTE chrRomMSB : 4; // bits 4 - 7
+						} fields;
+						BYTE raw;
+					} flag9;
+					union
+					{
+						struct
+						{
+							BYTE prgVolRam : 4; // bits  0 - 3 
+							BYTE prgNonVolRam : 4; // bits 4 - 7
+						} fields;
+						BYTE raw;
+					} flag10;
+					union
+					{
+						struct
+						{
+							BYTE chrVolRam : 4; // bits  0 - 3 
+							BYTE chrNonVolRam : 4; // bits 4 - 7
+						} fields;
+						BYTE raw;
+					} flag11;
+					union
+					{
+						struct
+						{
+							BYTE variant : 2; // bits  0 - 1 
+							BYTE reserved : 6; // bits 2 - 7
+						} fields;
+						BYTE raw;
+					} flag12;
+					union
+					{
+						struct
+						{
+							BYTE ppuType : 4; // bits  0 - 3 
+							BYTE hwType : 4; // bits 4 - 7
+						} fields;
+						BYTE raw;
+					} flag13;
+					union
+					{
+						struct
+						{
+							BYTE miscRoms : 2; // bits  0 - 1 
+							BYTE reserved : 6; // bits 2 - 7
+						} fields;
+						BYTE raw;
+					} flag14;
+					union
+					{
+						struct
+						{
+							BYTE expDev : 7; // bits  0 - 6 
+							BYTE reserved : 1; // bit 7
+						} fields;
+						BYTE raw;
+					} flag15;
+				} nes2p0;
+			} flags_8to15;
 		} fields;
 		BYTE header[SIXTEEN];
 	} iNES_header_t;
@@ -1249,15 +1335,15 @@ private:
 				struct
 				{
 					BYTE trainer[512];
-					BYTE romData[0x10000 - sizeof(iNES_header_t) - sizeof(trainer)];
+					BYTE romData[NES_MAX_ROM_SIZE - sizeof(iNES_header_t) - sizeof(trainer)];
 				} withTrainer;
 				struct
 				{
-					BYTE romData[0x10000 - sizeof(iNES_header_t)];
+					BYTE romData[NES_MAX_ROM_SIZE - sizeof(iNES_header_t)];
 				} withoutTrainer;
 			} remaining;
 		} iNES_Fields;
-		BYTE completeROM[0x202000];	// Maximum rom size seen so far is 2049 KB
+		BYTE completeROM[NES_MAX_ROM_SIZE];	// Maximum rom size seen so far is 2049 KB
 	} iNES_t;
 
 	typedef struct
