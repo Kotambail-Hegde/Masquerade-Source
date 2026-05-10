@@ -597,18 +597,18 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 #endif
 				BIT chrRomBankMode = pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.bankRegisterSelect_even8k.fields.chrRomMode;
 
-				auto startAddr1 = PATTERN_TABLE0_START_ADDRESS;
-				auto endAddr1 = startAddr1 + 0x07FF; // 2KB
-				auto startAddr2 = endAddr1 + ONE;
-				auto endAddr2 = startAddr2 + 0x07FF; // 2KB
-				auto startAddr3 = endAddr2 + ONE;
-				auto endAddr3 = startAddr3 + 0x03FF; // 1KB
-				auto startAddr4 = endAddr3 + ONE;
-				auto endAddr4 = startAddr4 + 0x03FF; // 1KB
-				auto startAddr5 = endAddr4 + ONE;
-				auto endAddr5 = startAddr5 + 0x03FF; // 1KB
-				auto startAddr6 = endAddr5 + ONE;
-				auto endAddr6 = startAddr6 + 0x03FF; // 1KB
+				uint32_t startAddr1 = PATTERN_TABLE0_START_ADDRESS;
+				uint32_t endAddr1 = startAddr1 + 0x07FF; // 2KB
+				uint32_t startAddr2 = endAddr1 + ONE;
+				uint32_t endAddr2 = startAddr2 + 0x07FF; // 2KB
+				uint32_t startAddr3 = endAddr2 + ONE;
+				uint32_t endAddr3 = startAddr3 + 0x03FF; // 1KB
+				uint32_t startAddr4 = endAddr3 + ONE;
+				uint32_t endAddr4 = startAddr4 + 0x03FF; // 1KB
+				uint32_t startAddr5 = endAddr4 + ONE;
+				uint32_t endAddr5 = startAddr5 + 0x03FF; // 1KB
+				uint32_t startAddr6 = endAddr5 + ONE;
+				uint32_t endAddr6 = startAddr6 + 0x03FF; // 1KB
 
 				if (chrRomBankMode == SET)
 				{
@@ -1260,19 +1260,19 @@ void NES_t::writePpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 				pNES_ppuMemory->NESMemoryMap.paletteRamIndex[index] = data;
 				pNES_ppuMemory->NESMemoryMap.paletteRamIndex[index + SIXTEEN] = data;
 			}
-			if (index == FOUR || index == (FOUR + SIXTEEN))
+			else if (index == FOUR || index == (FOUR + SIXTEEN))
 			{
 				index = FOUR;
 				pNES_ppuMemory->NESMemoryMap.paletteRamIndex[index] = data;
 				pNES_ppuMemory->NESMemoryMap.paletteRamIndex[index + SIXTEEN] = data;
 			}
-			if (index == EIGHT || index == (EIGHT + SIXTEEN))
+			else if (index == EIGHT || index == (EIGHT + SIXTEEN))
 			{
 				index = EIGHT;
 				pNES_ppuMemory->NESMemoryMap.paletteRamIndex[index] = data;
 				pNES_ppuMemory->NESMemoryMap.paletteRamIndex[index + SIXTEEN] = data;
 			}
-			if (index == TWELVE || index == (TWELVE + SIXTEEN))
+			else if (index == TWELVE || index == (TWELVE + SIXTEEN))
 			{
 				index = TWELVE;
 				pNES_ppuMemory->NESMemoryMap.paletteRamIndex[index] = data;
@@ -1766,7 +1766,7 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 						}
 						}
 
-						if ((ceNES->interceptCPURead(address, &modedData, &compareVal, &hasCompare))
+						if ((ceNES->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
 							&&
 							(!hasCompare || (BYTE)compareVal == pNES_catridgeMemory->maxCatridgePRGROM[index]))
 						{
@@ -1868,16 +1868,27 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 						}
 						else if (IF_ADDRESS_WITHIN(address, startAddr2, endAddr2))
 						{
-							// Note that sizeOfPrgRom is in 16KB units
-							// sizeOfPrgRom - ONE is the start address of last 16 KB bank
-							// Hence sizeOfPrgRom - ONE is also the start address of second last 8KB bank
-							index = (pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB - ONE) * 0x4000;
+							const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
+							const bool isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
+							const uint32_t totalPrg16kBanks = isNES2
+								? (hdr.sizeOfPrgRomIn16KB | (hdr.flags_8to15.nes2p0.flag9.fields.prgRomMSB << 8))
+								: hdr.sizeOfPrgRomIn16KB;
+
+							// totalPrg16kBanks - ONE is the start of the last 16KB bank,
+							// which is also the start of the second-to-last 8KB bank
+							index = (totalPrg16kBanks - ONE) * 0x4000;
 							index += ((address - startAddr2) & 0x1FFF);
 						}
 						else if (IF_ADDRESS_WITHIN(address, 0xE000, 0xFFFF))
 						{
-							// Same as what we did for last but 1 bank, but add another 0x2000 to get the last bank
-							index = (pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB - ONE) * 0x4000;
+							const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
+							const bool isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
+							const uint32_t totalPrg16kBanks = isNES2
+								? (hdr.sizeOfPrgRomIn16KB | (hdr.flags_8to15.nes2p0.flag9.fields.prgRomMSB << 8))
+								: hdr.sizeOfPrgRomIn16KB;
+
+							// Add 0x2000 past the second-to-last bank to get the last 8KB bank
+							index = (totalPrg16kBanks - ONE) * 0x4000;
 							index += 0x2000;
 							index += ((address - 0xE000) & 0x1FFF);
 						}
@@ -1947,21 +1958,12 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 				}
 				case MAPPER::NANJING_FC001:
 				{
-					if (address == 0x5000)
+					if (address == 0x5000
+						|| IF_ADDRESS_WITHIN(address, 0x5100, 0x5101)
+						|| address == 0x5200
+						|| address == 0x5300)
 					{
-						FATAL("Reading from write only register ??? for mapper 163 at %d of %s", __LINE__, __FILE__);
-					}
-					else if (IF_ADDRESS_WITHIN(address, 0x5100, 0x5101))
-					{
-						FATAL("Reading from write only register ??? for mapper 163 at %d of %s", __LINE__, __FILE__);
-					}
-					else if (address == 0x5200)
-					{
-						FATAL("Reading from write only register ??? for mapper 163 at %d of %s", __LINE__, __FILE__);
-					}
-					else if (address == 0x5300)
-					{
-						FATAL("Reading from write only register ??? for mapper 163 at %d of %s", __LINE__, __FILE__);
+						RETURN (address >> EIGHT);
 					}
 					else if (IF_ADDRESS_WITHIN(address, 0x5500, 0x5501))
 					{
@@ -2749,10 +2751,16 @@ void NES_t::writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 											// Refer https://www.nesdev.org/wiki/MMC1#Consecutive-cycle_writes for 3: fix last bank at $C000 and switch 16 KB bank at $8000
 											pNES_instance->NES_state.catridgeInfo.mmc1.prgBank16Lo
 												= (pNES_instance->NES_state.catridgeInfo.mmc1.intfShiftReg.fields2.shiftValue & 0x0F);
+											// Last bank — use full NES 2.0 bank count if applicable
+											{
+												const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
+												const bool isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
+												const uint32_t totalPrg16kBanks = isNES2
+													? (hdr.sizeOfPrgRomIn16KB | (hdr.flags_8to15.nes2p0.flag9.fields.prgRomMSB << 8))
+													: hdr.sizeOfPrgRomIn16KB;
 
-											// Last bank
-											pNES_instance->NES_state.catridgeInfo.mmc1.prgBank16Hi = pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB - ONE;
-
+												pNES_instance->NES_state.catridgeInfo.mmc1.prgBank16Hi = totalPrg16kBanks - ONE;
+											}
 											BREAK;
 										}
 										default:
@@ -2781,7 +2789,18 @@ void NES_t::writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 					}
 					if (IF_ADDRESS_WITHIN(address, CATRIDGE_ROM_BANK0_START_ADDRESS, UNMAPPED_END_ADDRESS))
 					{
-						pNES_instance->NES_state.catridgeInfo.uxrom_002.prgBank16 = data & 0x0F;
+						if (pNES_instance->NES_state.catridgeInfo.isBusConflictPresent)
+						{
+							data &= readCpuRawMemory(address, MEMORY_ACCESS_SOURCE::DEBUG_PORT);
+						}
+
+						BYTE mask = 0x0F;
+						if (pINES->iNES_Fields.iNES_header.fields.flag7.fields.nes2p0 == 0x02)
+						{
+							mask = 0xFF;
+						}
+
+						pNES_instance->NES_state.catridgeInfo.uxrom_002.prgBank16 = data & mask;
 					}
 					BREAK;
 				}
@@ -2793,6 +2812,10 @@ void NES_t::writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 					}
 					if (IF_ADDRESS_WITHIN(address, CATRIDGE_ROM_BANK0_START_ADDRESS, UNMAPPED_END_ADDRESS))
 					{
+						if (pNES_instance->NES_state.catridgeInfo.isBusConflictPresent)
+						{
+							data &= readCpuRawMemory(address, MEMORY_ACCESS_SOURCE::DEBUG_PORT);
+						}
 						pNES_instance->NES_state.catridgeInfo.cnrom.chrBank8 = data;
 					}
 					BREAK;
@@ -5782,6 +5805,9 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 			// check whether trainer is present
 			FLAG isTrainerPresent = (FLAG)pINES->iNES_Fields.iNES_header.fields.flag6.fields.trainerPresent;
 
+			// nes 2.0
+			FLAG is2p0 = pINES->iNES_Fields.iNES_header.fields.flag7.fields.nes2p0;
+
 			BYTE* romData = nullptr;
 
 			if (isTrainerPresent == YES)
@@ -5793,614 +5819,1082 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 				romData = pINES->iNES_Fields.remaining.withoutTrainer.romData;
 			}
 
-			switch (pNES_instance->NES_state.catridgeInfo.mapper)
-			{
-			case MAPPER::NROM:
-			{
-				if (pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB == ONE)
-				{
-					memcpy_portable(
-						&(pNES_instance->NES_state.cpuMemory.NESMemoryMap.catridgeMappedMemory[0x3FE0])
-						, 0x4000
-						, romData
-						, 0x4000);
-
-					if (pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB == ONE)
-					{
-						memcpy_portable(
-							pNES_instance->NES_state.ppuMemory.NESMemoryMap.patternTable.raw
-							, 0x2000
-							, &(romData[0x4000])
-							, 0x2000);
-					}
-
-					// If PRG ROM is 16 KB, then crom0 and crom1 are mirrored
-
-					memcpy_portable(
-						&(pNES_instance->NES_state.cpuMemory.NESMemoryMap.catridgeMappedMemory[0x3FE0 + 0x4000])
-						, 0x4000
-						, &(pNES_instance->NES_state.cpuMemory.NESMemoryMap.catridgeMappedMemory[0x3FE0])
-						, 0x4000);
-				}
-				else if (pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB == TWO)
-				{
-					memcpy_portable(
-						&(pNES_instance->NES_state.cpuMemory.NESMemoryMap.catridgeMappedMemory[0x3FE0])
-						, 0x4000
-						, romData
-						, 0x4000);
-
-					memcpy_portable(
-						&(pNES_instance->NES_state.cpuMemory.NESMemoryMap.catridgeMappedMemory[0x3FE0 + 0x4000])
-						, 0x4000
-						, &(romData[0x4000])
-						, 0x4000);
-
-					if (pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB == ONE)
-					{
-						memcpy_portable(
-							pNES_instance->NES_state.ppuMemory.NESMemoryMap.patternTable.raw
-							, 0x2000
-							, &(romData[0x8000])
-							, 0x2000);
-					}
-				}
-				else
-				{
-					FATAL("Invalid PRG ROM size for NROM");
-				}
-
-				BREAK;
-			}
-			case MAPPER::MMC1:
-			{
-				pNES_instance->NES_state.catridgeInfo.mmc1.intfControlReg.raw = 0x1C;
-				pNES_instance->NES_state.catridgeInfo.mmc1.prgBank16Lo = ZERO;
-				pNES_instance->NES_state.catridgeInfo.mmc1.prgBank16Hi = pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB - ONE;
-				pNES_instance->NES_state.catridgeInfo.mmc1.prgBank32 = ZERO;
-				pNES_instance->NES_state.catridgeInfo.mmc1.chrBank4Lo = ZERO;
-				pNES_instance->NES_state.catridgeInfo.mmc1.chrBank4Hi = ZERO;
-				pNES_instance->NES_state.catridgeInfo.mmc1.chrBank8 = ZERO;
-
-				if (pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB >= ONE)
-				{
-					if (ENABLED)
-					{
-						memcpy_portable(
-							&(pNES_instance->NES_state.cpuMemory.NESMemoryMap.catridgeMappedMemory[0x3FE0])
-							, 0x4000
-							, romData
-							, 0x4000);
-
-						if (pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB == ONE)
-						{
-							TODO("If PRG ROM is 16 KB, is crom0 and crom1 mirrored in mmc1 as well?");
-
-							memcpy_portable(
-								&(pNES_instance->NES_state.cpuMemory.NESMemoryMap.catridgeMappedMemory[0x3FE0 + 0x4000])
-								, 0x4000
-								, &(pNES_instance->NES_state.cpuMemory.NESMemoryMap.catridgeMappedMemory[0x3FE0])
-								, 0x4000);
-						}
-						else
-						{
-							// Storing the last bank
-
-							memcpy_portable(
-								&(pNES_instance->NES_state.cpuMemory.NESMemoryMap.catridgeMappedMemory
-									[0x3FE0 + 0x4000])
-								, 0x4000
-								, &(romData[((pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB - ONE) * 0x4000)])
-								, 0x4000);
-						}
-
-						// CHR ROM
-						if (pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB >= ONE)
-						{
-							memcpy_portable(
-								pNES_instance->NES_state.ppuMemory.NESMemoryMap.patternTable.raw
-								, 0x2000
-								, &(romData[pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB * 0x4000])
-								, 0x2000);
-						}
-					}
-
-					//
-
-					if (ENABLED)
-					{
-						memcpy_portable(
-							&(pNES_catridgeMemory->maxCatridgePRGROM)
-							, pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB * 0x4000
-							, romData
-							, pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB * 0x4000);
-
-						if (pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB >= ONE)
-						{
-							memcpy_portable(
-								pNES_catridgeMemory->maxCatridgeCHRROM
-								, pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB * 0x2000
-								, &(romData[pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB * 0x4000])
-								, pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB * 0x2000);
-						}
-					}
-				}
-				BREAK;
-			}
-			case MAPPER::UxROM_002:
-			{
-				if (pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB >= ONE)
-				{
-					if (ENABLED)
-					{
-						memcpy_portable(
-							&(pNES_instance->NES_state.cpuMemory.NESMemoryMap.catridgeMappedMemory[0x3FE0])
-							, 0x4000
-							, romData
-							, 0x4000);
-
-						if (pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB == ONE)
-						{
-							TODO("If PRG ROM is 16 KB, is crom0 and crom1 mirrored in uxrom as well?");
-
-							memcpy_portable(
-								&(pNES_instance->NES_state.cpuMemory.NESMemoryMap.catridgeMappedMemory[0x3FE0 + 0x4000])
-								, 0x4000
-								, &(pNES_instance->NES_state.cpuMemory.NESMemoryMap.catridgeMappedMemory[0x3FE0])
-								, 0x4000);
-						}
-						else
-						{
-							// Storing the last bank
-
-							memcpy_portable(
-								&(pNES_instance->NES_state.cpuMemory.NESMemoryMap.catridgeMappedMemory
-									[0x3FE0 + 0x4000])
-								, 0x4000
-								, &(romData[((pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB - ONE) * 0x4000)])
-								, 0x4000);
-						}
-
-						if (pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB >= ONE)
-						{
-							memcpy_portable(
-								pNES_instance->NES_state.ppuMemory.NESMemoryMap.patternTable.raw
-								, 0x2000
-								, &(romData[pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB * 0x4000])
-								, 0x2000);
-						}
-					}
-
-					//
-
-					if (ENABLED)
-					{
-						memcpy_portable(
-							&(pNES_catridgeMemory->maxCatridgePRGROM)
-							, pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB * 0x4000
-							, romData
-							, pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB * 0x4000);
-
-						if (pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB >= ONE)
-						{
-							memcpy_portable(
-								pNES_catridgeMemory->maxCatridgeCHRROM
-								, pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB * 0x2000
-								, &(romData[pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB * 0x4000])
-								, pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB * 0x2000);
-						}
-					}
-				}
-
-				BREAK;
-			}
-			case MAPPER::CNROM:
-			{
-				if (pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB == ONE)
-				{
-					memcpy_portable(
-						&(pNES_instance->NES_state.cpuMemory.NESMemoryMap.catridgeMappedMemory[0x3FE0])
-						, 0x4000
-						, romData
-						, 0x4000);
-
-					if (pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB >= ONE)
-					{
-						memcpy_portable(
-							pNES_instance->NES_state.ppuMemory.NESMemoryMap.patternTable.raw
-							, 0x2000
-							, &(romData
-								[0x4000])
-							, 0x2000);
-					}
-
-					memcpy_portable(
-						pNES_catridgeMemory->maxCatridgePRGROM
-						, pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB * 0x4000
-						, romData
-						, pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB * 0x4000);
-
-					memcpy_portable(
-						pNES_catridgeMemory->maxCatridgeCHRROM
-						, pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB * 0x2000
-						, &(romData
-							[0x4000])
-						, pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB * 0x2000);
-
-					TODO("If PRG ROM is 16 KB, is crom0 and crom1 mirrored in cnrom as well?");
-
-					memcpy_portable(
-						&(pNES_instance->NES_state.cpuMemory.NESMemoryMap.catridgeMappedMemory[0x3FE0 + 0x4000])
-						, 0x4000
-						, &(pNES_instance->NES_state.cpuMemory.NESMemoryMap.catridgeMappedMemory[0x3FE0])
-						, 0x4000);
-				}
-				else if (pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB == TWO)
-				{
-					memcpy_portable(
-						&(pNES_instance->NES_state.cpuMemory.NESMemoryMap.catridgeMappedMemory[0x3FE0])
-						, 0x4000
-						, romData
-						, 0x4000);
-
-					memcpy_portable(
-						&(pNES_instance->NES_state.cpuMemory.NESMemoryMap.catridgeMappedMemory[0x3FE0 + 0x4000])
-						, 0x4000
-						, &(romData[0x4000])
-						, 0x4000);
-
-					if (pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB >= ONE)
-					{
-						memcpy_portable(
-							pNES_instance->NES_state.ppuMemory.NESMemoryMap.patternTable.raw
-							, 0x2000
-							, &(romData[0x8000])
-							, 0x2000);
-					}
-
-					memcpy_portable(
-						pNES_catridgeMemory->maxCatridgePRGROM
-						, pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB * 0x4000
-						, romData
-						, pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB * 0x4000);
-
-					memcpy_portable(
-						pNES_catridgeMemory->maxCatridgeCHRROM
-						, pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB * 0x2000
-						, &(romData[0x8000])
-						, pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB * 0x2000);
-				}
-				else
-				{
-					FATAL("Invalid PRG ROM size for CNROM");
-				}
-
-				BREAK;
-			}
-			case MAPPER::MMC3:
-			{
-				pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.bankData_odd8k = 0x00;
-				pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.bankRegisterSelect_even8k.raw = 0x00;
-				pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.irqDisable_evenEk = 0x00;
-				pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.irqEnable_oddEk = 0x00;
-				pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.irqReload_evenCk = 0x00;
-				pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.irqReload_oddCk = 0x00;
-				pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.mirroring_evenAk.raw = 0x00;
-				pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.prgRamProtect_oddAk.raw = 0x00;
-				pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1a = 0x00;
-				pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1b = 0x00;
-				pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1c = 0x00;
-				pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1d = 0x00;
-				pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank2a = 0x00;
-				pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank2b = 0x00;
-				pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.currentMMC3IrqCounter = 0x00;
-				pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.filteredA12RiseEvent = NO;
-				pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.mmc3IrqCounterReloadEnabled = NO;
-				pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.mmc3IrqEnable = NO;
-				pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.prgBank8a = 0x00;
-				pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.prgBank8b = 0x00;
-				pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.unfilteredA12RiseEvent = 0x00;
-
-				if (pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB >= ONE)
-				{
-					if (ENABLED)
-					{
-						// MMC3 has 4 8KB banks; lower 2 store first 2 banks and for optimization, we directly load first 16KB for rom
-						memcpy_portable(
-							&(pNES_instance->NES_state.cpuMemory.NESMemoryMap.catridgeMappedMemory[0x3FE0])
-							, 0x4000
-							, romData
-							, 0x4000);
-
-						if (pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB == ONE)
-						{
-							TODO("If PRG ROM is 16 KB, is crom0 and crom1 mirrored in mmc3 as well?");
-
-							memcpy_portable(
-								&(pNES_instance->NES_state.cpuMemory.NESMemoryMap.catridgeMappedMemory[0x3FE0 + 0x4000])
-								, 0x4000
-								, &(pNES_instance->NES_state.cpuMemory.NESMemoryMap.catridgeMappedMemory[0x3FE0])
-								, 0x4000);
-						}
-						else
-						{
-							// Storing the last bank and second to last
-							// MMC3 has 4 8KB banks; higher 2 store last 2 banks and for optimization, we directly load last 16KB of rom
-
-							memcpy_portable(
-								&(pNES_instance->NES_state.cpuMemory.NESMemoryMap.catridgeMappedMemory[0x3FE0 + 0x4000])
-								, 0x4000
-								, &(romData[((pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB - ONE) * 0x4000)])
-								, 0x4000);
-						}
-
-						// CHR ROM
-						if (pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB >= ONE)
-						{
-							memcpy_portable(
-								pNES_instance->NES_state.ppuMemory.NESMemoryMap.patternTable.raw
-								, 0x2000
-								, &(romData[pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB * 0x4000])
-								, 0x2000);
-						}
-					}
-
-					//
-
-					if (ENABLED)
-					{
-						memcpy_portable(
-							&(pNES_catridgeMemory->maxCatridgePRGROM)
-							, pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB * 0x4000
-							, romData
-							, pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB * 0x4000);
-
-						if (pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB >= ONE)
-						{
-							memcpy_portable(
-								pNES_catridgeMemory->maxCatridgeCHRROM
-								, pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB * 0x2000
-								, &(romData[pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB * 0x4000])
-								, pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB * 0x2000);
-						}
-					}
-				}
-				BREAK;
-			}
-			case MAPPER::AxROM:
-			{
-				pNES_instance->NES_state.catridgeInfo.nameTblMir = NAMETABLE_MIRROR::ONESCREEN_LO_MIRROR;
-
-				if (pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB >= ONE)
-				{
-					if (ENABLED)
-					{
-						memcpy_portable(
-							&(pNES_instance->NES_state.cpuMemory.NESMemoryMap.catridgeMappedMemory[0x3FE0])
-							, 0x4000
-							, romData
-							, 0x4000);
-
-						if (pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB == ONE)
-						{
-							TODO("If PRG ROM is 16 KB, is crom0 and crom1 mirrored in axrom as well?");
-
-							memcpy_portable(
-								&(pNES_instance->NES_state.cpuMemory.NESMemoryMap.catridgeMappedMemory[0x3FE0 + 0x4000])
-								, 0x4000
-								, &(pNES_instance->NES_state.cpuMemory.NESMemoryMap.catridgeMappedMemory[0x3FE0])
-								, 0x4000);
-						}
-						else
-						{
-							memcpy_portable(
-								&(pNES_instance->NES_state.cpuMemory.NESMemoryMap.catridgeMappedMemory[0x3FE0 + 0x4000])
-								, 0x4000
-								, &(romData[0x4000])
-								, 0x4000);
-						}
-
-						if (pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB > ZERO)
-						{
-							FATAL("Invalid CHR ROM size for AxROM");
-						}
-					}
-
-					//
-
-					if (ENABLED)
-					{
-						memcpy_portable(
-							&(pNES_catridgeMemory->maxCatridgePRGROM)
-							, pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB * 0x4000
-							, romData
-							, pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB * 0x4000);
-					}
-				}
-
-				BREAK;
-			}
-			case MAPPER::GxROM:
-			{
-				if (pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB >= ONE)
-				{
-					if (ENABLED)
-					{
-						memcpy_portable(
-							&(pNES_instance->NES_state.cpuMemory.NESMemoryMap.catridgeMappedMemory[0x3FE0])
-							, 0x4000
-							, romData
-							, 0x4000);
-
-						if (pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB == ONE)
-						{
-							TODO("If PRG ROM is 16 KB, is crom0 and crom1 mirrored in gxrom as well?");
-
-							memcpy_portable(
-								&(pNES_instance->NES_state.cpuMemory.NESMemoryMap.catridgeMappedMemory[0x3FE0 + 0x4000])
-								, 0x4000
-								, &(pNES_instance->NES_state.cpuMemory.NESMemoryMap.catridgeMappedMemory[0x3FE0])
-								, 0x4000);
-						}
-						else
-						{
-							memcpy_portable(
-								&(pNES_instance->NES_state.cpuMemory.NESMemoryMap.catridgeMappedMemory
-									[0x3FE0 + 0x4000])
-								, 0x4000
-								, &(romData[0x4000])
-								, 0x4000);
-						}
-
-						if (pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB >= ONE)
-						{
-							memcpy_portable(
-								pNES_instance->NES_state.ppuMemory.NESMemoryMap.patternTable.raw
-								, 0x2000
-								, &(romData[pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB * 0x4000])
-								, 0x2000);
-						}
-					}
-
-					//
-
-					if (ENABLED)
-					{
-						memcpy_portable(
-							&(pNES_catridgeMemory->maxCatridgePRGROM)
-							, pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB * 0x4000
-							, romData
-							, pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB * 0x4000);
-
-						if (pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB >= ONE)
-						{
-							memcpy_portable(
-								pNES_catridgeMemory->maxCatridgeCHRROM
-								, pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB * 0x2000
-								, &(romData[pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB * 0x4000])
-								, pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB * 0x2000);
-						}
-					}
-				}
-
-				BREAK;
-			}
-			case MAPPER::NANJING_FC001:
-			{
-				if (pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB >= ONE)
-				{
-					if (ENABLED)
-					{
-						memcpy_portable(
-							&(pNES_instance->NES_state.cpuMemory.NESMemoryMap.catridgeMappedMemory[0x3FE0])
-							, 0x8000
-							, romData
-							, 0x8000);
-
-
-						// CHR ROM
-						if (pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB >= ONE)
-						{
-							FATAL("NANJING_FC001 doesn't support CHR ROM");
-						}
-					}
-
-					//
-
-					if (ENABLED)
-					{
-						memcpy_portable(
-							&(pNES_catridgeMemory->maxCatridgePRGROM)
-							, pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB * 0x4000
-							, romData
-							, pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB * 0x4000);
-					}
-
-					TODO("For NANJING_FC001, As mentioned in NesDev, ROM should be dumped with  $5300=$04 as this determines rom bank, but not sure how to map this initially");
-					TODO("So, for now, $5300's A bit is by default set to 1, as keeping this zero make games boot from bank 3");
-					pNES_instance->NES_state.catridgeInfo.nanjing_fc001.A = (FLAG)SET;
-
-				}
-				BREAK;
-			}
-			default:
-			{
-				FATAL("Unsupported Mapper : %u", pNES_instance->NES_state.catridgeInfo.mapperID);
-			}
-			}
-
 			// Display some of the Cartridge information
 			if (ENABLED)
 			{
 				LOG_NEW_LINE;
-				LOG("Cartridge Loaded:\n");
-				if (pINES->iNES_Fields.iNES_header.fields.flag10.fields.tvSystem == ONE
-					|| pINES->iNES_Fields.iNES_header.fields.flag10.fields.tvSystem == THREE)
+				LOG("==================================================");
+				LOG(" NES Cartridge Information");
+				LOG("==================================================");
+
+				const auto& header = pINES->iNES_Fields.iNES_header.fields;
+
+				// ---------------------------------------------------------------------
+				// FORMAT DETECTION
+				// ---------------------------------------------------------------------
+
+				const bool isNES2 =
+					((header.flag7.raw & 0x0C) == 0x08);
+
+				const bool isArchaic =
+					((header.flag7.raw & 0x0C) == 0x04);
+
+				LOG(" Format : %s",
+					isNES2 ? "NES 2.0" :
+					isArchaic ? "Archaic iNES" :
+					"iNES");
+
+				// ---------------------------------------------------------------------
+				// CONSOLE TYPE
+				// ---------------------------------------------------------------------
+
+				if (isNES2)
 				{
-					LOG(" TV System : %s", "NTSC / PAL");
+					switch (header.flag7.raw & 0x03)
+					{
+					case 0:
+						LOG(" Console Type : Nintendo Entertainment System / Famicom");
+						BREAK;
+
+					case 1:
+						LOG(" Console Type : Nintendo Vs. System");
+						BREAK;
+
+					case 2:
+						LOG(" Console Type : Nintendo PlayChoice-10");
+						BREAK;
+
+					case 3:
+						LOG(" Console Type : Extended Console Type");
+						BREAK;
+					}
 				}
 				else
 				{
-					if (pINES->iNES_Fields.iNES_header.fields.flag9.fields.tvSystem == ZERO)
+					if (header.flag7.fields.vsUnisystem)
 					{
-						LOG(" TV System : %s", "NTSC");
+						LOG(" Console Type : Nintendo Vs. System");
+					}
+					else if (header.flag7.fields.playChoice)
+					{
+						LOG(" Console Type : Nintendo PlayChoice-10");
 					}
 					else
 					{
-						LOG(" TV System : %s", "PAL");
+						LOG(" Console Type : Nintendo Entertainment System / Famicom");
 					}
 				}
-				LOG(" PRG ROM Size : %d KB", pINES->iNES_Fields.iNES_header.fields.sizeOfPrgRomIn16KB * 16);
-				LOG(" CHR ROM Size : %d KB", pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB * 8);
-				LOG(" PRG RAM Size : %d KB", pINES->iNES_Fields.iNES_header.fields.prgRamSize * 8);
-				if (pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB == ZERO)
+
+				// ---------------------------------------------------------------------
+				// MAPPER
+				// ---------------------------------------------------------------------
+
+				uint32_t mapper = ZERO;
+
+				if (isNES2)
 				{
-					LOG(" CHR RAM : %s", "YES");
+					mapper =
+						(header.flag6.fields.mapperLo)
+						| (header.flag7.fields.mapperHi << 4)
+						| (header.flags_8to15.nes2p0.flag8.fields.mapperNBHi << 8);
 				}
 				else
 				{
-					LOG(" CHR RAM : %s", "NO");
+					mapper =
+						(header.flag6.fields.mapperLo)
+						| (header.flag7.fields.mapperHi << 4);
 				}
-				LOG(" Mapper : %d", TO_UINT(pNES_instance->NES_state.catridgeInfo.mapper));
-				if (pINES->iNES_Fields.iNES_header.fields.flag6.fields.nametableArrangement == TO_UINT(NAMETABLE_MIRROR::VERTICAL_MIRROR))
+
+				LOG(" Mapper : %u", mapper);
+
+				if (isNES2)
 				{
-					LOG(" Name Table Arrangement : %s", "VERTICAL");
+					LOG(" Submapper : %u",
+						header.flags_8to15.nes2p0.flag8.fields.subMapper);
 				}
-				else if (pINES->iNES_Fields.iNES_header.fields.flag6.fields.nametableArrangement == TO_UINT(NAMETABLE_MIRROR::HORIZONTAL_MIRROR))
+
+				// ---------------------------------------------------------------------
+				// PRG-ROM SIZE
+				// ---------------------------------------------------------------------
+
+				uint64_t prgRomBytes = ZERO;
+
+				if (isNES2)
 				{
-					LOG(" Name Table Arrangement : %s", "HORIZONTAL");
-				}
-				if (pINES->iNES_Fields.iNES_header.fields.flag6.fields.hasPersistantMemory == YES)
-				{
-					LOG(" Battery Packed PRG RAM : %s", "YES");
+					const uint32_t msb =
+						header.flags_8to15.nes2p0.flag9.fields.prgRomMSB;
+
+					if (msb != 0x0F)
+					{
+						const uint32_t units =
+							header.sizeOfPrgRomIn16KB
+							| (msb << 8);
+
+						prgRomBytes =
+							static_cast<uint64_t>(units) * 16ULL * 1024ULL;
+					}
+					else
+					{
+						const BYTE lsb = header.sizeOfPrgRomIn16KB;
+
+						const uint32_t exponent =
+							(lsb >> 2);
+
+						const uint32_t multiplier =
+							((lsb & 0x03) * 2) + 1;
+
+						prgRomBytes =
+							(1ULL << exponent) * multiplier;
+					}
 				}
 				else
 				{
-					LOG(" Battery Packed PRG RAM : %s", "NO");
+					prgRomBytes =
+						static_cast<uint64_t>(header.sizeOfPrgRomIn16KB)
+						* 16ULL * 1024ULL;
 				}
-				if (pINES->iNES_Fields.iNES_header.fields.flag6.fields.trainerPresent == YES)
+
+				LOG(" PRG-ROM : %llu KB (%llu bytes)",
+					prgRomBytes / 1024ULL,
+					prgRomBytes);
+
+				// ---------------------------------------------------------------------
+				// CHR-ROM SIZE
+				// ---------------------------------------------------------------------
+
+				uint64_t chrRomBytes = ZERO;
+
+				if (isNES2)
 				{
-					LOG(" Trainer Present : %s", "YES");
+					const uint32_t msb =
+						header.flags_8to15.nes2p0.flag9.fields.chrRomMSB;
+
+					if (msb != 0x0F)
+					{
+						const uint32_t units =
+							header.sizeOfChrRomIn8KB
+							| (msb << 8);
+
+						chrRomBytes =
+							static_cast<uint64_t>(units) * 8ULL * 1024ULL;
+					}
+					else
+					{
+						const BYTE lsb = header.sizeOfChrRomIn8KB;
+
+						const uint32_t exponent =
+							(lsb >> 2);
+
+						const uint32_t multiplier =
+							((lsb & 0x03) * 2) + 1;
+
+						chrRomBytes =
+							(1ULL << exponent) * multiplier;
+					}
 				}
 				else
 				{
-					LOG(" Trainer Present : %s", "NO");
+					chrRomBytes =
+						static_cast<uint64_t>(header.sizeOfChrRomIn8KB)
+						* 8ULL * 1024ULL;
 				}
-				if (pINES->iNES_Fields.iNES_header.fields.flag6.fields.alternativeNametable == ZERO)
+
+				LOG(" CHR-ROM : %llu KB (%llu bytes)",
+					chrRomBytes / 1024ULL,
+					chrRomBytes);
+
+				if (header.sizeOfChrRomIn8KB == ZERO)
 				{
-					LOG(" Alternative Name Table : %s", "YES");
+					LOG(" CHR Memory : CHR-RAM");
 				}
 				else
 				{
-					LOG(" Alternative Name Table : %s", "NO");
+					LOG(" CHR Memory : CHR-ROM");
 				}
-				if (pINES->iNES_Fields.iNES_header.fields.flag7.fields.flags8_15Type == TWO)
+
+				// ---------------------------------------------------------------------
+				// RAM SIZES
+				// ---------------------------------------------------------------------
+
+				if (isNES2)
 				{
-					LOG(" NES 2.0 : %s", "YES");
+					const BYTE prgRamShift =
+						header.flags_8to15.nes2p0.flag10.fields.prgVolRam;
+
+					const BYTE prgNvRamShift =
+						header.flags_8to15.nes2p0.flag10.fields.prgNonVolRam;
+
+					const BYTE chrRamShift =
+						header.flags_8to15.nes2p0.flag11.fields.chrVolRam;
+
+					const BYTE chrNvRamShift =
+						header.flags_8to15.nes2p0.flag11.fields.chrNonVolRam;
+
+					const uint64_t prgRamSize =
+						(prgRamShift == ZERO)
+						? ZERO
+						: (64ULL << prgRamShift);
+
+					const uint64_t prgNvRamSize =
+						(prgNvRamShift == ZERO)
+						? ZERO
+						: (64ULL << prgNvRamShift);
+
+					const uint64_t chrRamSize =
+						(chrRamShift == ZERO)
+						? ZERO
+						: (64ULL << chrRamShift);
+
+					const uint64_t chrNvRamSize =
+						(chrNvRamShift == ZERO)
+						? ZERO
+						: (64ULL << chrNvRamShift);
+
+					LOG(" PRG-RAM : %llu KB", prgRamSize / 1024ULL);
+					LOG(" PRG-NVRAM : %llu KB", prgNvRamSize / 1024ULL);
+					LOG(" CHR-RAM : %llu KB", chrRamSize / 1024ULL);
+					LOG(" CHR-NVRAM : %llu KB", chrNvRamSize / 1024ULL);
 				}
 				else
 				{
-					LOG(" NES 2.0 : %s", "NO");
+					uint32_t prgRamSizeKB =
+						(header.flags_8to15.ines.prgRamSize == ZERO)
+						? 8
+						: (header.flags_8to15.ines.prgRamSize * 8);
+
+					LOG(" PRG-RAM : %u KB", prgRamSizeKB);
+				}
+
+				// ---------------------------------------------------------------------
+				// MIRRORING / NAMETABLES
+				// ---------------------------------------------------------------------
+
+				switch (header.flag6.fields.nametableArrangement)
+				{
+				case 0:
+					LOG(" Nametable Layout : Vertical Arrangement");
+					LOG("                     (Horizontal Mirroring)");
+					BREAK;
+
+				case 1:
+					LOG(" Nametable Layout : Horizontal Arrangement");
+					LOG("                     (Vertical Mirroring)");
+					BREAK;
+				}
+
+				LOG(" Alternative Nametable Layout : %s",
+					header.flag6.fields.alternativeNametable
+					? "YES"
+					: "NO");
+
+				// ---------------------------------------------------------------------
+				// TRAINER
+				// ---------------------------------------------------------------------
+
+				LOG(" Trainer Present : %s",
+					header.flag6.fields.trainerPresent
+					? "YES (512 bytes @ $7000-$71FF)"
+					: "NO");
+
+				// ---------------------------------------------------------------------
+				// BATTERY / SAVE MEMORY
+				// ---------------------------------------------------------------------
+
+				LOG(" Battery / Persistent Memory : %s",
+					header.flag6.fields.hasPersistantMemory
+					? "YES"
+					: "NO");
+
+				// ---------------------------------------------------------------------
+				// TV SYSTEM
+				// ---------------------------------------------------------------------
+
+				if (isNES2)
+				{
+					switch (header.flags_8to15.nes2p0.flag12.fields.variant)
+					{
+					case 0:
+						LOG(" TV System : NTSC");
+						BREAK;
+
+					case 1:
+						LOG(" TV System : PAL");
+						BREAK;
+
+					case 2:
+						LOG(" TV System : Multi-Region");
+						BREAK;
+
+					case 3:
+						LOG(" TV System : Dendy");
+						BREAK;
+					}
+				}
+				else
+				{
+					switch (header.flags_8to15.ines.flag9.fields.tvSystem)
+					{
+					case 0:
+						LOG(" TV System : NTSC");
+						BREAK;
+
+					case 1:
+						LOG(" TV System : PAL");
+						BREAK;
+					}
+				}
+
+				// ---------------------------------------------------------------------
+				// BUS CONFLICTS
+				// ---------------------------------------------------------------------
+
+				if (isNES2 == NO)
+				{
+					LOG(" Bus Conflicts : %s",
+						header.flags_8to15.ines.flag10.fields.busConflict
+						? "YES"
+						: "NO");
+				}
+
+				// ---------------------------------------------------------------------
+				// PLAYCHOICE / VS SYSTEM
+				// ---------------------------------------------------------------------
+
+				LOG(" Vs. Unisystem : %s",
+					header.flag7.fields.vsUnisystem
+					? "YES"
+					: "NO");
+
+				LOG(" PlayChoice-10 : %s",
+					header.flag7.fields.playChoice
+					? "YES"
+					: "NO");
+
+				if (isNES2)
+				{
+					LOG(" Miscellaneous ROMs : %u",
+						header.flags_8to15.nes2p0.flag14.fields.miscRoms);
+
+					LOG(" Default Expansion Device : %u",
+						header.flags_8to15.nes2p0.flag15.fields.expDev);
+				}
+
+				LOG("==================================================");
+			}
+
+			if (ENABLED)
+			{
+				// -----------------------------------------------------------------------------
+				// ROM POINTERS / SIZES
+				// -----------------------------------------------------------------------------
+
+				const auto& header =
+					pINES->iNES_Fields.iNES_header.fields;
+
+				const bool isNES2 =
+					((header.flag7.raw & 0x0C) == 0x08);
+
+				const bool trainerPresent =
+					(header.flag6.fields.trainerPresent == YES);
+
+				// -----------------------------------------------------------------------------
+				// DECODE PRG-ROM / CHR-ROM SIZE
+				// -----------------------------------------------------------------------------
+
+				uint64_t prgRomSizeBytes = ZERO;
+				uint64_t chrRomSizeBytes = ZERO;
+
+				bool prgExponentEncoding = NO;
+				bool chrExponentEncoding = NO;
+
+				if (isNES2)
+				{
+					const BYTE prgMsb =
+						header.flags_8to15.nes2p0.flag9.fields.prgRomMSB;
+
+					const BYTE chrMsb =
+						header.flags_8to15.nes2p0.flag9.fields.chrRomMSB;
+
+					// -------------------------------------------------------------------------
+					// PRG-ROM
+					// -------------------------------------------------------------------------
+
+					if (prgMsb == 0x0F)
+					{
+						prgExponentEncoding = YES;
+
+						const BYTE lsb =
+							header.sizeOfPrgRomIn16KB;
+
+						const uint32_t exponent =
+							(lsb >> 2);
+
+						const uint32_t multiplier =
+							((lsb & 0x03) * 2) + 1;
+
+						prgRomSizeBytes =
+							(1ULL << exponent) * multiplier;
+					}
+					else
+					{
+						const uint32_t units =
+							header.sizeOfPrgRomIn16KB
+							| (prgMsb << 8);
+
+						prgRomSizeBytes =
+							static_cast<uint64_t>(units) * 0x4000ULL;
+					}
+
+					// -------------------------------------------------------------------------
+					// CHR-ROM
+					// -------------------------------------------------------------------------
+
+					if (chrMsb == 0x0F)
+					{
+						chrExponentEncoding = YES;
+
+						const BYTE lsb =
+							header.sizeOfChrRomIn8KB;
+
+						const uint32_t exponent =
+							(lsb >> 2);
+
+						const uint32_t multiplier =
+							((lsb & 0x03) * 2) + 1;
+
+						chrRomSizeBytes =
+							(1ULL << exponent) * multiplier;
+					}
+					else
+					{
+						const uint32_t units =
+							header.sizeOfChrRomIn8KB
+							| (chrMsb << 8);
+
+						chrRomSizeBytes =
+							static_cast<uint64_t>(units) * 0x2000ULL;
+					}
+				}
+				else
+				{
+					prgRomSizeBytes =
+						static_cast<uint64_t>(header.sizeOfPrgRomIn16KB)
+						* 0x4000ULL;
+
+					chrRomSizeBytes =
+						static_cast<uint64_t>(header.sizeOfChrRomIn8KB)
+						* 0x2000ULL;
+				}
+
+				// -----------------------------------------------------------------------------
+				// NES 2.0 EXPONENT ENCODING
+				// -----------------------------------------------------------------------------
+
+				if (prgExponentEncoding)
+				{
+					FATAL("NES 2.0 PRG exponent/multiplier encoding not supported");
+				}
+
+				if (chrExponentEncoding)
+				{
+					FATAL("NES 2.0 CHR exponent/multiplier encoding not supported");
+				}
+
+				// -----------------------------------------------------------------------------
+				// RAM / NVRAM
+				// -----------------------------------------------------------------------------
+
+				bool hasPrgRam = NO;
+				bool hasChrRam = NO;
+				bool hasBatteryBackedMemory = NO;
+
+				uint64_t prgRamSizeBytes = ZERO;
+				uint64_t prgNvRamSizeBytes = ZERO;
+
+				uint64_t chrRamSizeBytes = ZERO;
+				uint64_t chrNvRamSizeBytes = ZERO;
+
+				if (isNES2)
+				{
+					const BYTE prgRamShift =
+						header.flags_8to15.nes2p0.flag10.fields.prgVolRam;
+
+					const BYTE prgNvRamShift =
+						header.flags_8to15.nes2p0.flag10.fields.prgNonVolRam;
+
+					const BYTE chrRamShift =
+						header.flags_8to15.nes2p0.flag11.fields.chrVolRam;
+
+					const BYTE chrNvRamShift =
+						header.flags_8to15.nes2p0.flag11.fields.chrNonVolRam;
+
+					prgRamSizeBytes =
+						(prgRamShift == ZERO)
+						? ZERO
+						: (64ULL << prgRamShift);
+
+					prgNvRamSizeBytes =
+						(prgNvRamShift == ZERO)
+						? ZERO
+						: (64ULL << prgNvRamShift);
+
+					chrRamSizeBytes =
+						(chrRamShift == ZERO)
+						? ZERO
+						: (64ULL << chrRamShift);
+
+					chrNvRamSizeBytes =
+						(chrNvRamShift == ZERO)
+						? ZERO
+						: (64ULL << chrNvRamShift);
+
+					hasPrgRam =
+						(prgRamSizeBytes > ZERO)
+						|| (prgNvRamSizeBytes > ZERO);
+
+					hasChrRam =
+						(chrRamSizeBytes > ZERO)
+						|| (chrNvRamSizeBytes > ZERO);
+
+					hasBatteryBackedMemory =
+						(prgNvRamSizeBytes > ZERO)
+						|| (chrNvRamSizeBytes > ZERO);
+				}
+				else
+				{
+					prgRamSizeBytes =
+						((header.flags_8to15.ines.prgRamSize == ZERO)
+							? 8ULL
+							: static_cast<uint64_t>(
+								header.flags_8to15.ines.prgRamSize * 8ULL))
+						* 1024ULL;
+
+					hasPrgRam =
+						(prgRamSizeBytes > ZERO);
+
+					hasChrRam =
+						(chrRomSizeBytes == ZERO);
+
+					hasBatteryBackedMemory =
+						header.flag6.fields.hasPersistantMemory;
+				}
+
+				// -----------------------------------------------------------------------------
+				// ROM POINTERS
+				// -----------------------------------------------------------------------------
+
+				const BYTE* prgRom =
+					romData + (trainerPresent ? 512 : 0);
+
+				const BYTE* chrRom =
+					prgRom + prgRomSizeBytes;
+
+				// -----------------------------------------------------------------------------
+				// BANK COUNTS
+				// -----------------------------------------------------------------------------
+
+				const uint32_t prg16kBanks =
+					static_cast<uint32_t>(prgRomSizeBytes / 0x4000ULL);
+
+				const uint32_t chr8kBanks =
+					static_cast<uint32_t>(chrRomSizeBytes / 0x2000ULL);
+
+				// -----------------------------------------------------------------------------
+				// CPU/PPU WINDOWS
+				// -----------------------------------------------------------------------------
+
+				BYTE* cpuCart =
+					&(pNES_instance->NES_state.cpuMemory
+						.NESMemoryMap.catridgeMappedMemory[0x3FE0]);
+
+				BYTE* ppuChr =
+					pNES_instance->NES_state.ppuMemory
+					.NESMemoryMap.patternTable.raw;
+
+				// -----------------------------------------------------------------------------
+				// STORE GLOBAL FLAGS
+				// -----------------------------------------------------------------------------
+
+				pNES_instance->NES_state.catridgeInfo.isBusConflictPresent = NO;
+
+				if (isNES2 == NO)
+				{
+					pNES_instance->NES_state.catridgeInfo.isBusConflictPresent =
+						header.flags_8to15.ines.flag10.fields.busConflict;
+				}
+
+				// -----------------------------------------------------------------------------
+				// CLEAR CART MEMORY
+				// -----------------------------------------------------------------------------
+
+				memset(
+					pNES_catridgeMemory->maxCatridgePRGROM,
+					0,
+					sizeof(pNES_catridgeMemory->maxCatridgePRGROM));
+
+				memset(
+					pNES_catridgeMemory->maxCatridgeCHRROM,
+					0,
+					sizeof(pNES_catridgeMemory->maxCatridgeCHRROM));
+
+				// -----------------------------------------------------------------------------
+				// COPY FULL ROMS
+				// -----------------------------------------------------------------------------
+
+				if (prgRomSizeBytes > ZERO)
+				{
+					memcpy_portable(
+						pNES_catridgeMemory->maxCatridgePRGROM,
+						prgRomSizeBytes,
+						prgRom,
+						prgRomSizeBytes);
+				}
+
+				if (chrRomSizeBytes > ZERO)
+				{
+					memcpy_portable(
+						pNES_catridgeMemory->maxCatridgeCHRROM,
+						chrRomSizeBytes,
+						chrRom,
+						chrRomSizeBytes);
+				}
+
+				// -----------------------------------------------------------------------------
+				// MAPPER INIT
+				// -----------------------------------------------------------------------------
+
+				switch (pNES_instance->NES_state.catridgeInfo.mapper)
+				{
+				case MAPPER::NROM:
+				{
+					if ((prg16kBanks != ONE)
+						&& (prg16kBanks != TWO))
+					{
+						FATAL("Invalid PRG-ROM size for NROM");
+					}
+
+					memcpy_portable(
+						&(cpuCart[0x0000]),
+						0x4000,
+						prgRom,
+						0x4000);
+
+					if (prg16kBanks == ONE)
+					{
+						memcpy_portable(
+							&(cpuCart[0x4000]),
+							0x4000,
+							prgRom,
+							0x4000);
+					}
+					else
+					{
+						memcpy_portable(
+							&(cpuCart[0x4000]),
+							0x4000,
+							&(prgRom[0x4000]),
+							0x4000);
+					}
+
+					if (chrRomSizeBytes > ZERO)
+					{
+						uint64_t copySize = chrRomSizeBytes;
+
+						if (copySize > 0x2000ULL)
+						{
+							copySize = 0x2000ULL;
+						}
+
+						memcpy_portable(
+							ppuChr,
+							copySize,
+							chrRom,
+							copySize);
+					}
+
+					BREAK;
+				}
+
+				case MAPPER::MMC1:
+				{
+					memset(
+						&(pNES_instance->NES_state.catridgeInfo.mmc1),
+						0,
+						sizeof(pNES_instance->NES_state.catridgeInfo.mmc1));
+
+					pNES_instance->NES_state.catridgeInfo.mmc1.intfControlReg.raw = 0x1C;
+
+					pNES_instance->NES_state.catridgeInfo.mmc1.prgBank16Lo = ZERO;
+
+					pNES_instance->NES_state.catridgeInfo.mmc1.prgBank16Hi =
+						(prg16kBanks > ZERO)
+						? (prg16kBanks - ONE)
+						: ZERO;
+
+					pNES_instance->NES_state.catridgeInfo.mmc1.prgBank32 = ZERO;
+
+					pNES_instance->NES_state.catridgeInfo.mmc1.prgRamEnable =
+						hasPrgRam ? YES : NO;
+
+					if (prg16kBanks < ONE)
+					{
+						FATAL("Invalid MMC1 PRG-ROM");
+					}
+
+					memcpy_portable(
+						&(cpuCart[0x0000]),
+						0x4000,
+						prgRom,
+						0x4000);
+
+					if (prg16kBanks == ONE)
+					{
+						memcpy_portable(
+							&(cpuCart[0x4000]),
+							0x4000,
+							prgRom,
+							0x4000);
+					}
+					else
+					{
+						memcpy_portable(
+							&(cpuCart[0x4000]),
+							0x4000,
+							&(prgRom[(prg16kBanks - ONE) * 0x4000]),
+							0x4000);
+					}
+
+					if (chrRomSizeBytes > ZERO)
+					{
+						uint64_t copySize = chrRomSizeBytes;
+
+						if (copySize > 0x2000ULL)
+						{
+							copySize = 0x2000ULL;
+						}
+
+						memcpy_portable(
+							ppuChr,
+							copySize,
+							chrRom,
+							copySize);
+					}
+
+					BREAK;
+				}
+
+				case MAPPER::UxROM_002:
+				{
+					if (isNES2)
+					{
+						const BYTE sub = header.flags_8to15.nes2p0.flag8.fields.subMapper;
+						if (sub == 0 || sub == 2)
+							pNES_instance->NES_state.catridgeInfo.isBusConflictPresent = YES;
+						else if (sub == 1)
+							pNES_instance->NES_state.catridgeInfo.isBusConflictPresent = NO;
+					}
+					else
+					{
+						// iNES: use flag10 busConflict already set above, or hardcode YES for safety
+						pNES_instance->NES_state.catridgeInfo.isBusConflictPresent = YES;
+					}
+
+					memset(
+						&(pNES_instance->NES_state.catridgeInfo.uxrom_002),
+						0,
+						sizeof(pNES_instance->NES_state.catridgeInfo.uxrom_002));
+
+					if (prg16kBanks < ONE)
+					{
+						FATAL("Invalid UxROM PRG-ROM");
+					}
+
+					pNES_instance->NES_state.catridgeInfo.uxrom_002.prgBank16 = ZERO;
+
+					memcpy_portable(
+						&(cpuCart[0x0000]),
+						0x4000,
+						prgRom,
+						0x4000);
+
+					if (prg16kBanks == ONE)
+					{
+						memcpy_portable(
+							&(cpuCart[0x4000]),
+							0x4000,
+							prgRom,
+							0x4000);
+					}
+					else
+					{
+						memcpy_portable(
+							&(cpuCart[0x4000]),
+							0x4000,
+							&(prgRom[(prg16kBanks - ONE) * 0x4000]),
+							0x4000);
+					}
+
+					if (chrRomSizeBytes > ZERO)
+					{
+						uint64_t copySize = chrRomSizeBytes;
+
+						if (copySize > 0x2000ULL)
+						{
+							copySize = 0x2000ULL;
+						}
+
+						memcpy_portable(
+							ppuChr,
+							copySize,
+							chrRom,
+							copySize);
+					}
+
+					BREAK;
+				}
+
+				case MAPPER::CNROM:
+				{
+					if (isNES2)
+					{
+						const BYTE sub = header.flags_8to15.nes2p0.flag8.fields.subMapper;
+						if (sub == 0 || sub == 2)
+							pNES_instance->NES_state.catridgeInfo.isBusConflictPresent = YES;
+						else if (sub == 1)
+							pNES_instance->NES_state.catridgeInfo.isBusConflictPresent = NO;
+					}
+					else
+					{
+						// iNES: use flag10 busConflict already set above, or hardcode YES for safety
+						pNES_instance->NES_state.catridgeInfo.isBusConflictPresent = YES;
+					}
+
+					memset(
+						&(pNES_instance->NES_state.catridgeInfo.cnrom),
+						0,
+						sizeof(pNES_instance->NES_state.catridgeInfo.cnrom));
+
+					if ((prg16kBanks != ONE)
+						&& (prg16kBanks != TWO))
+					{
+						FATAL("Invalid PRG-ROM size for CNROM");
+					}
+
+					if (chrRomSizeBytes <= ZERO)
+					{
+						FATAL("CNROM requires CHR-ROM");
+					}
+
+					pNES_instance->NES_state.catridgeInfo.cnrom.chrBank8 = ZERO;
+
+					memcpy_portable(
+						&(cpuCart[0x0000]),
+						0x4000,
+						prgRom,
+						0x4000);
+
+					if (prg16kBanks == ONE)
+					{
+						memcpy_portable(
+							&(cpuCart[0x4000]),
+							0x4000,
+							prgRom,
+							0x4000);
+					}
+					else
+					{
+						memcpy_portable(
+							&(cpuCart[0x4000]),
+							0x4000,
+							&(prgRom[0x4000]),
+							0x4000);
+					}
+
+					{
+						uint64_t copySize = chrRomSizeBytes;
+
+						if (copySize > 0x2000ULL)
+						{
+							copySize = 0x2000ULL;
+						}
+
+						memcpy_portable(
+							ppuChr,
+							copySize,
+							chrRom,
+							copySize);
+					}
+
+					BREAK;
+				}
+
+				case MAPPER::MMC3:
+				{
+					memset(
+						&(pNES_instance->NES_state.catridgeInfo.mmc3),
+						0,
+						sizeof(pNES_instance->NES_state.catridgeInfo.mmc3));
+
+					if (prg16kBanks < TWO)
+					{
+						FATAL("MMC3 requires >= 32KB PRG-ROM");
+					}
+
+					pNES_instance->NES_state.catridgeInfo.mmc3
+						.exRegisters.prgRamProtect_oddAk.fields.prgRamEnable =
+						hasPrgRam ? YES : NO;
+
+					memcpy_portable(
+						&(cpuCart[0x0000]),
+						0x4000,
+						prgRom,
+						0x4000);
+
+					memcpy_portable(
+						&(cpuCart[0x4000]),
+						0x4000,
+						&(prgRom[(prg16kBanks - ONE) * 0x4000]),
+						0x4000);
+
+					if (chrRomSizeBytes > ZERO)
+					{
+						uint64_t copySize = chrRomSizeBytes;
+
+						if (copySize > 0x2000ULL)
+						{
+							copySize = 0x2000ULL;
+						}
+
+						memcpy_portable(
+							ppuChr,
+							copySize,
+							chrRom,
+							copySize);
+					}
+
+					BREAK;
+				}
+
+				case MAPPER::AxROM:
+				{
+					if (isNES2)
+					{
+						const BYTE sub = header.flags_8to15.nes2p0.flag8.fields.subMapper;
+						if (sub == 0 || sub == 2)
+							pNES_instance->NES_state.catridgeInfo.isBusConflictPresent = YES;
+						else if (sub == 1)
+							pNES_instance->NES_state.catridgeInfo.isBusConflictPresent = NO;
+					}
+					else
+					{
+						// iNES: use flag10 busConflict already set above, or hardcode YES for safety
+						pNES_instance->NES_state.catridgeInfo.isBusConflictPresent = YES;
+					}
+
+					memset(
+						&(pNES_instance->NES_state.catridgeInfo.axrom),
+						0,
+						sizeof(pNES_instance->NES_state.catridgeInfo.axrom));
+
+					pNES_instance->NES_state.catridgeInfo.nameTblMir =
+						NAMETABLE_MIRROR::ONESCREEN_LO_MIRROR;
+
+					if (prgRomSizeBytes < 0x8000ULL)
+					{
+						FATAL("AxROM requires >= 32KB PRG-ROM");
+					}
+
+					memcpy_portable(
+						&(cpuCart[0x0000]),
+						0x8000,
+						prgRom,
+						0x8000);
+
+					if ((hasChrRam == NO)
+						&& (chrRomSizeBytes == ZERO))
+					{
+						LOG("Warning : AxROM has no CHR memory");
+					}
+
+					BREAK;
+				}
+
+				case MAPPER::GxROM:
+				{
+					memset(
+						&(pNES_instance->NES_state.catridgeInfo.gxrom),
+						0,
+						sizeof(pNES_instance->NES_state.catridgeInfo.gxrom));
+
+					if (prgRomSizeBytes < 0x8000ULL)
+					{
+						FATAL("Invalid GxROM PRG-ROM");
+					}
+
+					if (chrRomSizeBytes <= ZERO)
+					{
+						FATAL("GxROM requires CHR-ROM");
+					}
+
+					memcpy_portable(
+						&(cpuCart[0x0000]),
+						0x8000,
+						prgRom,
+						0x8000);
+
+					{
+						uint64_t copySize = chrRomSizeBytes;
+
+						if (copySize > 0x2000ULL)
+						{
+							copySize = 0x2000ULL;
+						}
+
+						memcpy_portable(
+							ppuChr,
+							copySize,
+							chrRom,
+							copySize);
+					}
+
+					BREAK;
+				}
+
+				case MAPPER::NANJING_FC001:
+				{
+					memset(
+						&(pNES_instance->NES_state.catridgeInfo.nanjing_fc001),
+						0,
+						sizeof(pNES_instance->NES_state.catridgeInfo.nanjing_fc001));
+
+					if (prgRomSizeBytes < 0x8000ULL)
+					{
+						FATAL("Invalid NANJING_FC001 PRG-ROM");
+					}
+
+					if (chrRomSizeBytes > ZERO)
+					{
+						FATAL("NANJING_FC001 doesn't support CHR-ROM");
+					}
+
+					memcpy_portable(
+						&(cpuCart[0x0000]),
+						0x8000,
+						prgRom,
+						0x8000);
+
+					pNES_instance->NES_state.catridgeInfo.nanjing_fc001.A =
+						(FLAG)SET;
+
+					BREAK;
+				}
+
+				default:
+				{
+					FATAL(
+						"Unsupported Mapper : %u",
+						pNES_instance->NES_state.catridgeInfo.mapperID);
+				}
 				}
 			}
 
