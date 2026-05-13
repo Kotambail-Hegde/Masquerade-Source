@@ -662,6 +662,17 @@ extern "C" {
 #define PACK_END
 #endif
 
+// --- Optimization (desktop only) ----------------
+#if defined(_MSC_VER)
+#define OPT_SPEED    __pragma(optimize("t", on))  // favor speed
+#define OPT_SIZE     __pragma(optimize("s", on))  // favor size
+#define OPT_DEFAULT  __pragma(optimize("", on))   // reset to defaults
+#else
+#define OPT_SPEED
+#define OPT_SIZE
+#define OPT_DEFAULT
+#endif
+
 // --- ImGui theme IDs (desktop only) ------------------
 #ifndef __RPI_PICO__
 #define ENABLED_IMGUI_DEFAULT_THEME                 NO

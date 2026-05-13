@@ -37,7 +37,7 @@
 #pragma region NES_SPECIFIC_DECLARATIONS
 // For debug
 static COUNTER64 logCounter = ZERO;
-static COUNTER64 emulationCounter[100] = { ZERO };
+static COUNTER64 nesEmulationCounter[100] = { ZERO };
 
 // for audio
 // maximum number of inputs
@@ -5728,7 +5728,7 @@ void NES_t::destroyEmulator()
 	}
 
 	logCounter = ZERO;
-	memset(emulationCounter, ZERO, ((sizeof(emulationCounter[100])) / sizeof(emulationCounter[0])));
+	memset(nesEmulationCounter, ZERO, ((sizeof(nesEmulationCounter[100])) / sizeof(nesEmulationCounter[0])));
 
 	pINES = nullptr;
 	pNES_catridgeMemory = nullptr;
