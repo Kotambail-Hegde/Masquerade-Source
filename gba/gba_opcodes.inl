@@ -1,3 +1,5 @@
+#pragma once
+
 #include "gba.h"
 
 #pragma region ARM7TDMI_SPECIFIC_MACROS
@@ -72,11 +74,13 @@
 #define DATA_PROCESSING_INSTRUCTION						0x00000000
 #pragma endregion ARM7TDMI_SPECIFIC_MACROS
 
+OPT_SPEED
+
 //TODO: As per SST (and hence as per NBA), looks like the first non-instruction memory access is always non-sequential, even if the address is within the sequential 'distance' of previous memory transaction
 // Also, looks like transition from read -> write or write -> read is always a non-sequential as well
 // Not all of this implemented yet...
 
-GBA_WORD GBA_t::performShiftOperation(
+MASQ_INLINE GBA_WORD GBA_t::performShiftOperation(
 	FLAG updateFlag,
 	SHIFT_TYPE shiftType,
 	uint32_t shiftAmount,
@@ -181,7 +185,7 @@ GBA_WORD GBA_t::performShiftOperation(
 }
 
 // Thumb Instructions
-FLAG GBA_t::ThumbSoftwareInterrupt()
+MASQ_INLINE FLAG GBA_t::ThumbSoftwareInterrupt()
 {
 	FLAG isThisTheInstruction = NO;
 
@@ -218,7 +222,7 @@ FLAG GBA_t::ThumbSoftwareInterrupt()
 	RETURN isThisTheInstruction;
 }
 
-FLAG GBA_t::UnconditionalBranch()
+MASQ_INLINE FLAG GBA_t::UnconditionalBranch()
 {
 	FLAG isThisTheInstruction = NO;
 
@@ -242,7 +246,7 @@ FLAG GBA_t::UnconditionalBranch()
 	RETURN isThisTheInstruction;
 }
 
-FLAG GBA_t::ConditionalBranch()
+MASQ_INLINE FLAG GBA_t::ConditionalBranch()
 {
 	FLAG isThisTheInstruction = NO;
 
@@ -278,7 +282,7 @@ FLAG GBA_t::ConditionalBranch()
 	RETURN isThisTheInstruction;
 }
 
-FLAG GBA_t::MultipleLoadStore()
+MASQ_INLINE FLAG GBA_t::MultipleLoadStore()
 {
 	FLAG isThisTheInstruction = NO;
 
@@ -429,7 +433,7 @@ FLAG GBA_t::MultipleLoadStore()
 	RETURN isThisTheInstruction;
 }
 
-FLAG GBA_t::LongBranchWithLink()
+MASQ_INLINE FLAG GBA_t::LongBranchWithLink()
 {
 	FLAG isThisTheInstruction = NO;
 
@@ -477,7 +481,7 @@ FLAG GBA_t::LongBranchWithLink()
 	RETURN isThisTheInstruction;
 }
 
-FLAG GBA_t::AddOffsetToStackPointer()
+MASQ_INLINE FLAG GBA_t::AddOffsetToStackPointer()
 {
 	FLAG isThisTheInstruction = NO;
 
@@ -513,7 +517,7 @@ FLAG GBA_t::AddOffsetToStackPointer()
 	RETURN isThisTheInstruction;
 }
 
-FLAG GBA_t::PushPopRegisters()
+MASQ_INLINE FLAG GBA_t::PushPopRegisters()
 {
 	FLAG isThisTheInstruction = NO;
 
@@ -684,7 +688,7 @@ FLAG GBA_t::PushPopRegisters()
 	RETURN isThisTheInstruction;
 }
 
-FLAG GBA_t::LoadStoreHalfword()
+MASQ_INLINE FLAG GBA_t::LoadStoreHalfword()
 {
 	FLAG isThisTheInstruction = NO;
 
@@ -733,7 +737,7 @@ FLAG GBA_t::LoadStoreHalfword()
 	RETURN isThisTheInstruction;
 }
 
-FLAG GBA_t::SPRelativeLoadStore()
+MASQ_INLINE FLAG GBA_t::SPRelativeLoadStore()
 {
 	FLAG isThisTheInstruction = NO;
 
@@ -785,7 +789,7 @@ FLAG GBA_t::SPRelativeLoadStore()
 	RETURN isThisTheInstruction;
 }
 
-FLAG GBA_t::LoadAddress()
+MASQ_INLINE FLAG GBA_t::LoadAddress()
 {
 	FLAG isThisTheInstruction = NO;
 
@@ -829,7 +833,7 @@ FLAG GBA_t::LoadAddress()
 	RETURN isThisTheInstruction;
 }
 
-FLAG GBA_t::LoadStoreWithImmediateOffset()
+MASQ_INLINE FLAG GBA_t::LoadStoreWithImmediateOffset()
 {
 	FLAG isThisTheInstruction = NO;
 
@@ -899,7 +903,7 @@ FLAG GBA_t::LoadStoreWithImmediateOffset()
 	RETURN isThisTheInstruction;
 }
 
-FLAG GBA_t::LoadStoreWithRegisterOffset()
+MASQ_INLINE FLAG GBA_t::LoadStoreWithRegisterOffset()
 {
 	FLAG isThisTheInstruction = NO;
 
@@ -967,7 +971,7 @@ FLAG GBA_t::LoadStoreWithRegisterOffset()
 	RETURN isThisTheInstruction;
 }
 
-FLAG GBA_t::LoadStoreSignExtendedByteHalfword()
+MASQ_INLINE FLAG GBA_t::LoadStoreSignExtendedByteHalfword()
 {
 	FLAG isThisTheInstruction = NO;
 
@@ -1061,7 +1065,7 @@ FLAG GBA_t::LoadStoreSignExtendedByteHalfword()
 	RETURN isThisTheInstruction;
 }
 
-FLAG GBA_t::PCRelativeLoad()
+MASQ_INLINE FLAG GBA_t::PCRelativeLoad()
 {
 	FLAG isThisTheInstruction = NO;
 
@@ -1102,7 +1106,7 @@ FLAG GBA_t::PCRelativeLoad()
 	RETURN isThisTheInstruction;
 }
 
-FLAG GBA_t::HiRegisterOperationsBranchExchange()
+MASQ_INLINE FLAG GBA_t::HiRegisterOperationsBranchExchange()
 {
 	FLAG isThisTheInstruction = NO;
 
@@ -1252,7 +1256,7 @@ FLAG GBA_t::HiRegisterOperationsBranchExchange()
 	RETURN isThisTheInstruction;
 }
 
-FLAG GBA_t::ALUOperations()
+MASQ_INLINE FLAG GBA_t::ALUOperations()
 {
 	FLAG isThisTheInstruction = NO;
 
@@ -1488,7 +1492,7 @@ FLAG GBA_t::ALUOperations()
 	RETURN isThisTheInstruction;
 }
 
-FLAG GBA_t::MoveCompareAddSubtractImmediate()
+MASQ_INLINE FLAG GBA_t::MoveCompareAddSubtractImmediate()
 {
 	FLAG isThisTheInstruction = NO;
 
@@ -1573,7 +1577,7 @@ FLAG GBA_t::MoveCompareAddSubtractImmediate()
 	RETURN isThisTheInstruction;
 }
 
-FLAG GBA_t::AddSubtract()
+MASQ_INLINE FLAG GBA_t::AddSubtract()
 {
 	FLAG isThisTheInstruction = NO;
 
@@ -1651,7 +1655,7 @@ FLAG GBA_t::AddSubtract()
 	RETURN isThisTheInstruction;
 }
 
-FLAG GBA_t::MoveShiftedRegister()
+MASQ_INLINE FLAG GBA_t::MoveShiftedRegister()
 {
 	FLAG isThisTheInstruction = NO;
 
@@ -1718,7 +1722,7 @@ FLAG GBA_t::MoveShiftedRegister()
 }
 
 // ARM Instructions
-FLAG GBA_t::BranchAndBranchExchange()
+MASQ_INLINE FLAG GBA_t::BranchAndBranchExchange()
 {
 	FLAG isThisTheInstruction = NO;
 
@@ -1774,7 +1778,7 @@ FLAG GBA_t::BranchAndBranchExchange()
 	RETURN isThisTheInstruction;
 }
 
-FLAG GBA_t::BlockDataTransfer()
+MASQ_INLINE FLAG GBA_t::BlockDataTransfer()
 {
 	FLAG isThisTheInstruction = NO;
 
@@ -2026,7 +2030,7 @@ FLAG GBA_t::BlockDataTransfer()
 	RETURN isThisTheInstruction;
 }
 
-FLAG GBA_t::BranchAndBranchLink()
+MASQ_INLINE FLAG GBA_t::BranchAndBranchLink()
 {
 	FLAG isThisTheInstruction = NO;
 
@@ -2069,7 +2073,7 @@ FLAG GBA_t::BranchAndBranchLink()
 	RETURN isThisTheInstruction;
 }
 
-FLAG GBA_t::SoftwareInterrupt()
+MASQ_INLINE FLAG GBA_t::SoftwareInterrupt()
 {
 	FLAG isThisTheInstruction = NO;
 
@@ -2121,7 +2125,7 @@ FLAG GBA_t::SoftwareInterrupt()
 	RETURN isThisTheInstruction;
 }
 
-FLAG GBA_t::Undefined()
+MASQ_INLINE FLAG GBA_t::Undefined()
 {
 	FLAG isThisTheInstruction = NO;
 
@@ -2161,7 +2165,7 @@ FLAG GBA_t::Undefined()
 	RETURN isThisTheInstruction;
 }
 
-FLAG GBA_t::SingleDataTransfer()
+MASQ_INLINE FLAG GBA_t::SingleDataTransfer()
 {
 	FLAG isThisTheInstruction = NO;
 
@@ -2323,7 +2327,7 @@ FLAG GBA_t::SingleDataTransfer()
 	RETURN isThisTheInstruction;
 }
 
-FLAG GBA_t::SingleDataSwap()
+MASQ_INLINE FLAG GBA_t::SingleDataSwap()
 {
 	FLAG isThisTheInstruction = NO;
 
@@ -2394,7 +2398,7 @@ FLAG GBA_t::SingleDataSwap()
 	RETURN isThisTheInstruction;
 }
 
-FLAG GBA_t::MultiplyAndMultiplyAccumulate()
+MASQ_INLINE FLAG GBA_t::MultiplyAndMultiplyAccumulate()
 {
 	FLAG isThisTheInstruction = NO;
 
@@ -2574,7 +2578,7 @@ FLAG GBA_t::MultiplyAndMultiplyAccumulate()
 	RETURN isThisTheInstruction;
 }
 
-FLAG GBA_t::HalfWordDataTransfer()
+MASQ_INLINE FLAG GBA_t::HalfWordDataTransfer()
 {
 	FLAG isThisTheInstruction = NO;
 
@@ -2793,7 +2797,7 @@ FLAG GBA_t::HalfWordDataTransfer()
 	RETURN isThisTheInstruction;
 }
 
-FLAG GBA_t::psrTransfer()
+MASQ_INLINE FLAG GBA_t::psrTransfer()
 {
 	FLAG isThisTheInstruction = NO;
 
@@ -2942,7 +2946,7 @@ FLAG GBA_t::psrTransfer()
 	RETURN isThisTheInstruction;
 }
 
-FLAG GBA_t::DataProcessing()
+MASQ_INLINE FLAG GBA_t::DataProcessing()
 {
 	FLAG isThisTheInstruction = NO;
 
@@ -3417,3 +3421,5 @@ FLAG GBA_t::DataProcessing()
 	}
 	RETURN isThisTheInstruction;
 }
+
+OPT_DEFAULT

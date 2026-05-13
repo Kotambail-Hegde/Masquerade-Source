@@ -375,6 +375,8 @@ set(PROJECT_HEADERS
     nes/nes.h
     gb-gbc/gbc.h
     gba/gba.h
+    gba/gba.inl
+    gba/gba_opcodes.inl
     helpers/helpers.h
     cheats/cheats.h
     ui/imgui_custom_config.h
@@ -488,7 +490,6 @@ if(MASQ_ENABLE_GBA)
     list(APPEND GBA_SOURCES
         gba/gba.cpp
         gba/gba_mods.cpp
-        gba/gba_opcodes.cpp
     )
 endif()
 
