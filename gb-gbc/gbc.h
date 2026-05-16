@@ -2486,6 +2486,7 @@ public:
 
 public:
 
+	void freezeLCD();
 	void setPPULCDMode(LCD_MODES lcdMode);
 	LCD_MODES getPPULCDMode();
 	FLAG isPPULCDEnabled();
@@ -2614,32 +2615,32 @@ private:
 
 private:
 
-	inline uint16_t GET_PC()
+	MASQ_INLINE uint16_t GET_PC()
 	{
 		RETURN pGBc_registers->pc;
 	}
 
-	inline void SET_PC(uint16_t pc)
+	MASQ_INLINE void SET_PC(uint16_t pc)
 	{
 		pGBc_registers->pc = pc;
 	}
 
-	inline void INCREMENT_BC_BY_ONE()
+	MASQ_INLINE void INCREMENT_BC_BY_ONE()
 	{
 		pGBc_registers->bc.bc_u16memory++;
 	}
 
-	inline void INCREMENT_DE_BY_ONE()
+	MASQ_INLINE void INCREMENT_DE_BY_ONE()
 	{
 		pGBc_registers->de.de_u16memory++;
 	}
 
-	inline void INCREMENT_HL_BY_ONE()
+	MASQ_INLINE void INCREMENT_HL_BY_ONE()
 	{
 		pGBc_registers->hl.hl_u16memory++;
 	}
 
-	inline FLAG INCREMENT_PC_BY_ONE()
+	MASQ_INLINE FLAG INCREMENT_PC_BY_ONE()
 	{
 		if (pGBc_instance->GBc_state.emulatorStatus.isHaltBugActivated == HALT_BUG_STATE::HALT_BUG_ENABLED)
 		{
@@ -2653,32 +2654,32 @@ private:
 		}
 	}
 
-	inline void INCREMENT_SP_BY_ONE()
+	MASQ_INLINE void INCREMENT_SP_BY_ONE()
 	{
 		pGBc_registers->sp++;
 	}
 
-	inline void DECREMENT_BC_BY_ONE()
+	MASQ_INLINE void DECREMENT_BC_BY_ONE()
 	{
 		pGBc_registers->bc.bc_u16memory--;
 	}
 
-	inline void DECREMENT_DE_BY_ONE()
+	MASQ_INLINE void DECREMENT_DE_BY_ONE()
 	{
 		pGBc_registers->de.de_u16memory--;
 	}
 
-	inline void DECREMENT_HL_BY_ONE()
+	MASQ_INLINE void DECREMENT_HL_BY_ONE()
 	{
 		pGBc_registers->hl.hl_u16memory--;
 	}
 
-	inline void DECREMENT_PC_BY_ONE()
+	MASQ_INLINE void DECREMENT_PC_BY_ONE()
 	{
 		pGBc_registers->pc--;
 	}
 
-	inline void DECREMENT_SP_BY_ONE()
+	MASQ_INLINE void DECREMENT_SP_BY_ONE()
 	{
 		pGBc_registers->sp--;
 	}
