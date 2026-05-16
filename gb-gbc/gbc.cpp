@@ -2529,6 +2529,15 @@ void GBc_t::ppuTick()
 								pGBc_peripherals->STAT.lcdStatusFields.LYC_EQL_LY_FLAG = ZERO;
 								pGBc_instance->GBc_state.emulatorStatus.STATInterruptSignal.STATInterruptSources.LY_LYC_SIGNAL = LO;
 							}
+							
+							// If we need to blank a frame and LCD was just enabled
+							if (pGBc_emuStatus->freezeLCDOneFrame == YES) MASQ_UNLIKELY
+							{
+								freezeLCD();
+
+								// Clear blanking of LCD if needed here as this frame is done...
+								pGBc_emuStatus->freezeLCDOneFrame = CLEAR;
+							}
 						}
 						else
 						{
@@ -2570,8 +2579,17 @@ void GBc_t::ppuTick()
 		}
 		else
 		{
-			// Tick the lcd blank counter needed for gbc
-			++pGBc_instance->GBc_state.emulatorStatus.ticks.lcdBlankCounter;
+			// CGB special case needed for Bug's Life
+			if (pGBc_instance->GBc_state.emulatorStatus.ticks.lcdBlankCounter < LCD_V_BLANK)
+			{
+				// Tick the lcd blank counter needed for gbc
+				++pGBc_instance->GBc_state.emulatorStatus.ticks.lcdBlankCounter;
+
+				if ((ROM_TYPE == ROM::GAME_BOY_COLOR) && (pGBc_instance->GBc_state.emulatorStatus.ticks.lcdBlankCounter >= LCD_V_BLANK)) MASQ_UNLIKELY
+				{
+					freezeLCD();
+				}
+			}
 
 			pGBc_display->fakeBgFetcherRuns = ZERO;
 
@@ -4148,6 +4166,22 @@ void GBc_t::OAMDMASTATModeGlitch()
 #endif
 }
 
+void GBc_t::freezeLCD()
+{
+	Pixel FROZEN;
+
+	if (ROM_TYPE == ROM::GAME_BOY_COLOR)
+	{
+		FROZEN = getColorFromColorIDForGBC(0x7FFF, pGBc_instance->GBc_state.gbc_palette == PALETTE_ID::PALETTE_2).COLOR;
+	}
+	else
+	{
+		FROZEN = paletteIDToColor.at(pGBc_instance->GBc_state.gb_palette).COLOR_000P.COLOR;
+	}
+
+	std::fill_n(pGBc_display->imGuiBuffer.imGuiBuffer1D, sizeof(pGBc_display->imGuiBuffer.imGuiBuffer1D), FROZEN);
+}
+
 void GBc_t::setPPULCDMode(LCD_MODES lcdMode)
 {
 	pGBc_display->currentSpecialLCDMode = lcdMode;
@@ -4291,7 +4325,6 @@ void GBc_t::processLCDEnable()
 	{
 		pGBc_emuStatus->freezeLCDOneFrame = NO;
 	}
-
 	pGBc_instance->GBc_state.emulatorStatus.ticks.lcdBlankCounter = RESET;
 }
 
@@ -4343,6 +4376,7 @@ void GBc_t::processLCDDisable()
 
 	// Blank for 1 frame
 	pGBc_emuStatus->freezeLCDOneFrame = YES;
+	pGBc_instance->GBc_state.emulatorStatus.ticks.lcdBlankCounter = RESET;
 
 	setPPULCDMode(LCD_MODES::MODE_LCD_H_BLANK);
 }
@@ -6374,45 +6408,6 @@ void GBc_t::translateGFX(PALETTE_ID from, PALETTE_ID to, PALETTE_ID colorCorrect
 
 void GBc_t::displayCompleteScreen()
 {
-	// If we need to blank a frame and LCD was just enabled
-	if (pGBc_emuStatus->freezeLCDOneFrame == YES && isPPULCDEnabled() == YES) MASQ_UNLIKELY
-	{
-		auto freezeLCDStep = [&](Pixel color)
-			{
-				std::fill_n(pGBc_display->imGuiBuffer.imGuiBuffer1D, sizeof(pGBc_display->imGuiBuffer.imGuiBuffer1D), color);
-
-				// Clear the ghost accumulator when the LCD blanks so the frozen
-				// color does not bleed into the next game scene.
-				if (ghost_decay > 0.0f)
-				{
-					GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, ghost_fbo));
-					GL_CALL(glClearColor(
-						color.r / 255.0f,
-						color.g / 255.0f,
-						color.b / 255.0f,
-						1.0f
-					));
-					GL_CALL(glClear(GL_COLOR_BUFFER_BIT));
-					GL_CALL(glClearColor(0.0f, 0.0f, 0.0f, 1.0f)); // restore default
-					GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, 0));
-				}
-			};
-
-		if (ROM_TYPE == ROM::GAME_BOY_COLOR)
-		{
-			Pixel FROZEN = getColorFromColorIDForGBC(0x7FFF, pGBc_instance->GBc_state.gbc_palette == PALETTE_ID::PALETTE_2).COLOR;
-			freezeLCDStep(FROZEN);
-		}
-		else
-		{
-			Pixel FROZEN = paletteIDToColor.at(pGBc_instance->GBc_state.gb_palette).COLOR_000P.COLOR;
-			freezeLCDStep(FROZEN);
-		}
-
-		// Clear blanking of LCD if needed here as this frame is done...
-		pGBc_emuStatus->freezeLCDOneFrame = CLEAR;
-	}
-
 #if (GL_FIXED_FUNCTION_PIPELINE == YES) && !defined(IMGUI_IMPL_OPENGL_ES2) && !defined(IMGUI_IMPL_OPENGL_ES3)
 	glBindFramebuffer(GL_FRAMEBUFFER, frame_buffer);
 
