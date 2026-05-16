@@ -2722,20 +2722,25 @@ void NES_t::writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 									case THREE: // PRG bank $E000-$FFFF
 									{
 										TODO("Find source for enabling of prgRamEnable on write to $E000-$FFFF without checking whether 4th bit is set as mentioned in wiki");
-	#if (DISABLED)
+#if (DISABLED)
 										pNES_instance->NES_state.catridgeInfo.mmc1.prgRamEnable
 											= (FLAG)((pNES_instance->NES_state.catridgeInfo.mmc1.intfShiftReg.fields2.shiftValue & 0x10) == 0x10);
-	#else
+#else
 										pNES_instance->NES_state.catridgeInfo.mmc1.prgRamEnable = YES;
-	#endif
+#endif
 
+										const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
+										const bool isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
+										const uint32_t totalPrg16kBanks = isNES2
+											? (hdr.sizeOfPrgRomIn16KB | (hdr.flags_8to15.nes2p0.flag9.fields.prgRomMSB << 8))
+											: hdr.sizeOfPrgRomIn16KB;
 										switch (pNES_instance->NES_state.catridgeInfo.mmc1.intfControlReg.fields1.pp)
 										{
 										case ZERO:
 										case ONE:
 										{
 											pNES_instance->NES_state.catridgeInfo.mmc1.prgBank32
-												= (pNES_instance->NES_state.catridgeInfo.mmc1.intfShiftReg.fields2.shiftValue & 0x0E);
+												= (pNES_instance->NES_state.catridgeInfo.mmc1.intfShiftReg.fields2.shiftValue & 0x0E) % totalPrg16kBanks;
 											BREAK;
 										}
 										case TWO:
@@ -2743,24 +2748,15 @@ void NES_t::writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 											// Refer https://www.nesdev.org/wiki/MMC1#Consecutive-cycle_writes for 2: fix first bank at $8000 and switch 16 KB bank at $C000
 											pNES_instance->NES_state.catridgeInfo.mmc1.prgBank16Lo = ZERO;
 											pNES_instance->NES_state.catridgeInfo.mmc1.prgBank16Hi
-												= (pNES_instance->NES_state.catridgeInfo.mmc1.intfShiftReg.fields2.shiftValue & 0x0F);
+												= (pNES_instance->NES_state.catridgeInfo.mmc1.intfShiftReg.fields2.shiftValue & 0x0F) % totalPrg16kBanks;
 											BREAK;
 										}
 										case THREE:
 										{
 											// Refer https://www.nesdev.org/wiki/MMC1#Consecutive-cycle_writes for 3: fix last bank at $C000 and switch 16 KB bank at $8000
 											pNES_instance->NES_state.catridgeInfo.mmc1.prgBank16Lo
-												= (pNES_instance->NES_state.catridgeInfo.mmc1.intfShiftReg.fields2.shiftValue & 0x0F);
-											// Last bank — use full NES 2.0 bank count if applicable
-											{
-												const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
-												const bool isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
-												const uint32_t totalPrg16kBanks = isNES2
-													? (hdr.sizeOfPrgRomIn16KB | (hdr.flags_8to15.nes2p0.flag9.fields.prgRomMSB << 8))
-													: hdr.sizeOfPrgRomIn16KB;
-
-												pNES_instance->NES_state.catridgeInfo.mmc1.prgBank16Hi = totalPrg16kBanks - ONE;
-											}
+												= (pNES_instance->NES_state.catridgeInfo.mmc1.intfShiftReg.fields2.shiftValue & 0x0F) % totalPrg16kBanks;
+											pNES_instance->NES_state.catridgeInfo.mmc1.prgBank16Hi = totalPrg16kBanks - ONE;
 											BREAK;
 										}
 										default:
@@ -2800,7 +2796,14 @@ void NES_t::writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 							mask = 0xFF;
 						}
 
-						pNES_instance->NES_state.catridgeInfo.uxrom_002.prgBank16 = data & mask;
+						{
+							const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
+							const bool isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
+							const uint32_t totalPrg16kBanks = isNES2
+								? (hdr.sizeOfPrgRomIn16KB | (hdr.flags_8to15.nes2p0.flag9.fields.prgRomMSB << 8))
+								: hdr.sizeOfPrgRomIn16KB;
+							pNES_instance->NES_state.catridgeInfo.uxrom_002.prgBank16 = (data & mask) % totalPrg16kBanks;
+						}
 					}
 					BREAK;
 				}
@@ -2816,7 +2819,15 @@ void NES_t::writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 						{
 							data &= readCpuRawMemory(address, MEMORY_ACCESS_SOURCE::DEBUG_PORT);
 						}
-						pNES_instance->NES_state.catridgeInfo.cnrom.chrBank8 = data;
+
+						{
+							const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
+							const bool isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
+							const uint32_t totalChr8kBanks = isNES2
+								? (hdr.sizeOfChrRomIn8KB | (hdr.flags_8to15.nes2p0.flag9.fields.chrRomMSB << 8))
+								: hdr.sizeOfChrRomIn8KB;
+							pNES_instance->NES_state.catridgeInfo.cnrom.chrBank8 = (data & 0x03) % totalChr8kBanks;
+						}
 					}
 					BREAK;
 				}
@@ -2845,15 +2856,29 @@ void NES_t::writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 							{
 								pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.bankData_odd8k = data;
 
+								// Bank counts for % guard
+								const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
+								const bool isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
+								const uint32_t totalPrg16kBanks = isNES2
+									? (hdr.sizeOfPrgRomIn16KB | (hdr.flags_8to15.nes2p0.flag9.fields.prgRomMSB << 8))
+									: hdr.sizeOfPrgRomIn16KB;
+								const uint32_t totalChr8kBanks = isNES2
+									? (hdr.sizeOfChrRomIn8KB | (hdr.flags_8to15.nes2p0.flag9.fields.chrRomMSB << 8))
+									: hdr.sizeOfChrRomIn8KB;
+								// MMC3 addresses PRG in 8KB units and CHR in 1KB units
+								const uint32_t totalPrg8kBanks = totalPrg16kBanks * 2;
+
 								switch (pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.bankRegisterSelect_even8k.fields.bankRegSel)
 								{
 								case ZERO:
 								{
+									// 2KB CHR bank at PPU $0000 (or $1000); & 0xFE enforces 2KB alignment
 									pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank2a = (data & 0xFE);
 									BREAK;
 								}
 								case ONE:
 								{
+									// 2KB CHR bank at PPU $0800 (or $1800); & 0xFE enforces 2KB alignment
 									pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank2b = (data & 0xFE);
 									BREAK;
 								}
@@ -2879,12 +2904,12 @@ void NES_t::writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 								}
 								case SIX:
 								{
-									pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.prgBank8a = (data & 0x3F);
+									pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.prgBank8a = (data & 0x3F) % totalPrg8kBanks;
 									BREAK;
 								}
 								case SEVEN:
 								{
-									pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.prgBank8b = (data & 0x3F);
+									pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.prgBank8b = (data & 0x3F) % totalPrg8kBanks;
 									BREAK;
 								}
 								default:
@@ -2974,7 +2999,16 @@ void NES_t::writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 						// Note: Nesdev mentions only first 3 bits to be considered for prgBank,
 						// But according to https://forums.nesdev.org/viewtopic.php?p=79826#p79826, first four bits needs to be considered
 						// Both Mesen and Fceux64 do the same as well
-						pNES_instance->NES_state.catridgeInfo.axrom.prgBank = (data & 0x0F);
+						{
+							const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
+							const bool isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
+							const uint32_t totalPrg16kBanks = isNES2
+								? (hdr.sizeOfPrgRomIn16KB | (hdr.flags_8to15.nes2p0.flag9.fields.prgRomMSB << 8))
+								: hdr.sizeOfPrgRomIn16KB;
+							// AxROM switches 32KB banks
+							const uint32_t totalPrg32kBanks = totalPrg16kBanks / 2;
+							pNES_instance->NES_state.catridgeInfo.axrom.prgBank = (data & 0x0F) % totalPrg32kBanks;
+						}
 						pNES_instance->NES_state.catridgeInfo.axrom.vramPage = (((data & 0x10) == 0x10) ? YES : NO);
 					}
 					BREAK;
@@ -2987,8 +3021,18 @@ void NES_t::writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 					}
 					if (IF_ADDRESS_WITHIN(address, CATRIDGE_ROM_BANK0_START_ADDRESS, UNMAPPED_END_ADDRESS))
 					{
-						pNES_instance->NES_state.catridgeInfo.gxrom.chrBank = (data & 0x03);
-						pNES_instance->NES_state.catridgeInfo.gxrom.prgBank = ((data >> FOUR) & 0x03);
+						const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
+						const bool isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
+						const uint32_t totalPrg16kBanks = isNES2
+							? (hdr.sizeOfPrgRomIn16KB | (hdr.flags_8to15.nes2p0.flag9.fields.prgRomMSB << 8))
+							: hdr.sizeOfPrgRomIn16KB;
+						const uint32_t totalChr8kBanks = isNES2
+							? (hdr.sizeOfChrRomIn8KB | (hdr.flags_8to15.nes2p0.flag9.fields.chrRomMSB << 8))
+							: hdr.sizeOfChrRomIn8KB;
+						// GxROM switches 32KB PRG and 8KB CHR banks
+						const uint32_t totalPrg32kBanks = totalPrg16kBanks / 2;
+						pNES_instance->NES_state.catridgeInfo.gxrom.chrBank = (data & 0x03) % totalChr8kBanks;
+						pNES_instance->NES_state.catridgeInfo.gxrom.prgBank = ((data >> FOUR) & 0x03) % totalPrg32kBanks;
 					}
 					BREAK;
 				}
