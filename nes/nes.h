@@ -684,26 +684,33 @@ private:
 	enum MAPPER : int16_t
 	{
 		MAPPER_NOT_APPLICABLE = INVALID,
-		NROM,
-		MMC1,
-		UxROM_002,
-		CNROM,
-		MMC3,
-		MMC5,
-		INES_MAPPER_006,
-		AxROM,
-		GxROM = 66,
-		NANJING_FC001 = 163
+		NROM = ZERO,
+		MMC1 = ONE,
+		UxROM_002 = TWO,
+		CNROM = THREE,
+		MMC3 = FOUR,
+		MMC5 = FIVE,
+		INES_MAPPER_006 = SIX,
+		AxROM = SEVEN,
+		MMC2 = NINE,
+		MMC4 = TEN,
+		COLOR_DREAMS = ELEVEN,
+		INES_MAPPER_034 = THIRTYFOUR,
+		INES_MAPPER_037 = THIRTYSEVEN,
+		GxROM = SIXTYSIX,
+		NANJING_FC001 = ONEHUNDREDSIXTYTHREE
 	};
 
 	enum SUB_MAPPER : int16_t
 	{
 		SUB_MAPPER_NOT_APPLICABLE = INVALID,
-		SEROM_SHROM_SH1ROM,
-		SUROM,
-		SOROM,
-		SNROM,
-		SXROM,
+		SEROM_SHROM_SH1ROM = ZERO,
+		SUROM = ONE,
+		NINA = ONE,
+		SOROM = TWO,
+		BNROM = TWO,
+		SNROM = THREE,
+		SXROM = FOUR,
 	};
 
 	enum class MEMORY_ACCESS_SOURCE
@@ -738,8 +745,8 @@ private:
 		{
 			ID mapperID;
 			MAPPER mapper;
-			SUB_MAPPER subMapper;
 		};
+		SUB_MAPPER subMapper;
 		NAMETABLE_MIRROR nameTblMir;
 		struct
 		{
@@ -852,6 +859,10 @@ private:
 				FLAG mmc3IrqCounterReloadEnabled;
 				FLAG mmc3IrqEnable;
 			} inRegisters;
+			struct
+			{
+				BYTE outerBank;
+			} ines037;
 		} mmc3;
 		struct
 		{
@@ -863,6 +874,31 @@ private:
 			BYTE prgBank;
 			BYTE chrBank;
 		} gxrom;
+		struct
+		{
+			BYTE prgBank;
+			BYTE chrBankFD[TWO];
+			BYTE chrBankFE[TWO];
+			BYTE chrBankLatch[TWO];
+		} mmc2;
+		struct
+		{
+			BYTE prgBank16;
+			BYTE chrBankFD[TWO];
+			BYTE chrBankFE[TWO];
+			BYTE chrBankLatch[TWO];
+		} mmc4;
+		struct
+		{
+			BYTE prgBank32;
+			BYTE chrBank8;
+		} colorDreams;
+		struct
+		{
+			BYTE prgBank32;
+			BYTE chrBank4Lo;
+			BYTE chrBank4Hi;
+		} ines034;
 		struct
 		{
 			union

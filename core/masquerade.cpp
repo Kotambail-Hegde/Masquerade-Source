@@ -300,6 +300,9 @@ VIDEO_FILTERS currEnVFilter = VIDEO_FILTERS::NEAREST_FILTER;
 PALETTE_ID    currEnGbPalette = PALETTE_ID::PALETTE_1;
 PALETTE_ID    currEnGbcPalette = PALETTE_ID::PALETTE_1;
 
+// NES Zapper Support
+FLAG enableZapper = NO;
+
 #pragma endregion GLOBAL_INFRASTRUCTURE_DECLARATIONS
 
 // =========================================================
@@ -2033,6 +2036,15 @@ public:
 												boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
 											}
 											if (ImGui::IsItemHovered()) ImGui::SetTooltip("Some ROMs like \"tellinglys\" needs this to be enabled");
+											ImGui::Separator();
+											if (ImGui::BeginMenu("NES", MASQ_ENABLE_NES))
+											{
+												if (ImGui::MenuItem("Enable Zapper##EnableZapper", NULL, enableZapper))
+												{
+													enableZapper = (enableZapper == YES ? NO : YES);
+												}
+												ImGui::EndMenu();
+											}
 											ImGui::EndMenu();
 										}
 										if (ImGui::BeginMenu("Other Settings"))
