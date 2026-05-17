@@ -1741,7 +1741,7 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 						case ONE:
 						{
 							// NOTE: "prgBank32 * 0x4000" is used instead of "prgBank32 * 0x8000" as bank IDs are based on 16KB mode even when 32KB mode is selected
-							index = pNES_instance->NES_state.catridgeInfo.mmc1.prgBank32 * 0x4000;
+							index = (pNES_instance->NES_state.catridgeInfo.mmc1.prgBank32 | pNES_instance->NES_state.catridgeInfo.mmc1.surom_sxrom.prgBank256) * 0x4000;
 							index += ((address - CATRIDGE_ROM_BANK0_START_ADDRESS) & 0x7FFF);
 							BREAK;
 						}
@@ -1750,12 +1750,12 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 						{
 							if (IF_ADDRESS_WITHIN(address, CATRIDGE_ROM_BANK0_START_ADDRESS, CATRIDGE_ROM_BANK0_END_ADDRESS))
 							{
-								index = pNES_instance->NES_state.catridgeInfo.mmc1.prgBank16Lo * 0x4000;
+								index = (pNES_instance->NES_state.catridgeInfo.mmc1.prgBank16Lo | pNES_instance->NES_state.catridgeInfo.mmc1.surom_sxrom.prgBank256) * 0x4000;
 								index += ((address - CATRIDGE_ROM_BANK0_START_ADDRESS) & 0x3FFF);
 							}
 							else if (IF_ADDRESS_WITHIN(address, CATRIDGE_ROM_BANK1_START_ADDRESS, CATRIDGE_ROM_BANK1_END_ADDRESS))
 							{
-								index = pNES_instance->NES_state.catridgeInfo.mmc1.prgBank16Hi * 0x4000;
+								index = (pNES_instance->NES_state.catridgeInfo.mmc1.prgBank16Hi | pNES_instance->NES_state.catridgeInfo.mmc1.surom_sxrom.prgBank256) * 0x4000;
 								index += ((address - CATRIDGE_ROM_BANK1_START_ADDRESS) & 0x3FFF);
 							}
 							else
@@ -2694,17 +2694,25 @@ void NES_t::writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 									}
 									case ONE: // CHR bank 0 $A000-$BFFF
 									{
-										// 8KB mode
-										if (pNES_instance->NES_state.catridgeInfo.mmc1.intfControlReg.fields1.c == RESET)
+										if (pNES_instance->NES_state.catridgeInfo.subMapper == SUB_MAPPER::SUROM) MASQ_UNLIKELY
 										{
-											pNES_instance->NES_state.catridgeInfo.mmc1.chrBank8
-												= (pNES_instance->NES_state.catridgeInfo.mmc1.intfShiftReg.fields2.shiftValue & 0x1E);
+											pNES_instance->NES_state.catridgeInfo.mmc1.surom_sxrom.prgBank256
+											= (pNES_instance->NES_state.catridgeInfo.mmc1.intfShiftReg.fields2.shiftValue & 0x10);
 										}
-										// 4KB mode
 										else
 										{
-											pNES_instance->NES_state.catridgeInfo.mmc1.chrBank4Lo
-												= (pNES_instance->NES_state.catridgeInfo.mmc1.intfShiftReg.fields2.shiftValue & 0x1F);
+											// 8KB mode
+											if (pNES_instance->NES_state.catridgeInfo.mmc1.intfControlReg.fields1.c == RESET)
+											{
+												pNES_instance->NES_state.catridgeInfo.mmc1.chrBank8
+													= (pNES_instance->NES_state.catridgeInfo.mmc1.intfShiftReg.fields2.shiftValue & 0x1E);
+											}
+											// 4KB mode
+											else
+											{
+												pNES_instance->NES_state.catridgeInfo.mmc1.chrBank4Lo
+													= (pNES_instance->NES_state.catridgeInfo.mmc1.intfShiftReg.fields2.shiftValue & 0x1F);
+											}
 										}
 
 										BREAK;
@@ -2713,8 +2721,16 @@ void NES_t::writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 									{
 										if (pNES_instance->NES_state.catridgeInfo.mmc1.intfControlReg.fields1.c == SET)
 										{
-											pNES_instance->NES_state.catridgeInfo.mmc1.chrBank4Hi
-												= (pNES_instance->NES_state.catridgeInfo.mmc1.intfShiftReg.fields2.shiftValue & 0x1F);
+											if (pNES_instance->NES_state.catridgeInfo.subMapper == SUB_MAPPER::SUROM) MASQ_UNLIKELY
+											{
+												pNES_instance->NES_state.catridgeInfo.mmc1.surom_sxrom.prgBank256
+												= (pNES_instance->NES_state.catridgeInfo.mmc1.intfShiftReg.fields2.shiftValue & 0x10);
+											}
+											else
+											{
+												pNES_instance->NES_state.catridgeInfo.mmc1.chrBank4Hi
+													= (pNES_instance->NES_state.catridgeInfo.mmc1.intfShiftReg.fields2.shiftValue & 0x1F);
+											}
 										}
 
 										BREAK;
@@ -5955,6 +5971,9 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 				{
 					LOG(" Submapper : %u",
 						header.flags_8to15.nes2p0.flag8.fields.subMapper);
+
+					pNES_instance->NES_state.catridgeInfo.subMapper 
+						= static_cast<SUB_MAPPER>(header.flags_8to15.nes2p0.flag8.fields.subMapper);
 				}
 
 				// ---------------------------------------------------------------------
@@ -6622,6 +6641,18 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 							copySize,
 							chrRom,
 							copySize);
+					}
+
+					// More than 256KB
+					if (prgRomSizeBytes > 0x40000U)
+					{
+						switch (prgRomSizeBytes)
+						{
+						case 0x80000U:
+							pNES_instance->NES_state.catridgeInfo.subMapper = SUB_MAPPER::SUROM;
+							LOG(" Submapper : %u", pNES_instance->NES_state.catridgeInfo.subMapper);
+							LOG("==================================================");
+						}
 					}
 
 					BREAK;
