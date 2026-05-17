@@ -681,9 +681,9 @@ private:
 #pragma region EMULATION_DECLARATIONS
 private:
 
-	enum class MAPPER
+	enum MAPPER : int16_t
 	{
-		NOT_APPLICABLE = INVALID,
+		MAPPER_NOT_APPLICABLE = INVALID,
 		NROM,
 		MMC1,
 		UxROM_002,
@@ -696,13 +696,13 @@ private:
 		NANJING_FC001 = 163
 	};
 
-	enum class SUB_MAPPER
+	enum SUB_MAPPER : int16_t
 	{
-		NOT_APPLICABLE = INVALID,
+		SUB_MAPPER_NOT_APPLICABLE = INVALID,
 		SEROM_SHROM_SH1ROM,
-		SNROM,
-		SOROM,
 		SUROM,
+		SOROM,
+		SNROM,
 		SXROM,
 	};
 
@@ -738,6 +738,7 @@ private:
 		{
 			ID mapperID;
 			MAPPER mapper;
+			SUB_MAPPER subMapper;
 		};
 		NAMETABLE_MIRROR nameTblMir;
 		struct
