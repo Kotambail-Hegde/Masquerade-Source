@@ -265,6 +265,8 @@ private:
 		FLAG w;
 		BYTE ignoreVramRead;
 		FLAG needVideoRamIncrement;
+		uint8_t  vramAddrUpdateDelay;   // countdown: 3->0 then fires
+		uint16_t vramAddrPendingValue;  // the t.raw value to apply
 		struct openBus_t
 		{
 			uint8_t pad[7];

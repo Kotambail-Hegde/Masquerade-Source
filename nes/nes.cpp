@@ -2424,8 +2424,13 @@ void NES_t::writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 					else if (pNES_ppuRegisters->ppuInternalRegisters.w == SECOND_WRITE)
 					{
 						pNES_ppuRegisters->ppuInternalRegisters.t.addr.lo = data;
-						pNES_ppuRegisters->ppuInternalRegisters.v.raw = pNES_ppuRegisters->ppuInternalRegisters.t.raw;
-						clockMMC3IRQ(pNES_ppuRegisters->ppuInternalRegisters.v.raw, MEMORY_ACCESS_SOURCE::CPU, YES);
+
+						// Delay v update by 3 PPU cycles (matches Mesen _updateVramAddrDelay)
+						pNES_ppuRegisters->ppuInternalRegisters.vramAddrUpdateDelay = THREE;
+						pNES_ppuRegisters->ppuInternalRegisters.vramAddrPendingValue = pNES_ppuRegisters->ppuInternalRegisters.t.raw;
+						// DO NOT set v.raw or call clockMMC3IRQ here
+
+						refreshOpenBus(data);
 						pNES_ppuRegisters->ppuInternalRegisters.w = FIRST_WRITE;
 					}
 
@@ -3947,6 +3952,8 @@ void NES_t::ppuTick()
 		SCOUNTER64 cycle = pNES_instance->NES_state.emulatorStatus.ticks.ppuCounterPerLY;
 		SCOUNTER32 ly = pNES_instance->NES_state.display.currentScanline;
 
+		FLAG prevRendering = checkIfRenderring(); // capture BEFORE any PPUMASK changes take effect
+
 		if ((ly >= NES_PRE_RENDER_SCANLINE) && (ly <= NES_LAST_SCANLINE_PER_FRAME))
 		{
 			if ((ly == NES_PRE_RENDER_SCANLINE) && (cycle == ONE))
@@ -4101,7 +4108,7 @@ void NES_t::ppuTick()
 					// Increment X and populate the shift registers @ cycles 8, 16, 24... 240, 248, 256
 					// Also, since this if condition also runs from cycles 321 to 336 AND (321 - 1) % 8 == 7 and (326 - 1) % 8 == 7
 					// All the conditions mentioned in above link is satisfied!
-					if (checkIfRenderring() == YES)
+					if (prevRendering == YES)
 					{
 						xInc();
 					}
@@ -4270,14 +4277,14 @@ void NES_t::ppuTick()
 					}
 				}
 
-				if (checkIfRenderring() == YES)
+				if (prevRendering == YES)
 				{
 					shiftThePixelShiftRegisters(cycle);
 				}
 			}
 
 			// Refer https://forums.nesdev.org/viewtopic.php?p=195567#p195567 for condition to check if rendering is enabled
-			if ((cycle >= ONE) && (cycle <= SIXTYFOUR) && (checkIfRenderring() == YES))
+			if ((cycle >= ONE) && (cycle <= SIXTYFOUR) && (prevRendering == YES))
 			{
 				PPUTODO("Get the actual sequence in which secondary oam clear is performed");
 				// Odd cycle
@@ -4315,7 +4322,7 @@ void NES_t::ppuTick()
 				&&
 				((ly >= NES_PRE_RENDER_SCANLINE) && (ly <= NES_LAST_SCANLINE_PER_FRAME))
 				&&
-				(checkIfRenderring() == YES)
+				(prevRendering == YES)
 				)
 			{
 				if (pNES_ppuRegisters->stopSpriteEvaluation == NO)
@@ -4415,7 +4422,7 @@ void NES_t::ppuTick()
 
 							if (y >= yMin && y <= yMax)
 							{
-								if (checkIfRenderring() == YES)
+								if (prevRendering == YES)
 								{
 									pNES_ppuRegisters->spriteOverflow = YES;
 								}
@@ -4469,7 +4476,7 @@ void NES_t::ppuTick()
 			// Also refer "At dot 256 of each scanline" in https://www.nesdev.org/wiki/PPU_scrolling#PPU_internal_registers
 			if (cycle == TWOFIFTYSIX)
 			{
-				if (checkIfRenderring() == YES)
+				if (prevRendering == YES)
 				{
 					yInc();
 				}
@@ -4480,7 +4487,7 @@ void NES_t::ppuTick()
 			if (cycle == TWOFIFTYSEVEN)
 			{
 				populatePixelShiftRegisters(); // Refer "Cycles 1-256" in https://www.nesdev.org/wiki/PPU_rendering ("The shifters are reloaded during ticks 9, 17, 25, ..., 257")
-				if (checkIfRenderring() == YES)
+				if (prevRendering == YES)
 				{
 					pNES_ppuRegisters->ppuInternalRegisters.v.fields.coarseXScroll = pNES_ppuRegisters->ppuInternalRegisters.t.fields.coarseXScroll;
 					pNES_ppuRegisters->ppuInternalRegisters.v.fields.nameTblSelectH = pNES_ppuRegisters->ppuInternalRegisters.t.fields.nameTblSelectH;
@@ -4768,7 +4775,7 @@ void NES_t::ppuTick()
 			// Refer to difference b/w pre-render ly and normal ly mentioned in https://forums.nesdev.org/viewtopic.php?p=40598#p40598
 			if ((pNES_instance->NES_state.display.currentScanline == NES_PRE_RENDER_SCANLINE) && (cycle >= TWOHUNDREDEIGHTY) && (cycle <= THREEHUNDREDFOUR))
 			{
-				if (checkIfRenderring() == YES)
+				if (prevRendering == YES)
 				{
 					pNES_ppuRegisters->ppuInternalRegisters.v.fields.coarseYScroll = pNES_ppuRegisters->ppuInternalRegisters.t.fields.coarseYScroll;
 					pNES_ppuRegisters->ppuInternalRegisters.v.fields.nameTblSelectV = pNES_ppuRegisters->ppuInternalRegisters.t.fields.nameTblSelectV;
@@ -4846,6 +4853,28 @@ void NES_t::ppuTick()
 			pNES_instance->NES_state.display.wasVblankJustTriggerred = YES;
 		}
 
+		// Deferred $2006 2nd-write v update (Mesen _updateVramAddrDelay)
+		if (pNES_ppuRegisters->ppuInternalRegisters.vramAddrUpdateDelay > ZERO)
+		{
+			pNES_ppuRegisters->ppuInternalRegisters.vramAddrUpdateDelay--;
+
+			if (pNES_ppuRegisters->ppuInternalRegisters.vramAddrUpdateDelay == ZERO)
+			{
+				pNES_ppuRegisters->ppuInternalRegisters.v.raw
+					= pNES_ppuRegisters->ppuInternalRegisters.vramAddrPendingValue;
+
+				bool isNotRendering = !((pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.ENABLE_BG_RENDERING == SET)
+					|| (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.ENABLE_SPRITE_RENDERING == SET));
+				bool isOutsideVisible = !((pNES_instance->NES_state.display.currentScanline >= NES_PRE_RENDER_SCANLINE)
+					&& (pNES_instance->NES_state.display.currentScanline <= NES_LAST_VISIBLE_PPU_SCANLINE));
+
+				if (isNotRendering || isOutsideVisible)
+				{
+					clockMMC3IRQ(pNES_ppuRegisters->ppuInternalRegisters.v.raw, MEMORY_ACCESS_SOURCE::CPU, NO);
+				}
+			}
+		}
+
 		// Refer : Mesen _ignoreVramRead - suppress back-to-back $2007 reads within 6 PPU cycles
 		if (pNES_ppuRegisters->ppuInternalRegisters.ignoreVramRead > ZERO)
 		{
@@ -4895,7 +4924,7 @@ void NES_t::ppuTick()
 		if (
 			(ly == NES_PRE_RENDER_SCANLINE)
 			&&
-			(checkIfRenderring() == YES)
+			(prevRendering == YES)
 			&&
 			(pNES_instance->NES_state.display.isOddFrame == YES)
 			&&
