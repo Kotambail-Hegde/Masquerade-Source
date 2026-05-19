@@ -3130,16 +3130,21 @@ NES_t::EXCEPTION_EVENT_TYPE NES_t::processNMI()
 	// For 6.nmi_disable.nes and 08-nmi_off_timing
 	SCOUNTER64 ppuCycle = pNES_instance->NES_state.emulatorStatus.ticks.ppuCounterPerLY;
 	SCOUNTER32 ly = pNES_instance->NES_state.display.currentScanline;
-	if (pNES_instance->NES_state.interrupts.isNMI == YES	// To ensure NMI was triggered which inturn ensures VBL is set or atleast was set just few cycles before to generate the edge trigger
-		&& ly == NES_POST_RENDER_SCANLINE	// To ensure "just as VBL flag is set" condition
-		&& ppuCycle <= SIX	// Refer 08-nmi_off_timing documentation; This is the method used achieve the PPU cycle accuracy expected by the test in our emulator where CPU cycle is min resolution
-		&& pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUCTRL.ppuctrl.VBLANK_NMI_ENABLE == RESET)
+
+	// NMI edge trigger requires VBL to be set, or have been set just moments before to generate the edge trigger
+	if (pNES_instance->NES_state.interrupts.isNMI != YES)
 	{
-		pNES_instance->NES_state.interrupts.isNMI = CLEAR;
-		pNES_instance->NES_state.interrupts.nmiDelayInInstructions = RESET;
 		RETURN EXCEPTION_EVENT_TYPE::EVENT_NONE;
 	}
-
+	// NMI suppression: VBLANK_NMI_ENABLE was cleared right at the VBL edge � cancel NMI
+	else if (isNMI_SuppressedAtVBLEdge(ly, ppuCycle))
+	{
+		// Reset counters
+		pNES_instance->NES_state.interrupts.nmiDelayInInstructions = RESET;
+		// Clear the NMI flag
+		pNES_instance->NES_state.interrupts.isNMI = CLEAR;
+		RETURN EXCEPTION_EVENT_TYPE::EVENT_NONE;
+	}
 	// Handle NMI
 	// Interrupt is checked only during the final tick of an opcode, hence can be executed only when we are about to fetch the next opcode
 	// Refer https://www.reddit.com/r/EmuDev/comments/16y1ilc/comment/k362vo1/?utm_source=share&utm_medium=web3x&utm_name=web3xcss&utm_term=1&utm_content=share_button
@@ -3147,26 +3152,7 @@ NES_t::EXCEPTION_EVENT_TYPE NES_t::processNMI()
 	// Refer https://forums.nesdev.org/viewtopic.php?p=177414#p177414
 	// Refer https://forums.nesdev.org/viewtopic.php?p=177516#p177516 (this is an interesting post)
 	// Also handles for 7.nmi_timing.nes, 04-nmi_control and 05-nmi_timing.nes
-	else if
-		(
-			pNES_instance->NES_state.interrupts.isNMI == YES	// To ensure NMI was triggered which inturn ensures VBL is set or atleast was set just few cycles before to generate the edge trigger 
-			&&
-			(
-				pNES_instance->NES_state.interrupts.nmiDelayInInstructions <= RESET	// NOTE 1 : This handled for NMI latency assuming VBL was already set sometime before 
-				&&
-				(
-					(
-						ly == NES_POST_RENDER_SCANLINE	// To ensure "just as VBL flag is set" condition 
-						&&
-						ppuCycle > SIX	// NOTE 2 : This handles for NMI latency assuming VBL is set just few PPU clocks before; This is the method used achieve the PPU cycle accuracy expected by the test in our emulator where CPU cycle is min resolution
-						)
-					||
-					(
-						ly != NES_POST_RENDER_SCANLINE	// To handle condition other than "just as VBL flag is set"
-						)
-					)
-				)
-			)
+	else if (isNMI_ReadyToDispatch(ly, ppuCycle))
 	{
 		// For debug
 		pNES_ppuRegisters->startOfFrameToNMIHandlerPPUCycles = pNES_instance->NES_state.emulatorStatus.ticks.ppuCounterPerFrame;
@@ -3420,8 +3406,7 @@ void NES_t::cpuTickT(CYCLES_TYPE cycleType)
 
 				// As mentioned in point 1 of https://forums.nesdev.org/viewtopic.php?t=14120
 				// "Values are written on 'put' cycles"
-				pNES_ppuMemory->NESMemoryMap.primaryOam.oamB[pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.OAMADDR]
-					= pNES_instance->NES_state.oamDMA.dataToTx;
+				pNES_ppuMemory->NESMemoryMap.primaryOam.oamB[pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.OAMADDR] = pNES_instance->NES_state.oamDMA.dataToTx;
 				++pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.OAMADDR;
 				// DMA unit alternates between 'get' cycles and 'put' cycles as mentioned in https://forums.nesdev.org/viewtopic.php?p=169070#p169070
 				++pNES_instance->NES_state.emulatorStatus.ticks.dmaGetPutCounter;
@@ -3456,7 +3441,7 @@ void NES_t::cpuTickT(CYCLES_TYPE cycleType)
 					++pNES_instance->NES_state.emulatorStatus.ticks.cpuCounter;
 
 					// Refer : https://discord.com/channels/465585922579103744/465586161067229195/863885418143416351
-					// Accoring to above link, IRQ was buffered during the CPU's READ_CYCLE which triggered OAMDMA; post the completeion of OAMDMA to compensate for "Dummy DMA read", CPU will try to do another CPU_READ. Will the buffered IRQ get triggered now?
+					// Accoring to above link, IRQ was buffered during the CPU's READ_CYCLE which triggered OAMDMA; post the completion of OAMDMA to compensate for "Dummy DMA read", CPU will try to do another CPU_READ. Will the buffered IRQ get triggered now?
 					// Emulating this behaviour seems to help pass "4-irq_and_dma.nes"
 					TODO("Need to find few more reliable sources for behaviour mentioned in line %d of file %s", __LINE__, __FILE__);
 					pNES_instance->NES_state.interrupts.irqDelayInCpuCycles = RESET; // Reset the cycles to simulate the IRQ getting triggered during the "Dummy DMA read"
@@ -3503,138 +3488,6 @@ void NES_t::syncOtherGBModuleTicks()
 
 void NES_t::ppuTick()
 {
-	auto resetPPUState = [&]()
-		{
-			pNES_instance->NES_state.display.bg.nameTblAddr = RESET;
-			pNES_instance->NES_state.display.bg.nameTblByte = RESET;
-			pNES_instance->NES_state.display.bg.attrTblAddr = RESET;
-			pNES_instance->NES_state.display.bg.attrTblByte = RESET;
-			pNES_instance->NES_state.display.bg.patternTableLAddr = RESET;
-			pNES_instance->NES_state.display.bg.patternTblLByte = RESET;
-			pNES_instance->NES_state.display.bg.patternTblMByte = RESET;
-			pNES_ppuRegisters->pn = RESET;
-			pNES_ppuRegisters->pm = RESET;
-			pNES_ppuRegisters->sn = RESET;
-			pNES_ppuRegisters->sm = RESET;
-			pNES_ppuRegisters->oamByte = RESET;
-			pNES_ppuRegisters->stopSpriteEvaluation = CLEAR;
-			pNES_instance->NES_state.display.obj.spriteYCoordinate = RESET;
-			pNES_instance->NES_state.display.obj.patternTableLAddr = RESET;
-			pNES_instance->NES_state.display.obj.patternTableMAddr = RESET;
-			pNES_instance->NES_state.display.obj.patternTblLByte = RESET;
-			pNES_instance->NES_state.display.obj.patternTblMByte = RESET;
-			pNES_instance->NES_state.display.obj.spriteAttribute.raw = RESET;
-			pNES_instance->NES_state.display.obj.spriteXCoordinate = RESET;
-			pNES_instance->NES_state.display.obj.tileNumber = RESET;
-			pNES_instance->NES_state.display.obj.paletteID = RESET;
-		};
-
-	auto checkIfRenderring = [&]()
-		{
-			if ((pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.ENABLE_BG_RENDERING == SET)
-				|| (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.ENABLE_SPRITE_RENDERING == SET))
-			{
-				RETURN YES;
-			}
-			else
-			{
-				RETURN NO;
-			}
-		};
-
-	auto xInc = [&]()
-		{
-			// if coarse X == 31
-			if ((pNES_ppuRegisters->ppuInternalRegisters.v.raw & 0x001F) == THIRTYONE)
-			{
-				pNES_ppuRegisters->ppuInternalRegisters.v.raw &= (~0x001F);						// coarse X = 0
-				pNES_ppuRegisters->ppuInternalRegisters.v.raw ^= 0x0400;						// switch horizontal nametable
-			}
-			else
-			{
-				pNES_ppuRegisters->ppuInternalRegisters.v.raw += ONE;							// increment coarse X
-			}
-		};
-
-	auto yInc = [&]()
-		{
-			// if fine Y < 7
-			if ((pNES_ppuRegisters->ppuInternalRegisters.v.raw & 0x7000) != 0x7000)
-			{
-				pNES_ppuRegisters->ppuInternalRegisters.v.raw += 0x1000;						// increment fine Y
-			}
-			else
-			{
-				pNES_ppuRegisters->ppuInternalRegisters.v.raw &= (~0x7000);						// fine Y = 0
-				uint16_t y = (pNES_ppuRegisters->ppuInternalRegisters.v.raw & 0x03E0) >> FIVE;	// let y = coarse Y
-				if (y == TWENTYNINE)
-				{
-					y = ZERO;																	// coarse Y = 0
-					pNES_ppuRegisters->ppuInternalRegisters.v.raw ^= 0x0800;					// switch vertical nametable
-				}
-				else if (y == THIRTYONE)
-				{
-					y = ZERO;																	// coarse Y = 0, nametable not switched
-				}
-				else
-				{
-					y += ONE;																	// increment coarse Y
-				}
-				// put coarse Y back into v
-				pNES_ppuRegisters->ppuInternalRegisters.v.raw = (pNES_ppuRegisters->ppuInternalRegisters.v.raw & (~0x03E0)) | (y << FIVE);
-			}
-		};
-
-	auto populatePixelShiftRegisters = [&]()
-		{
-			// Loading the shift registers
-
-			pNES_instance->NES_state.display.bg.loPatternShifter.loPatternShiftSplit[LO]
-				= pNES_instance->NES_state.display.bg.patternTblLByte;
-			pNES_instance->NES_state.display.bg.hiPatternShifter.hiPatternShiftSplit[LO]
-				= pNES_instance->NES_state.display.bg.patternTblMByte;
-
-			// Even though ideally this needs to be 1 bit latch, we will still use 8 bit register and set all bits to same value...
-			// NOTE: bit[n] Xly 256 sets all 8 bits to bit[n] 
-
-			pNES_instance->NES_state.display.bg.loAttrShifter.loAttrShiftSplit[LO]
-				= GETBIT(LO, pNES_instance->NES_state.display.bg.paletteID) * 0xFF;
-
-			pNES_instance->NES_state.display.bg.hiAttrShifter.hiAttrShiftSplit[LO]
-				= GETBIT(HI, pNES_instance->NES_state.display.bg.paletteID) * 0xFF;
-		};
-
-	auto shiftThePixelShiftRegisters = [&](SCOUNTER64 cycle)
-		{
-			if (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.ENABLE_BG_RENDERING == SET)
-			{
-				pNES_instance->NES_state.display.bg.loPatternShifter.loPatternShift <<= ONE;
-				pNES_instance->NES_state.display.bg.hiPatternShifter.hiPatternShift <<= ONE;
-				pNES_instance->NES_state.display.bg.loAttrShifter.loAttrShift <<= ONE;
-				pNES_instance->NES_state.display.bg.hiAttrShifter.hiAttrShift <<= ONE;
-			}
-
-			// We check for cycles because we don't want sprite shifter to run during ((cycle >= THREETWENTYONE) && (cycle <= THREETHIRTYSIX))
-			if ((cycle >= ONE) && (cycle <= TWOFIFTYSIX))
-			{
-				if (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.ENABLE_SPRITE_RENDERING == SET)
-				{
-					for (COUNTER8 spriteI = ZERO; spriteI < pNES_instance->NES_state.display.obj.spriteCountPerScanline; spriteI++)
-					{
-						if (pNES_instance->NES_state.display.obj.shifter[spriteI].xSubtractor > ZERO)
-						{
-							pNES_instance->NES_state.display.obj.shifter[spriteI].xSubtractor--;
-						}
-						else
-						{
-							pNES_instance->NES_state.display.obj.shifter[spriteI].loPatternShifter <<= ONE;
-							pNES_instance->NES_state.display.obj.shifter[spriteI].hiPatternShifter <<= ONE;
-						}
-					}
-				}
-			}
-		};
-
 	if (pNES_instance->NES_state.emulatorStatus.ticks.cpuCounter >= NES_PPU_WAIT_CPU_CYCLES_POST_RESET)
 	{
 		SCOUNTER64 cycle = pNES_instance->NES_state.emulatorStatus.ticks.ppuCounterPerLY;
@@ -3994,6 +3847,8 @@ void NES_t::ppuTick()
 					pNES_ppuRegisters->oamByte = RESET;
 					pNES_ppuRegisters->startSpriteOverflowEvaluation = CLEAR;
 					pNES_ppuRegisters->stopSpriteEvaluation = CLEAR;
+
+					pNES_instance->NES_state.display.obj.isSprite0PresentInSecondaryOam = CLEAR;
 
 					memset(pNES_ppuMemory->NESMemoryMap.overflowOam.oamB, RESET, sizeof(pNES_ppuMemory->NESMemoryMap.overflowOam.oamB));
 				}
