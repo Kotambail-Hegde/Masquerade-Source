@@ -263,10 +263,14 @@ private:
 		tv_t t;
 		BYTE x;
 		FLAG w;
+		BYTE ignoreVramRead;
+		FLAG needVideoRamIncrement;
 		struct openBus_t
 		{
-			BYTE openBusValue;
-			long long lastRefreshTimeInMs;
+			uint8_t pad[7];
+			uint8_t openBusValue;
+			// Store per-bit stamps
+			uint64_t openBusDecayStamp[8]; // one per bit
 		} openBus;
 	} ppuInternalRegisters_t;
 
@@ -1522,6 +1526,52 @@ private:
 	void cpuSetRegister(REGISTER_TYPE rt, uint16_t u16parameter);
 
 	uint16_t cpuReadRegister(REGISTER_TYPE rt);
+
+	MASQ_INLINE void setOpenBus(uint8_t mask, uint8_t value)
+	{
+		auto& openBus = pNES_ppuRegisters->ppuInternalRegisters.openBus;
+		uint64_t now = pNES_instance->NES_state.emulatorStatus.ticks.ppuCounter;
+
+		for (int i = 0; i < 8; i++)
+		{
+			if (mask & 0x01)
+			{
+				if (value & 0x01)
+				{
+					openBus.openBusValue |= (1 << i);
+				}
+				else
+				{
+					openBus.openBusValue &= ~(1 << i);
+				}
+				openBus.openBusDecayStamp[i] = now;
+			}
+			else if ((now - openBus.openBusDecayStamp[i]) > (3 * NES_PPU_NTSC_FRAME_DOTS)) // 3 frames
+			{
+				openBus.openBusValue &= ~(1 << i);
+			}
+			mask >>= 1;
+			value >>= 1;
+		}
+	}
+
+	MASQ_INLINE uint8_t applyOpenBus(uint8_t mask, uint8_t value)
+	{
+		setOpenBus(~mask, value);
+		RETURN value | (pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusValue & mask);
+	}
+
+	// replaces refreshOpenBus
+	MASQ_INLINE void refreshOpenBus(uint8_t value, uint8_t mask = 0xFF)
+	{
+		setOpenBus(mask, value);
+	}
+
+	// replaces applyOpenBusDecay (write-only register reads)
+	MASQ_INLINE uint8_t applyOpenBusDecay()
+	{
+		RETURN applyOpenBus(0xFF, 0);
+	}
 
 	byte readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source);
 

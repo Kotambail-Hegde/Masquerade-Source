@@ -1528,6 +1528,8 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 			}
 			else if (IF_ADDRESS_WITHIN(address, PPU_START_ADDRESS, PPU_MIRROR_END_ADDRESS))
 			{
+				auto& openBus = pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusValue;
+
 				address -= PPU_START_ADDRESS;
 				auto index = address & (PPU_CTRL_REG_SIZE - ONE); // % 0x0008
 
@@ -1536,19 +1538,18 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 				switch (index + PPU_START_ADDRESS)
 				{
 				case PPU_CTRL_ADDRESS:
-				{
-					RETURN pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusValue;
-				}
 				case PPU_MASK_ADDRESS:
+				case OAM_ADDR_ADDRESS:
+				case PPU_SCROLL_ADDRESS:
 				{
-					RETURN pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusValue;
+					RETURN applyOpenBusDecay();
 				}
 				case PPU_STATUS_ADDRESS:
 				{
 					pNES_ppuRegisters->ppuInternalRegisters.w = FIRST_WRITE; // Reading PPU status register clears the PPU internal W register
 
 					// First, fill the open bus values
-					pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUSTATUS.raw = pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusValue;
+					pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUSTATUS.raw = openBus;
 
 					// Next, override the appropriate status bits with actual values
 					pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUSTATUS.ppustatus.VBLANK = pNES_ppuRegisters->vblank;
@@ -1577,12 +1578,10 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 						pNES_ppuRegisters->ppuStatusReadQuirkEnable = YES;
 					}
 
-					pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusValue = pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUSTATUS.raw;
-					RETURN pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUSTATUS.raw;
-				}
-				case OAM_ADDR_ADDRESS:
-				{
-					RETURN pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusValue;
+					auto statusVal = pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUSTATUS.raw;
+
+					// bits 7:5 are driven, bits 4:0 are open bus
+					RETURN applyOpenBus(0x1F, statusVal);
 				}
 				case OAM_DATA_ADDRESS:
 				{
@@ -1605,76 +1604,66 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 
 					pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.OAMDATA = data;
 
-					pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusValue = pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.OAMDATA;
-					RETURN pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.OAMDATA;
-				}
-				case PPU_SCROLL_ADDRESS:
-				{
-					RETURN pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusValue;
+					RETURN applyOpenBus(0x00, data); // all bits driven
 				}
 				case PPU_ADDR_ADDRESS:
 				{
 					clockMMC3IRQ(pNES_ppuRegisters->ppuInternalRegisters.v.raw, MEMORY_ACCESS_SOURCE::CPU, NO);
+					applyOpenBusDecay();
 					RETURN pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusValue;
 				}
 				case PPU_DATA_ADDRESS:
 				{
 					// Refer : https://www.nesdev.org/wiki/PPU_registers#PPUDATA
-					auto data = pNES_ppuRegisters->ppuInternalRegisters.cpu2ppu;
+					if (pNES_ppuRegisters->ppuInternalRegisters.ignoreVramRead > ZERO)
+					{
+						// 2 reads to $2007 in quick succession causes 2nd read to be ignored
+						RETURN applyOpenBus(0xFF, ZERO);
+					}
 
+					auto data = pNES_ppuRegisters->ppuInternalRegisters.cpu2ppu;
 					pNES_ppuRegisters->ppuInternalRegisters.cpu2ppu
 						= readPpuRawMemory(pNES_ppuRegisters->ppuInternalRegisters.v.raw, MEMORY_ACCESS_SOURCE::CPU);
-					if (IF_ADDRESS_WITHIN(pNES_ppuRegisters->ppuInternalRegisters.v.raw, PALETTE_RAM_INDEXES_START_ADDRESS, PALETTE_RAM_INDEXES_MIRROR_END_ADDRESS))
+
+					bool isPaletteRead = IF_ADDRESS_WITHIN(pNES_ppuRegisters->ppuInternalRegisters.v.raw,
+						PALETTE_RAM_INDEXES_START_ADDRESS, PALETTE_RAM_INDEXES_MIRROR_END_ADDRESS);
+
+					if (isPaletteRead)
 					{
 						data = pNES_ppuRegisters->ppuInternalRegisters.cpu2ppu;
 
 						// This is needed to handle vram_access.nes
 						// Implemented based on https://forums.nesdev.org/viewtopic.php?p=79492#p79492
-						// This is hinted @ "Reading palette RAM" section of https://www.nesdev.org/wiki/PPU_registers#PPUDATA_-_VRAM_data_($2007_read/write)
-
 						pNES_ppuRegisters->ppuInternalRegisters.cpu2ppu
 							= readPpuRawMemory(pNES_ppuRegisters->ppuInternalRegisters.v.raw - 0x1000, MEMORY_ACCESS_SOURCE::CPU);
 
-						// For PPU Openbus
-						// Extract bits 6 and 7 from openBusValue
-						auto bits6And7 = (pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusValue & 0xC0);
-						// Clear bits 6 and 7 in data
+						// For PPU Openbus: palette reads only drive bits 5:0
 						data &= 0x3F;
-						// Insert the extracted bits 6 and 7 to corresponding position in data
-						data |= bits6And7;
 					}
 
-					if (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUCTRL.ppuctrl.VRAM_ADDRESS_INCREMENT == RESET)
-					{
-						pNES_ppuRegisters->ppuInternalRegisters.v.raw += ONE;
-						clockMMC3IRQ(pNES_ppuRegisters->ppuInternalRegisters.v.raw, MEMORY_ACCESS_SOURCE::CPU, NO);
-					}
-					else
-					{
-						pNES_ppuRegisters->ppuInternalRegisters.v.raw += THIRTYTWO;
-						clockMMC3IRQ(pNES_ppuRegisters->ppuInternalRegisters.v.raw, MEMORY_ACCESS_SOURCE::CPU, NO);
-					}
+					// Defer VRAM address increment to next PPU cycle (matches Mesen _needVideoRamIncrement)
+					pNES_ppuRegisters->ppuInternalRegisters.needVideoRamIncrement = YES;
+
+					// Ignore next back-to-back read (6 PPU cycles worth)
+					pNES_ppuRegisters->ppuInternalRegisters.ignoreVramRead = SIX;
 
 					pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUDATA = data;
 
-					pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusValue = pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUDATA;
-					RETURN pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUDATA;
+					RETURN isPaletteRead ? applyOpenBus(0xC0, data) : applyOpenBus(0x00, data);
 				}
 				default:
 				{
 					FATAL("Unknown PPU register");
+					RETURN pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusValue;
 				}
 				}
-
-				pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusValue = pNES_cpuMemory->NESMemoryMap.ppuCtrl.raw[index];
-				RETURN pNES_cpuMemory->NESMemoryMap.ppuCtrl.raw[index];
 			}
 			else if (IF_ADDRESS_WITHIN(address, APU_AND_IO_START_ADDRESS, APU_AND_IO_END_ADDRESS))
 			{
 				if (address >= APU_AND_IO_START_ADDRESS && address <= 0x4014)
 				{
 					// To handle test_cpu_exec_space_apu.nes
-					// NOTE : "CPU open bus" section of https://www.nesdev.org/wiki/Open_bus_behavior mentions that "high byte of address" should be RETURNed
+					// NOTE : "CPU open bus" section of https://www.nesdev.org/wiki/Open_bus_behavior mentions that "high byte of address" should be returned
 					// Maybe this is why test_cpu_exec_space_apu.nes is passing. But this needs further investigation
 					RETURN (address >> EIGHT);
 				}
@@ -2298,9 +2287,8 @@ void NES_t::writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 
 				FLAG wasNmiSet = ((pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUCTRL.ppuctrl.VBLANK_NMI_ENABLE == SET) ? YES : NO);
 
-				// Update this in CPU's perspective 
+				// Update this in CPU's perspective (except for PPU_STATUS)
 
-				auto originalStatus = pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUSTATUS;
 				if ((index + PPU_START_ADDRESS) != PPU_STATUS_ADDRESS)
 				{
 					pNES_cpuMemory->NESMemoryMap.ppuCtrl.raw[index] = data;
@@ -2312,6 +2300,8 @@ void NES_t::writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 				{
 				case PPU_CTRL_ADDRESS:
 				{
+					pNES_cpuMemory->NESMemoryMap.ppuCtrl.raw[index] = data;
+
 					// Refer "$2000 (PPUCTRL) write" of https://www.nesdev.org/wiki/PPU_scrolling
 					pNES_ppuRegisters->ppuInternalRegisters.t.fields.nameTblSelectH
 						= pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUCTRL.ppuctrl.BASE_NAMETABLE_ADDR_H;
@@ -2357,19 +2347,26 @@ void NES_t::writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 						pNES_instance->NES_state.interrupts.isNMI = wasNmiSet; // Revert the NMI to original state
 					}
 
+					refreshOpenBus(data);
+
 					BREAK;
 				}
 				case PPU_MASK_ADDRESS:
 				{
+					refreshOpenBus(data);
+
 					BREAK;
 				}
 				case PPU_STATUS_ADDRESS:
 				{
-					pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUSTATUS = originalStatus; // We have made sure above that status cannot be written, but just as a precaution
+					refreshOpenBus(data);
+
 					BREAK;
 				}
 				case OAM_ADDR_ADDRESS:
 				{
+					refreshOpenBus(data);
+
 					BREAK;
 				}
 				case OAM_DATA_ADDRESS:
@@ -2393,6 +2390,9 @@ void NES_t::writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 						pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.OAMADDR += ONE;
 						pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.OAMADDR &= 0xFF;
 					}
+
+					refreshOpenBus(data);
+
 					BREAK;
 				}
 				case PPU_SCROLL_ADDRESS:
@@ -2409,6 +2409,9 @@ void NES_t::writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 						pNES_ppuRegisters->ppuInternalRegisters.t.fields.fineYScroll = (data & 0x07);
 						pNES_ppuRegisters->ppuInternalRegisters.w = FIRST_WRITE;
 					}
+
+					refreshOpenBus(data);
+
 					BREAK;
 				}
 				case PPU_ADDR_ADDRESS:
@@ -2426,21 +2429,20 @@ void NES_t::writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 						pNES_ppuRegisters->ppuInternalRegisters.w = FIRST_WRITE;
 					}
 
+					refreshOpenBus(data);
+
 					BREAK;
 				}
 				case PPU_DATA_ADDRESS:
 				{
 					writePpuRawMemory(pNES_ppuRegisters->ppuInternalRegisters.v.raw, data, MEMORY_ACCESS_SOURCE::CPU);
-					if (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUCTRL.ppuctrl.VRAM_ADDRESS_INCREMENT == RESET)
-					{
-						pNES_ppuRegisters->ppuInternalRegisters.v.raw += ONE;
-						clockMMC3IRQ(pNES_ppuRegisters->ppuInternalRegisters.v.raw, MEMORY_ACCESS_SOURCE::CPU, YES);
-					}
-					else
-					{
-						pNES_ppuRegisters->ppuInternalRegisters.v.raw += THIRTYTWO;
-						clockMMC3IRQ(pNES_ppuRegisters->ppuInternalRegisters.v.raw, MEMORY_ACCESS_SOURCE::CPU, YES);
-					}
+
+					// Defer v increment to ppuTick (matches Mesen _needVideoRamIncrement on writes)
+					// ppuTick will do xInc()+yInc() during rendering, or v+=1/32 outside rendering
+					pNES_ppuRegisters->ppuInternalRegisters.needVideoRamIncrement = YES;
+
+					refreshOpenBus(data);
+
 					BREAK;
 				}
 				default:
@@ -2448,10 +2450,6 @@ void NES_t::writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 					FATAL("Unknown PPU register");
 				}
 				}
-
-				pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusValue = data;
-				pNES_ppuRegisters->ppuInternalRegisters.openBus.lastRefreshTimeInMs
-					= std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 			}
 			else if (IF_ADDRESS_WITHIN(address, APU_AND_IO_START_ADDRESS, APU_AND_IO_END_ADDRESS))
 			{
@@ -4848,6 +4846,43 @@ void NES_t::ppuTick()
 			pNES_instance->NES_state.display.wasVblankJustTriggerred = YES;
 		}
 
+		// Refer : Mesen _ignoreVramRead - suppress back-to-back $2007 reads within 6 PPU cycles
+		if (pNES_ppuRegisters->ppuInternalRegisters.ignoreVramRead > ZERO)
+		{
+			pNES_ppuRegisters->ppuInternalRegisters.ignoreVramRead--;
+		}
+
+		// Refer : Mesen _needVideoRamIncrement - defer $2007 v increment by 1 PPU cycle
+		// This prevents open bus test's rapid $2007 reads from corrupting v during rendering tests
+		if (pNES_ppuRegisters->ppuInternalRegisters.needVideoRamIncrement == YES)
+		{
+			pNES_ppuRegisters->ppuInternalRegisters.needVideoRamIncrement = NO;
+
+			bool isRendering = (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.ENABLE_BG_RENDERING == SET)
+				|| (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.ENABLE_SPRITE_RENDERING == SET);
+			bool isVisibleOrPrerender = (pNES_instance->NES_state.display.currentScanline >= NES_PRE_RENDER_SCANLINE)
+				&& (pNES_instance->NES_state.display.currentScanline <= NES_LAST_VISIBLE_PPU_SCANLINE);
+
+			if (isRendering && isVisibleOrPrerender)
+			{
+				xInc();
+				yInc();
+			}
+			else
+			{
+				if (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUCTRL.ppuctrl.VRAM_ADDRESS_INCREMENT == RESET)
+				{
+					pNES_ppuRegisters->ppuInternalRegisters.v.raw += ONE;
+					clockMMC3IRQ(pNES_ppuRegisters->ppuInternalRegisters.v.raw, MEMORY_ACCESS_SOURCE::CPU, NO);
+				}
+				else
+				{
+					pNES_ppuRegisters->ppuInternalRegisters.v.raw += THIRTYTWO;
+					clockMMC3IRQ(pNES_ppuRegisters->ppuInternalRegisters.v.raw, MEMORY_ACCESS_SOURCE::CPU, NO);
+				}
+			}
+		}
+
 		// Tick the counters
 		++pNES_instance->NES_state.emulatorStatus.ticks.ppuCounter;
 		++pNES_instance->NES_state.emulatorStatus.ticks.ppuCounterPerLY;
@@ -5589,6 +5624,12 @@ void NES_t::initializeGraphics()
 	palScreen[0x3F] = Pixel(0, 0, 0);
 
 	pNES_instance->NES_state.display.currentScanline = NES_PRE_RENDER_SCANLINE;
+
+	// in your PPU reset / init
+	memset(pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusDecayStamp, 0,
+		sizeof(pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusDecayStamp));
+
+	pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusValue = 0;
 }
 
 float NES_t::getEmulationVolume()
@@ -5664,14 +5705,6 @@ bool NES_t::runEmulationAtFixedRate(uint32_t currentFrame)
 	playTheAudioFrame();
 
 	displayCompleteScreen();
-
-	// To handle 3rd test of ppu_open_bus.nes 
-	// Check for 600 ms decay rate for open bus
-	auto currentTimeInMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-	if ((currentTimeInMs - pNES_ppuRegisters->ppuInternalRegisters.openBus.lastRefreshTimeInMs) > (600 / _XFPS))
-	{
-		pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusValue = RESET;
-	}
 
 	RETURN status;
 }
