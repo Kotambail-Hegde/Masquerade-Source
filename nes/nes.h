@@ -263,10 +263,16 @@ private:
 		tv_t t;
 		BYTE x;
 		FLAG w;
+		BYTE ignoreVramRead;
+		FLAG needVideoRamIncrement;
+		uint8_t  vramAddrUpdateDelay;   // countdown: 3->0 then fires
+		uint16_t vramAddrPendingValue;  // the t.raw value to apply
 		struct openBus_t
 		{
-			BYTE openBusValue;
-			long long lastRefreshTimeInMs;
+			uint8_t pad[7];
+			uint8_t openBusValue;
+			// Store per-bit stamps
+			uint64_t openBusDecayStamp[8]; // one per bit
 		} openBus;
 	} ppuInternalRegisters_t;
 
@@ -684,26 +690,33 @@ private:
 	enum MAPPER : int16_t
 	{
 		MAPPER_NOT_APPLICABLE = INVALID,
-		NROM,
-		MMC1,
-		UxROM_002,
-		CNROM,
-		MMC3,
-		MMC5,
-		INES_MAPPER_006,
-		AxROM,
-		GxROM = 66,
-		NANJING_FC001 = 163
+		NROM = ZERO,
+		MMC1 = ONE,
+		UxROM_002 = TWO,
+		CNROM = THREE,
+		MMC3 = FOUR,
+		MMC5 = FIVE,
+		INES_MAPPER_006 = SIX,
+		AxROM = SEVEN,
+		MMC2 = NINE,
+		MMC4 = TEN,
+		COLOR_DREAMS = ELEVEN,
+		INES_MAPPER_034 = THIRTYFOUR,
+		INES_MAPPER_037 = THIRTYSEVEN,
+		GxROM = SIXTYSIX,
+		NANJING_FC001 = ONEHUNDREDSIXTYTHREE
 	};
 
 	enum SUB_MAPPER : int16_t
 	{
 		SUB_MAPPER_NOT_APPLICABLE = INVALID,
-		SEROM_SHROM_SH1ROM,
-		SUROM,
-		SOROM,
-		SNROM,
-		SXROM,
+		SEROM_SHROM_SH1ROM = ZERO,
+		SUROM = ONE,
+		NINA = ONE,
+		SOROM = TWO,
+		BNROM = TWO,
+		SNROM = THREE,
+		SXROM = FOUR,
 	};
 
 	enum class MEMORY_ACCESS_SOURCE
@@ -738,8 +751,8 @@ private:
 		{
 			ID mapperID;
 			MAPPER mapper;
-			SUB_MAPPER subMapper;
 		};
+		SUB_MAPPER subMapper;
 		NAMETABLE_MIRROR nameTblMir;
 		struct
 		{
@@ -852,6 +865,10 @@ private:
 				FLAG mmc3IrqCounterReloadEnabled;
 				FLAG mmc3IrqEnable;
 			} inRegisters;
+			struct
+			{
+				BYTE outerBank;
+			} ines037;
 		} mmc3;
 		struct
 		{
@@ -863,6 +880,31 @@ private:
 			BYTE prgBank;
 			BYTE chrBank;
 		} gxrom;
+		struct
+		{
+			BYTE prgBank;
+			BYTE chrBankFD[TWO];
+			BYTE chrBankFE[TWO];
+			BYTE chrBankLatch[TWO];
+		} mmc2;
+		struct
+		{
+			BYTE prgBank16;
+			BYTE chrBankFD[TWO];
+			BYTE chrBankFE[TWO];
+			BYTE chrBankLatch[TWO];
+		} mmc4;
+		struct
+		{
+			BYTE prgBank32;
+			BYTE chrBank8;
+		} colorDreams;
+		struct
+		{
+			BYTE prgBank32;
+			BYTE chrBank4Lo;
+			BYTE chrBank4Hi;
+		} ines034;
 		struct
 		{
 			union
@@ -1487,6 +1529,52 @@ private:
 
 	uint16_t cpuReadRegister(REGISTER_TYPE rt);
 
+	MASQ_INLINE void setOpenBus(uint8_t mask, uint8_t value)
+	{
+		auto& openBus = pNES_ppuRegisters->ppuInternalRegisters.openBus;
+		uint64_t now = pNES_instance->NES_state.emulatorStatus.ticks.ppuCounter;
+
+		for (int i = 0; i < 8; i++)
+		{
+			if (mask & 0x01)
+			{
+				if (value & 0x01)
+				{
+					openBus.openBusValue |= (1 << i);
+				}
+				else
+				{
+					openBus.openBusValue &= ~(1 << i);
+				}
+				openBus.openBusDecayStamp[i] = now;
+			}
+			else if ((now - openBus.openBusDecayStamp[i]) > (3 * NES_PPU_NTSC_FRAME_DOTS)) // 3 frames
+			{
+				openBus.openBusValue &= ~(1 << i);
+			}
+			mask >>= 1;
+			value >>= 1;
+		}
+	}
+
+	MASQ_INLINE uint8_t applyOpenBus(uint8_t mask, uint8_t value)
+	{
+		setOpenBus(~mask, value);
+		RETURN value | (pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusValue & mask);
+	}
+
+	// replaces refreshOpenBus
+	MASQ_INLINE void refreshOpenBus(uint8_t value, uint8_t mask = 0xFF)
+	{
+		setOpenBus(mask, value);
+	}
+
+	// replaces applyOpenBusDecay (write-only register reads)
+	MASQ_INLINE uint8_t applyOpenBusDecay()
+	{
+		RETURN applyOpenBus(0xFF, 0);
+	}
+
 	byte readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source);
 
 	void writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE source);
@@ -1661,8 +1749,6 @@ private:
 
 		// We check for cycles because we don't want sprite shifter to run during ((cycle >= THREETWENTYONE) && (cycle <= THREETHIRTYSIX))
 		if ((cycle >= ONE) && (cycle <= TWOFIFTYSIX))
-		{
-			if (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.ENABLE_SPRITE_RENDERING == SET)
 			{
 				for (COUNTER8 spriteI = ZERO; spriteI < pNES_instance->NES_state.display.obj.spriteCountPerScanline; spriteI++)
 				{
@@ -1674,7 +1760,6 @@ private:
 					{
 						pNES_instance->NES_state.display.obj.shifter[spriteI].loPatternShifter <<= ONE;
 						pNES_instance->NES_state.display.obj.shifter[spriteI].hiPatternShifter <<= ONE;
-					}
 				}
 			}
 		}

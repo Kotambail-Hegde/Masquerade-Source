@@ -361,32 +361,29 @@ float NES_t::getEmulationFPS()
 #pragma region RP2C02_DEFINITIONS
 void NES_t::clockMMC3IRQ(uint16_t address, MEMORY_ACCESS_SOURCE source, FLAG isWriteOperation)
 {
-	if (pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::MMC3)
+	if (pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::MMC3
+		|| pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::INES_MAPPER_037)
 	{
 		if (address & 0x1000 // If A12 is high
 			&&
 			pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.unfilteredA12RiseEvent == NO) // If A12 was previously low
 		{
 			pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.unfilteredA12RiseEvent = YES;
-
 			// Refer https://forums.nesdev.org/viewtopic.php?p=92322#p92322
 			if (pNES_instance->NES_state.emulatorStatus.ticks.ppuCounterMMC3A12 >= SIXTEEN)
 			{
 				pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.filteredA12RiseEvent = YES;
-
 				if (pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.currentMMC3IrqCounter == RESET
 					|| pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.mmc3IrqCounterReloadEnabled == YES)
 				{
 					pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.currentMMC3IrqCounter
 						= pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.irqReload_evenCk;
-
 					pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.mmc3IrqCounterReloadEnabled = CLEAR;
 				}
 				else if (pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.currentMMC3IrqCounter > RESET)
 				{
 					--pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.currentMMC3IrqCounter;
 				}
-
 				if (pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.currentMMC3IrqCounter == RESET
 					&& pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.mmc3IrqEnable == ENABLED)
 				{
@@ -398,7 +395,6 @@ void NES_t::clockMMC3IRQ(uint16_t address, MEMORY_ACCESS_SOURCE source, FLAG isW
 			{
 				pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.filteredA12RiseEvent = NO;
 			}
-
 			pNES_instance->NES_state.emulatorStatus.ticks.ppuCounterMMC3A12 = RESET;
 		}
 		// If A12 is low
@@ -410,6 +406,7 @@ void NES_t::clockMMC3IRQ(uint16_t address, MEMORY_ACCESS_SOURCE source, FLAG isW
 		}
 	}
 }
+
 
 byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 {
@@ -425,7 +422,8 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 
 	address &= 0x3FFF;
 
-	if (pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::MMC3)
+	if (pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::MMC3
+		|| pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::INES_MAPPER_037)
 	{
 		// Refer https://forums.nesdev.org/viewtopic.php?p=243424#p243424 AND
 		// https://forums.nesdev.org/viewtopic.php?p=243432#p243432 AND
@@ -514,28 +512,21 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 				}
 				else
 				{
+					auto& mmc1 = pNES_instance->NES_state.catridgeInfo.mmc1;
+
 					// 8KB mode
-					if (pNES_instance->NES_state.catridgeInfo.mmc1.intfControlReg.fields1.c == RESET)
+					if (mmc1.intfControlReg.fields1.c == RESET)
 					{
-						auto index = pNES_instance->NES_state.catridgeInfo.mmc1.chrBank8 * 0x1000;
-						index += ((address - PATTERN_TABLE0_START_ADDRESS) & 0x1FFF);
+						const uint32_t index = (mmc1.chrBank8 << 12) | (address & 0x1FFF);
 						RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index];
 					}
 					// 4KB mode
 					else
 					{
-						if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE0_END_ADDRESS))
-						{
-							auto index = pNES_instance->NES_state.catridgeInfo.mmc1.chrBank4Lo * 0x1000;
-							index += ((address - PATTERN_TABLE0_START_ADDRESS) & 0x0FFF);
-							RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index];
-						}
-						if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE1_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
-						{
-							auto index = pNES_instance->NES_state.catridgeInfo.mmc1.chrBank4Hi * 0x1000;
-							index += ((address - PATTERN_TABLE1_START_ADDRESS) & 0x0FFF);
-							RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index];
-						}
+						const uint32_t patternTable = (address >> 12) & 1;
+						const uint32_t bank = (patternTable == 0) ? mmc1.chrBank4Lo : mmc1.chrBank4Hi;
+						const uint32_t index = (bank << 12) | (address & 0x0FFF);
+						RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index];
 					}
 				}
 			}
@@ -571,17 +562,24 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 				}
 				else
 				{
-					auto index = pNES_instance->NES_state.catridgeInfo.cnrom.chrBank8 * 0x2000;
-					index += ((address - PATTERN_TABLE0_START_ADDRESS) & 0x1FFF);
+					const uint32_t index = (pNES_instance->NES_state.catridgeInfo.cnrom.chrBank8 << 13) | (address & 0x1FFF);
 					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index];
 				}
 			}
 			BREAK;
 		}
 		case MAPPER::MMC3:
+		case MAPPER::INES_MAPPER_037:
 		{
 			if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
 			{
+				// NOTE: Mapper 037 CHR base — Q bit selects 128KB CHR window.
+				// 0 for plain MMC3, so this is safe as a shared declaration.
+				// Refer https://www.nesdev.org/wiki/INES_Mapper_037
+				const uint32_t chrBase = (pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::INES_MAPPER_037)
+					? (((pNES_instance->NES_state.catridgeInfo.mmc3.ines037.outerBank >> 2) & 0x01) ? 0x20000u : 0x00000u)
+					: 0x00000u;
+
 #if (ENABLE_CHR_RAM_BANKING_MMC3 == NO)
 				if (pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB == ZERO)
 				{
@@ -642,7 +640,7 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 					}
 					else
 					{
-						RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index];
+						RETURN pNES_catridgeMemory->maxCatridgeCHRROM[chrBase + index];
 					}
 				}
 				if (IF_ADDRESS_WITHIN(address, startAddr2, endAddr2))
@@ -661,7 +659,7 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 					}
 					else
 					{
-						RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index];
+						RETURN pNES_catridgeMemory->maxCatridgeCHRROM[chrBase + index];
 					}
 				}
 				if (IF_ADDRESS_WITHIN(address, startAddr3, endAddr3))
@@ -678,7 +676,7 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 					}
 					else
 					{
-						RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index];
+						RETURN pNES_catridgeMemory->maxCatridgeCHRROM[chrBase + index];
 					}
 				}
 				if (IF_ADDRESS_WITHIN(address, startAddr4, endAddr4))
@@ -695,7 +693,7 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 					}
 					else
 					{
-						RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index];
+						RETURN pNES_catridgeMemory->maxCatridgeCHRROM[chrBase + index];
 					}
 				}
 				if (IF_ADDRESS_WITHIN(address, startAddr5, endAddr5))
@@ -714,7 +712,7 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 					}
 					else
 					{
-						RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index];
+						RETURN pNES_catridgeMemory->maxCatridgeCHRROM[chrBase + index];
 					}
 				}
 				if (IF_ADDRESS_WITHIN(address, startAddr6, endAddr6))
@@ -733,10 +731,122 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 					}
 					else
 					{
-						RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index];
+						RETURN pNES_catridgeMemory->maxCatridgeCHRROM[chrBase + index];
 					}
 				}
 				FATAL("Invalid CHR ROM/RAM address in MMC3");
+			}
+			BREAK;
+		}
+		case MAPPER::MMC2:
+		case MAPPER::MMC4:
+		{
+			if (address <= PATTERN_TABLE1_END_ADDRESS)
+			{
+				const FLAG isMMC4 = (pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::MMC4);
+
+				auto& chrBankFD = (isMMC4)
+					?
+					pNES_instance->NES_state.catridgeInfo.mmc4.chrBankFD
+					:
+					pNES_instance->NES_state.catridgeInfo.mmc2.chrBankFD;
+
+				auto& chrBankFE = (isMMC4)
+					?
+					pNES_instance->NES_state.catridgeInfo.mmc4.chrBankFE
+					:
+					pNES_instance->NES_state.catridgeInfo.mmc2.chrBankFE;
+
+				auto& chrBankLatch = (isMMC4)
+					?
+					pNES_instance->NES_state.catridgeInfo.mmc4.chrBankLatch
+					:
+					pNES_instance->NES_state.catridgeInfo.mmc2.chrBankLatch;
+
+				const uint32_t patternTable = (address >> 12) & 1;
+				const uint32_t bank = (chrBankLatch[patternTable] == 0xFD) ? chrBankFD[patternTable] : chrBankFE[patternTable];
+				const uint32_t index = (bank << 12) | (address & 0x0FFF); // << 12 is same as * 0x1000
+				const BYTE value = pNES_catridgeMemory->maxCatridgeCHRROM[index];
+
+				// Update latch AFTER fetch
+				if (
+					(isMMC4 && IF_ADDRESS_WITHIN(address, 0x0FD8, 0x0FDF))
+					||
+					(!isMMC4 && address == 0x0FD8)
+					)
+				{
+					chrBankLatch[0] = 0xFD;
+				}
+				else if (
+					(isMMC4 && IF_ADDRESS_WITHIN(address, 0x0FE8, 0x0FEF))
+					||
+					(!isMMC4 && address == 0x0FE8)
+					)
+				{
+					chrBankLatch[0] = 0xFE;
+				}
+				else if (IF_ADDRESS_WITHIN(address, 0x1FD8, 0x1FDF))
+				{
+					chrBankLatch[1] = 0xFD;
+				}
+				else if (IF_ADDRESS_WITHIN(address, 0x1FE8, 0x1FEF))
+				{
+					chrBankLatch[1] = 0xFE;
+				}
+
+				RETURN value;
+			}
+
+			BREAK;
+		}
+		case MAPPER::COLOR_DREAMS:
+		{
+			if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
+			{
+				if (pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB == ZERO)
+				{
+					if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE0_END_ADDRESS))
+					{
+						RETURN pNES_ppuMemory->NESMemoryMap.patternTable.patternTable0[address - PATTERN_TABLE0_START_ADDRESS];
+					}
+					else if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE1_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
+					{
+						RETURN pNES_ppuMemory->NESMemoryMap.patternTable.patternTable1[address - PATTERN_TABLE1_START_ADDRESS];
+					}
+				}
+				else
+				{
+					const uint32_t index = (pNES_instance->NES_state.catridgeInfo.colorDreams.chrBank8 << 13) | (address & 0x1FFF); // << 13 is same as * 0x2000
+					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index];
+				}
+			}
+			BREAK;
+		}
+		case MAPPER::INES_MAPPER_034:
+		{
+			if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
+			{
+				const uint32_t patternTable = (address >> 12) & 1;
+				const uint32_t offset = address & 0x0FFF;
+
+				if (pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB == ZERO 
+					|| pNES_instance->NES_state.catridgeInfo.subMapper == SUB_MAPPER::BNROM) // BNROM doesnt have any banking, just blindly reads CHR ROM/RAM
+				{
+					if (patternTable == 0)
+					{
+						RETURN pNES_ppuMemory->NESMemoryMap.patternTable.patternTable0[offset];
+					}
+					else
+					{
+						RETURN pNES_ppuMemory->NESMemoryMap.patternTable.patternTable1[offset];
+					}
+				}
+				else
+				{
+					const uint32_t bank = (patternTable == 0) ? pNES_instance->NES_state.catridgeInfo.ines034.chrBank4Lo : pNES_instance->NES_state.catridgeInfo.ines034.chrBank4Hi;
+					const uint32_t index = (bank << 12) | offset; // << 12 is same as * 0x1000
+					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index];
+				}
 			}
 			BREAK;
 		}
@@ -757,8 +867,7 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 				}
 				else
 				{
-					auto index = pNES_instance->NES_state.catridgeInfo.gxrom.chrBank * 0x2000;
-					index += ((address - PATTERN_TABLE0_START_ADDRESS) & 0x1FFF);
+					const uint32_t index = (pNES_instance->NES_state.catridgeInfo.gxrom.chrBank << 13) | (address & 0x1FFF);
 					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index];
 				}
 			}
@@ -908,7 +1017,8 @@ void NES_t::writePpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 
 	address &= 0x3FFF;
 
-	if (pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::MMC3)
+	if (pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::MMC3
+		|| pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::INES_MAPPER_037)
 	{
 		// Refer https://forums.nesdev.org/viewtopic.php?p=243424#p243424 AND
 		// https://forums.nesdev.org/viewtopic.php?p=243432#p243432 AND
@@ -935,6 +1045,8 @@ void NES_t::writePpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 		case MAPPER::CNROM:
 		case MAPPER::AxROM:
 		case MAPPER::GxROM:
+		case MAPPER::COLOR_DREAMS:
+		case MAPPER::INES_MAPPER_034:
 		{
 			// If size of chr rom is 0, then use this as chr ram
 			if (pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB == ZERO)
@@ -1019,6 +1131,7 @@ void NES_t::writePpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 			BREAK;
 		}
 		case MAPPER::MMC3:
+		case MAPPER::INES_MAPPER_037:
 		{
 			if (pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB == ZERO)
 			{
@@ -1146,6 +1259,8 @@ void NES_t::writePpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 			}
 			BREAK;
 		}
+		case MAPPER::MMC2:
+		case MAPPER::MMC4:
 		default:
 		{
 			FATAL("Read performed for unsupported mapper");
@@ -1340,36 +1455,36 @@ uint16_t NES_t::cpuReadRegister(REGISTER_TYPE rt)
 		// Normal Register access
 	case REGISTER_TYPE::RT_A:
 	{
-		RETURN(pNES_cpuRegisters->a & 0x00FF); BREAK;
+		RETURN (pNES_cpuRegisters->a & 0x00FF); BREAK;
 	}
 	case REGISTER_TYPE::RT_X:
 	{
-		RETURN(pNES_cpuRegisters->x & 0x00FF); BREAK;
+		RETURN (pNES_cpuRegisters->x & 0x00FF); BREAK;
 	}
 	case REGISTER_TYPE::RT_Y:
 	{
-		RETURN(pNES_cpuRegisters->y & 0x00FF); BREAK;
+		RETURN (pNES_cpuRegisters->y & 0x00FF); BREAK;
 	}
 	case REGISTER_TYPE::RT_P:
 	{
-		RETURN(pNES_cpuRegisters->p.p & 0x00FF); BREAK;
+		RETURN (pNES_cpuRegisters->p.p & 0x00FF); BREAK;
 	}
 	case REGISTER_TYPE::RT_SP:
 	{
-		RETURN(pNES_cpuRegisters->sp & 0x00FF); BREAK;
+		RETURN (pNES_cpuRegisters->sp & 0x00FF); BREAK;
 	}
 	case REGISTER_TYPE::RT_PC:
 	{
-		RETURN(pNES_cpuRegisters->pc & 0xFFFF); BREAK;
+		RETURN (pNES_cpuRegisters->pc & 0xFFFF); BREAK;
 	}
 
 	case REGISTER_TYPE::RT_NONE:
 	{
-		RETURN(uint16_t)NULL;  BREAK;
+		RETURN (uint16_t)NULL;  BREAK;
 	}
 	default:
 	{
-		RETURN(uint16_t)NULL; BREAK;
+		RETURN (uint16_t)NULL; BREAK;
 	}
 	}
 }
@@ -1413,6 +1528,8 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 			}
 			else if (IF_ADDRESS_WITHIN(address, PPU_START_ADDRESS, PPU_MIRROR_END_ADDRESS))
 			{
+				auto& openBus = pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusValue;
+
 				address -= PPU_START_ADDRESS;
 				auto index = address & (PPU_CTRL_REG_SIZE - ONE); // % 0x0008
 
@@ -1421,19 +1538,18 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 				switch (index + PPU_START_ADDRESS)
 				{
 				case PPU_CTRL_ADDRESS:
-				{
-					RETURN pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusValue;
-				}
 				case PPU_MASK_ADDRESS:
+				case OAM_ADDR_ADDRESS:
+				case PPU_SCROLL_ADDRESS:
 				{
-					RETURN pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusValue;
+					RETURN applyOpenBusDecay();
 				}
 				case PPU_STATUS_ADDRESS:
 				{
 					pNES_ppuRegisters->ppuInternalRegisters.w = FIRST_WRITE; // Reading PPU status register clears the PPU internal W register
 
 					// First, fill the open bus values
-					pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUSTATUS.raw = pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusValue;
+					pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUSTATUS.raw = openBus;
 
 					// Next, override the appropriate status bits with actual values
 					pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUSTATUS.ppustatus.VBLANK = pNES_ppuRegisters->vblank;
@@ -1462,12 +1578,10 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 						pNES_ppuRegisters->ppuStatusReadQuirkEnable = YES;
 					}
 
-					pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusValue = pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUSTATUS.raw;
-					RETURN pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUSTATUS.raw;
-				}
-				case OAM_ADDR_ADDRESS:
-				{
-					RETURN pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusValue;
+					auto statusVal = pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUSTATUS.raw;
+
+					// bits 7:5 are driven, bits 4:0 are open bus
+					RETURN applyOpenBus(0x1F, statusVal);
 				}
 				case OAM_DATA_ADDRESS:
 				{
@@ -1490,78 +1604,68 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 
 					pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.OAMDATA = data;
 
-					pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusValue = pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.OAMDATA;
-					RETURN pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.OAMDATA;
-				}
-				case PPU_SCROLL_ADDRESS:
-				{
-					RETURN pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusValue;
+					RETURN applyOpenBus(0x00, data); // all bits driven
 				}
 				case PPU_ADDR_ADDRESS:
 				{
 					clockMMC3IRQ(pNES_ppuRegisters->ppuInternalRegisters.v.raw, MEMORY_ACCESS_SOURCE::CPU, NO);
+					applyOpenBusDecay();
 					RETURN pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusValue;
 				}
 				case PPU_DATA_ADDRESS:
 				{
 					// Refer : https://www.nesdev.org/wiki/PPU_registers#PPUDATA
-					auto data = pNES_ppuRegisters->ppuInternalRegisters.cpu2ppu;
+					if (pNES_ppuRegisters->ppuInternalRegisters.ignoreVramRead > ZERO)
+					{
+						// 2 reads to $2007 in quick succession causes 2nd read to be ignored
+						RETURN applyOpenBus(0xFF, ZERO);
+					}
 
+					auto data = pNES_ppuRegisters->ppuInternalRegisters.cpu2ppu;
 					pNES_ppuRegisters->ppuInternalRegisters.cpu2ppu
 						= readPpuRawMemory(pNES_ppuRegisters->ppuInternalRegisters.v.raw, MEMORY_ACCESS_SOURCE::CPU);
-					if (IF_ADDRESS_WITHIN(pNES_ppuRegisters->ppuInternalRegisters.v.raw, PALETTE_RAM_INDEXES_START_ADDRESS, PALETTE_RAM_INDEXES_MIRROR_END_ADDRESS))
+
+					bool isPaletteRead = IF_ADDRESS_WITHIN(pNES_ppuRegisters->ppuInternalRegisters.v.raw,
+						PALETTE_RAM_INDEXES_START_ADDRESS, PALETTE_RAM_INDEXES_MIRROR_END_ADDRESS);
+
+					if (isPaletteRead)
 					{
 						data = pNES_ppuRegisters->ppuInternalRegisters.cpu2ppu;
 
 						// This is needed to handle vram_access.nes
 						// Implemented based on https://forums.nesdev.org/viewtopic.php?p=79492#p79492
-						// This is hinted @ "Reading palette RAM" section of https://www.nesdev.org/wiki/PPU_registers#PPUDATA_-_VRAM_data_($2007_read/write)
-
 						pNES_ppuRegisters->ppuInternalRegisters.cpu2ppu
 							= readPpuRawMemory(pNES_ppuRegisters->ppuInternalRegisters.v.raw - 0x1000, MEMORY_ACCESS_SOURCE::CPU);
 
-						// For PPU Openbus
-						// Extract bits 6 and 7 from openBusValue
-						auto bits6And7 = (pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusValue & 0xC0);
-						// Clear bits 6 and 7 in data
+						// For PPU Openbus: palette reads only drive bits 5:0
 						data &= 0x3F;
-						// Insert the extracted bits 6 and 7 to corresponding position in data
-						data |= bits6And7;
 					}
 
-					if (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUCTRL.ppuctrl.VRAM_ADDRESS_INCREMENT == RESET)
-					{
-						pNES_ppuRegisters->ppuInternalRegisters.v.raw += ONE;
-						clockMMC3IRQ(pNES_ppuRegisters->ppuInternalRegisters.v.raw, MEMORY_ACCESS_SOURCE::CPU, NO);
-					}
-					else
-					{
-						pNES_ppuRegisters->ppuInternalRegisters.v.raw += THIRTYTWO;
-						clockMMC3IRQ(pNES_ppuRegisters->ppuInternalRegisters.v.raw, MEMORY_ACCESS_SOURCE::CPU, NO);
-					}
+					// Defer VRAM address increment to next PPU cycle (matches Mesen _needVideoRamIncrement)
+					pNES_ppuRegisters->ppuInternalRegisters.needVideoRamIncrement = YES;
+
+					// Ignore next back-to-back read (6 PPU cycles worth)
+					pNES_ppuRegisters->ppuInternalRegisters.ignoreVramRead = SIX;
 
 					pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUDATA = data;
 
-					pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusValue = pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUDATA;
-					RETURN pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUDATA;
+					RETURN isPaletteRead ? applyOpenBus(0xC0, data) : applyOpenBus(0x00, data);
 				}
 				default:
 				{
 					FATAL("Unknown PPU register");
+					RETURN pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusValue;
 				}
 				}
-
-				pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusValue = pNES_cpuMemory->NESMemoryMap.ppuCtrl.raw[index];
-				RETURN pNES_cpuMemory->NESMemoryMap.ppuCtrl.raw[index];
 			}
 			else if (IF_ADDRESS_WITHIN(address, APU_AND_IO_START_ADDRESS, APU_AND_IO_END_ADDRESS))
 			{
 				if (address >= APU_AND_IO_START_ADDRESS && address <= 0x4014)
 				{
 					// To handle test_cpu_exec_space_apu.nes
-					// NOTE : "CPU open bus" section of https://www.nesdev.org/wiki/Open_bus_behavior mentions that "high byte of address" should be RETURNed
+					// NOTE : "CPU open bus" section of https://www.nesdev.org/wiki/Open_bus_behavior mentions that "high byte of address" should be returned
 					// Maybe this is why test_cpu_exec_space_apu.nes is passing. But this needs further investigation
-					RETURN(address >> EIGHT);
+					RETURN (address >> EIGHT);
 				}
 				else if (address == APU_STATUS_ADDRESS)
 				{
@@ -1604,7 +1708,7 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 					if (pNES_instance->NES_state.controller.startPolling == YES && pNES_instance->NES_state.controller.endPolling == NO)
 					{
 						// Refer https://www.nesdev.org/wiki/Standard_controller for reasons to OR with MSB of address
-						RETURN((byte)ImGui::IsKeyDown(ImGuiKey_Z) | (address >> EIGHT));
+						RETURN ((byte)ImGui::IsKeyDown(ImGuiKey_Z) | (address >> EIGHT));
 					}
 					else if ((pNES_instance->NES_state.controller.startPolling == NO && pNES_instance->NES_state.controller.endPolling == YES)
 						&& (pNES_instance->NES_state.controller.keyID >= KEY_A && pNES_instance->NES_state.controller.keyID <= KEY_RIGHT))
@@ -1620,55 +1724,85 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 						// To handle test_cpu_exec_space_apu.nes
 						// "CPU open bus" section of https://www.nesdev.org/wiki/Open_bus_behavior mentions that "high byte of address" should be RETURNed
 						// Also refer https://www.nesdev.org/wiki/Standard_controller for reasons to OR with MSB of address
-						RETURN((address >> EIGHT) | 0x01);
+						RETURN ((address >> EIGHT) | 0x01);
 					}
 				}
 				if (address == JOYSTICK2_OR_FRAMECFG_ADDRESS)
 				{
-					if (pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::GxROM)
+					if (enableZapper)
 					{
 						typedef union
 						{
 							struct
 							{
-								byte S : 1; // bit 0
+								byte S : 1;       // bit 0 — always 0, zapper has no shift register
 								byte unused0 : 2; // bits 1 - 2
-								byte W : 1; // bit 3
-								byte T : 1; // bit 4
+								byte W : 1;       // bit 3 — 0 = light detected, 1 = no light
+								byte T : 1;       // bit 4 — 0 = trigger pulled, 1 = released
 								byte unused1 : 3; // bits 5 - 7
 							} fields;
 							byte raw;
 						} zapper_t;
-
 						zapper_t zapper = { ZERO };
-
 						float x = 0.0f, y = 0.0f;
-						getMouseRelPosIfDocked(&x, &y, getScreenWidth(), getScreenHeight());
+						FLAG isInsideScreen = getMouseRelPosIfDocked(&x, &y, getScreenWidth(), getScreenHeight());
 
-						ID paletteID = pNES_instance->NES_state.display.gfxColorID[(uint8_t)(x)][(uint8_t)(y)];
+						zapper.fields.W = SET; // default: no light
+						if (isInsideScreen == YES)
+						{
+							const int32_t cursorX = (int32_t)x;
+							const int32_t cursorY = (int32_t)y;
+							const int32_t currentLy = (int32_t)pNES_instance->NES_state.display.currentScanline;
+							const int32_t currentCy = (int32_t)pNES_instance->NES_state.emulatorStatus.ticks.ppuCounterPerLY;
 
-						// NOTE : As per https://www.nesdev.org/wiki/Zapper
-						// We need to detect the white color generated by the game
-						// Now based on PPU palettes (https://www.nesdev.org/wiki/PPU_palettes), white is index 0x20 and 0x30
-						// So, we check for these 2 palettes as a way to detect the white color!
+							// NOTE: Zapper light detection matches Mesen's logic:
+							// - Check a small radius around the cursor (real sensor isn't a single pixel)
+							// - Beam must have already passed the target pixel (scanline+cycle check)
+							// - Scanline window: 20 lines behind beam
+							// - Brightness threshold: luminance >= 85/255 on rendered RGB
+							// Refer https://www.nesdev.org/wiki/Zapper
+							static constexpr int32_t ZAPPER_SCANLINE_WINDOW = 20;
+							static constexpr int32_t ZAPPER_RADIUS = 2;
+							static constexpr uint8_t ZAPPER_BRIGHTNESS = 85;
 
-						if (paletteID == 0x20 || paletteID == 0x30)
-						{
-							zapper.fields.W = RESET;
-						}
-						else
-						{
-							zapper.fields.W = SET;
+							bool lightFound = false;
+							for (int32_t yOffset = -ZAPPER_RADIUS; yOffset <= ZAPPER_RADIUS && !lightFound; ++yOffset)
+							{
+								const int32_t yPos = cursorY + yOffset;
+								if (yPos < ZERO || yPos >= (int32_t)getScreenHeight())
+								{
+									continue;
+								}
+								for (int32_t xOffset = -ZAPPER_RADIUS; xOffset <= ZAPPER_RADIUS && !lightFound; ++xOffset)
+								{
+									const int32_t xPos = cursorX + xOffset;
+									if (xPos < ZERO || xPos >= (int32_t)getScreenWidth())
+									{
+										continue;
+									}
+									// Beam must have already passed this pixel:
+									// scanline must be at or past yPos, within window,
+									// and if on the same scanline the cycle must be past xPos
+									const bool beamPastPixel = (currentLy >= yPos)
+										&& ((currentLy - yPos) <= ZAPPER_SCANLINE_WINDOW)
+										&& (currentLy != yPos || currentCy > xPos);
+									if (beamPastPixel)
+									{
+										const Pixel& p = pNES_instance->NES_state.display.imGuiBuffer.imGuiBuffer2D[yPos][xPos];
+										// Standard luminance formula (BT.601)
+										const uint8_t luminance = (uint8_t)(0.299f * p.r + 0.587f * p.g + 0.114f * p.b);
+										if (luminance >= ZAPPER_BRIGHTNESS)
+										{
+											lightFound = true;
+										}
+									}
+								}
+							}
+							zapper.fields.W = lightFound ? RESET : SET;
 						}
 
-						if (ImGui::IsMouseDown(ImGuiMouseButton_Left))
-						{
-							zapper.fields.T = RESET;
-						}
-						else
-						{
-							zapper.fields.T = SET;
-						}
+						// Trigger: 0 = pulled, 1 = released
+						zapper.fields.T = ImGui::IsMouseDown(ImGuiMouseButton_Left) ? RESET : SET;
 
 						RETURN zapper.raw;
 					}
@@ -1677,7 +1811,7 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 						// To handle test_cpu_exec_space_apu.nes
 						// "CPU open bus" section of https://www.nesdev.org/wiki/Open_bus_behavior mentions that "high byte of address" should be RETURNed
 						// Refer https://www.nesdev.org/wiki/Standard_controller for reasons to OR with MSB of address
-						RETURN(address >> EIGHT);
+						RETURN (address >> EIGHT);
 					}
 				}
 
@@ -1688,7 +1822,7 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 				// To handle test_cpu_exec_space_apu.nes
 				// NOTE : "CPU open bus" section of https://www.nesdev.org/wiki/Open_bus_behavior mentions that "high byte of address" should be RETURNed
 				// Maybe this is why test_cpu_exec_space_apu.nes is passing. But this needs further investigation
-				RETURN(address >> EIGHT);
+				RETURN (address >> EIGHT);
 			}
 			else if (IF_ADDRESS_WITHIN(address, UNMAPPED_START_ADDRESS, UNMAPPED_END_ADDRESS))
 			{
@@ -1697,7 +1831,7 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 				// Maybe this is why test_cpu_exec_space_apu.nes is passing. But this needs further investigation
 				if (address >= 0x4020 && address <= 0x40FF)
 				{
-					RETURN(address >> EIGHT);
+					RETURN (address >> EIGHT);
 				}
 
 				uint32_t modedData = 0;
@@ -1730,7 +1864,7 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 						}
 						else
 						{
-							RETURN(address >> EIGHT);
+							RETURN (address >> EIGHT);
 						}
 					}
 					if (IF_ADDRESS_WITHIN(address, CATRIDGE_ROM_BANK0_START_ADDRESS, UNMAPPED_END_ADDRESS))
@@ -1829,6 +1963,7 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 					}
 				}
 				case MAPPER::MMC3:
+				case MAPPER::INES_MAPPER_037:
 				{
 					if (IF_ADDRESS_WITHIN(address, UNMAPPED_START_ADDRESS, CATRIDGE_RAM_END_ADDRESS))
 					{
@@ -1836,7 +1971,7 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 						{
 							RETURN pNES_cpuMemory->NESMemoryMap.catridgeMappedMemory[address - UNMAPPED_START_ADDRESS];
 						}
-						RETURN(address >> EIGHT);
+						RETURN (address >> EIGHT);
 					}
 					if (IF_ADDRESS_WITHIN(address, CATRIDGE_ROM_BANK0_START_ADDRESS, UNMAPPED_END_ADDRESS))
 					{
@@ -1897,6 +2032,18 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 							FATAL("Invalid PRG ROM address in MMC3");
 						}
 
+						// NOTE: Mapper 037 outer bank PRG transform
+						// Refer https://www.nesdev.org/wiki/INES_Mapper_037
+						if (pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::INES_MAPPER_037)
+						{
+							const uint8_t outerBank = pNES_instance->NES_state.catridgeInfo.mmc3.ines037.outerBank;
+							const uint8_t BB = outerBank & 0x03;
+							const uint8_t Q = (outerBank >> 2) & 0x01;
+							const uint32_t A17 = (uint32_t)Q << 17;
+							const uint32_t A16 = (BB == 3) ? 0x10000u : ((index & 0x10000u) & ((uint32_t)Q << 16));
+							index = A17 | A16 | (index & 0xFFFF);
+						}
+
 						if ((ceNES->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
 							&&
 							(!hasCompare || (BYTE)compareVal == pNES_catridgeMemory->maxCatridgePRGROM[index]))
@@ -1910,6 +2057,55 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 					}
 					BREAK;
 				}
+				case MAPPER::MMC2:
+				case MAPPER::MMC4:
+				{
+					const FLAG isMMC4 = (pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::MMC4);
+
+					if (IF_ADDRESS_WITHIN(address, UNMAPPED_START_ADDRESS, CATRIDGE_RAM_END_ADDRESS))
+					{
+						RETURN pNES_cpuMemory->NESMemoryMap.catridgeMappedMemory[address - UNMAPPED_START_ADDRESS];
+					}
+
+					const uint32_t switchableBankEndAddress = (isMMC4) ? CATRIDGE_ROM_BANK0_END_ADDRESS : (CATRIDGE_ROM_BANK0_START_ADDRESS + 0x1FFF);
+					if (IF_ADDRESS_WITHIN(address, CATRIDGE_ROM_BANK0_START_ADDRESS, switchableBankEndAddress))
+					{
+						const uint32_t bank = (isMMC4) ? pNES_instance->NES_state.catridgeInfo.mmc4.prgBank16 : pNES_instance->NES_state.catridgeInfo.mmc2.prgBank;
+
+						const uint32_t bankShift = (isMMC4) ? 14 : 13;
+						const uint32_t addressMask = (isMMC4) ? 0x3FFF : 0x1FFF;
+
+						index = (bank << bankShift) | (address & addressMask);
+
+						if ((ceNES->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
+							&&
+							(!hasCompare || (BYTE)compareVal == pNES_catridgeMemory->maxCatridgePRGROM[index]))
+						{
+							RETURN TO_UINT8(modedData);
+						}
+						else
+						{
+							RETURN pNES_catridgeMemory->maxCatridgePRGROM[index];
+						}
+					}
+
+					const uint32_t fixedBankStartAddress = (isMMC4) ? CATRIDGE_ROM_BANK1_START_ADDRESS : (CATRIDGE_ROM_BANK0_START_ADDRESS + 0x2000);
+					if (IF_ADDRESS_WITHIN(address, fixedBankStartAddress, UNMAPPED_END_ADDRESS))
+					{
+						if ((ceNES->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
+							&&
+							(!hasCompare || (BYTE)compareVal == pNES_cpuMemory->NESMemoryMap.catridgeMappedMemory[address - UNMAPPED_START_ADDRESS]))
+						{
+							RETURN TO_UINT8(modedData);
+						}
+						else
+						{
+							RETURN pNES_cpuMemory->NESMemoryMap.catridgeMappedMemory[address - UNMAPPED_START_ADDRESS];
+						}
+					}
+
+					BREAK;
+				}
 				case MAPPER::AxROM:
 				{
 					if (IF_ADDRESS_WITHIN(address, UNMAPPED_START_ADDRESS, CATRIDGE_RAM_END_ADDRESS))
@@ -1919,6 +2115,44 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 					if (IF_ADDRESS_WITHIN(address, CATRIDGE_ROM_BANK0_START_ADDRESS, UNMAPPED_END_ADDRESS))
 					{
 						index = pNES_instance->NES_state.catridgeInfo.axrom.prgBank * 0x8000;
+						index += ((address - CATRIDGE_ROM_BANK0_START_ADDRESS) & 0x7FFF);
+						if ((ceNES->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
+							&&
+							(!hasCompare || (BYTE)compareVal == pNES_catridgeMemory->maxCatridgePRGROM[index]))
+						{
+							RETURN TO_UINT8(modedData);
+						}
+						else
+						{
+							RETURN pNES_catridgeMemory->maxCatridgePRGROM[index];
+						}
+					}
+					BREAK;
+				}
+				case MAPPER::COLOR_DREAMS:
+				{
+					if (IF_ADDRESS_WITHIN(address, CATRIDGE_ROM_BANK0_START_ADDRESS, UNMAPPED_END_ADDRESS))
+					{
+						index = pNES_instance->NES_state.catridgeInfo.colorDreams.prgBank32 * 0x8000;
+						index += ((address - CATRIDGE_ROM_BANK0_START_ADDRESS) & 0x7FFF);
+						if ((ceNES->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
+							&&
+							(!hasCompare || (BYTE)compareVal == pNES_catridgeMemory->maxCatridgePRGROM[index]))
+						{
+							RETURN TO_UINT8(modedData);
+						}
+						else
+						{
+							RETURN pNES_catridgeMemory->maxCatridgePRGROM[index];
+						}
+					}
+					BREAK;
+				}
+				case MAPPER::INES_MAPPER_034:
+				{
+					if (IF_ADDRESS_WITHIN(address, CATRIDGE_ROM_BANK0_START_ADDRESS, UNMAPPED_END_ADDRESS))
+					{
+						index = pNES_instance->NES_state.catridgeInfo.ines034.prgBank32 * 0x8000;
 						index += ((address - CATRIDGE_ROM_BANK0_START_ADDRESS) & 0x7FFF);
 						if ((ceNES->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
 							&&
@@ -2006,7 +2240,7 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 		}
 
 		FATAL("Unknown Memory Access Source : %d", TO_UINT(source));
-		RETURN(byte)ZERO;
+		RETURN (byte)ZERO;
 	}
 }
 
@@ -2053,9 +2287,8 @@ void NES_t::writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 
 				FLAG wasNmiSet = ((pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUCTRL.ppuctrl.VBLANK_NMI_ENABLE == SET) ? YES : NO);
 
-				// Update this in CPU's perspective 
+				// Update this in CPU's perspective (except for PPU_STATUS)
 
-				auto originalStatus = pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUSTATUS;
 				if ((index + PPU_START_ADDRESS) != PPU_STATUS_ADDRESS)
 				{
 					pNES_cpuMemory->NESMemoryMap.ppuCtrl.raw[index] = data;
@@ -2067,6 +2300,8 @@ void NES_t::writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 				{
 				case PPU_CTRL_ADDRESS:
 				{
+					pNES_cpuMemory->NESMemoryMap.ppuCtrl.raw[index] = data;
+
 					// Refer "$2000 (PPUCTRL) write" of https://www.nesdev.org/wiki/PPU_scrolling
 					pNES_ppuRegisters->ppuInternalRegisters.t.fields.nameTblSelectH
 						= pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUCTRL.ppuctrl.BASE_NAMETABLE_ADDR_H;
@@ -2112,19 +2347,26 @@ void NES_t::writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 						pNES_instance->NES_state.interrupts.isNMI = wasNmiSet; // Revert the NMI to original state
 					}
 
+					refreshOpenBus(data);
+
 					BREAK;
 				}
 				case PPU_MASK_ADDRESS:
 				{
+					refreshOpenBus(data);
+
 					BREAK;
 				}
 				case PPU_STATUS_ADDRESS:
 				{
-					pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUSTATUS = originalStatus; // We have made sure above that status cannot be written, but just as a precaution
+					refreshOpenBus(data);
+
 					BREAK;
 				}
 				case OAM_ADDR_ADDRESS:
 				{
+					refreshOpenBus(data);
+
 					BREAK;
 				}
 				case OAM_DATA_ADDRESS:
@@ -2148,6 +2390,9 @@ void NES_t::writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 						pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.OAMADDR += ONE;
 						pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.OAMADDR &= 0xFF;
 					}
+
+					refreshOpenBus(data);
+
 					BREAK;
 				}
 				case PPU_SCROLL_ADDRESS:
@@ -2164,6 +2409,9 @@ void NES_t::writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 						pNES_ppuRegisters->ppuInternalRegisters.t.fields.fineYScroll = (data & 0x07);
 						pNES_ppuRegisters->ppuInternalRegisters.w = FIRST_WRITE;
 					}
+
+					refreshOpenBus(data);
+
 					BREAK;
 				}
 				case PPU_ADDR_ADDRESS:
@@ -2176,26 +2424,30 @@ void NES_t::writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 					else if (pNES_ppuRegisters->ppuInternalRegisters.w == SECOND_WRITE)
 					{
 						pNES_ppuRegisters->ppuInternalRegisters.t.addr.lo = data;
-						pNES_ppuRegisters->ppuInternalRegisters.v.raw = pNES_ppuRegisters->ppuInternalRegisters.t.raw;
-						clockMMC3IRQ(pNES_ppuRegisters->ppuInternalRegisters.v.raw, MEMORY_ACCESS_SOURCE::CPU, YES);
+
+						// Delay v update by 3 PPU cycles (matches Mesen _updateVramAddrDelay)
+						pNES_ppuRegisters->ppuInternalRegisters.vramAddrUpdateDelay = THREE;
+						pNES_ppuRegisters->ppuInternalRegisters.vramAddrPendingValue = pNES_ppuRegisters->ppuInternalRegisters.t.raw;
+						// DO NOT set v.raw or call clockMMC3IRQ here
+
+						refreshOpenBus(data);
 						pNES_ppuRegisters->ppuInternalRegisters.w = FIRST_WRITE;
 					}
+
+					refreshOpenBus(data);
 
 					BREAK;
 				}
 				case PPU_DATA_ADDRESS:
 				{
 					writePpuRawMemory(pNES_ppuRegisters->ppuInternalRegisters.v.raw, data, MEMORY_ACCESS_SOURCE::CPU);
-					if (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUCTRL.ppuctrl.VRAM_ADDRESS_INCREMENT == RESET)
-					{
-						pNES_ppuRegisters->ppuInternalRegisters.v.raw += ONE;
-						clockMMC3IRQ(pNES_ppuRegisters->ppuInternalRegisters.v.raw, MEMORY_ACCESS_SOURCE::CPU, YES);
-					}
-					else
-					{
-						pNES_ppuRegisters->ppuInternalRegisters.v.raw += THIRTYTWO;
-						clockMMC3IRQ(pNES_ppuRegisters->ppuInternalRegisters.v.raw, MEMORY_ACCESS_SOURCE::CPU, YES);
-					}
+
+					// Defer v increment to ppuTick (matches Mesen _needVideoRamIncrement on writes)
+					// ppuTick will do xInc()+yInc() during rendering, or v+=1/32 outside rendering
+					pNES_ppuRegisters->ppuInternalRegisters.needVideoRamIncrement = YES;
+
+					refreshOpenBus(data);
+
 					BREAK;
 				}
 				default:
@@ -2203,10 +2455,6 @@ void NES_t::writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 					FATAL("Unknown PPU register");
 				}
 				}
-
-				pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusValue = data;
-				pNES_ppuRegisters->ppuInternalRegisters.openBus.lastRefreshTimeInMs
-					= std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 			}
 			else if (IF_ADDRESS_WITHIN(address, APU_AND_IO_START_ADDRESS, APU_AND_IO_END_ADDRESS))
 			{
@@ -2848,13 +3096,23 @@ void NES_t::writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 					BREAK;
 				}
 				case MAPPER::MMC3:
+				case MAPPER::INES_MAPPER_037:
 				{
 					if (IF_ADDRESS_WITHIN(address, UNMAPPED_START_ADDRESS, CATRIDGE_RAM_END_ADDRESS))
 					{
 						if ((pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.prgRamProtect_oddAk.fields.prgRamEnable == SET)
 							&& pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.prgRamProtect_oddAk.fields.denyWrite == RESET)
 						{
-							pNES_cpuMemory->NESMemoryMap.catridgeMappedMemory[address - UNMAPPED_START_ADDRESS] = data;
+							if (pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::INES_MAPPER_037)
+							{
+								// NOTE: Outer bank register — write only, not RAM.
+								// Refer https://www.nesdev.org/wiki/INES_Mapper_037
+								pNES_instance->NES_state.catridgeInfo.mmc3.ines037.outerBank = data & 0x07;
+							}
+							else
+							{
+								pNES_cpuMemory->NESMemoryMap.catridgeMappedMemory[address - UNMAPPED_START_ADDRESS] = data;
+							}
 						}
 					}
 					if (IF_ADDRESS_WITHIN(address, CATRIDGE_ROM_BANK0_START_ADDRESS, UNMAPPED_END_ADDRESS))
@@ -3004,6 +3262,59 @@ void NES_t::writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 					}
 					BREAK;
 				}
+				case MAPPER::MMC2:
+				case MAPPER::MMC4:
+				{
+					if (IF_ADDRESS_WITHIN(address, UNMAPPED_START_ADDRESS, CATRIDGE_RAM_END_ADDRESS))
+					{
+						pNES_cpuMemory->NESMemoryMap.catridgeMappedMemory[address - UNMAPPED_START_ADDRESS] = data;
+					}
+
+					if (IF_ADDRESS_WITHIN(address, 0xA000, UNMAPPED_END_ADDRESS))
+					{
+						const FLAG isMMC4 = (pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::MMC4);
+
+						auto* mmc = (isMMC4) ? (void*)&pNES_instance->NES_state.catridgeInfo.mmc4 : (void*)&pNES_instance->NES_state.catridgeInfo.mmc2;
+
+						switch (address & 0xF000)
+						{
+						case 0xA000:
+							isMMC4
+								? ((decltype(&pNES_instance->NES_state.catridgeInfo.mmc4))mmc)->prgBank16
+								: ((decltype(&pNES_instance->NES_state.catridgeInfo.mmc2))mmc)->prgBank;
+							((isMMC4
+								? ((decltype(&pNES_instance->NES_state.catridgeInfo.mmc4))mmc)->prgBank16
+								: ((decltype(&pNES_instance->NES_state.catridgeInfo.mmc2))mmc)->prgBank) = (data & 0x0F));
+							BREAK;
+
+						case 0xB000:
+							((decltype(&pNES_instance->NES_state.catridgeInfo.mmc2))mmc)->chrBankFD[0] = (data & 0x1F);
+							BREAK;
+
+						case 0xC000:
+							((decltype(&pNES_instance->NES_state.catridgeInfo.mmc2))mmc)->chrBankFE[0] = (data & 0x1F);
+							BREAK;
+
+						case 0xD000:
+							((decltype(&pNES_instance->NES_state.catridgeInfo.mmc2))mmc)->chrBankFD[1] = (data & 0x1F);
+							BREAK;
+
+						case 0xE000:
+							((decltype(&pNES_instance->NES_state.catridgeInfo.mmc2))mmc)->chrBankFE[1] = (data & 0x1F);
+							BREAK;
+
+						case 0xF000:
+							pNES_instance->NES_state.catridgeInfo.nameTblMir 
+								= ((data & 0x01) == RESET) ? NAMETABLE_MIRROR::VERTICAL_MIRROR : NAMETABLE_MIRROR::HORIZONTAL_MIRROR;
+							BREAK;
+
+						default:
+							BREAK;
+						}
+					}
+
+					BREAK;
+				}
 				case MAPPER::AxROM:
 				{
 					if (IF_ADDRESS_WITHIN(address, UNMAPPED_START_ADDRESS, CATRIDGE_RAM_END_ADDRESS))
@@ -3026,6 +3337,94 @@ void NES_t::writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 							pNES_instance->NES_state.catridgeInfo.axrom.prgBank = (data & 0x0F) % totalPrg32kBanks;
 						}
 						pNES_instance->NES_state.catridgeInfo.axrom.vramPage = (((data & 0x10) == 0x10) ? YES : NO);
+					}
+					BREAK;
+				}
+				case MAPPER::COLOR_DREAMS:
+				{
+					if (IF_ADDRESS_WITHIN(address, CATRIDGE_ROM_BANK0_START_ADDRESS, UNMAPPED_END_ADDRESS))
+					{
+						if (pNES_instance->NES_state.catridgeInfo.isBusConflictPresent)
+						{
+							data &= readCpuRawMemory(address, MEMORY_ACCESS_SOURCE::DEBUG_PORT);
+						}
+
+						const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
+						const bool isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
+						const uint32_t totalPrg16kBanks = isNES2
+							? (hdr.sizeOfPrgRomIn16KB | (hdr.flags_8to15.nes2p0.flag9.fields.prgRomMSB << 8))
+							: hdr.sizeOfPrgRomIn16KB;
+						const uint32_t totalChr8kBanks = isNES2
+							? (hdr.sizeOfChrRomIn8KB | (hdr.flags_8to15.nes2p0.flag9.fields.chrRomMSB << 8))
+							: hdr.sizeOfChrRomIn8KB;
+						// COLOR_DREAMS switches 32KB PRG and 8KB CHR banks
+						const uint32_t totalPrg32kBanks = totalPrg16kBanks / 2;
+						pNES_instance->NES_state.catridgeInfo.colorDreams.chrBank8 = ((data >> FOUR) & 0x0F) % totalChr8kBanks;
+						pNES_instance->NES_state.catridgeInfo.colorDreams.prgBank32 = (data & 0x03) % totalPrg32kBanks;
+					}
+					BREAK;
+				}
+				case MAPPER::INES_MAPPER_034:
+				{
+					if (IF_ADDRESS_WITHIN(address, UNMAPPED_START_ADDRESS, CATRIDGE_RAM_END_ADDRESS))
+					{
+						pNES_cpuMemory->NESMemoryMap.catridgeMappedMemory[address - UNMAPPED_START_ADDRESS] = data;
+
+						if (pNES_instance->NES_state.catridgeInfo.subMapper == SUB_MAPPER::NINA)
+						{
+							if (address == 0x7FFD || address == 0x7FFE || address == 0x7FFF)
+							{
+								const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
+								const bool isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
+								const uint32_t totalPrg16kBanks = isNES2
+									? (hdr.sizeOfPrgRomIn16KB | (hdr.flags_8to15.nes2p0.flag9.fields.prgRomMSB << 8))
+									: hdr.sizeOfPrgRomIn16KB;
+								const uint32_t totalChr8kBanks = isNES2
+									? (hdr.sizeOfChrRomIn8KB | (hdr.flags_8to15.nes2p0.flag9.fields.chrRomMSB << 8))
+									: hdr.sizeOfChrRomIn8KB;
+								// INES_MAPPER_034 switches 32KB PRG and 4KB CHR banks
+								const uint32_t totalPrg32kBanks = totalPrg16kBanks / 2;
+								const uint32_t totalChr4kBanks = totalChr8kBanks * 2;
+
+								switch (address)
+								{
+								case 0x7FFD:
+								{
+									pNES_instance->NES_state.catridgeInfo.ines034.prgBank32 = (data & 0x03) % totalPrg32kBanks;
+									BREAK;
+								}
+								case 0x7FFE:
+								{
+									pNES_instance->NES_state.catridgeInfo.ines034.chrBank4Lo = (data & 0x0F) % totalChr4kBanks;
+									BREAK;
+								}
+								case 0x7FFF:
+								{
+									pNES_instance->NES_state.catridgeInfo.ines034.chrBank4Hi = (data & 0x0F) % totalChr4kBanks;
+									BREAK;
+								}
+								}
+							}
+						}
+					}
+					if (IF_ADDRESS_WITHIN(address, CATRIDGE_ROM_BANK0_START_ADDRESS, UNMAPPED_END_ADDRESS))
+					{
+						if (pNES_instance->NES_state.catridgeInfo.subMapper == SUB_MAPPER::BNROM)
+						{
+							if (pNES_instance->NES_state.catridgeInfo.isBusConflictPresent)
+							{
+								data &= readCpuRawMemory(address, MEMORY_ACCESS_SOURCE::DEBUG_PORT);
+							}
+
+							const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
+							const bool isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
+							const uint32_t totalPrg16kBanks = isNES2
+								? (hdr.sizeOfPrgRomIn16KB | (hdr.flags_8to15.nes2p0.flag9.fields.prgRomMSB << 8))
+								: hdr.sizeOfPrgRomIn16KB;
+							// INES_MAPPER_034 switches 32KB PRG
+							const uint32_t totalPrg32kBanks = totalPrg16kBanks / 2;
+							pNES_instance->NES_state.catridgeInfo.ines034.prgBank32 = (data & 0x03) % totalPrg32kBanks;
+						}
 					}
 					BREAK;
 				}
@@ -4113,257 +4512,266 @@ void NES_t::ppuTick()
 				((ly >= NES_PRE_RENDER_SCANLINE) && (ly <= NES_LAST_SCANLINE_PER_FRAME))
 				)
 			{
-				auto stateIdx = ((cycle - TWOFIFTYSEVEN) & SEVEN); // ((cycle - 257) % 8)
-				auto objIdx = ((cycle - TWOFIFTYSEVEN) / EIGHT);
+				if (checkIfRenderring() == YES)
+				{
+					auto stateIdx = ((cycle - TWOFIFTYSEVEN) & SEVEN); // ((cycle - 257) % 8)
+					auto objIdx = ((cycle - TWOFIFTYSEVEN) / EIGHT);
 
-				switch (stateIdx)
-				{
-				case ZERO:
-				{
-					pNES_instance->NES_state.display.obj.spriteYCoordinate
-						= pNES_ppuMemory->NESMemoryMap.secondaryOam.oamW[objIdx].yPosition;
-					BREAK;
-				}
-				case ONE:
-				{
-					// Refer to https://www.nesdev.org/wiki/PPU_rendering#Cycles_257-320
-					auto dummyNameTblAddr = NAME_TABLE0_START_ADDRESS | (pNES_ppuRegisters->ppuInternalRegisters.v.raw & 0x0FFF);
-					auto discard = readPpuRawMemory(pNES_instance->NES_state.display.bg.nameTblAddr, MEMORY_ACCESS_SOURCE::PPU);
-
-					pNES_instance->NES_state.display.obj.tileNumber
-						= pNES_ppuMemory->NESMemoryMap.secondaryOam.oamW[objIdx].tileID;
-					BREAK;
-				}
-				case TWO:
-				{
-					pNES_instance->NES_state.display.obj.spriteAttribute.raw
-						= pNES_ppuMemory->NESMemoryMap.secondaryOam.oamW[objIdx].attributes.raw;
-					BREAK;
-				}
-				case THREE:
-				{
-					// Refer to https://www.nesdev.org/wiki/PPU_rendering#Cycles_257-320
-					auto dummyNameTblAddr = (NAME_TABLE0_START_ADDRESS + 0x03C0)
-						| (pNES_ppuRegisters->ppuInternalRegisters.v.raw & 0x0C00)
-						| ((pNES_ppuRegisters->ppuInternalRegisters.v.raw >> FOUR) & 0x0038)
-						| ((pNES_ppuRegisters->ppuInternalRegisters.v.raw >> TWO) & 0x0007);
-					auto discard = readPpuRawMemory(pNES_instance->NES_state.display.bg.attrTblAddr, MEMORY_ACCESS_SOURCE::PPU);
-
-					pNES_instance->NES_state.display.obj.spriteXCoordinate
-						= pNES_ppuMemory->NESMemoryMap.secondaryOam.oamW[objIdx].xPosition;
-					BREAK;
-				}
-				case FOUR:
-				{
-					// Dummy Read as mentioned in point 3b of https://www.nesdev.org/wiki/PPU_sprite_evaluation#Details
-					pNES_instance->NES_state.display.obj.spriteXCoordinate
-						= pNES_ppuMemory->NESMemoryMap.secondaryOam.oamW[objIdx].xPosition;
-					BREAK;
-				}
-				case FIVE:
-				{
-					auto flipY = ((pNES_instance->NES_state.display.obj.spriteAttribute.fields.flipVertically == SET) ? YES : NO);
-
-					if (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUCTRL.ppuctrl.SPRITE_SIZE == SET)
+					switch (stateIdx)
 					{
-						auto tileNumber = pNES_instance->NES_state.display.obj.tileNumber & 0xFE;
-						// Note: Below mod operation is needed because
-						// from the equations below, we know that to figure out the pattern Table Address, we needed "y per tile"
-						// In case of 8*16 tiles, the way we normally get "y per tile" is not enough
-						// as ly - spriteY can be => 8
-						// This is because spriteY always indicates the top tiles y value, so for bottom tile, ly - spriteY becomes >= 8
-						// So we take mod of this diff, which essentially is same as moving the spriteY to the lower tile
-						auto yPerTile = (ly - pNES_instance->NES_state.display.obj.spriteYCoordinate) & 0x07;
-
-						if (flipY)
-						{
-							// Check if we need the higher half of 8x16 sprite
-							if ((ly - pNES_instance->NES_state.display.obj.spriteYCoordinate) < EIGHT)
-							{
-								tileNumber += ONE;
-							}
-
-							pNES_instance->NES_state.display.obj.patternTableLAddr
-								= (PATTERN_TABLE0_START_ADDRESS + (GETBIT(ZERO, pNES_instance->NES_state.display.obj.tileNumber) << TWELVE)) // Xlied by 0x1000 using shift 12
-								| (tileNumber << FOUR) // Xlied by 16 using shift 4
-								| (SEVEN - yPerTile); // Represents "y per tile"
-						}
-						else
-						{
-							// Check if we need the lower half of 8x16 sprite
-							if ((ly - pNES_instance->NES_state.display.obj.spriteYCoordinate) >= EIGHT)
-							{
-								tileNumber += ONE;
-							}
-
-							pNES_instance->NES_state.display.obj.patternTableLAddr
-								= (PATTERN_TABLE0_START_ADDRESS + (GETBIT(ZERO, pNES_instance->NES_state.display.obj.tileNumber) << TWELVE)) // Xlied by 0x1000 using shift 12
-								| (tileNumber << FOUR) // Xlied by 16 using shift 4
-								| (yPerTile); // Represents "y per tile"
-						}
+					case ZERO:
+					{
+						pNES_instance->NES_state.display.obj.spriteYCoordinate
+							= pNES_ppuMemory->NESMemoryMap.secondaryOam.oamW[objIdx].yPosition;
+						BREAK;
 					}
-					else
+					case ONE:
 					{
-						if (flipY)
-						{
-							pNES_instance->NES_state.display.obj.patternTableLAddr
-								= (PATTERN_TABLE0_START_ADDRESS + (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUCTRL.ppuctrl.SPRITE_PATTER_TABLE_ADDR_8x8 << TWELVE)) // Xlied by 0x1000 using shift 12
-								| (pNES_instance->NES_state.display.obj.tileNumber << FOUR) // Xlied by 16 using shift 4
-								| (SEVEN - (ly - pNES_instance->NES_state.display.obj.spriteYCoordinate)); // Represents "y per tile"
-						}
-						else
-						{
-							pNES_instance->NES_state.display.obj.patternTableLAddr
-								= (PATTERN_TABLE0_START_ADDRESS + (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUCTRL.ppuctrl.SPRITE_PATTER_TABLE_ADDR_8x8 << TWELVE)) // Xlied by 0x1000 using shift 12
-								| (pNES_instance->NES_state.display.obj.tileNumber << FOUR) // Xlied by 16 using shift 4
-								| (ly - pNES_instance->NES_state.display.obj.spriteYCoordinate); // Represents "y per tile"
-						}
+						// Refer to https://www.nesdev.org/wiki/PPU_rendering#Cycles_257-320
+						auto dummyNameTblAddr = NAME_TABLE0_START_ADDRESS | (pNES_ppuRegisters->ppuInternalRegisters.v.raw & 0x0FFF);
+						auto discard = readPpuRawMemory(pNES_instance->NES_state.display.bg.nameTblAddr, MEMORY_ACCESS_SOURCE::PPU);
+
+						pNES_instance->NES_state.display.obj.tileNumber
+							= pNES_ppuMemory->NESMemoryMap.secondaryOam.oamW[objIdx].tileID;
+						BREAK;
 					}
-
-					if (pNES_instance->NES_state.catridgeInfo.nanjing_fc001.chrRamAutoSwitch == YES
-						&& pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::NANJING_FC001)
+					case TWO:
 					{
-						// Refer to https://www.nesdev.org/wiki/INES_Mapper_163#Feedback_Write_($5100-$5101,_write)
-						// NOTE : 
-						// Left pattern table refers to patternTable0
-						// Right pattern table refers to patternTable1
-						// And also since we are hardwired to be in vertical name table mirroring
-						// https://www.nesdev.org/wiki/Mirroring#Nametable_Mirroring
-						// top left block is nameTable0
-						// top right block is nameTable1
-						// bottom left block is nameTable0
-						// botton right block is nameTable1
+						pNES_instance->NES_state.display.obj.spriteAttribute.raw
+							= pNES_ppuMemory->NESMemoryMap.secondaryOam.oamW[objIdx].attributes.raw;
+						BREAK;
+					}
+					case THREE:
+					{
+						// Refer to https://www.nesdev.org/wiki/PPU_rendering#Cycles_257-320
+						auto dummyNameTblAddr = (NAME_TABLE0_START_ADDRESS + 0x03C0)
+							| (pNES_ppuRegisters->ppuInternalRegisters.v.raw & 0x0C00)
+							| ((pNES_ppuRegisters->ppuInternalRegisters.v.raw >> FOUR) & 0x0038)
+							| ((pNES_ppuRegisters->ppuInternalRegisters.v.raw >> TWO) & 0x0007);
+						auto discard = readPpuRawMemory(pNES_instance->NES_state.display.bg.attrTblAddr, MEMORY_ACCESS_SOURCE::PPU);
 
-						auto normNameTblAddr = ((pNES_instance->NES_state.display.bg.nameTblAddr - NAME_TABLE0_START_ADDRESS) & 1023); // & 1023 == % 1024 == % 0x400 (size of single nametable memory)
-						if (normNameTblAddr <= 0x1FF)
+						pNES_instance->NES_state.display.obj.spriteXCoordinate
+							= pNES_ppuMemory->NESMemoryMap.secondaryOam.oamW[objIdx].xPosition;
+						BREAK;
+					}
+					case FOUR:
+					{
+						// Dummy Read as mentioned in point 3b of https://www.nesdev.org/wiki/PPU_sprite_evaluation#Details
+						pNES_instance->NES_state.display.obj.spriteXCoordinate
+							= pNES_ppuMemory->NESMemoryMap.secondaryOam.oamW[objIdx].xPosition;
+						BREAK;
+					}
+					case FIVE:
+					{
+						auto flipY = ((pNES_instance->NES_state.display.obj.spriteAttribute.fields.flipVertically == SET) ? YES : NO);
+
+						if (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUCTRL.ppuctrl.SPRITE_SIZE == SET)
 						{
-							if (pNES_instance->NES_state.display.bg.patternTableLAddr >= 0x1000)
+							auto tileNumber = pNES_instance->NES_state.display.obj.tileNumber & 0xFE;
+							// Note: Below mod operation is needed because
+							// from the equations below, we know that to figure out the pattern Table Address, we needed "y per tile"
+							// In case of 8*16 tiles, the way we normally get "y per tile" is not enough
+							// as ly - spriteY can be => 8
+							// This is because spriteY always indicates the top tiles y value, so for bottom tile, ly - spriteY becomes >= 8
+							// So we take mod of this diff, which essentially is same as moving the spriteY to the lower tile
+							auto yPerTile = (ly - pNES_instance->NES_state.display.obj.spriteYCoordinate) & 0x07;
+
+							if (flipY)
 							{
-								pNES_instance->NES_state.display.bg.patternTableLAddr -= 0x1000;
+								// Check if we need the higher half of 8x16 sprite
+								if ((ly - pNES_instance->NES_state.display.obj.spriteYCoordinate) < EIGHT)
+								{
+									tileNumber += ONE;
+								}
+
+								pNES_instance->NES_state.display.obj.patternTableLAddr
+									= (PATTERN_TABLE0_START_ADDRESS + (GETBIT(ZERO, pNES_instance->NES_state.display.obj.tileNumber) << TWELVE)) // Xlied by 0x1000 using shift 12
+									| (tileNumber << FOUR) // Xlied by 16 using shift 4
+									| (SEVEN - yPerTile); // Represents "y per tile"
 							}
-						}
-						else if (normNameTblAddr <= 0x3FF)
-						{
-							if (pNES_instance->NES_state.display.bg.patternTableLAddr < 0x1000)
+							else
 							{
-								pNES_instance->NES_state.display.bg.patternTableLAddr += 0x1000;
+								// Check if we need the lower half of 8x16 sprite
+								if ((ly - pNES_instance->NES_state.display.obj.spriteYCoordinate) >= EIGHT)
+								{
+									tileNumber += ONE;
+								}
+
+								pNES_instance->NES_state.display.obj.patternTableLAddr
+									= (PATTERN_TABLE0_START_ADDRESS + (GETBIT(ZERO, pNES_instance->NES_state.display.obj.tileNumber) << TWELVE)) // Xlied by 0x1000 using shift 12
+									| (tileNumber << FOUR) // Xlied by 16 using shift 4
+									| (yPerTile); // Represents "y per tile"
 							}
 						}
 						else
 						{
-							FATAL("Invalid name table address encountered in mapper 163 when in automatic chrram switch mode");
+							if (flipY)
+							{
+								pNES_instance->NES_state.display.obj.patternTableLAddr
+									= (PATTERN_TABLE0_START_ADDRESS + (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUCTRL.ppuctrl.SPRITE_PATTER_TABLE_ADDR_8x8 << TWELVE)) // Xlied by 0x1000 using shift 12
+									| (pNES_instance->NES_state.display.obj.tileNumber << FOUR) // Xlied by 16 using shift 4
+									| (SEVEN - (ly - pNES_instance->NES_state.display.obj.spriteYCoordinate)); // Represents "y per tile"
+							}
+							else
+							{
+								pNES_instance->NES_state.display.obj.patternTableLAddr
+									= (PATTERN_TABLE0_START_ADDRESS + (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUCTRL.ppuctrl.SPRITE_PATTER_TABLE_ADDR_8x8 << TWELVE)) // Xlied by 0x1000 using shift 12
+									| (pNES_instance->NES_state.display.obj.tileNumber << FOUR) // Xlied by 16 using shift 4
+									| (ly - pNES_instance->NES_state.display.obj.spriteYCoordinate); // Represents "y per tile"
+							}
 						}
-					}
 
-					pNES_instance->NES_state.display.obj.patternTblLByte
-						= readPpuRawMemory(pNES_instance->NES_state.display.obj.patternTableLAddr, MEMORY_ACCESS_SOURCE::PPU);
-
-					// Dummy Read as mentioned in point 3b of https://www.nesdev.org/wiki/PPU_sprite_evaluation#Details
-					pNES_instance->NES_state.display.obj.spriteXCoordinate
-						= pNES_ppuMemory->NESMemoryMap.secondaryOam.oamW[objIdx].xPosition;
-					BREAK;
-				}
-				case SIX:
-				{
-					// Dummy Read as mentioned in point 3b of https://www.nesdev.org/wiki/PPU_sprite_evaluation#Details
-					pNES_instance->NES_state.display.obj.spriteXCoordinate
-						= pNES_ppuMemory->NESMemoryMap.secondaryOam.oamW[objIdx].xPosition;
-					BREAK;
-				}
-				case SEVEN:
-				{
-					pNES_instance->NES_state.display.obj.patternTableMAddr
-						= pNES_instance->NES_state.display.obj.patternTableLAddr + EIGHT;
-
-					pNES_instance->NES_state.display.obj.patternTblMByte
-						= readPpuRawMemory(pNES_instance->NES_state.display.obj.patternTableMAddr, MEMORY_ACCESS_SOURCE::PPU);
-
-					// Populate the shift registers
-					// Refer : https://stackoverflow.com/a/2602885
-					auto flipbyte = [](BYTE b)
+						if (pNES_instance->NES_state.catridgeInfo.nanjing_fc001.chrRamAutoSwitch == YES
+							&& pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::NANJING_FC001)
 						{
-							b = (b & 0xF0) >> 4 | (b & 0x0F) << 4;
-							b = (b & 0xCC) >> 2 | (b & 0x33) << 2;
-							b = (b & 0xAA) >> 1 | (b & 0x55) << 1;
-							RETURN b;
-						};
+							// Refer to https://www.nesdev.org/wiki/INES_Mapper_163#Feedback_Write_($5100-$5101,_write)
+							// NOTE : 
+							// Left pattern table refers to patternTable0
+							// Right pattern table refers to patternTable1
+							// And also since we are hardwired to be in vertical name table mirroring
+							// https://www.nesdev.org/wiki/Mirroring#Nametable_Mirroring
+							// top left block is nameTable0
+							// top right block is nameTable1
+							// bottom left block is nameTable0
+							// botton right block is nameTable1
 
-					// Populate the sprite subtractor
-					pNES_instance->NES_state.display.obj.shifter[objIdx].xSubtractor = pNES_instance->NES_state.display.obj.spriteXCoordinate;
-
-					// Check if horizontal flip is needed 
-					auto flipX = ((pNES_instance->NES_state.display.obj.spriteAttribute.fields.flipHorizontally == SET) ? YES : NO);
-					if (flipX == YES)
-					{
-						pNES_instance->NES_state.display.obj.patternTblLByte =
-							flipbyte(pNES_instance->NES_state.display.obj.patternTblLByte);
-
-						pNES_instance->NES_state.display.obj.patternTblMByte =
-							flipbyte(pNES_instance->NES_state.display.obj.patternTblMByte);
-
-					}
-
-					PPUTODO("Below if condition's functionality at line %d of file %s is needed as \"last column sprite glitch\" is not there when we add this", __LINE__, __FILE__);
-					// But we don't know how PPU actually achieves this functionality
-					// We probably need to figure out the behaviour of sprite rendering when primary OAM is completely empty!
-					// Refer : https://www.nesdev.org/wiki/PPU_sprite_evaluation (For the first empty sprite slot, this will consist of sprite #63's Y-coordinate followed by 3 $FF bytes; for subsequent empty sprite slots, this will be four $FF bytes)
-					// Discarding dummy 64th sprite entry
-					if (pNES_instance->NES_state.display.obj.spriteXCoordinate == 0xFF
-						&& pNES_instance->NES_state.display.obj.spriteAttribute.raw == 0xFF
-						&& pNES_instance->NES_state.display.obj.tileNumber == 0xFF)
-					{
-						// If sprite zero is present in secondary OAM and is valid, then it will occupy the first place in our secondary OAM
-						if (pNES_instance->NES_state.display.obj.isSprite0PresentInSecondaryOam == YES
-							&& objIdx == ZERO)
-						{
-							pNES_instance->NES_state.display.obj.isSprite0PresentInSecondaryOam = CLEAR;
+							auto normNameTblAddr = ((pNES_instance->NES_state.display.bg.nameTblAddr - NAME_TABLE0_START_ADDRESS) & 1023); // & 1023 == % 1024 == % 0x400 (size of single nametable memory)
+							if (normNameTblAddr <= 0x1FF)
+							{
+								if (pNES_instance->NES_state.display.bg.patternTableLAddr >= 0x1000)
+								{
+									pNES_instance->NES_state.display.bg.patternTableLAddr -= 0x1000;
+								}
+							}
+							else if (normNameTblAddr <= 0x3FF)
+							{
+								if (pNES_instance->NES_state.display.bg.patternTableLAddr < 0x1000)
+								{
+									pNES_instance->NES_state.display.bg.patternTableLAddr += 0x1000;
+								}
+							}
+							else
+							{
+								FATAL("Invalid name table address encountered in mapper 163 when in automatic chrram switch mode");
+							}
 						}
+
+						pNES_instance->NES_state.display.obj.patternTblLByte
+							= readPpuRawMemory(pNES_instance->NES_state.display.obj.patternTableLAddr, MEMORY_ACCESS_SOURCE::PPU);
+
+						// Dummy Read as mentioned in point 3b of https://www.nesdev.org/wiki/PPU_sprite_evaluation#Details
+						pNES_instance->NES_state.display.obj.spriteXCoordinate
+							= pNES_ppuMemory->NESMemoryMap.secondaryOam.oamW[objIdx].xPosition;
+						BREAK;
 					}
-					else if (pNES_instance->NES_state.display.obj.spriteCountPerScanline < EIGHT)
+					case SIX:
 					{
-						// Load the shift registers
-						pNES_instance->NES_state.display.obj.shifter
-							[pNES_instance->NES_state.display.obj.spriteCountPerScanline].loPatternShifter = pNES_instance->NES_state.display.obj.patternTblLByte;
+						// Dummy Read as mentioned in point 3b of https://www.nesdev.org/wiki/PPU_sprite_evaluation#Details
+						pNES_instance->NES_state.display.obj.spriteXCoordinate
+							= pNES_ppuMemory->NESMemoryMap.secondaryOam.oamW[objIdx].xPosition;
+						BREAK;
+					}
+					case SEVEN:
+					{
+						pNES_instance->NES_state.display.obj.patternTableMAddr
+							= pNES_instance->NES_state.display.obj.patternTableLAddr + EIGHT;
 
-						pNES_instance->NES_state.display.obj.shifter
-							[pNES_instance->NES_state.display.obj.spriteCountPerScanline].hiPatternShifter = pNES_instance->NES_state.display.obj.patternTblMByte;
+						pNES_instance->NES_state.display.obj.patternTblMByte
+							= readPpuRawMemory(pNES_instance->NES_state.display.obj.patternTableMAddr, MEMORY_ACCESS_SOURCE::PPU);
 
-						pNES_instance->NES_state.display.obj.shifter
-							[pNES_instance->NES_state.display.obj.spriteCountPerScanline].spriteAttribute.raw = pNES_instance->NES_state.display.obj.spriteAttribute.raw;
+						// Populate the shift registers
+						// Refer : https://stackoverflow.com/a/2602885
+						auto flipbyte = [](BYTE b)
+							{
+								b = (b & 0xF0) >> 4 | (b & 0x0F) << 4;
+								b = (b & 0xCC) >> 2 | (b & 0x33) << 2;
+								b = (b & 0xAA) >> 1 | (b & 0x55) << 1;
+								RETURN b;
+							};
 
-						// If sprite zero is present in secondary OAM and is valid, then it will occupy the first place in our secondary OAM
-						if (pNES_instance->NES_state.display.obj.isSprite0PresentInSecondaryOam == YES
-							&& objIdx == ZERO)
+						// Populate the sprite subtractor
+						pNES_instance->NES_state.display.obj.shifter[objIdx].xSubtractor = pNES_instance->NES_state.display.obj.spriteXCoordinate;
+
+						// Check if horizontal flip is needed 
+						auto flipX = ((pNES_instance->NES_state.display.obj.spriteAttribute.fields.flipHorizontally == SET) ? YES : NO);
+						if (flipX == YES)
 						{
+							pNES_instance->NES_state.display.obj.patternTblLByte =
+								flipbyte(pNES_instance->NES_state.display.obj.patternTblLByte);
+
+							pNES_instance->NES_state.display.obj.patternTblMByte =
+								flipbyte(pNES_instance->NES_state.display.obj.patternTblMByte);
+
+						}
+
+						PPUTODO("Below if condition's functionality at line %d of file %s is needed as \"last column sprite glitch\" is not there when we add this", __LINE__, __FILE__);
+						// But we don't know how PPU actually achieves this functionality
+						// We probably need to figure out the behaviour of sprite rendering when primary OAM is completely empty!
+						// Refer : https://www.nesdev.org/wiki/PPU_sprite_evaluation (For the first empty sprite slot, this will consist of sprite #63's Y-coordinate followed by 3 $FF bytes; for subsequent empty sprite slots, this will be four $FF bytes)
+						// Discarding dummy 64th sprite entry
+						if (pNES_instance->NES_state.display.obj.spriteXCoordinate == 0xFF
+							&& pNES_instance->NES_state.display.obj.spriteAttribute.raw == 0xFF
+							&& pNES_instance->NES_state.display.obj.tileNumber == 0xFF)
+						{
+							// If sprite zero is present in secondary OAM and is valid, then it will occupy the first place in our secondary OAM
+							if (pNES_instance->NES_state.display.obj.isSprite0PresentInSecondaryOam == YES
+								&& objIdx == ZERO)
+							{
+								pNES_instance->NES_state.display.obj.isSprite0PresentInSecondaryOam = CLEAR;
+							}
+						}
+						else if (pNES_instance->NES_state.display.obj.spriteCountPerScanline < EIGHT)
+						{
+							// Load the shift registers
 							pNES_instance->NES_state.display.obj.shifter
-								[pNES_instance->NES_state.display.obj.spriteCountPerScanline].isSpriteZero = YES;
-							pNES_instance->NES_state.display.obj.isSprite0PresentInSecondaryOam = CLEAR;
+								[pNES_instance->NES_state.display.obj.spriteCountPerScanline].loPatternShifter = pNES_instance->NES_state.display.obj.patternTblLByte;
+
+							pNES_instance->NES_state.display.obj.shifter
+								[pNES_instance->NES_state.display.obj.spriteCountPerScanline].hiPatternShifter = pNES_instance->NES_state.display.obj.patternTblMByte;
+
+							pNES_instance->NES_state.display.obj.shifter
+								[pNES_instance->NES_state.display.obj.spriteCountPerScanline].spriteAttribute.raw = pNES_instance->NES_state.display.obj.spriteAttribute.raw;
+
+							// If sprite zero is present in secondary OAM and is valid, then it will occupy the first place in our secondary OAM
+							if (pNES_instance->NES_state.display.obj.isSprite0PresentInSecondaryOam == YES
+								&& objIdx == ZERO)
+							{
+								pNES_instance->NES_state.display.obj.shifter
+									[pNES_instance->NES_state.display.obj.spriteCountPerScanline].isSpriteZero = YES;
+								pNES_instance->NES_state.display.obj.isSprite0PresentInSecondaryOam = CLEAR;
+							}
+
+							// Increment the sprite count
+							++pNES_instance->NES_state.display.obj.spriteCountPerScanline;
 						}
 
-						// Increment the sprite count
-						++pNES_instance->NES_state.display.obj.spriteCountPerScanline;
+						// Clear the internal registers
+						pNES_instance->NES_state.display.obj.spriteXCoordinate = RESET;
+						pNES_instance->NES_state.display.obj.spriteYCoordinate = RESET;
+						pNES_instance->NES_state.display.obj.patternTableLAddr = RESET;
+						pNES_instance->NES_state.display.obj.patternTableMAddr = RESET;
+						pNES_instance->NES_state.display.obj.patternTblLByte = RESET;
+						pNES_instance->NES_state.display.obj.patternTblMByte = RESET;
+						pNES_instance->NES_state.display.obj.spriteAttribute.raw = RESET;
+						pNES_instance->NES_state.display.obj.tileNumber = RESET;
+						pNES_instance->NES_state.display.obj.paletteID = RESET;
+
+						// Dummy Read as mentioned in point 3b of https://www.nesdev.org/wiki/PPU_sprite_evaluation#Details
+						pNES_instance->NES_state.display.obj.spriteXCoordinate
+							= pNES_ppuMemory->NESMemoryMap.secondaryOam.oamW[objIdx].xPosition;
+						BREAK;
+					}
+					default:
+					{
+						FATAL("Unknown Sprite Fetch Stage");
+					}
 					}
 
-					// Clear the internal registers
-					pNES_instance->NES_state.display.obj.spriteXCoordinate = RESET;
-					pNES_instance->NES_state.display.obj.spriteYCoordinate = RESET;
-					pNES_instance->NES_state.display.obj.patternTableLAddr = RESET;
-					pNES_instance->NES_state.display.obj.patternTableMAddr = RESET;
-					pNES_instance->NES_state.display.obj.patternTblLByte = RESET;
-					pNES_instance->NES_state.display.obj.patternTblMByte = RESET;
-					pNES_instance->NES_state.display.obj.spriteAttribute.raw = RESET;
-					pNES_instance->NES_state.display.obj.tileNumber = RESET;
-					pNES_instance->NES_state.display.obj.paletteID = RESET;
-
-					// Dummy Read as mentioned in point 3b of https://www.nesdev.org/wiki/PPU_sprite_evaluation#Details
-					pNES_instance->NES_state.display.obj.spriteXCoordinate
-						= pNES_ppuMemory->NESMemoryMap.secondaryOam.oamW[objIdx].xPosition;
-					BREAK;
-				}
-				default:
-				{
-					FATAL("Unknown Sprite Fetch Stage");
-				}
+					if (ly <= NES_LAST_VISIBLE_PPU_SCANLINE)
+					{
+						// Refer https://www.nesdev.org/wiki/PPU_registers#OAMADDR
+						pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.OAMADDR = ZERO;
+					}
 				}
 			}
 
@@ -4450,6 +4858,65 @@ void NES_t::ppuTick()
 			pNES_ppuRegisters->ppuStatusReadQuirkEnable = CLEAR;
 
 			pNES_instance->NES_state.display.wasVblankJustTriggerred = YES;
+		}
+
+		// Refer : Mesen _updateVramAddrDelay - deferred $2006 2nd-write v update
+		if (pNES_ppuRegisters->ppuInternalRegisters.vramAddrUpdateDelay > ZERO)
+		{
+			pNES_ppuRegisters->ppuInternalRegisters.vramAddrUpdateDelay--;
+
+			if (pNES_ppuRegisters->ppuInternalRegisters.vramAddrUpdateDelay == ZERO)
+			{
+				pNES_ppuRegisters->ppuInternalRegisters.v.raw
+					= pNES_ppuRegisters->ppuInternalRegisters.vramAddrPendingValue;
+
+				bool isNotRendering = !((pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.ENABLE_BG_RENDERING == SET)
+					|| (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.ENABLE_SPRITE_RENDERING == SET));
+				bool isOutsideVisible = !((pNES_instance->NES_state.display.currentScanline >= NES_PRE_RENDER_SCANLINE)
+					&& (pNES_instance->NES_state.display.currentScanline <= NES_LAST_VISIBLE_PPU_SCANLINE));
+
+				if (isNotRendering || isOutsideVisible)
+				{
+					clockMMC3IRQ(pNES_ppuRegisters->ppuInternalRegisters.v.raw, MEMORY_ACCESS_SOURCE::CPU, NO);
+				}
+			}
+		}
+
+		// Refer : Mesen _ignoreVramRead - suppress back-to-back $2007 reads within 6 PPU cycles
+		if (pNES_ppuRegisters->ppuInternalRegisters.ignoreVramRead > ZERO)
+		{
+			pNES_ppuRegisters->ppuInternalRegisters.ignoreVramRead--;
+		}
+
+		// Refer : Mesen _needVideoRamIncrement - defer $2007 v increment by 1 PPU cycle
+		// This prevents open bus test's rapid $2007 reads from corrupting v during rendering tests
+		if (pNES_ppuRegisters->ppuInternalRegisters.needVideoRamIncrement == YES)
+		{
+			pNES_ppuRegisters->ppuInternalRegisters.needVideoRamIncrement = NO;
+
+			bool isRendering = (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.ENABLE_BG_RENDERING == SET)
+				|| (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.ENABLE_SPRITE_RENDERING == SET);
+			bool isVisibleOrPrerender = (pNES_instance->NES_state.display.currentScanline >= NES_PRE_RENDER_SCANLINE)
+				&& (pNES_instance->NES_state.display.currentScanline <= NES_LAST_VISIBLE_PPU_SCANLINE);
+
+			if (isRendering && isVisibleOrPrerender)
+			{
+				xInc();
+				yInc();
+			}
+			else
+			{
+				if (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUCTRL.ppuctrl.VRAM_ADDRESS_INCREMENT == RESET)
+				{
+					pNES_ppuRegisters->ppuInternalRegisters.v.raw += ONE;
+					clockMMC3IRQ(pNES_ppuRegisters->ppuInternalRegisters.v.raw, MEMORY_ACCESS_SOURCE::CPU, NO);
+				}
+				else
+				{
+					pNES_ppuRegisters->ppuInternalRegisters.v.raw += THIRTYTWO;
+					clockMMC3IRQ(pNES_ppuRegisters->ppuInternalRegisters.v.raw, MEMORY_ACCESS_SOURCE::CPU, NO);
+				}
+			}
 		}
 
 		// Tick the counters
@@ -5193,6 +5660,12 @@ void NES_t::initializeGraphics()
 	palScreen[0x3F] = Pixel(0, 0, 0);
 
 	pNES_instance->NES_state.display.currentScanline = NES_PRE_RENDER_SCANLINE;
+
+	// in your PPU reset / init
+	memset(pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusDecayStamp, 0,
+		sizeof(pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusDecayStamp));
+
+	pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusValue = 0;
 }
 
 float NES_t::getEmulationVolume()
@@ -5268,14 +5741,6 @@ bool NES_t::runEmulationAtFixedRate(uint32_t currentFrame)
 	playTheAudioFrame();
 
 	displayCompleteScreen();
-
-	// To handle 3rd test of ppu_open_bus.nes 
-	// Check for 600 ms decay rate for open bus
-	auto currentTimeInMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-	if ((currentTimeInMs - pNES_ppuRegisters->ppuInternalRegisters.openBus.lastRefreshTimeInMs) > (600 / _XFPS))
-	{
-		pNES_ppuRegisters->ppuInternalRegisters.openBus.openBusValue = RESET;
-	}
 
 	RETURN status;
 }
@@ -6245,6 +6710,8 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 				LOG("==================================================");
 			}
 
+			crc32_init();
+
 			if (ENABLED)
 			{
 				// -----------------------------------------------------------------------------
@@ -6804,7 +7271,22 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 				}
 
 				case MAPPER::MMC3:
+				case MAPPER::INES_MAPPER_037:
 				{
+					// run crc32 to check for the weird INES37 mapper
+					uint32_t crc_32 = crc32_compute(pINES->completeROM, pAbsolute_NES_instance->absolute_NES_state.aboutRom.codeRomSize);
+					switch (crc_32)
+					{
+					case 0x94B036E3:
+					{
+						LOG("iNES Mapper 37 detected !");
+						LOG("==================================================");
+						pNES_instance->NES_state.catridgeInfo.mapper = MAPPER::INES_MAPPER_037;
+						BREAK;
+					}
+					default: BREAK;
+					}
+
 					memset(
 						&(pNES_instance->NES_state.catridgeInfo.mmc3),
 						0,
@@ -6812,7 +7294,7 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 
 					if (prg16kBanks < TWO)
 					{
-						FATAL("MMC3 requires >= 32KB PRG-ROM");
+						FATAL("MMC3/Mapper037 requires >= 32KB PRG-ROM");
 					}
 
 					pNES_instance->NES_state.catridgeInfo.mmc3
@@ -6889,6 +7371,205 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 						&& (chrRomSizeBytes == ZERO))
 					{
 						LOG("Warning : AxROM has no CHR memory");
+					}
+
+					BREAK;
+				}
+
+				case MAPPER::MMC2:
+				{
+					memset(
+						&(pNES_instance->NES_state.catridgeInfo.mmc2),
+						0,
+						sizeof(pNES_instance->NES_state.catridgeInfo.mmc2));
+
+					pNES_instance->NES_state.catridgeInfo.mmc2.chrBankLatch[0] = 0xFD;
+					pNES_instance->NES_state.catridgeInfo.mmc2.chrBankLatch[1] = 0xFD;
+
+					memcpy_portable(
+						&(cpuCart[0x0000]),
+						0x2000,
+						prgRom,
+						0x2000);
+
+					const uint32_t prg8kBanks = prg16kBanks << 1;
+
+					if (prg8kBanks < ONE)
+					{
+						FATAL("Invalid MMC2 PRG-ROM");
+					}
+
+					switch (prg8kBanks)
+					{
+					case ZERO:
+					case ONE:
+					case TWO:
+					case THREE:
+						FATAL("Invalid MMC2 PRG-ROM");
+						BREAK;
+					default:
+						for (uint32_t i = 0; i < 3; ++i)
+						{
+							memcpy_portable(
+								&(cpuCart[0x2000 + (i * 0x2000)]),
+								0x2000,
+								&(prgRom[((prg8kBanks - 3 + i) * 0x2000)]),
+								0x2000);
+						}
+						BREAK;
+					}
+
+					if (chrRomSizeBytes > ZERO)
+					{
+						uint64_t copySize = chrRomSizeBytes;
+
+						if (copySize > 0x2000ULL)
+						{
+							copySize = 0x2000ULL;
+						}
+
+						memcpy_portable(
+							ppuChr,
+							copySize,
+							chrRom,
+							copySize);
+					}
+
+					BREAK;
+				}
+
+				case MAPPER::MMC4:
+				{
+					memset(
+						&(pNES_instance->NES_state.catridgeInfo.mmc4),
+						0,
+						sizeof(pNES_instance->NES_state.catridgeInfo.mmc4));
+
+					pNES_instance->NES_state.catridgeInfo.mmc4.chrBankLatch[0] = 0xFD;
+					pNES_instance->NES_state.catridgeInfo.mmc4.chrBankLatch[1] = 0xFD;
+
+					pNES_instance->NES_state.catridgeInfo.mmc4.prgBank16 = ZERO;
+
+					memcpy_portable(
+						&(cpuCart[0x0000]),
+						0x4000,
+						prgRom,
+						0x4000);
+
+					if (prg16kBanks == ONE)
+					{
+						memcpy_portable(
+							&(cpuCart[0x4000]),
+							0x4000,
+							prgRom,
+							0x4000);
+					}
+					else
+					{
+						memcpy_portable(
+							&(cpuCart[0x4000]),
+							0x4000,
+							&(prgRom[(prg16kBanks - ONE) * 0x4000]),
+							0x4000);
+					}
+
+					if (chrRomSizeBytes > ZERO)
+					{
+						uint64_t copySize = chrRomSizeBytes;
+
+						if (copySize > 0x2000ULL)
+						{
+							copySize = 0x2000ULL;
+						}
+
+						memcpy_portable(
+							ppuChr,
+							copySize,
+							chrRom,
+							copySize);
+					}
+
+					BREAK;
+				}
+
+				case MAPPER::COLOR_DREAMS:
+				{
+					memset(
+						&(pNES_instance->NES_state.catridgeInfo.colorDreams),
+						0,
+						sizeof(pNES_instance->NES_state.catridgeInfo.colorDreams));
+
+					pNES_instance->NES_state.catridgeInfo.colorDreams.prgBank32 = ZERO;
+
+					memcpy_portable(
+						&(cpuCart[0x0000]),
+						0x8000,
+						prgRom,
+						0x8000);
+
+					if (chrRomSizeBytes > ZERO)
+					{
+						uint64_t copySize = chrRomSizeBytes;
+
+						if (copySize > 0x2000ULL)
+						{
+							copySize = 0x2000ULL;
+						}
+
+						memcpy_portable(
+							ppuChr,
+							copySize,
+							chrRom,
+							copySize);
+					}
+
+					BREAK;
+				}
+
+				case MAPPER::INES_MAPPER_034:
+				{
+					memset(
+						&(pNES_instance->NES_state.catridgeInfo.ines034),
+						0,
+						sizeof(pNES_instance->NES_state.catridgeInfo.ines034));
+
+					pNES_instance->NES_state.catridgeInfo.ines034.prgBank32 = ZERO;
+
+					if (pNES_instance->NES_state.catridgeInfo.subMapper == static_cast<SUB_MAPPER>(ZERO))
+					{
+						if (chrRomSizeBytes <= 0x2000ULL)
+						{
+							pNES_instance->NES_state.catridgeInfo.subMapper = SUB_MAPPER::BNROM;
+						}
+						else
+						{
+							pNES_instance->NES_state.catridgeInfo.subMapper = SUB_MAPPER::NINA;
+						}
+
+						LOG(" Submapper : %u", pNES_instance->NES_state.catridgeInfo.subMapper);
+						LOG("==================================================");
+					}
+
+					memcpy_portable(
+						&(cpuCart[0x0000]),
+						0x8000,
+						prgRom,
+						0x8000);
+
+					if (chrRomSizeBytes > ZERO)
+					{
+						uint64_t copySize = chrRomSizeBytes;
+
+						if (copySize > 0x2000ULL)
+						{
+							copySize = 0x2000ULL;
+						}
+
+						memcpy_portable(
+							ppuChr,
+							copySize,
+							chrRom,
+							copySize);
 					}
 
 					BREAK;
