@@ -1412,6 +1412,35 @@ private:
 
 	bool processSOC();
 
+	MASQ_INLINE FLAG isNMI_SuppressedAtVBLEdge(SCOUNTER32 ly, SCOUNTER64 ppuCycle)
+	{
+		// Must be right at the VBL set moment � post-render scanline within PPU cycle window
+		// Refer 08-nmi_off_timing; This is the method used to achieve the PPU cycle accuracy expected by the test in our emulator where CPU cycle is min resolution
+		if (ly != NES_POST_RENDER_SCANLINE || ppuCycle > SIX)
+		{
+			RETURN NO;
+		}
+		// VBLANK_NMI_ENABLE was cleared within the timing window � suppress NMI
+		RETURN (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUCTRL.ppuctrl.VBLANK_NMI_ENABLE == RESET);
+	}
+
+	MASQ_INLINE FLAG isNMI_ReadyToDispatch(SCOUNTER32 ly, SCOUNTER64 ppuCycle)
+	{
+		// NOTE 1: NMI latency guard � VBL was already set sometime before, delay must have elapsed before we can dispatch
+		if (pNES_instance->NES_state.interrupts.nmiDelayInInstructions > RESET)
+		{
+			RETURN NO;
+		}
+		// On the post-render scanline, VBL is being set right now � enforce PPU cycle window
+		// NOTE 2: This handles for NMI latency assuming VBL is set just few PPU clocks before; This is the method used to achieve the PPU cycle accuracy expected by the test in our emulator where CPU cycle is min resolution
+		if (ly == NES_POST_RENDER_SCANLINE)
+		{
+			RETURN (ppuCycle > SIX);
+		}
+		// Past the post-render scanline � VBL was already set, NMI dispatch window is open
+		RETURN YES;
+	}
+
 	EXCEPTION_EVENT_TYPE processNMI();
 
 	EXCEPTION_EVENT_TYPE processIRQ();
@@ -1428,6 +1457,142 @@ private:
 
 	void syncOtherGBModuleTicks();
 
+	MASQ_INLINE void resetPPUState()
+	{
+		// Must be right at the VBL set moment � post-render scanline within PPU cycle window
+		// Refer 08-nmi_off_timing; This is the method used to achieve the PPU cycle accuracy expected by the test in our emulator where CPU cycle is min resolution
+
+		pNES_instance->NES_state.display.bg.nameTblAddr = RESET;
+		pNES_instance->NES_state.display.bg.nameTblByte = RESET;
+		pNES_instance->NES_state.display.bg.attrTblAddr = RESET;
+		pNES_instance->NES_state.display.bg.attrTblByte = RESET;
+		pNES_instance->NES_state.display.bg.patternTableLAddr = RESET;
+		pNES_instance->NES_state.display.bg.patternTblLByte = RESET;
+		pNES_instance->NES_state.display.bg.patternTblMByte = RESET;
+		pNES_ppuRegisters->pn = RESET;
+		pNES_ppuRegisters->pm = RESET;
+		pNES_ppuRegisters->sn = RESET;
+		pNES_ppuRegisters->sm = RESET;
+		pNES_ppuRegisters->oamByte = RESET;
+		pNES_ppuRegisters->stopSpriteEvaluation = CLEAR;
+		pNES_ppuRegisters->ppuInternalRegisters.ignoreVramRead = RESET;
+		pNES_ppuRegisters->ppuInternalRegisters.needVideoRamIncrement = NO;
+		pNES_instance->NES_state.display.obj.isSprite0PresentInSecondaryOam = CLEAR;
+		pNES_instance->NES_state.display.obj.spriteYCoordinate = RESET;
+		pNES_instance->NES_state.display.obj.patternTableLAddr = RESET;
+		pNES_instance->NES_state.display.obj.patternTableMAddr = RESET;
+		pNES_instance->NES_state.display.obj.patternTblLByte = RESET;
+		pNES_instance->NES_state.display.obj.patternTblMByte = RESET;
+		pNES_instance->NES_state.display.obj.spriteAttribute.raw = RESET;
+		pNES_instance->NES_state.display.obj.spriteXCoordinate = RESET;
+		pNES_instance->NES_state.display.obj.tileNumber = RESET;
+		pNES_instance->NES_state.display.obj.paletteID = RESET;
+	}
+
+	MASQ_INLINE FLAG checkIfRenderring()
+	{
+		if ((pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.ENABLE_BG_RENDERING == SET)
+			|| (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.ENABLE_SPRITE_RENDERING == SET))
+		{
+			RETURN YES;
+		}
+		else
+		{
+			RETURN NO;
+		}
+	}
+
+	MASQ_INLINE void xInc()
+	{
+		// if coarse X == 31
+		if ((pNES_ppuRegisters->ppuInternalRegisters.v.raw & 0x001F) == THIRTYONE)
+		{
+			pNES_ppuRegisters->ppuInternalRegisters.v.raw &= (~0x001F);						// coarse X = 0
+			pNES_ppuRegisters->ppuInternalRegisters.v.raw ^= 0x0400;						// switch horizontal nametable
+		}
+		else
+		{
+			pNES_ppuRegisters->ppuInternalRegisters.v.raw += ONE;							// increment coarse X
+		}
+	}
+
+	MASQ_INLINE void yInc()
+	{
+		// if fine Y < 7
+		if ((pNES_ppuRegisters->ppuInternalRegisters.v.raw & 0x7000) != 0x7000)
+		{
+			pNES_ppuRegisters->ppuInternalRegisters.v.raw += 0x1000;						// increment fine Y
+		}
+		else
+		{
+			pNES_ppuRegisters->ppuInternalRegisters.v.raw &= (~0x7000);						// fine Y = 0
+			uint16_t y = (pNES_ppuRegisters->ppuInternalRegisters.v.raw & 0x03E0) >> FIVE;	// let y = coarse Y
+			if (y == TWENTYNINE)
+			{
+				y = ZERO;																	// coarse Y = 0
+				pNES_ppuRegisters->ppuInternalRegisters.v.raw ^= 0x0800;					// switch vertical nametable
+			}
+			else if (y == THIRTYONE)
+			{
+				y = ZERO;																	// coarse Y = 0, nametable not switched
+			}
+			else
+			{
+				y += ONE;																	// increment coarse Y
+			}
+			// put coarse Y back into v
+			pNES_ppuRegisters->ppuInternalRegisters.v.raw = (pNES_ppuRegisters->ppuInternalRegisters.v.raw & (~0x03E0)) | (y << FIVE);
+		}
+	}
+
+	MASQ_INLINE void populatePixelShiftRegisters()
+	{
+		// Loading the shift registers
+
+		pNES_instance->NES_state.display.bg.loPatternShifter.loPatternShiftSplit[LO]
+			= pNES_instance->NES_state.display.bg.patternTblLByte;
+		pNES_instance->NES_state.display.bg.hiPatternShifter.hiPatternShiftSplit[LO]
+			= pNES_instance->NES_state.display.bg.patternTblMByte;
+
+		// Even though ideally this needs to be 1 bit latch, we will still use 8 bit register and set all bits to same value...
+		// NOTE: bit[n] Xly 256 sets all 8 bits to bit[n] 
+
+		pNES_instance->NES_state.display.bg.loAttrShifter.loAttrShiftSplit[LO]
+			= GETBIT(LO, pNES_instance->NES_state.display.bg.paletteID) * 0xFF;
+
+		pNES_instance->NES_state.display.bg.hiAttrShifter.hiAttrShiftSplit[LO]
+			= GETBIT(HI, pNES_instance->NES_state.display.bg.paletteID) * 0xFF;
+	}
+
+	MASQ_INLINE void shiftThePixelShiftRegisters(SCOUNTER64 cycle)
+	{
+		// Note: Background shift registers should be initialized and clocked when only rendering sprites.
+		pNES_instance->NES_state.display.bg.loPatternShifter.loPatternShift <<= ONE;
+		pNES_instance->NES_state.display.bg.hiPatternShifter.hiPatternShift <<= ONE;
+		pNES_instance->NES_state.display.bg.loAttrShifter.loAttrShift <<= ONE;
+		pNES_instance->NES_state.display.bg.hiAttrShifter.hiAttrShift <<= ONE;
+
+		// We check for cycles because we don't want sprite shifter to run during ((cycle >= THREETWENTYONE) && (cycle <= THREETHIRTYSIX))
+		if ((cycle >= ONE) && (cycle <= TWOFIFTYSIX))
+		{
+			if (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.ENABLE_SPRITE_RENDERING == SET)
+			{
+				for (COUNTER8 spriteI = ZERO; spriteI < pNES_instance->NES_state.display.obj.spriteCountPerScanline; spriteI++)
+				{
+					if (pNES_instance->NES_state.display.obj.shifter[spriteI].xSubtractor > ZERO)
+					{
+						pNES_instance->NES_state.display.obj.shifter[spriteI].xSubtractor--;
+					}
+					else
+					{
+						pNES_instance->NES_state.display.obj.shifter[spriteI].loPatternShifter <<= ONE;
+						pNES_instance->NES_state.display.obj.shifter[spriteI].hiPatternShifter <<= ONE;
+					}
+				}
+			}
+		}
+	}
+
 	void ppuTick();
 
 	void apuTick();
@@ -1443,7 +1608,7 @@ private:
 private:
 
 	// Refer https://forums.nesdev.org/viewtopic.php?p=163102#p163102 for pseudocode
-	inline void tickPulse(AUDIO_CHANNELS channel)
+	MASQ_INLINE void tickPulse(AUDIO_CHANNELS channel)
 	{
 		if ((TO_UINT8(channel) > TO_UINT8(AUDIO_CHANNELS::PULSE_2))
 			||
@@ -1453,176 +1618,148 @@ private:
 		}
 		else
 		{
-			if (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].frequencyCounter > RESET)
+			auto& pulseReg = pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)];
+
+			if (pulseReg.frequencyCounter > RESET)
 			{
-				--pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].frequencyCounter;
+				--pulseReg.frequencyCounter;
 			}
 			else
 			{
-				pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].frequencyPeriod.fields.unused = RESET;
-				pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].frequencyCounter
-					= pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].frequencyPeriod.raw;
-
-				pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].dutyCounter
-					= ((pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].dutyCounter + ONE) & SEVEN);
+				pulseReg.frequencyPeriod.fields.unused = RESET;
+				pulseReg.frequencyCounter = pulseReg.frequencyPeriod.raw;
+				pulseReg.dutyCounter = ((pulseReg.dutyCounter + ONE) & SEVEN);
 			}
 		}
 	}
 
 	// Refer https://forums.nesdev.org/viewtopic.php?p=163155#p163155 for pseudocode
-	inline void tickTriangle()
+	MASQ_INLINE void tickTriangle()
 	{
-		pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::TRIANGLE)].triangle.isUltrasonic = NO;
+		auto& triReg = pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::TRIANGLE)];
+		auto& tri = triReg.triangle;
 
-		pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::TRIANGLE)].frequencyPeriod.fields.unused = RESET;
-		if ((pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::TRIANGLE)].frequencyPeriod.raw < TWO)
-			&& pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::TRIANGLE)].frequencyCounter == RESET)
+		tri.isUltrasonic = NO;
+
+		triReg.frequencyPeriod.fields.unused = RESET;
+		if ((triReg.frequencyPeriod.raw < TWO) && (triReg.frequencyCounter == RESET))
 		{
-			pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::TRIANGLE)].triangle.isUltrasonic = YES;
+			tri.isUltrasonic = YES;
 		}
 
-		FLAG clockTriangle = YES;
-		if (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::TRIANGLE)].lengthCounter == RESET)
-		{
-			clockTriangle = NO;
-		}
-		if (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::TRIANGLE)].triangle.linearCounter.linearCounter == RESET)
-		{
-			clockTriangle = NO;
-		}
-		if (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::TRIANGLE)].triangle.isUltrasonic == YES)
-		{
-			clockTriangle = NO;
-		}
+		const FLAG clockTriangle = ((triReg.lengthCounter != RESET)
+			&& (tri.linearCounter.linearCounter != RESET)
+			&& (tri.isUltrasonic != YES)) ? YES : NO;
 
 		if (clockTriangle == YES)
 		{
-			if (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::TRIANGLE)].frequencyCounter > RESET)
+			if (triReg.frequencyCounter > RESET)
 			{
-				--pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::TRIANGLE)].frequencyCounter;
+				--triReg.frequencyCounter;
 			}
 			else
 			{
-				pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::TRIANGLE)].frequencyPeriod.fields.unused = ZERO;
-				pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::TRIANGLE)].frequencyCounter
-					= pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::TRIANGLE)].frequencyPeriod.raw;
-
-				pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::TRIANGLE)].triangle.triangleStep
-					= ((pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::TRIANGLE)].triangle.triangleStep + ONE) & 0x1F);
+				triReg.frequencyPeriod.fields.unused = ZERO;
+				triReg.frequencyCounter = triReg.frequencyPeriod.raw;
+				tri.triangleStep = ((tri.triangleStep + ONE) & 0x1F);
 			}
 		}
 	}
 
 	// Refer https://forums.nesdev.org/viewtopic.php?p=163157#p163157 for pseudocode
-	inline void tickNoise()
+	MASQ_INLINE void tickNoise()
 	{
-		if (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::NOISE)].frequencyCounter > RESET)
-		{
-			--pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::NOISE)].frequencyCounter;
-		}
-		else
-		{
-			pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::NOISE)].frequencyCounter
-				= pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::NOISE)].noise.noiseFrequencyPeriod;
+		auto& noiseReg = pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::NOISE)];
+		auto& noise = noiseReg.noise;
+		auto& shiftReg = noise.noiseShiftRegister;
 
-			if (pNES_cpuMemory->NESMemoryMap.apuAndIO.NOISE_PERIOD.LOOP_NOISE == SET)
-			{
-				pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::NOISE)].noise.noiseShiftRegister.fields.fifteen
-					= (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::NOISE)].noise.noiseShiftRegister.fields.six
-						^ pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::NOISE)].noise.noiseShiftRegister.fields.zero);
+		if (noiseReg.frequencyCounter > RESET)
+		{
+			--noiseReg.frequencyCounter;
 			}
 			else
 			{
-				pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::NOISE)].noise.noiseShiftRegister.fields.fifteen
-					= (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::NOISE)].noise.noiseShiftRegister.fields.one
-						^ pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::NOISE)].noise.noiseShiftRegister.fields.zero);
-			}
+			noiseReg.frequencyCounter = noise.noiseFrequencyPeriod;
 
-			pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::NOISE)].noise.noiseShiftRegister.raw >>= ONE;
+			shiftReg.fields.fifteen = (pNES_cpuMemory->NESMemoryMap.apuAndIO.NOISE_PERIOD.LOOP_NOISE == SET)
+				? (shiftReg.fields.six ^ shiftReg.fields.zero)
+				: (shiftReg.fields.one ^ shiftReg.fields.zero);
+
+			shiftReg.raw >>= ONE;
 		}
 	}
 
 	// Refer https://forums.nesdev.org/viewtopic.php?p=163187&sid=4e4aade9cf7e18093eb1fd3afad14c49#p163187 for pseudocode
-	inline void tickDMC()
+	MASQ_INLINE void tickDMC()
 	{
-		if (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)].frequencyCounter > RESET)
+		// Cache references to avoid repeated deep dereferences
+		auto& dmcReg = pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)];
+		auto& dmc = dmcReg.dmc;
+		auto& apuIO = pNES_cpuMemory->NESMemoryMap.apuAndIO;
+
+		if (dmcReg.frequencyCounter > RESET)
 		{
-			--pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)].frequencyCounter;
+			--dmcReg.frequencyCounter;
 		}
 		else
 		{
-			pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)].frequencyCounter
-				= pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)].dmc.dmcFrequencyPeriod;
+			dmcReg.frequencyCounter = dmc.dmcFrequencyPeriod;
 
-			if (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)].dmc.isOutputUnitSilent == NO)
+			if (dmc.isOutputUnitSilent == NO)
 			{
-				auto outputShift = pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)].dmc.outputShift;
+				const auto outputShift = dmc.outputShift;
 
-				if ((outputShift & 0x01) 
-					&& (pNES_cpuMemory->NESMemoryMap.apuAndIO.DMC_RAW.DIRECT_LOAD < 0x7E))
+				if ((outputShift & 0x01) && (apuIO.DMC_RAW.DIRECT_LOAD < 0x7E))
 				{
-					pNES_cpuMemory->NESMemoryMap.apuAndIO.DMC_RAW.DIRECT_LOAD += TWO;
+					apuIO.DMC_RAW.DIRECT_LOAD += TWO;
 				}
-				if ((!(outputShift & 0x01))
-					&& (pNES_cpuMemory->NESMemoryMap.apuAndIO.DMC_RAW.DIRECT_LOAD > 0x01))
+				else if (!(outputShift & 0x01) && (apuIO.DMC_RAW.DIRECT_LOAD > 0x01))
 				{
-					pNES_cpuMemory->NESMemoryMap.apuAndIO.DMC_RAW.DIRECT_LOAD -= TWO;
+					apuIO.DMC_RAW.DIRECT_LOAD -= TWO;
 				}
 			}
 
-			--pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)].dmc.bitsInOutputUnit;
-			pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)].dmc.outputShift >>= ONE;
+			--dmc.bitsInOutputUnit;
+			dmc.outputShift >>= ONE;
 
-			if (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)].dmc.bitsInOutputUnit == RESET)
+			if (dmc.bitsInOutputUnit == RESET)
 			{
-				pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)].dmc.bitsInOutputUnit = EIGHT;
-				pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)].dmc.outputShift
-					= pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)].dmc.sampleBuffer;
-				pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)].dmc.isOutputUnitSilent
-					= pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)].dmc.isSampleBufferEmpty;
-				pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)].dmc.isSampleBufferEmpty = YES;
+				dmc.bitsInOutputUnit = EIGHT;
+				dmc.outputShift = dmc.sampleBuffer;
+				dmc.isOutputUnitSilent = dmc.isSampleBufferEmpty;
+				dmc.isSampleBufferEmpty = YES;
 			}
 		}
 
-		if ((pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)].lengthCounter > RESET)
-			&& (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)].dmc.isSampleBufferEmpty == YES))
+		if ((dmcReg.lengthCounter > RESET) && (dmc.isSampleBufferEmpty == YES))
 		{
 			pNES_instance->NES_state.emulatorStatus.ticks.dmcDmaCounter = RESET;
 
 			APUTODO("Emulate the CPU halt cycles during the below DMC DMA read operation");
 
-			pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)].dmc.sampleBuffer
-				= readCpuRawMemory(pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)].dmc.dmcAddress, MEMORY_ACCESS_SOURCE::DMA);
+			dmc.sampleBuffer = readCpuRawMemory(dmc.dmcAddress, MEMORY_ACCESS_SOURCE::DMA);
+			dmc.isSampleBufferEmpty = NO;
+			dmc.dmcAddress = ((dmc.dmcAddress + ONE) & 0x7FFF) | 0x8000;
 
-			pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)].dmc.isSampleBufferEmpty = NO;
-			pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)].dmc.dmcAddress
-				= ((pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)].dmc.dmcAddress + ONE) | 0x8000);
-
-			// Handle length counter processing
-			--pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)].lengthCounter;
-			if (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)].lengthCounter == RESET)
+			if (--dmcReg.lengthCounter == RESET)
 			{
-				if (pNES_cpuMemory->NESMemoryMap.apuAndIO.DMC_FREQ.LOOP_SAMPLE == SET)
+				if (apuIO.DMC_FREQ.LOOP_SAMPLE == SET)
 				{
-					pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)].lengthCounter
-						= pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)].dmc.dmcSampleLength;
-					pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)].dmc.dmcAddress
-						= pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)].dmc.dmcSampleAddress;
-					pNES_instance->NES_state.dmcDMA.sourceAddress = pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)].dmc.dmcSampleAddress;
+					dmcReg.lengthCounter = dmc.dmcSampleLength;
+					dmc.dmcAddress = dmc.dmcSampleAddress;
+					pNES_instance->NES_state.dmcDMA.sourceAddress = dmc.dmcSampleAddress;
 				}
-				else if (pNES_cpuMemory->NESMemoryMap.apuAndIO.DMC_FREQ.IRQ_ENABLE == SET)
+				else if (apuIO.DMC_FREQ.IRQ_ENABLE == SET)
 				{
 					pNES_instance->NES_state.interrupts.isIRQ.fields.IRQ_SRC_DMC = SET;
 				}
 			}
-
-			pNES_instance->NES_state.dmcDMA.sourceAddress = pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)].dmc.dmcSampleAddress;
 		}
 	}
 
 private:
 
-	inline void processLengthCounter(AUDIO_CHANNELS channel)
+	MASQ_INLINE void processLengthCounter(AUDIO_CHANNELS channel)
 	{
 		if ((TO_UINT8(channel) >= TO_UINT8(AUDIO_CHANNELS::TOTAL_AUDIO_CHANNELS))
 			||
@@ -1632,14 +1769,16 @@ private:
 		}
 		else
 		{
+			auto& chanReg = pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)];
+
 			// If length counter is non zero and halt flag is not set, decrement the length counter
-			if (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].lengthCounter > ZERO)
+			if (chanReg.lengthCounter > ZERO)
 			{
-				auto isHaltEn = (pNES_instance->NES_state.audio.effectivelengthCounterHaltFlag[TO_UINT8(channel)] == SET);
+				const auto isHaltEn = (pNES_instance->NES_state.audio.effectivelengthCounterHaltFlag[TO_UINT8(channel)] == SET);
 
 				if (isHaltEn == NO && pNES_instance->NES_state.audio.skipClockingLengthCounter == NO)
 				{
-					--(pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].lengthCounter);
+					--chanReg.lengthCounter;
 				}
 
 				pNES_instance->NES_state.audio.skipClockingLengthCounter = CLEAR;
@@ -1647,28 +1786,29 @@ private:
 		}
 	}
 
-	inline void processEnvelope(AUDIO_CHANNELS channel)
+	MASQ_INLINE void processEnvelope(AUDIO_CHANNELS channel)
 	{
+		auto& chanReg = pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)];
+		auto& envelope = chanReg.envelope;
+		auto& apuIO = pNES_cpuMemory->NESMemoryMap.apuAndIO;
+
 		auto reloadDivider = [&](AUDIO_CHANNELS channel)
 			{
 				switch (channel)
 				{
 				case AUDIO_CHANNELS::PULSE_1:
 				{
-					pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].envelope.divider
-						= pNES_cpuMemory->NESMemoryMap.apuAndIO.SQ1_VOL.ENV_PERIOD_OR_VOL;
+					envelope.divider = apuIO.SQ1_VOL.ENV_PERIOD_OR_VOL;
 					BREAK;
 				}
 				case AUDIO_CHANNELS::PULSE_2:
 				{
-					pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].envelope.divider
-						= pNES_cpuMemory->NESMemoryMap.apuAndIO.SQ2_VOL.ENV_PERIOD_OR_VOL;
+					envelope.divider = apuIO.SQ2_VOL.ENV_PERIOD_OR_VOL;
 					BREAK;
 				}
 				case AUDIO_CHANNELS::NOISE:
 				{
-					pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].envelope.divider
-						= pNES_cpuMemory->NESMemoryMap.apuAndIO.NOISE_VOL.ENV_PERIOD_OR_VOL;
+					envelope.divider = apuIO.NOISE_VOL.ENV_PERIOD_OR_VOL;
 					BREAK;
 				}
 				default:
@@ -1678,42 +1818,42 @@ private:
 				}
 			};
 
-		if (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].envelope.startFlag == YES)
+		if (envelope.startFlag == YES)
 		{
-			pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].envelope.startFlag = NO;
-			pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].envelope.decayLevelCounter = FIFTEEN;
+			envelope.startFlag = NO;
+			envelope.decayLevelCounter = FIFTEEN;
 			reloadDivider(channel);
 		}
 		else
 		{
-			if (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].envelope.divider == RESET)
+			if (envelope.divider == RESET)
 			{
 				reloadDivider(channel);
-				if (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].envelope.decayLevelCounter == RESET)
+				if (envelope.decayLevelCounter == RESET)
 				{
 					switch (channel)
 					{
 					case AUDIO_CHANNELS::PULSE_1:
 					{
-						if (pNES_cpuMemory->NESMemoryMap.apuAndIO.SQ1_VOL.LOOP_ENV_OR_DIS_LENGTH_COUNTER == SET)
+						if (apuIO.SQ1_VOL.LOOP_ENV_OR_DIS_LENGTH_COUNTER == SET)
 						{
-							pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].envelope.decayLevelCounter = FIFTEEN;
+							envelope.decayLevelCounter = FIFTEEN;
 						}
 						BREAK;
 					}
 					case AUDIO_CHANNELS::PULSE_2:
 					{
-						if (pNES_cpuMemory->NESMemoryMap.apuAndIO.SQ2_VOL.LOOP_ENV_OR_DIS_LENGTH_COUNTER == SET)
+						if (apuIO.SQ2_VOL.LOOP_ENV_OR_DIS_LENGTH_COUNTER == SET)
 						{
-							pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].envelope.decayLevelCounter = FIFTEEN;
+							envelope.decayLevelCounter = FIFTEEN;
 						}
 						BREAK;
 					}
 					case AUDIO_CHANNELS::NOISE:
 					{
-						if (pNES_cpuMemory->NESMemoryMap.apuAndIO.NOISE_VOL.LOOP_ENV_OR_DIS_LENGTH_COUNTER == SET)
+						if (apuIO.NOISE_VOL.LOOP_ENV_OR_DIS_LENGTH_COUNTER == SET)
 						{
-							pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].envelope.decayLevelCounter = FIFTEEN;
+							envelope.decayLevelCounter = FIFTEEN;
 						}
 						BREAK;
 					}
@@ -1725,18 +1865,18 @@ private:
 				}
 				else
 				{
-					--pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].envelope.decayLevelCounter;
+					--envelope.decayLevelCounter;
 				}
 			}
 			else
 			{
-				--pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].envelope.divider;
+				--envelope.divider;
 			}
 		}
 	}
 
 	// Refer https://forums.nesdev.org/viewtopic.php?p=163102#p163102 for pseudocode
-	inline FLAG isSweepMutingChannel(AUDIO_CHANNELS channel, BYTE shift, FLAG negate)
+	MASQ_INLINE FLAG isSweepMutingChannel(AUDIO_CHANNELS channel, BYTE shift, FLAG negate)
 	{
 		FLAG isMute = NO;
 
@@ -1749,13 +1889,13 @@ private:
 		}
 		else
 		{
-			pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].frequencyPeriod.fields.unused = RESET;
-			auto upperBound
-				= pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].frequencyPeriod.raw
-				+ (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].frequencyPeriod.raw >> shift);
-			pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].frequencyPeriod.fields.unused = RESET;
+			auto& freqPeriod = pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].frequencyPeriod;
 
-			if (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].frequencyPeriod.raw < EIGHT)
+			freqPeriod.fields.unused = RESET;
+			const auto upperBound = freqPeriod.raw + (freqPeriod.raw >> shift);
+			freqPeriod.fields.unused = RESET;
+
+			if (freqPeriod.raw < EIGHT)
 			{
 				isMute = YES;
 			}
@@ -1773,7 +1913,7 @@ private:
 	}
 
 	// Refer https://forums.nesdev.org/viewtopic.php?p=163102#p163102 for pseudocode
-	inline void processSweep(AUDIO_CHANNELS channel)
+	MASQ_INLINE void processSweep(AUDIO_CHANNELS channel)
 	{
 		auto sweep = [&](AUDIO_CHANNELS channel, FLAG enable, BYTE shift, BYTE period, FLAG negate)
 			{
@@ -1785,33 +1925,35 @@ private:
 					RETURN;
 				}
 
-				if (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].sweep.reload == YES)
+				auto& chanReg = pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)];
+				auto& sweep = chanReg.sweep;
+				auto& freqPeriod = chanReg.frequencyPeriod;
+
+				if (sweep.reload == YES)
 				{
-					pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].sweep.sweepCounter = period;
+					sweep.sweepCounter = period;
 					APUTODO("Handle Sweep Reload Edge Case at %d in %s", __LINE__, __FILE__);
-					pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].sweep.reload = NO;
+					sweep.reload = NO;
 				}
-				else if (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].sweep.sweepCounter > RESET)
+				else if (sweep.sweepCounter > RESET)
 				{
-					--pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].sweep.sweepCounter;
+					--sweep.sweepCounter;
 				}
 				else
 				{
-					pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].sweep.sweepCounter = period;
+					sweep.sweepCounter = period;
 					if ((enable == YES) && (isSweepMutingChannel(channel, shift, negate) == NO))
 					{
-						pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].frequencyPeriod.fields.unused = RESET;
+						freqPeriod.fields.unused = RESET;
 						if (negate == YES)
 						{
 							if (channel == AUDIO_CHANNELS::PULSE_1)
 							{
-								pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].frequencyPeriod.raw
-									-= ((pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].frequencyPeriod.raw >> shift) + ONE);
+								freqPeriod.raw -= ((freqPeriod.raw >> shift) + ONE);
 							}
 							else if (channel == AUDIO_CHANNELS::PULSE_2)
 							{
-								pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].frequencyPeriod.raw
-									-= (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].frequencyPeriod.raw >> shift);
+								freqPeriod.raw -= (freqPeriod.raw >> shift);
 							}
 							else
 							{
@@ -1820,41 +1962,37 @@ private:
 						}
 						else
 						{
-							pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].frequencyPeriod.raw
-								+= (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].frequencyPeriod.raw >> shift);
+							freqPeriod.raw += (freqPeriod.raw >> shift);
 						}
-						pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].frequencyPeriod.fields.unused = RESET;
+						freqPeriod.fields.unused = RESET;
 					}
 				}
-
 			};
 
 		switch (channel)
 		{
 		case AUDIO_CHANNELS::PULSE_1:
 		{
+			auto& sq1 = pNES_cpuMemory->NESMemoryMap.apuAndIO.SQ1_SWEEP;
 			sweep(
 				channel
-				, (FLAG)((pNES_cpuMemory->NESMemoryMap.apuAndIO.SQ1_SWEEP.ENABLE == SET)
-					&& (pNES_cpuMemory->NESMemoryMap.apuAndIO.SQ1_SWEEP.SHIFT_COUNT != RESET))
-				, pNES_cpuMemory->NESMemoryMap.apuAndIO.SQ1_SWEEP.SHIFT_COUNT
-				, pNES_cpuMemory->NESMemoryMap.apuAndIO.SQ1_SWEEP.PERIOD
-				, pNES_cpuMemory->NESMemoryMap.apuAndIO.SQ1_SWEEP.NEGATIVE
+				, (FLAG)((sq1.ENABLE == SET) && (sq1.SHIFT_COUNT != RESET))
+				, sq1.SHIFT_COUNT
+				, sq1.PERIOD
+				, sq1.NEGATIVE
 			);
-
 			BREAK;
 		}
 		case AUDIO_CHANNELS::PULSE_2:
 		{
+			auto& sq2 = pNES_cpuMemory->NESMemoryMap.apuAndIO.SQ2_SWEEP;
 			sweep(
 				channel
-				, (FLAG)((pNES_cpuMemory->NESMemoryMap.apuAndIO.SQ2_SWEEP.ENABLE == SET)
-					&& (pNES_cpuMemory->NESMemoryMap.apuAndIO.SQ2_SWEEP.SHIFT_COUNT != RESET))
-				, pNES_cpuMemory->NESMemoryMap.apuAndIO.SQ2_SWEEP.SHIFT_COUNT
-				, pNES_cpuMemory->NESMemoryMap.apuAndIO.SQ2_SWEEP.PERIOD
-				, pNES_cpuMemory->NESMemoryMap.apuAndIO.SQ2_SWEEP.NEGATIVE
+				, (FLAG)((sq2.ENABLE == SET) && (sq2.SHIFT_COUNT != RESET))
+				, sq2.SHIFT_COUNT
+				, sq2.PERIOD
+				, sq2.NEGATIVE
 			);
-
 			BREAK;
 		}
 		default:
@@ -1865,21 +2003,23 @@ private:
 	}
 
 	// Refer https://forums.nesdev.org/viewtopic.php?p=163155#p163155 for pseudocode
-	inline void processLinearCounter()
+	MASQ_INLINE void processLinearCounter()
 	{
-		if (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::TRIANGLE)].triangle.linearCounter.linearReload == YES)
+		auto& triReg = pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::TRIANGLE)];
+		auto& linCtr = triReg.triangle.linearCounter;
+
+		if (linCtr.linearReload == YES)
 		{
-			pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::TRIANGLE)].triangle.linearCounter.linearCounter
-				= pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::TRIANGLE)].triangle.linearCounter.linearCounterReload;
+			linCtr.linearCounter = linCtr.linearCounterReload;
 		}
-		else if (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::TRIANGLE)].triangle.linearCounter.linearCounter > RESET)
+		else if (linCtr.linearCounter > RESET)
 		{
-			--pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::TRIANGLE)].triangle.linearCounter.linearCounter;
+			--linCtr.linearCounter;
 		}
 
 		if (pNES_cpuMemory->NESMemoryMap.apuAndIO.TRI_LINEAR.DIS_LENGTH_COUNTER == RESET)
 		{
-			pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::TRIANGLE)].triangle.linearCounter.linearReload = NO;
+			linCtr.linearReload = NO;
 		}
 	}
 
@@ -1888,97 +2028,73 @@ private:
 	// Refer https://forums.nesdev.org/viewtopic.php?p=163102#p163102 for pulse part of the pseudocode
 	// Refer https://forums.nesdev.org/viewtopic.php?p=163155#p163155 for triangle part of the pseudocode
 	// Refer https://forums.nesdev.org/viewtopic.php?p=163157#p163157 for noise part of the pseudocode
-	inline void generateLogicalOutput(AUDIO_CHANNELS channel)
+	MASQ_INLINE void generateLogicalOutput(AUDIO_CHANNELS channel)
 	{
 		NES_AUDIO_SAMPLE_TYPE sample = MUTE_AUDIO;
+		auto& chanReg = pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)];
+		auto& apuIO = pNES_cpuMemory->NESMemoryMap.apuAndIO;
 
 		switch (channel)
 		{
 		case AUDIO_CHANNELS::PULSE_1:
 		{
-			auto duty = pNES_cpuMemory->NESMemoryMap.apuAndIO.SQ1_VOL.DUTY;
-			auto dutyCounter = pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].dutyCounter;
-			auto lengthCounter = pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].lengthCounter;
-			auto shift = pNES_cpuMemory->NESMemoryMap.apuAndIO.SQ1_SWEEP.SHIFT_COUNT;
-			auto negate = pNES_cpuMemory->NESMemoryMap.apuAndIO.SQ1_SWEEP.NEGATIVE;
-			if (((PULSE_AMPLITUDE_LUT[duty][dutyCounter]) == HI)
-				&& lengthCounter != RESET
-				&& isSweepMutingChannel(channel, shift, negate) == NO)
+			if ((PULSE_AMPLITUDE_LUT[apuIO.SQ1_VOL.DUTY][chanReg.dutyCounter] == HI)
+				&& (chanReg.lengthCounter != RESET)
+				&& (isSweepMutingChannel(channel, apuIO.SQ1_SWEEP.SHIFT_COUNT, apuIO.SQ1_SWEEP.NEGATIVE) == NO))
 			{
-				if (pNES_cpuMemory->NESMemoryMap.apuAndIO.SQ1_VOL.CONSTANT_VOL == SET)
-				{
-					sample = static_cast<float>(pNES_cpuMemory->NESMemoryMap.apuAndIO.SQ1_VOL.ENV_PERIOD_OR_VOL);
+				sample = static_cast<float>(apuIO.SQ1_VOL.CONSTANT_VOL == SET
+					? apuIO.SQ1_VOL.ENV_PERIOD_OR_VOL
+					: chanReg.envelope.decayLevelCounter);
 				}
-				else
-				{
-					sample = static_cast<float>(pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].envelope.decayLevelCounter);
-				}
-			}
-			pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].dacInput = sample;
+			chanReg.dacInput = sample;
 			BREAK;
 		}
 		case AUDIO_CHANNELS::PULSE_2:
 		{
-			auto duty = pNES_cpuMemory->NESMemoryMap.apuAndIO.SQ2_VOL.DUTY;
-			auto dutyCounter = pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].dutyCounter;
-			auto lengthCounter = pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].lengthCounter;
-			auto shift = pNES_cpuMemory->NESMemoryMap.apuAndIO.SQ2_SWEEP.SHIFT_COUNT;
-			auto negate = pNES_cpuMemory->NESMemoryMap.apuAndIO.SQ2_SWEEP.NEGATIVE;
-			if (((PULSE_AMPLITUDE_LUT[duty][dutyCounter]) == HI)
-				&& lengthCounter != RESET
-				&& isSweepMutingChannel(channel, shift, negate) == NO)
+			if ((PULSE_AMPLITUDE_LUT[apuIO.SQ2_VOL.DUTY][chanReg.dutyCounter] == HI)
+				&& (chanReg.lengthCounter != RESET)
+				&& (isSweepMutingChannel(channel, apuIO.SQ2_SWEEP.SHIFT_COUNT, apuIO.SQ2_SWEEP.NEGATIVE) == NO))
 			{
-				if (pNES_cpuMemory->NESMemoryMap.apuAndIO.SQ2_VOL.CONSTANT_VOL == SET)
-				{
-					sample = static_cast<float>(pNES_cpuMemory->NESMemoryMap.apuAndIO.SQ2_VOL.ENV_PERIOD_OR_VOL);
+				sample = static_cast<float>(apuIO.SQ2_VOL.CONSTANT_VOL == SET
+					? apuIO.SQ2_VOL.ENV_PERIOD_OR_VOL
+					: chanReg.envelope.decayLevelCounter);
 				}
-				else
-				{
-					sample = static_cast<float>(pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].envelope.decayLevelCounter);
-				}
-			}
-			pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].dacInput = sample;
+			chanReg.dacInput = sample;
 			BREAK;
 		}
 		case AUDIO_CHANNELS::TRIANGLE:
 		{
-			if (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].triangle.isUltrasonic == YES)
+			auto& tri = chanReg.triangle;
+			if (tri.isUltrasonic == YES)
 			{
 				sample = 7.5f;
 			}
-			else if (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].triangle.triangleStep & 0x10)
+			else if (tri.triangleStep & 0x10)
 			{
-				sample = static_cast<float>(pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].triangle.triangleStep ^ 0x1F);
+				sample = static_cast<float>(tri.triangleStep ^ 0x1F);
 			}
 			else
 			{
-				sample = static_cast<float>(pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].triangle.triangleStep);
+				sample = static_cast<float>(tri.triangleStep);
 			}
-			pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].dacInput = sample;
+			chanReg.dacInput = sample;
 			BREAK;
 		}
 		case AUDIO_CHANNELS::NOISE:
 		{
-			auto lengthCounter = pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].lengthCounter;
-			if ((pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].noise.noiseShiftRegister.fields.zero == RESET)
-				&& lengthCounter != RESET)
+			if ((chanReg.noise.noiseShiftRegister.fields.zero == RESET)
+				&& (chanReg.lengthCounter != RESET))
 			{
-				if (pNES_cpuMemory->NESMemoryMap.apuAndIO.NOISE_VOL.CONSTANT_VOL == SET)
-				{
-					sample = static_cast<float>(pNES_cpuMemory->NESMemoryMap.apuAndIO.NOISE_VOL.ENV_PERIOD_OR_VOL);
+				sample = static_cast<float>(apuIO.NOISE_VOL.CONSTANT_VOL == SET
+					? apuIO.NOISE_VOL.ENV_PERIOD_OR_VOL
+					: chanReg.envelope.decayLevelCounter);
 				}
-				else
-				{
-					sample = static_cast<float>(pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].envelope.decayLevelCounter);
-				}
-			}
-			pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].dacInput = sample;
+			chanReg.dacInput = sample;
 			BREAK;
 		}
 		case AUDIO_CHANNELS::DMC:
 		{
-			sample = static_cast<float>(pNES_cpuMemory->NESMemoryMap.apuAndIO.DMC_RAW.DIRECT_LOAD);
-			pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(channel)].dacInput = sample;
+			chanReg.dacInput = static_cast<float>(apuIO.DMC_RAW.DIRECT_LOAD);
 			BREAK;
 		}
 		default:
