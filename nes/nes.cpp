@@ -1585,25 +1585,53 @@ byte NES_t::readCpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 				}
 				case OAM_DATA_ADDRESS:
 				{
-					auto data = pNES_ppuMemory->NESMemoryMap.primaryOam.oamB[pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.OAMADDR];
+					SCOUNTER64 ppuCycle = pNES_instance->NES_state.emulatorStatus.ticks.ppuCounterPerLY;
+					SCOUNTER32 scanline = pNES_instance->NES_state.display.currentScanline;
+					bool isVisibleScanline = (scanline >= NES_FIRST_VISIBLE_SCANLINE && scanline <= NES_LAST_VISIBLE_PPU_SCANLINE);
+					bool isRendering = (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.ENABLE_BG_RENDERING == SET
+						|| pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.ENABLE_SPRITE_RENDERING == SET);
 
-					// To handle 10th test of ppu_open_bus.nes
-					// OAMADDR can go from 0 - 255, each sprite has 4 bytes allocated to it
-					// So, we have 64 entries of 4 bytes (0th, 1st, 2nd and 3rd byte)
-					// For any entry, if we access "2nd byte", then bits 2-4 should be cleared to zero
-					// Therefore, OAMADDR of 2, 6, 10 ... should have their bits 2-4 should be cleared to zero
+					uint8_t data;
 
-					// We check for this by doing OAMADDR % 4 == 2 (checking for remainder 2)
-					// Therefore ((OAMADDR & 0x03) == 2)
-
-					if ((pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.OAMADDR & 0x03) == TWO)
+					if (isRendering && isVisibleScanline)
 					{
-						// Can also refer "Byte 2" section of https://www.nesdev.org/wiki/PPU_OAM
-						data &= 0xE3;
+						// Refer to https://www.nesdev.org/wiki/PPU_registers#OAMDATA
+						// "It mentions the following : "Reading OAMDATA while the PPU is rendering will expose internal OAM accesses during sprite evaluation and loading"
+						if (ppuCycle >= ONE && ppuCycle <= SIXTYFOUR)
+						{
+							// Refer to `Cycles 1-64` of https://www.nesdev.org/wiki/PPU_sprite_evaluation
+							// Secondary OAM being cleared — always reads $FF
+							data = 0xFF;
+						}
+						else if (ppuCycle >= SIXTYFIVE && ppuCycle <= TWOFIFTYSIX)
+						{
+							// Sprite evaluation active — return oamByte (current read from primary OAM)
+							data = pNES_ppuRegisters->oamByte;
+						}
+						else
+						{
+							// Cycles 257-320 sprite fetch — return $FF
+							data = 0xFF;
+						}
 					}
-
+					else
+					{
+						// Outside rendering — normal read
+						data = pNES_ppuMemory->NESMemoryMap.primaryOam.oamB[pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.OAMADDR];
+						// To handle 10th test of ppu_open_bus.nes
+						// OAMADDR can go from 0 - 255, each sprite has 4 bytes allocated to it
+						// So, we have 64 entries of 4 bytes (0th, 1st, 2nd and 3rd byte)
+						// For any entry, if we access "2nd byte", then bits 2-4 should be cleared to zero
+						// Therefore, OAMADDR of 2, 6, 10 ... should have their bits 2-4 should be cleared to zero
+						// We check for this by doing OAMADDR % 4 == 2 (checking for remainder 2)
+						// Therefore ((OAMADDR & 0x03) == 2)
+						if ((pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.OAMADDR & 0x03) == TWO)
+						{
+							// Can also refer "Byte 2" section of https://www.nesdev.org/wiki/PPU_OAM
+							data &= 0xE3;
+						}
+					}
 					pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.OAMDATA = data;
-
 					RETURN applyOpenBus(0x00, data); // all bits driven
 				}
 				case PPU_ADDR_ADDRESS:
@@ -2376,11 +2404,13 @@ void NES_t::writeCpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 						pNES_instance->NES_state.display.currentScanline <= NES_LAST_VISIBLE_PPU_SCANLINE
 						&&
 						(pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.ENABLE_BG_RENDERING == SET
-							|| pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.ENABLE_SPRITE_RENDERING == SET)
-						)
+							|| pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.ENABLE_SPRITE_RENDERING == SET))
 					{
-						// As mentioned in https://www.nesdev.org/wiki/PPU_registers#OAMDATA
-						// For emulation purpose, its best to completely ignore the writes when rendering is enabled
+						// Don't write to OAM, but do glitchy increment of OAMADDR by 4
+						// Refer: https://www.nesdev.org/wiki/PPU_registers#OAMDATA
+						// "do perform a glitchy increment of OAMADDR, bumping only the high 6 bits"
+						pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.OAMADDR
+							= (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.OAMADDR + FOUR) & 0xFC;
 					}
 					else
 					{
@@ -3973,6 +4003,55 @@ void NES_t::ppuTick()
 				pNES_ppuRegisters->spriteOverflow = CLEAR;
 			}
 
+			PPUTODO("Find source for the 'OAM seed' implemented below in line %d of file %s", __LINE__, __FILE__);
+			// Refer : https://forums.nesdev.org/viewtopic.php?p=284030#p284030
+			// Refer : https://forums.nesdev.org/viewtopic.php?p=80985#p80985
+			// Wherever rendering transitions from enabled to disabled during visible scanlines:
+			if (pNES_ppuRegisters->prevRendering == YES
+				&& checkIfRenderring() == NO
+				&& ly >= NES_FIRST_VISIBLE_SCANLINE
+				&& ly <= NES_LAST_VISIBLE_PPU_SCANLINE)
+			{
+				if (cycle <= SIXTYFOUR)
+				{
+					pNES_ppuRegisters->oamCorruptionSeed = TO_UINT8(cycle / TWO);
+				}
+				else
+				{
+					pNES_ppuRegisters->oamCorruptionSeed = pNES_ppuRegisters->sn;
+				}
+
+				// Accuracy coin expects some delay and we have arbitrarily found this to be the below value...
+				pNES_ppuRegisters->oamCorruptionDelay = THREE; // 3 PPU cycle delay before pending
+			}
+			// Count down the delay, then arm the pending flag
+			if (pNES_ppuRegisters->oamCorruptionDelay > ZERO)
+			{
+				pNES_ppuRegisters->oamCorruptionDelay--;
+				if (pNES_ppuRegisters->oamCorruptionDelay == ZERO)
+				{
+					pNES_ppuRegisters->oamCorruptionPending = YES;
+				}
+			}
+			// Apply corruption on cycle 1 of pre-render or visible scanline when rendering re-enables
+			if (cycle == ONE
+				&& (ly == NES_PRE_RENDER_SCANLINE
+					|| (ly >= NES_FIRST_VISIBLE_SCANLINE && ly <= NES_LAST_VISIBLE_PPU_SCANLINE))
+				&& checkIfRenderring() == YES
+				&& pNES_ppuRegisters->oamCorruptionPending == YES)
+			{
+				pNES_ppuRegisters->oamCorruptionPending = NO;
+				uint8_t row = pNES_ppuRegisters->oamCorruptionSeed;
+				if (row > ZERO && row < THIRTYTWO)
+				{
+					memcpy(
+						&pNES_ppuMemory->NESMemoryMap.primaryOam.oamB[row * EIGHT],
+						&pNES_ppuMemory->NESMemoryMap.primaryOam.oamB[ZERO],
+						EIGHT);
+				}
+			}
+			pNES_ppuRegisters->prevRendering = checkIfRenderring();
+
 			// Refer "Tile and attribute fetching" in https://www.nesdev.org/wiki/PPU_scrolling#PPU_internal_registers
 			// NOTE: when "((cycle >= THREETWENTYONE) && (cycle <= THREETHIRTYSIX))" is triggerred, "Y" of v is already incremented
 			// So, we are fetching the first 2 tiles of the next scanline!
@@ -4299,8 +4378,13 @@ void NES_t::ppuTick()
 				PPUTODO("At which cycle of PPU should the OAM internal fetch registers be cleared");
 				if (cycle == SIXTYFOUR)
 				{
-					pNES_ppuRegisters->pn = RESET;
-					pNES_ppuRegisters->pm = RESET;
+					// Refer : https://www.nesdev.org/wiki/PPU_registers#OAMADDR
+					// OAMADDR is reset to zero if rendering is enabled in cycles 257 - 320 for visible scanlines; this is implemented below
+					// Now, for some reason this reset has not happened, then we start from a non-zero OAMADDR as mentioned in the above link.
+					// Previously, we were hardcoding pn and pm to zero, HW doesnt have a concept of zero, it always should be from OAMADDR, and
+					// HW mostly ensured OAMADDR would be zero and hence we never noticed any issues... in most of the cases of ofcourse.
+					pNES_ppuRegisters->pn = (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.OAMADDR >> TWO) & 0x3F;
+					pNES_ppuRegisters->pm = pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.OAMADDR & 0x03;
 					pNES_ppuRegisters->sn = RESET;
 					pNES_ppuRegisters->sm = RESET;
 					pNES_ppuRegisters->oamByte = RESET;
@@ -4353,8 +4437,12 @@ void NES_t::ppuTick()
 							if (y >= yMin && y <= yMax)
 							{
 								// Handle sprite 0 hit
-								// If we came here and pNES_ppuRegisters->pn = 0, this means sprite 0 of primary oam was triggered and will be copied to first location of secondary oam
-								if (pNES_ppuRegisters->pn == ZERO)
+								// Refer to https://forums.nesdev.org/viewtopic.php?t=25552
+								// "Sprite 0 is not a property of a sprite's position in OAM ($00 in OAM is *not* necessarily sprite 0) nor even the order of evaluation (the first sprite evaluated is *not* necessarily sprite 0). 
+								// Rather, it is a property of the time at which a sprite is evaluated. S
+								// pecifically, on dot 66 during rendering, a 'sprite 0 on next scanline' flag is set if the current sprite is in range and cleared otherwise."
+								// This helps pass arbitrary_sprite_0_test and accuracy coin's sprite evaluation tests
+								if (cycle == (SIXTYFOUR + TWO))
 								{
 									pNES_instance->NES_state.display.obj.isSprite0PresentInSecondaryOam = YES;
 								}

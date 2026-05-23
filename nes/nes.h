@@ -329,6 +329,10 @@ private:
 		FLAG startSpriteOverflowEvaluation;
 		FLAG stopSpriteEvaluation;
 		BYTE oamByte;
+		uint8_t oamCorruptionSeed;   // row to corrupt (0xFF = no corruption pending)
+		FLAG oamCorruptionPending;
+		uint8_t oamCorruptionDelay;
+		FLAG prevRendering;
 		ppuInternalRegisters_t ppuInternalRegisters;
 		// Debug
 		uint64_t vblSetPPUCycle;
