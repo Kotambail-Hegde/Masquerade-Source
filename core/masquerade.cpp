@@ -2096,7 +2096,18 @@ public:
 												}
 												ImGui::EndMenu();
 											}
-											if (ImGui::BeginMenu("GB", MASQ_ENABLE_GBC))
+											if (ImGui::BeginMenu("NES##NESFamily", MASQ_ENABLE_NES))
+											{
+												static FLAG isTicked = to_bool(config.get<std::string>("nes._enable_nes_db", "false"));
+												if (ImGui::MenuItem("Enable ROM Database##EnableROMDatabase2", NULL, isTicked))
+												{
+													isTicked = !isTicked;
+													config.put("nes._enable_nes_db", isTicked);
+													boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
+												}
+												ImGui::EndMenu();
+											}
+											if (ImGui::BeginMenu("GB#GBFamily", MASQ_ENABLE_GBC))
 											{
 												static FLAG isTicked = to_bool(config.get<std::string>("gb_gbc._force_gbc_for_gb", "false"));
 												if (ImGui::MenuItem("CGB Mode", NULL, isTicked))
@@ -2538,6 +2549,7 @@ public:
 										ImGui::Text("STB (stb_image)"); ImGui::NextColumn(); ImGui::Text(": %.2f", 2.28); ImGui::NextColumn();
 #endif
 										ImGui::Text("Chip-8-database"); ImGui::NextColumn(); ImGui::Text(": 0.1.0"); ImGui::NextColumn();
+										ImGui::Text("NES-database"); ImGui::NextColumn(); ImGui::Text(": 0.1.0"); ImGui::NextColumn();
 										ImGui::Columns(1);
 										ImGui::EndGroup();
 									}

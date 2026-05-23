@@ -1639,6 +1639,41 @@ MASQ_INLINE void doubleToInt64(double* input, int64_t* output, int length)
     for (int i = 0; i < length; i++) output[i] = (int64_t)input[i];
 }
 
+// Used by NES database
+#ifndef __RPI_PICO__
+MASQ_INLINE uint32_t hexStr32(const char* s)
+{
+    if (!s || s[0] == '\0') return 0u;
+    uint32_t v = 0;
+    while (*s)
+    {
+        v <<= 4;
+        char c = *s++;
+        if (c >= '0' && c <= '9') v |= static_cast<uint32_t>(c - '0');
+        else if (c >= 'A' && c <= 'F') v |= static_cast<uint32_t>(c - 'A' + 10);
+        else if (c >= 'a' && c <= 'f') v |= static_cast<uint32_t>(c - 'a' + 10);
+    }
+    return v;
+}
+
+// "_size":"16384" stored as string in the converted JSON
+MASQ_INLINE uint32_t u32str(const rapidjson::Value& obj, const char* key)
+{
+    if (!obj.HasMember(key)) return 0u;
+    const auto& v = obj[key];
+    if (v.IsUint())   return v.GetUint();
+    if (v.IsString()) return static_cast<uint32_t>(std::stoul(v.GetString()));
+    return 0u;
+}
+
+MASQ_INLINE const char* strval(const rapidjson::Value& obj, const char* key)
+{
+    if (!obj.HasMember(key)) return "";
+    const auto& v = obj[key];
+    return v.IsString() ? v.GetString() : "";
+}
+#endif
+
 // --- ZIP extraction (desktop + Emscripten only) ------
 #ifndef __RPI_PICO__
 #ifndef __EMSCRIPTEN__
