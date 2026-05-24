@@ -407,7 +407,6 @@ void NES_t::clockMMC3IRQ(uint16_t address, MEMORY_ACCESS_SOURCE source, FLAG isW
 	}
 }
 
-
 byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 {
 	pNES_instance->NES_state.emulatorStatus.memoryAccessType.previousAccessType = pNES_instance->NES_state.emulatorStatus.memoryAccessType.currentAccessType;
@@ -4913,6 +4912,15 @@ void NES_t::ppuTick()
 				}
 				case THREETHIRTYNINE:
 				{
+					// If rendering is disabled at dot 339, all sprite X positions become 0
+					// Refer : https://github.com/100thCoin/AccuracyCoin#stale-bg-shift-registers
+					if (checkIfRenderring() == NO)
+					{
+						for (COUNTER8 i = ZERO; i < EIGHT; i++)
+						{
+							pNES_instance->NES_state.display.obj.shifter[i].xSubtractor = ZERO;
+						}
+					}
 					BREAK;
 				}
 				case THREEFORTY:
