@@ -61,6 +61,14 @@ jobs:
         shell: pwsh
 
       # --- Cache all external dependencies
+      # v15: b2 auto-detects MSVC version via _MSC_VER mapping, but VS 2026
+      # (MSVC 19.51) isn't in Boost 1.84's mapping table so b2 falls back to
+      # the bogus "msvc-6.0" tag. This produces paths like:
+      #   bin.v2\libs\foo\build\msvc-6.0\release\address-model-64\link-static\...
+      # which overflow cmd.exe's 8191-char limit on msvc.archive/msvc.link.dll,
+      # causing "filename syntax incorrect" on every lib. Fix: write a
+      # user-config.jam that explicitly sets "using msvc : 14.4 ;" with the
+      # resolved cl.exe path, bypassing the broken auto-detection entirely.
       - name: Cache external dependencies
         id: cache-external
         uses: actions/cache@v4
@@ -73,155 +81,186 @@ jobs:
             external/boost
             external/SDL
             external/nativefiledialog-extended
-          key: windows-external-all-v9-${{ hashFiles('.github/workflows/*.yml') }}
+          key: windows-external-all-v15-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: |
-            windows-external-all-v9-
+            windows-external-all-v15-
 
       # --- Clone all dependencies (only if not cached)
       - name: Clone all dependencies
         if: steps.cache-external.outputs.cache-hit != 'true'
+        shell: pwsh
         run: |
-          # --- Ensure external folder exists
           $externalDir = "external"
           if (-not (Test-Path $externalDir)) { New-Item -ItemType Directory -Path $externalDir | Out-Null }
 
           cd external
 
-          # --- ImGui
           if (-not (Test-Path "imgui")) {
               git clone https://github.com/ocornut/imgui.git --branch docking --depth 1
           }
 
-          # --- Miniz
           if (-not (Test-Path "miniz")) {
               Write-Host "=== MINIZ: not found, downloading ==="
               $url = "https://github.com/richgel999/miniz/releases/download/3.0.2/miniz-3.0.2.zip"
               $zip = "miniz-3.0.2.zip"
               $tmpDir = "_miniz_extract"
-
-              Write-Host "Downloading: $url"
               Invoke-WebRequest -Uri $url -OutFile $zip
-
-              Write-Host "Extracting $zip into ${tmpDir}/"
               if (Test-Path $tmpDir) { Remove-Item -Recurse -Force $tmpDir }
               Expand-Archive $zip -DestinationPath $tmpDir -Force
-
-              Write-Host "Moving ${tmpDir} -> miniz"
               if (Test-Path "miniz") { Remove-Item -Recurse -Force "miniz" }
               Move-Item -Path $tmpDir -Destination "miniz"
-
-              Write-Host "Cleaning up"
               Remove-Item -Path $zip -Force
-
               Write-Host "=== MINIZ setup complete ==="
           } else {
               Write-Host "=== MINIZ already exists, skipping ==="
           }
 
-          # --- stb
           if (-not (Test-Path "stb/stb")) {
               git clone https://github.com/nothings/stb.git --depth 1 stb/stb
           }
 
-          # --- rapidjson
           if (-not (Test-Path "rapidjson")) {
               git clone https://github.com/Tencent/rapidjson.git --depth 1 rapidjson
           }
 
-          # --- SDL
           if (-not (Test-Path "SDL")) {
               git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL
           }
 
-          # --- NativeFileDialog-Extended
           if (-not (Test-Path "nativefiledialog-extended")) {
               git clone https://github.com/btzy/nativefiledialog-extended.git --depth 1 --recurse-submodules --shallow-submodules
           }
 
-          # --- Boost source
           if (-not (Test-Path "boost")) {
               $boostZip = "boost_1_84_0.zip"
               $boostUrl = "https://archives.boost.io/release/1.84.0/source/boost_1_84_0.zip"
               Write-Host "Downloading Boost source from $boostUrl..."
               Invoke-WebRequest -Uri $boostUrl -OutFile $boostZip
-
               Write-Host "Extracting Boost source..."
               Expand-Archive $boostZip -DestinationPath .
               Rename-Item -Path "boost_1_84_0" -NewName "boost"
-
-              Write-Host "Cleaning up Boost zip..."
               Remove-Item -Path $boostZip -Force
-
               Write-Host "=== Boost source setup complete ==="
           } else {
               Write-Host "=== Boost already exists, skipping ==="
           }
-        shell: pwsh
 
-      # --- Build Boost with b2
+      # --- Build Boost
+      # Shell is cmd so vcvars activation and b2 share the same process.
+      #
+      # MSVC version detection problem:
+      #   Boost 1.84's b2 maps _MSC_VER to a toolset version string. VS 2026
+      #   (MSVC 19.51, _MSC_VER=1951) is beyond what the mapping table knows,
+      #   so b2 falls back to "msvc-6.0". This makes output paths like:
+      #     bin.v2\libs\foo\build\msvc-6.0\release\address-model-64\...
+      #   whose combined length + all .obj args exceeds cmd.exe's 8191-char
+      #   limit, causing "filename syntax incorrect" on every msvc.archive call.
+      #
+      # Fix: write a user-config.jam with an explicit "using msvc : 14.4 ;"
+      #   pointing at the resolved cl.exe path. b2 uses the version string we
+      #   supply verbatim, bypassing the broken _MSC_VER lookup entirely.
+      #   "14.4" maps to MSVC 19.4x (VS 2022+/2026), giving short path tags
+      #   like "msvc-14.4" that stay well within the cmd.exe limit.
       - name: Build Boost
         if: runner.os == 'Windows'
-        shell: pwsh
+        shell: cmd
         run: |
-          cd external/boost
+          @echo off
 
-          Write-Host "=== Boost root: $PWD ==="
+          :: Locate vcvars64.bat via vswhere
+          set VSWHERE="%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+          for /f "usebackq tokens=*" %%i in (`%VSWHERE% -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set VS_PATH=%%i
+          if not defined VS_PATH ( echo ERROR: VS not found via vswhere & exit /b 1 )
 
-          # Bootstrap b2 if not exists
-          if (!(Test-Path ".\b2.exe")) {
-              Write-Host "Bootstrapping Boost..."
-              .\bootstrap.bat
-          } else {
-              Write-Host "b2.exe already exists, skipping bootstrap"
-          }
+          set VCVARS=%VS_PATH%\VC\Auxiliary\Build\vcvars64.bat
+          if not exist "%VCVARS%" ( echo ERROR: vcvars64.bat not found at %VCVARS% & exit /b 1 )
 
-          Write-Host "Building Boost (this may take several minutes)..."
-          .\b2.exe install `
-              variant=release `
-              link=static,shared `
-              threading=multi `
-              runtime-link=shared `
-              address-model=64 `
-              --prefix="$($PWD.Path)" `
-              --jobs=$env:NUMBER_OF_PROCESSORS
+          echo === Activating MSVC from: %VCVARS% ===
+          call "%VCVARS%"
+          if errorlevel 1 ( echo ERROR: vcvars64.bat failed & exit /b 1 )
 
-          # Validate installation
-          if (-not (Test-Path "boost/config.hpp")) {
-              Write-Error "Boost headers missing after build"
-              exit 1
-          }
+          :: Resolve cl.exe path — needed for user-config.jam
+          for /f "usebackq tokens=*" %%i in (`where cl.exe`) do set CL_PATH=%%i
+          if not defined CL_PATH ( echo ERROR: cl.exe not found on PATH after vcvars & exit /b 1 )
+          echo === cl.exe: %CL_PATH% ===
+          cl 2>&1 | findstr /i "version"
 
-          if (-not (Get-ChildItem -Path "lib" -Filter "*.lib" -ErrorAction SilentlyContinue)) {
-              Write-Error "Boost libraries missing after build"
-              exit 1
-          }
+          cd external\boost
+          echo === Boost root: %CD% ===
 
-          Write-Host "=== Boost built successfully ==="
+          :: Bootstrap b2 if missing
+          if not exist b2.exe (
+              echo Bootstrapping Boost...
+              call bootstrap.bat msvc
+              if errorlevel 1 ( echo ERROR: bootstrap failed & exit /b 1 )
+          ) else (
+              echo b2.exe already exists, skipping bootstrap
+          )
+
+          :: Wipe the entire standalone/msvc sentinel dir so b2 re-probes on
+          :: every run regardless of toolset version
+          if exist bin.v2\standalone\msvc (
+              echo Removing stale b2 MSVC sentinel dir...
+              rmdir /s /q bin.v2\standalone\msvc
+          )
+
+          :: Write a user-config.jam that pins the toolset version to "14.4".
+          :: This bypasses b2's _MSC_VER-to-version mapping, which falls back
+          :: to "msvc-6.0" for VS 2026 (MSVC 19.51) because Boost 1.84 was
+          :: released before VS 2026 shipped. The "6.0" tag creates paths that
+          :: overflow cmd.exe's 8191-char limit on msvc.archive/link.dll calls.
+          echo using msvc : 14.4 : "%CL_PATH%" ; > user-config.jam
+          echo === user-config.jam written: ===
+          type user-config.jam
+
+          echo Building Boost (this may take several minutes)...
+          b2.exe install ^
+              toolset=msvc-14.4 ^
+              variant=release ^
+              link=static,shared ^
+              threading=multi ^
+              runtime-link=shared ^
+              address-model=64 ^
+              --without-wave ^
+              --without-url ^
+              --without-stacktrace ^
+              --without-test ^
+              --user-config=user-config.jam ^
+              --prefix="%CD%" ^
+              -j%NUMBER_OF_PROCESSORS%
+          if errorlevel 1 ( echo ERROR: b2 build failed & exit /b 1 )
+
+          if not exist boost\config.hpp ( echo ERROR: Boost headers missing & exit /b 1 )
+          dir /b lib\*.lib >nul 2>&1
+          if errorlevel 1 ( echo ERROR: Boost libraries missing & exit /b 1 )
+
+          echo === Boost built successfully ===
 
       # --- Build SDL3
       - name: Build SDL3
+        shell: pwsh
         run: |
           cd external/SDL
           if (-not (Test-Path "build")) { New-Item -ItemType Directory -Path "build" | Out-Null }
           cd build
-          cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$($PWD.Path)" -DSDL_SHARED=ON -DSDL_STATIC=ON
+          cmake .. -G "Visual Studio 18 2026" -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$($PWD.Path)" -DSDL_SHARED=ON -DSDL_STATIC=ON
           cmake --build . --config Release --parallel
           cmake --build . --config Release --target install
-        shell: pwsh
 
       # --- Build NFD
       - name: Build NFD
+        shell: pwsh
         run: |
           cd external/nativefiledialog-extended
           if (-not (Test-Path "build")) { New-Item -ItemType Directory -Path "build" | Out-Null }
           cd build
-          cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$($PWD.Path)"
+          cmake .. -G "Visual Studio 18 2026" -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$($PWD.Path)"
           cmake --build . --config Release --parallel
           cmake --build . --config Release --target install
-        shell: pwsh
 
       # --- Set environment variables
       - name: Set dependency paths
+        shell: pwsh
         run: |
           echo "IMGUI_ROOT=$env:GITHUB_WORKSPACE\external\imgui" >> $env:GITHUB_ENV
           echo "MINIZ_ROOT=$env:GITHUB_WORKSPACE\external\miniz" >> $env:GITHUB_ENV
@@ -230,12 +269,11 @@ jobs:
           echo "BOOST_ROOT=$env:GITHUB_WORKSPACE\external\boost" >> $env:GITHUB_ENV
           echo "SDL3_ROOT=$env:GITHUB_WORKSPACE\external\SDL\build" >> $env:GITHUB_ENV
           echo "NFD_ROOT=$env:GITHUB_WORKSPACE\external\nativefiledialog-extended" >> $env:GITHUB_ENV
-        shell: pwsh
 
       # --- Configure CMake
       - name: Configure CMake
         run: |
-          cmake -G "Visual Studio 17 2022" -A x64 ^
+          cmake -G "Visual Studio 18 2026" -A x64 ^
                 -DCMAKE_BUILD_TYPE=Release ^
                 -DGIT_COMMIT_HASH=%GIT_COMMIT_HASH% ^
                 -DIMGUI_ROOT=%IMGUI_ROOT% ^
@@ -250,8 +288,8 @@ jobs:
 
       # --- Build
       - name: Build
+        shell: pwsh
         run: cmake --build build --config Release --parallel
-        shell: cmd
 
       # --- Upload artifacts
       - name: Upload artifacts
@@ -559,7 +597,7 @@ jobs:
 
       # --- Setup Emscripten SDK
       - name: Setup Emscripten
-        uses: mymindstorm/setup-emsdk@v14
+        uses: mymindstorm/setup-emsdk@v15
         with:
           version: '3.1.66'
           actions-cache-folder: 'emsdk-cache'
