@@ -1686,8 +1686,6 @@ void GBc_t::serialTick()
 
 void GBc_t::rtcTick()
 {
-	pGBc_instance->GBc_state.emulatorStatus.ticks.rtcCounter++;
-
 	// Refer : https://gbdev.io/pandocs/MBC3.html?highlight=rtc#mbc3
 
 	if (isRTCAccessEnabled())
@@ -1699,6 +1697,8 @@ void GBc_t::rtcTick()
 			{
 				RETURN;
 			}
+
+			pGBc_instance->GBc_state.emulatorStatus.ticks.rtcCounter++;
 
 			// Ideally, RTC should tick at 32768 Hz, i.e. it should increment by 0.0078125 second for every 32768 clocks
 			// But our minimum resolution of RTC field is 1 second, i.e. the smallest unit that we can increment is by 1 second (fractional seconds is not possible)
@@ -1771,6 +1771,8 @@ void GBc_t::rtcTick()
 		}
 		else if (isHUC3())
 		{
+			pGBc_instance->GBc_state.emulatorStatus.ticks.rtcCounter++;
+
 			// Refer https://gbdev.gg8.se/forums/viewtopic.php?id=744
 			if (pGBc_instance->GBc_state.emulatorStatus.ticks.rtcCounter >= GB_GBC_REFERENCE_CLOCK_HZ)
 			{
