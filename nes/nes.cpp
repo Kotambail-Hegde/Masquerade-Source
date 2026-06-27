@@ -6,6 +6,10 @@
 #pragma endregion CONDITIONAL_INCLUDES
 
 #pragma region NES_SPECIFIC_MACROS
+#pragma region WIP
+#define ENABLE_OAM_CORRUPTION							(NO)	// This 5.Emulator.nes
+#pragma endregion WIP
+
 #define KEY_A											(ZERO)
 #define KEY_B											(ONE)
 #define KEY_SELECT										(TWO)
@@ -8662,56 +8666,83 @@ void NES_t::ppuTick()
 				pNES_ppuRegisters->vblank = CLEAR;
 				pNES_ppuRegisters->sprite0hit = CLEAR;
 				pNES_ppuRegisters->spriteOverflow = CLEAR;
+
+#if (ENABLE_OAM_CORRUPTION == YES)
+				// Mesen: ProcessScanlineFirstCycle -> if(_renderingEnabled) ProcessOamCorruption()
+				if (checkIfRenderring() == YES)
+				{
+					for (COUNTER8 i = ZERO; i < THIRTYTWO; i++)
+					{
+						if (pNES_ppuRegisters->oamCorruptionRows[i] == YES)
+						{
+							if (i > ZERO)
+							{
+								memcpy(
+									&pNES_ppuMemory->NESMemoryMap.primaryOam.oamB[i * EIGHT],
+									&pNES_ppuMemory->NESMemoryMap.primaryOam.oamB[ZERO],
+									EIGHT);
+							}
+							pNES_ppuRegisters->oamCorruptionRows[i] = NO;
+						}
+					}
+				}
+#endif
 			}
 
+#if (ENABLE_OAM_CORRUPTION == YES)
 			PPUTODO("Find source for the 'OAM seed' implemented below in line %d of file %s", __LINE__, __FILE__);
 			// Refer : https://forums.nesdev.org/viewtopic.php?p=284030#p284030
 			// Refer : https://forums.nesdev.org/viewtopic.php?p=80985#p80985
-			// Wherever rendering transitions from enabled to disabled during visible scanlines:
+			// Mesen reference: SetOamCorruptionFlags() / ProcessOamCorruption()
+			//
+			// When rendering transitions from enabled to disabled during visible scanlines,
+			// flag OAM rows for corruption only during the two hardware windows:
+			//   Window A: cycles 0-63  (secondary OAM clear)
+			//   Window B: cycles 256-319 (sprite tile fetching)
 			if (pNES_ppuRegisters->prevRendering == YES
 				&& checkIfRenderring() == NO
 				&& ly >= NES_FIRST_VISIBLE_SCANLINE
 				&& ly <= NES_LAST_VISIBLE_PPU_SCANLINE)
 			{
-				if (cycle <= SIXTYFOUR)
+				// Window A: cycle 1-64 (your cycle is 1-based, Mesen's is 0-based)
+				if (cycle >= ONE && cycle <= SIXTYFOUR)
 				{
-					pNES_ppuRegisters->oamCorruptionSeed = TO_UINT8(cycle / TWO);
+					pNES_ppuRegisters->oamCorruptionRows[(cycle - ONE) >> ONE] = YES;
 				}
-				else
+				// Window B: cycle 257-320 (shift by 1 for 1-based)
+				else if (cycle >= TWOFIFTYSEVEN && cycle <= THREETWENTY)
 				{
-					pNES_ppuRegisters->oamCorruptionSeed = pNES_ppuRegisters->sn;
+					uint8_t base = TO_UINT8((cycle - TWOFIFTYSEVEN) >> THREE);
+					uint8_t offset = TO_UINT8(((cycle - TWOFIFTYSEVEN) & SEVEN) > THREE ? THREE : ((cycle - TWOFIFTYSEVEN) & SEVEN));
+					pNES_ppuRegisters->oamCorruptionRows[base * FOUR + offset] = YES;
 				}
+			}
 
-				// Accuracy coin expects some delay and we have arbitrarily found this to be the below value...
-				pNES_ppuRegisters->oamCorruptionDelay = THREE; // 3 PPU cycle delay before pending
-			}
-			// Count down the delay, then arm the pending flag
-			if (pNES_ppuRegisters->oamCorruptionDelay > ZERO)
-			{
-				pNES_ppuRegisters->oamCorruptionDelay--;
-				if (pNES_ppuRegisters->oamCorruptionDelay == ZERO)
-				{
-					pNES_ppuRegisters->oamCorruptionPending = YES;
-				}
-			}
-			// Apply corruption on cycle 1 of pre-render or visible scanline when rendering re-enables
-			if (cycle == ONE
-				&& (ly == NES_PRE_RENDER_SCANLINE
-					|| (ly >= NES_FIRST_VISIBLE_SCANLINE && ly <= NES_LAST_VISIBLE_PPU_SCANLINE))
+			// Apply any pending corruption when rendering is re-enabled mid-screen
+			// Mesen: UpdateState() -> _prevRenderingEnabled becomes true -> ProcessOamCorruption()
+			if (pNES_ppuRegisters->prevRendering == NO
 				&& checkIfRenderring() == YES
-				&& pNES_ppuRegisters->oamCorruptionPending == YES)
+				&& ly >= NES_FIRST_VISIBLE_SCANLINE
+				&& ly <= NES_LAST_VISIBLE_PPU_SCANLINE)
 			{
-				pNES_ppuRegisters->oamCorruptionPending = NO;
-				uint8_t row = pNES_ppuRegisters->oamCorruptionSeed;
-				if (row > ZERO && row < THIRTYTWO)
+				for (COUNTER8 i = ZERO; i < THIRTYTWO; i++)
 				{
-					memcpy(
-						&pNES_ppuMemory->NESMemoryMap.primaryOam.oamB[row * EIGHT],
-						&pNES_ppuMemory->NESMemoryMap.primaryOam.oamB[ZERO],
-						EIGHT);
+					if (pNES_ppuRegisters->oamCorruptionRows[i] == YES)
+					{
+						if (i > ZERO)
+						{
+							memcpy(
+								&pNES_ppuMemory->NESMemoryMap.primaryOam.oamB[i * EIGHT],
+								&pNES_ppuMemory->NESMemoryMap.primaryOam.oamB[ZERO],
+								EIGHT);
+						}
+						pNES_ppuRegisters->oamCorruptionRows[i] = NO;
+					}
 				}
 			}
+
 			pNES_ppuRegisters->prevRendering = checkIfRenderring();
+#endif
 
 			// Refer "Tile and attribute fetching" in https://www.nesdev.org/wiki/PPU_scrolling#PPU_internal_registers
 			// NOTE: when "((cycle >= THREETWENTYONE) && (cycle <= THREETHIRTYSIX))" is triggerred, "Y" of v is already incremented
