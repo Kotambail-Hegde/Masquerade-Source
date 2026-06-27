@@ -20,101 +20,101 @@
 #define MBC_SIMPLE_MODE									(false)
 #define MBC_ADVANCED_MODE								(true)
 
-#define ROM_00_START_ADDRESS							0x0000
-#define DMG_BIOS_START_ADDRESS							0x0000
-#define DMG_BIOS_END_ADDRESS							0x0100
-#define CGB_BIOS_START_ADDRESS_PART1					0x0000
-#define CGB_BIOS_END_ADDRESS_PART1						0x0100
-#define CGB_BIOS_START_ADDRESS_PART2					0x0200
-#define CGB_BIOS_END_ADDRESS_PART2						0x0900
-#define ROM_00_END_ADDRESS								0x3FFF
-#define ROM_NN_START_ADDRESS							(ROM_00_END_ADDRESS + ONE)
-#define ROM_NN_END_ADDRESS								0x7FFF
-#define VRAM_START_ADDRESS								(ROM_NN_END_ADDRESS + ONE)
-#define TILE_DATA_START_ADDRESS							VRAM_START_ADDRESS
-#define TILE_DATA_END_ADDRESS							0x97FF
-#define TILE_MAP_START_ADDRESS							(TILE_DATA_END_ADDRESS + ONE)
-#define TILE_MAP_END_ADDRESS							0x9FFF
-#define VRAM_END_ADDRESS								TILE_MAP_END_ADDRESS
-#define EXTERNAL_RAM_START_ADDRESS						(VRAM_END_ADDRESS + ONE)
-#define EXTERNAL_RAM_END_ADDRESS						0xBFFF
-#define WORK_RAM_00_START_ADDRESS						(EXTERNAL_RAM_END_ADDRESS + ONE)
-#define WORK_RAM_00_END_ADDRESS							0xCFFF
-#define WORK_RAM_01_START_ADDRESS						(WORK_RAM_00_END_ADDRESS + ONE)
-#define WORK_RAM_01_END_ADDRESS							0xDFFF
-#define ECHO_RAM_START_ADDRESS							(WORK_RAM_01_END_ADDRESS + ONE)
-#define ECHO_RAM_END_ADDRESS							0xFDFF
-#define OAM_START_ADDRESS								(ECHO_RAM_END_ADDRESS + ONE)
-#define OAM_END_ADDRESS									0xFE9F
-#define RESTRICTED_MEMORY_START_ADDRESS					(OAM_END_ADDRESS + ONE)
-#define RESTRICTED_MEMORY_END_ADDRESS					0xFEFF
-#define GB_GBC_IO_MEMORY_START_ADDRESS					0xFF00
-#define P1_JOYP_ADDRESS									GB_GBC_IO_MEMORY_START_ADDRESS
-#define SB_ADDRESS										0xFF01
-#define SC_ADDRESS										0xFF02
-#define DIV_ADDRESS_LSB									0xFF03
-#define DIV_ADDRESS_MSB									0xFF04
-#define TIMA_ADDRESS									0xFF05
-#define TMA_ADDRESS										0xFF06
-#define TAC_ADDRESS										0xFF07
-#define IF_ADDRESS										0xFF0F
-#define NR10_ADDRESS									0xFF10
-#define NR11_ADDRESS									0xFF11
-#define NR12_ADDRESS									0xFF12
-#define NR13_ADDRESS									0xFF13
-#define NR14_ADDRESS									0xFF14
-#define NR21_ADDRESS									0xFF16
-#define NR22_ADDRESS									0xFF17
-#define NR23_ADDRESS									0xFF18
-#define NR24_ADDRESS									0xFF19
-#define NR30_ADDRESS									0xFF1A
-#define NR31_ADDRESS									0xFF1B
-#define NR32_ADDRESS									0xFF1C
-#define NR33_ADDRESS									0xFF1D
-#define NR34_ADDRESS									0xFF1E
-#define NR41_ADDRESS									0xFF20
-#define NR42_ADDRESS									0xFF21
-#define NR43_ADDRESS									0xFF22
-#define NR44_ADDRESS									0xFF23
-#define NR50_ADDRESS									0xFF24
-#define NR51_ADDRESS									0xFF25
-#define NR52_ADDRESS									0xFF26
-#define WAVE_RAM_START_ADDRESS							0xFF30
-#define WAVE_RAM_END_ADDRESS							0xFF3F
-#define LCDC_ADDRESS									0xFF40
-#define STAT_ADDRESS									0xFF41
-#define SCY_ADDRESS										0xFF42
-#define SCX_ADDRESS										0xFF43
-#define LY_ADDRESS										0xFF44
-#define LYC_ADDRESS										0xFF45
-#define DMA_ADDRESS										0xFF46
-#define BGP_ADDRESS										0xFF47
-#define OBP0_ADDRESS									0xFF48
-#define OBP1_ADDRESS									0xFF49
-#define WY_ADDRESS										0xFF4A
-#define WX_ADDRESS										0xFF4B
-#define KEY0_ADDRESS									0xFF4C
-#define KEY1_ADDRESS									0xFF4D
-#define VRAM_BANK_SWITCH								0xFF4F
-#define BANK_ADDRESS									0xFF50
-#define HDMA1_SOURCE_HIGH_REGISTER_ADDRESS				0xFF51
-#define HDMA2_SOURCE_LOW_REGISTER_ADDRESS				0xFF52
-#define HDMA3_DEST_HIGH_REGISTER_ADDRESS				0xFF53
-#define HDMA4_DEST_LOW_REGISTER_ADDRESS					0xFF54
-#define HDMA5_CONFIG_REGISTER_ADDRESS					0xFF55
-#define IR_PORT_ADDRESS									0xFF56
-#define BCPS_ADDRESS									0xFF68
-#define BCPD_ADDRESS									0xFF69
-#define OCPS_ADDRESS									0xFF6A
-#define OCPD_ADDRESS									0xFF6B
-#define OBJECT_PRIORITY_MODE							0xFF6C
-#define WRAM_BANK_SWITCH								0xFF70
-#define PCM12_ADDRESS									0xFF76
-#define PCM34_ADDRESS									0xFF77
-#define GB_GBC_IO_MEMORY_END_ADDRESS					0xFF7F
-#define HIRAM_START_ADDRESS								0xFF80
-#define HIRAM_END_ADDRESS								0xFFFE
-#define IE_ADDRESS										(HIRAM_END_ADDRESS + ONE)
+#define ROM_00_START_ADDRESS                            0x0000  // 0x0000
+#define DMG_BIOS_START_ADDRESS                          0x0000  // 0x0000
+#define DMG_BIOS_END_ADDRESS                            0x0100  // 0x0100
+#define CGB_BIOS_START_ADDRESS_PART1                    0x0000  // 0x0000
+#define CGB_BIOS_END_ADDRESS_PART1                      0x0100  // 0x0100
+#define CGB_BIOS_START_ADDRESS_PART2                    0x0200  // 0x0200
+#define CGB_BIOS_END_ADDRESS_PART2                      0x0900  // 0x0900
+#define ROM_00_END_ADDRESS                              0x3FFF  // 0x3FFF
+#define ROM_NN_START_ADDRESS                            (ROM_00_END_ADDRESS + ONE)                // 0x4000
+#define ROM_NN_END_ADDRESS                              0x7FFF  // 0x7FFF
+#define VRAM_START_ADDRESS                              (ROM_NN_END_ADDRESS + ONE)                // 0x8000
+#define TILE_DATA_START_ADDRESS                         VRAM_START_ADDRESS                        // 0x8000
+#define TILE_DATA_END_ADDRESS                           0x97FF  // 0x97FF
+#define TILE_MAP_START_ADDRESS                          (TILE_DATA_END_ADDRESS + ONE)             // 0x9800
+#define TILE_MAP_END_ADDRESS                            0x9FFF  // 0x9FFF
+#define VRAM_END_ADDRESS                                TILE_MAP_END_ADDRESS                      // 0x9FFF
+#define EXTERNAL_RAM_START_ADDRESS                      (VRAM_END_ADDRESS + ONE)                  // 0xA000
+#define EXTERNAL_RAM_END_ADDRESS                        0xBFFF  // 0xBFFF
+#define WORK_RAM_00_START_ADDRESS                       (EXTERNAL_RAM_END_ADDRESS + ONE)          // 0xC000
+#define WORK_RAM_00_END_ADDRESS                         0xCFFF  // 0xCFFF
+#define WORK_RAM_01_START_ADDRESS                       (WORK_RAM_00_END_ADDRESS + ONE)           // 0xD000
+#define WORK_RAM_01_END_ADDRESS                         0xDFFF  // 0xDFFF
+#define ECHO_RAM_START_ADDRESS                          (WORK_RAM_01_END_ADDRESS + ONE)           // 0xE000
+#define ECHO_RAM_END_ADDRESS                            0xFDFF  // 0xFDFF
+#define OAM_START_ADDRESS                               (ECHO_RAM_END_ADDRESS + ONE)              // 0xFE00
+#define OAM_END_ADDRESS                                 0xFE9F  // 0xFE9F
+#define RESTRICTED_MEMORY_START_ADDRESS                 (OAM_END_ADDRESS + ONE)                   // 0xFEA0
+#define RESTRICTED_MEMORY_END_ADDRESS                   0xFEFF  // 0xFEFF
+#define GB_GBC_IO_MEMORY_START_ADDRESS                  0xFF00  // 0xFF00
+#define P1_JOYP_ADDRESS                                 GB_GBC_IO_MEMORY_START_ADDRESS            // 0xFF00
+#define SB_ADDRESS                                      0xFF01  // 0xFF01
+#define SC_ADDRESS                                      0xFF02  // 0xFF02
+#define DIV_ADDRESS_LSB                                 0xFF03  // 0xFF03
+#define DIV_ADDRESS_MSB                                 0xFF04  // 0xFF04
+#define TIMA_ADDRESS                                    0xFF05  // 0xFF05
+#define TMA_ADDRESS                                     0xFF06  // 0xFF06
+#define TAC_ADDRESS                                     0xFF07  // 0xFF07
+#define IF_ADDRESS                                      0xFF0F  // 0xFF0F
+#define NR10_ADDRESS                                    0xFF10  // 0xFF10
+#define NR11_ADDRESS                                    0xFF11  // 0xFF11
+#define NR12_ADDRESS                                    0xFF12  // 0xFF12
+#define NR13_ADDRESS                                    0xFF13  // 0xFF13
+#define NR14_ADDRESS                                    0xFF14  // 0xFF14
+#define NR21_ADDRESS                                    0xFF16  // 0xFF16
+#define NR22_ADDRESS                                    0xFF17  // 0xFF17
+#define NR23_ADDRESS                                    0xFF18  // 0xFF18
+#define NR24_ADDRESS                                    0xFF19  // 0xFF19
+#define NR30_ADDRESS                                    0xFF1A  // 0xFF1A
+#define NR31_ADDRESS                                    0xFF1B  // 0xFF1B
+#define NR32_ADDRESS                                    0xFF1C  // 0xFF1C
+#define NR33_ADDRESS                                    0xFF1D  // 0xFF1D
+#define NR34_ADDRESS                                    0xFF1E  // 0xFF1E
+#define NR41_ADDRESS                                    0xFF20  // 0xFF20
+#define NR42_ADDRESS                                    0xFF21  // 0xFF21
+#define NR43_ADDRESS                                    0xFF22  // 0xFF22
+#define NR44_ADDRESS                                    0xFF23  // 0xFF23
+#define NR50_ADDRESS                                    0xFF24  // 0xFF24
+#define NR51_ADDRESS                                    0xFF25  // 0xFF25
+#define NR52_ADDRESS                                    0xFF26  // 0xFF26
+#define WAVE_RAM_START_ADDRESS                          0xFF30  // 0xFF30
+#define WAVE_RAM_END_ADDRESS                            0xFF3F  // 0xFF3F
+#define LCDC_ADDRESS                                    0xFF40  // 0xFF40
+#define STAT_ADDRESS                                    0xFF41  // 0xFF41
+#define SCY_ADDRESS                                     0xFF42  // 0xFF42
+#define SCX_ADDRESS                                     0xFF43  // 0xFF43
+#define LY_ADDRESS                                      0xFF44  // 0xFF44
+#define LYC_ADDRESS                                     0xFF45  // 0xFF45
+#define DMA_ADDRESS                                     0xFF46  // 0xFF46
+#define BGP_ADDRESS                                     0xFF47  // 0xFF47
+#define OBP0_ADDRESS                                    0xFF48  // 0xFF48
+#define OBP1_ADDRESS                                    0xFF49  // 0xFF49
+#define WY_ADDRESS                                      0xFF4A  // 0xFF4A
+#define WX_ADDRESS                                      0xFF4B  // 0xFF4B
+#define KEY0_ADDRESS                                    0xFF4C  // 0xFF4C
+#define KEY1_ADDRESS                                    0xFF4D  // 0xFF4D
+#define VRAM_BANK_SWITCH                                0xFF4F  // 0xFF4F
+#define BANK_ADDRESS                                    0xFF50  // 0xFF50
+#define HDMA1_SOURCE_HIGH_REGISTER_ADDRESS              0xFF51  // 0xFF51
+#define HDMA2_SOURCE_LOW_REGISTER_ADDRESS               0xFF52  // 0xFF52
+#define HDMA3_DEST_HIGH_REGISTER_ADDRESS                0xFF53  // 0xFF53
+#define HDMA4_DEST_LOW_REGISTER_ADDRESS                 0xFF54  // 0xFF54
+#define HDMA5_CONFIG_REGISTER_ADDRESS                   0xFF55  // 0xFF55
+#define IR_PORT_ADDRESS                                 0xFF56  // 0xFF56
+#define BCPS_ADDRESS                                    0xFF68  // 0xFF68
+#define BCPD_ADDRESS                                    0xFF69  // 0xFF69
+#define OCPS_ADDRESS                                    0xFF6A  // 0xFF6A
+#define OCPD_ADDRESS                                    0xFF6B  // 0xFF6B
+#define OBJECT_PRIORITY_MODE                            0xFF6C  // 0xFF6C
+#define WRAM_BANK_SWITCH                                0xFF70  // 0xFF70
+#define PCM12_ADDRESS                                   0xFF76  // 0xFF76
+#define PCM34_ADDRESS                                   0xFF77  // 0xFF77
+#define GB_GBC_IO_MEMORY_END_ADDRESS                    0xFF7F  // 0xFF7F
+#define HIRAM_START_ADDRESS                             0xFF80  // 0xFF80
+#define HIRAM_END_ADDRESS                               0xFFFE  // 0xFFFE
+#define IE_ADDRESS                                      (HIRAM_END_ADDRESS + ONE)                 // 0xFFFF
 
 #define DMA_DELAY										TWO
 
@@ -8109,10 +8109,16 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 			uint32_t crc_32 = crc32_compute(pGBc_instance->GBc_state.entireRom.entireRomMemory, pAbsolute_GBc_instance->absolute_GBc_state.aboutRom.codeRomSize);
 			switch (crc_32)
 			{
-			case 0x0C38A775:
+			case 0x0C38A775u:
 			{
 				LOG("M161 detected");
 				setMBCType(NULL, MBCType::M161);
+				BREAK;
+			}
+			case 0xABB17913u:  // Pokemon Red+Blue 2-in-1 (Unl) [S].gb
+			{
+				LOG("Pokemon 2-in-1 unlicensed multicart detected");
+				setMBCType(NULL, MBCType::POKE_2IN1);
 				BREAK;
 			}
 			default: BREAK;
@@ -8246,6 +8252,13 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 						setMBCType(NULL, MBCType::MBC1M);
 					}
 				}
+			}
+
+			if (isPoke2in1()) MASQ_UNLIKELY
+			{
+				pGBc_emuStatus->poke2in1.MBChi = ZERO;
+				pGBc_emuStatus->poke2in1.bcSelect = NO;
+				pGBc_emuStatus->poke2in1.bank0Change = NO;
 			}
 
 			// initialize the JoyPad state
@@ -9273,6 +9286,10 @@ byte GBc_t::readRawMemory(uint16_t address
 								  | (pGBc_emuStatus->currentROMBankNumber.mmm01Fields.romBankHi << SEVEN);
 					ROMBankNumber %= getNumberOfROMBanksUsed();
 				}
+			}
+			else if (isPoke2in1()) MASQ_UNLIKELY
+			{
+				ROMBankNumber = pGBc_emuStatus->poke2in1.MBChi % getNumberOfROMBanksUsed();
 			}
 
 			if ((ceGBGBC->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
@@ -11196,8 +11213,17 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 			// --- 0x0000 - 0x1FFF : RAM/RTC enable ---
 			if (address <= 0x1FFF)
 			{
-				if (isMBC1() || isMBC1M() || isMBC2() || isMBC3() || isMBC5() || isMBC7() || isHUC1() || isHUC3() || isMMM01())
+				if (isMBC1() || isMBC1M() || isMBC2() || isMBC3() || isMBC5() || isMBC7() || isHUC1() || isHUC3() || isMMM01() || isPoke2in1())
 				{
+					if (isPoke2in1()) MASQ_UNLIKELY
+					{
+						auto& p2 = pGBc_emuStatus->poke2in1;
+						// 0x0000–0x1FFF: RAM enable + bank0Change latch
+						((data & 0x0A) == 0x0A) ? enableRAMBank() : disableRAMBank();
+						p2.bank0Change = ((data & 0xC0) == 0xC0) ? YES : NO;
+						RETURN;
+					}
+
 					// MBC2 special handling
 					if (isMBC2())
 					{
@@ -11326,8 +11352,19 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 			// --- 0x2000 - 0x3FFF : ROM bank lower bits ---
 			else if (address <= 0x3FFF)
 			{
-				if (isMBC1() || isMBC1M() || isMBC2() || isMBC3() || isMBC5() || isMBC7() || isHUC1() || isHUC3() || isMMM01())
+				if (isMBC1() || isMBC1M() || isMBC2() || isMBC3() || isMBC5() || isMBC7() || isHUC1() || isHUC3() || isMMM01() || isPoke2in1())
 				{
+					if (isPoke2in1()) MASQ_UNLIKELY
+					{
+						auto& p2 = pGBc_emuStatus->poke2in1;
+						// 0x0000–0x1FFF: RAM enable + bank0Change latch
+						byte bank = data & 0x7F;
+						if (bank == ZERO) bank = ONE;
+						bank += p2.MBChi;
+						setROMBankNumber(bank % getNumberOfROMBanksUsed());
+						RETURN;
+					}
+
 					auto ROMBankNumber = getROMBankNumber();
 
 					if (isMBC1() || isMBC1M())
@@ -11429,6 +11466,18 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 			// --- 0x4000 - 0x5FFF : RAM bank or upper ROM bits ---
 			else if (address <= 0x5FFF)
 			{
+				if (isPoke2in1()) MASQ_UNLIKELY
+				{
+					auto& p2 = pGBc_emuStatus->poke2in1;
+					// 0x4000–0x5FFF: RAM bank (only if >8KB RAM)
+					if (getNumberOfRAMBanksUsed() > ONE)
+					{
+						uint8_t ramBank = (data & 0x03) % getNumberOfRAMBanksUsed();
+						setRAMBankNumber(ramBank);
+					}
+					RETURN;
+				}
+
 				if (isMBC1() || isMBC1M())
 				{
 					// Refer : https://gekkio.fi/files/gb-docs/gbctr.pdf
@@ -11623,6 +11672,40 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 						pGBc_emuStatus->dataWrittenToMBCReg4 = data;
 					}
 				}
+			}
+
+			if (isPoke2in1()) MASQ_UNLIKELY
+			{
+				auto& p2 = pGBc_emuStatus->poke2in1;
+
+				// Game select: write to 0xA100 while bank0Change is set and bcSelect not yet locked
+				if (p2.bank0Change == YES && address == 0xA100 && p2.bcSelect == NO)
+				{
+					p2.MBChi = ZERO;
+
+					if (data == 0x01)
+					{
+						p2.MBChi = TWO;   // Pokemon Blue starts at bank 2
+					}
+					else if (data != 0xC0)
+					{
+						p2.MBChi = 66;    // Pokemon Red starts at bank 66
+					}
+					else
+					{
+						p2.bcSelect = YES;  // lock; no further switching
+						// MBChi stays at current value (or 0 if first write)
+					}
+
+					// Remap the entire 0x0000–0x7FFF window to the new base
+					const uint16_t base = p2.MBChi % getNumberOfROMBanksUsed();
+					setROMBankNumber((base + ONE) % getNumberOfROMBanksUsed());
+					// Bank 0 window remap: store base so readRawMemory can use it for 0x0000–0x3FFF
+					// (handled in readRawMemory below)
+				}
+
+				// Always fall through to normal RAM write (if RAM enabled)
+				// so don't RETURN here — let the generic path handle it
 			}
 
 			if (isMBC6()) MASQ_UNLIKELY

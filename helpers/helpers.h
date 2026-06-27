@@ -786,6 +786,7 @@ extern "C" {
 #define MOREINFO(message, ...) do{if(GETBIT(LOG_VERBOSITY_MOREINFO,ENABLE_LOGS))MASQ_UNLIKELY{logger(LOG_COLOR_BOLD_BLUE "[INFO]  " message "\n" LOG_COLOR_END,##__VA_ARGS__);}}while(0)
 #define DEBUG(message, ...) do{if(GETBIT(LOG_VERBOSITY_DEBUG,ENABLE_LOGS))MASQ_UNLIKELY{logger("[DEBUG] " message "\n",##__VA_ARGS__);}}while(0)
 #define INFRA(message, ...) do{if(GETBIT(LOG_VERBOSITY_INFRA,ENABLE_LOGS))MASQ_UNLIKELY{logger(LOG_COLOR_BOLD_MAGENTA "[INFRA] " message "\n" LOG_COLOR_END,##__VA_ARGS__);}}while(0)
+#define MASQ_LOG    LOG
 
 // --- MASQ type-index constants -----------------------
 #define MASQ_UINT8                                  0

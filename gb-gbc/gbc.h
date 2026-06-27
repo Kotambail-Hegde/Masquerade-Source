@@ -417,6 +417,7 @@ private:
 		HUC1,
 		HUC3,
 		WISDOM_TREE,
+		POKE_2IN1,
 		INVALID_MBC
 	};
 
@@ -1781,6 +1782,12 @@ private:
 		FLAG enableRAMBanking;
 		FLAG isMBC7RamEn1;
 		FLAG isMBC7RamEn2;
+		struct
+		{
+			byte  MBChi;       // high ROM bank base (added to switchable bank number)
+			FLAG  bcSelect;    // once set, game-select writes are locked out
+			FLAG  bank0Change; // set when 0x0000 write has bits 7:6 == 0b11
+		} poke2in1;
 		uint8_t currentRAMBankNumber;
 		uint8_t currentVRAMBankNumber;
 		uint8_t currentWRAMBankNumber;
@@ -2387,6 +2394,10 @@ private:
 	MASQ_INLINE FLAG isWT() const
 	{
 		RETURN pGBc_emuStatus->activeMBC == MBCType::WISDOM_TREE;
+	}
+	MASQ_INLINE FLAG isPoke2in1() const
+	{
+		RETURN pGBc_emuStatus->activeMBC == MBCType::POKE_2IN1;
 	}
 	void setMBCType(uint16_t mbcType, MBCType force = MBCType::INVALID_MBC);
 	void setROMBankType(uint16_t romBankType);
