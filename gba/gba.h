@@ -347,8 +347,9 @@ private:
 
 private:
 
-	boost::property_tree::ptree pt;
+	MasqConfig_t pt;
 
+#ifndef __RPI_PICO__
 private:
 
 	uint8_t const SST_ROMS = TWO;
@@ -360,7 +361,8 @@ private:
 
 private:
 
-	void* GBAGameEngine = nullptr;
+	CheatEngine_t* ceGBA;
+#endif // !__RPI_PICO__
 #pragma endregion INFRASTRUCTURE_DECLARATIONS
 
 #pragma region ARM7TDMI_DECLARATIONS
@@ -1158,7 +1160,7 @@ private:
 
 	enum class MEMORY_ACCESS_SOURCE
 	{
-		HOST,
+		HOST, // This will be used for cheats as well
 		CPU,
 		PPU,
 		APU,
@@ -3855,11 +3857,11 @@ private:
 
 #pragma region INFRASTRUCTURE_DEFINITIONS
 public:
-	GBA_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, boost::property_tree::ptree& config);
+	GBA_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config, CheatEngine_t* ce = nullptr);
 
 	~GBA_t();
 
-	void setupTheCoreOfEmulation(void* masqueradeInstance = nullptr, void* audio = nullptr, void* network = nullptr) override;
+	void setupTheCoreOfEmulation(void* masqueradeInstance = nullptr, void* audio = nullptr, void* input = nullptr, void* network = nullptr) override;
 
 	void setupTheAlternativeSoundOfEmulation(void* audio);
 
@@ -3928,6 +3930,8 @@ public:
 #pragma endregion INFRASTRUCTURE_DEFINITIONS
 
 #pragma region ARM7TDMI_DEFINITIONS
+OPT_SPEED
+
 private:
 
 	MASQ_INLINE REGISTER_BANK_TYPE getRegisterBankFromOperatingMode(OP_MODE_TYPE opMode)
@@ -3946,7 +3950,11 @@ private:
 		RETURN REGISTER_BANK_TO_OP_MODE[static_cast<uint8_t>(rb)];
 	}
 
+OPT_DEFAULT
+
 private:
+
+OPT_SPEED
 
 	MASQ_INLINE void setARMState(STATE_TYPE armState)
 	{
@@ -3972,11 +3980,15 @@ private:
 		RETURN pGBA_cpuInstance->armMode;
 	}
 
+OPT_DEFAULT
+
 private:
 
 	void cpuSetRegister(REGISTER_BANK_TYPE rb, REGISTER_TYPE rt, STATE_TYPE st, uint32_t u32parameter);
 
 	uint32_t cpuReadRegister(REGISTER_BANK_TYPE rb, REGISTER_TYPE rt);
+
+OPT_SPEED
 
 	MASQ_INLINE void gamePAKBoundaryCheck(MEMORY_ACCESS_TYPE& mType, GBA_WORD mCurrentAddress, MEMORY_ACCESS_SOURCE mCurrentSource)
 	{
@@ -4082,7 +4094,7 @@ private:
 
 	// Refer "Reading from Unused Memory (00004000-01FFFFFF,10000000-FFFFFFFF)" of https://problemkaputt.de/gbatek-gba-unpredictable-things.htm
 	template <typename T>
-	T readOpenBus(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType = MEMORY_ACCESS_TYPE::AUTOMATIC)
+	MASQ_INLINE T readOpenBus(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType = MEMORY_ACCESS_TYPE::AUTOMATIC)
 	{
 		// Refer to "Reading from Unused Memory (00004000-01FFFFFF,10000000-FFFFFFFF)" in https://problemkaputt.de/gbatek-gba-unpredictable-things.htm
 		auto shift = (address & THREE) << THREE;
@@ -4190,7 +4202,14 @@ private:
 			(lock * ACCESS_LOCK);
 	}
 
+OPT_DEFAULT
+
 	GBA_HALFWORD readIO(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType);
+
+	void writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType);
+	void writeIO8(uint32_t address, BYTE data, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType);
+
+OPT_SPEED
 
 	// NOTE: For memory mirrors, refer http://problemkaputt.de/gbatek-gba-unpredictable-things.htm
 	template <typename T>
@@ -4201,7 +4220,7 @@ private:
 		// Refer https://github.com/zaydlang/AGBEEG-Aging-Cartridge/blob/master/documentation/dma/cpu_runs_idles_throughout_dma.md
 		if ((IsAnyDMARunning() == YES) && (source == MEMORY_ACCESS_SOURCE::CPU || source == MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH) && (LOCK == NO))
 		{
-			dmaTick();	
+			dmaTick();
 			dmaCyclesInThisRun = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.dmaCounter;
 			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.dmaCounter = RESET;
 			// All currenlty enabled DMA transactions should be complete by the time we come here
@@ -4266,24 +4285,24 @@ private:
 				{
 					sst.internal[sst.index].cycle += ONE;
 				}
-				// First cycle of this SST entry
-				else if (sst.index != RESET)
-				{
-					sst.internal[sst.index].cycle =
-						sst.internal[sst.index - 1].cycle + ONE;
-				}
-				// Very first SST entry
-				else
-				{
-					sst.internal[sst.index].cycle = ONE;
-				}
+			// First cycle of this SST entry
+			else if (sst.index != RESET)
+			{
+				sst.internal[sst.index].cycle =
+					sst.internal[sst.index - 1].cycle + ONE;
+			}
+			// Very first SST entry
+			else
+			{
+				sst.internal[sst.index].cycle = ONE;
+			}
 			}
 #endif
-			while (cpuTicks)
-			{
-				cpuTick();
-				--cpuTicks;
-			}
+				while (cpuTicks)
+				{
+					cpuTick();
+					--cpuTicks;
+				}
 		}
 
 		if (source == MEMORY_ACCESS_SOURCE::DMA)
@@ -4347,7 +4366,7 @@ private:
 				address &= ~THREE; // Handle 32 bit alignment
 				pGBA_instance->GBA_state.gbaMemory.previouslyLatchedBiosData = pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mSystemRom.mSystemRom32bit[(address - SYSTEM_ROM_START_ADDRESS) / FOUR];
 			}
-			RETURN ((T)(pGBA_instance->GBA_state.gbaMemory.previouslyLatchedBiosData >> shift));
+			RETURN((T)(pGBA_instance->GBA_state.gbaMemory.previouslyLatchedBiosData >> shift));
 		}
 		else if (IF_ADDRESS_WITHIN(address, SYSTEM_ROM_UNUSED_START_ADDRESS, SYSTEM_ROM_UNUSED_END_ADDRESS))
 		{
@@ -4396,11 +4415,11 @@ private:
 			{
 				if ((address & 0x01) == ZERO)
 				{
-					RETURN (BYTE)readIO(address, accessWidth, source, accessType);
+					RETURN(BYTE)readIO(address, accessWidth, source, accessType);
 				}
 				else
 				{
-					RETURN (BYTE)(readIO((address & (~ONE)), accessWidth, source, accessType) >> EIGHT);
+					RETURN(BYTE)(readIO((address & (~ONE)), accessWidth, source, accessType) >> EIGHT);
 				}
 			}
 			else if (accessWidth == MEMORY_ACCESS_WIDTH::SIXTEEN_BIT) MASQ_LIKELY
@@ -4424,7 +4443,7 @@ private:
 				{
 					GBA_HALFWORD lsWord = readIO(address, accessWidth, source, accessType);
 					GBA_HALFWORD msWord = readIO(address + TWO, accessWidth, source, accessType);
-					RETURN (GBA_WORD)(lsWord | (msWord << SIXTEEN));
+					RETURN(GBA_WORD)(lsWord | (msWord << SIXTEEN));
 				}
 				else if (((address & 0x03) == ONE) || ((address & 0x03) == THREE))
 				{
@@ -4452,7 +4471,7 @@ private:
 		{
 			if (IF_ADDRESS_WITHIN(address, 0x0400100C, 0x0400100D))
 			{
-				RETURN (T)0xDEAD;
+				RETURN(T)0xDEAD;
 			}
 			RETURN readOpenBus<T>(address, accessWidth, source, accessType);
 		}
@@ -4574,6 +4593,12 @@ private:
 		}
 		else if (IF_ADDRESS_WITHIN(address, GAMEPAK_ROM_WS0_START_ADDRESS, GAMEPAK_ROM_WS2_END_ADDRESS))
 		{
+			uint32_t modedData = RESET;
+			uint32_t compareVal = RESET;
+			FLAG     hasCompare = NO;
+
+			uint32_t originalAddress = address;
+
 			// As part of first level mirroring, OAM (0x08000000 - 0x0DFFFFFF) is mirrored in steps of GAMEPAK_ROM_SIZE 
 			address &= 0x01FFFFFF;
 
@@ -4639,22 +4664,62 @@ private:
 				stride = sizeof(GBA_WORD);
 			}
 
+			if (ENABLED)
+			{
+				uint32_t cheatData = 0; uint32_t cheatCmp = 0; FLAG cheatHasCmp = NO;
+				if ((ceGBA->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::ACTION_REPLAY_V3, originalAddress, &cheatData, &cheatCmp, &cheatHasCmp)
+					&& (!cheatHasCmp || cheatCmp == (uint32_t)dataT))
+					||
+					(ceGBA->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMESHARK, originalAddress, &cheatData, &cheatCmp, &cheatHasCmp)
+						&& (!cheatHasCmp || cheatCmp == (uint32_t)dataT)))
+					dataT = cheatData;
+			}
+
 			pGBA_memory->romLatchedAddress += stride;
 			pGBA_memory->romLatchedAddress &= pAbsolute_GBA_instance->absolute_GBA_state.aboutRom.romMaxAddressMask;
-
 			RETURN static_cast<T>(dataT);
 #else
 			if (accessWidth == MEMORY_ACCESS_WIDTH::EIGHT_BIT)
 			{
-				RETURN static_cast<T>(pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakRom.mWaitState.mWaitState0.mWaitState0Memory8bit[address]);
+				uint32_t romVal = ...mWaitState0Memory8bit[address];
+				uint32_t cheatData = 0; uint32_t cheatCmp = 0; FLAG cheatHasCmp = NO;
+
+				if ((ceGBA->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::ACTION_REPLAY_V3, originalAddress, &cheatData, &cheatCmp, &cheatHasCmp)
+					&& (!cheatHasCmp || (BYTE)cheatCmp == (BYTE)romVal))
+					||
+					(ceGBA->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMESHARK, originalAddress, &cheatData, &cheatCmp, &cheatHasCmp)
+						&& (!cheatHasCmp || (BYTE)cheatCmp == (BYTE)romVal)))
+					RETURN static_cast<T>(cheatData & 0xFF);
+
+				RETURN static_cast<T>(romVal);
 			}
 			else if (accessWidth == MEMORY_ACCESS_WIDTH::SIXTEEN_BIT)
 			{
-				RETURN static_cast<T>(pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakRom.mWaitState.mWaitState0.mWaitState0Memory16bit[address / TWO]);
+				uint32_t romVal = ...mWaitState0Memory16bit[address / TWO];
+				uint32_t cheatData = 0; uint32_t cheatCmp = 0; FLAG cheatHasCmp = NO;
+
+				if ((ceGBA->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::ACTION_REPLAY_V3, originalAddress, &cheatData, &cheatCmp, &cheatHasCmp)
+					&& (!cheatHasCmp || (uint16_t)cheatCmp == (uint16_t)romVal))
+					||
+					(ceGBA->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMESHARK, originalAddress, &cheatData, &cheatCmp, &cheatHasCmp)
+						&& (!cheatHasCmp || (uint16_t)cheatCmp == (uint16_t)romVal)))
+					RETURN static_cast<T>(cheatData & 0xFFFF);
+
+				RETURN static_cast<T>(romVal);
 			}
 			else if (accessWidth == MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT)
 			{
-				RETURN static_cast<T>(pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakRom.mWaitState.mWaitState0.mWaitState0Memory32bit[address / FOUR]);
+				uint32_t romVal = ...mWaitState0Memory32bit[address / FOUR];
+				uint32_t cheatData = 0; uint32_t cheatCmp = 0; FLAG cheatHasCmp = NO;
+
+				if ((ceGBA->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::ACTION_REPLAY_V3, originalAddress, &cheatData, &cheatCmp, &cheatHasCmp)
+					&& (!cheatHasCmp || cheatCmp == romVal))
+					||
+					(ceGBA->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMESHARK, originalAddress, &cheatData, &cheatCmp, &cheatHasCmp)
+						&& (!cheatHasCmp || cheatCmp == romVal)))
+					RETURN static_cast<T>(cheatData);
+
+				RETURN static_cast<T>(romVal);
 			}
 #endif
 		}
@@ -4737,9 +4802,6 @@ private:
 
 		RETURN readOpenBus<T>(address, accessWidth, source, accessType);
 	}
-
-	void writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType);
-	void writeIO8(uint32_t address, BYTE data, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType);
 
 	template <typename T>
 	void writeRawMemoryInternal(uint32_t address, T data, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType, FLAG LOCK = NO)
@@ -5279,6 +5341,8 @@ private:
 		WARN("Trying to write to invalid memory : 0x%08X", address);
 	}
 
+OPT_DEFAULT
+
 #if (ENABLE_ARM7TDMI_SST == YES)
 	template <typename T>
 	MASQ_INLINE T readRawMemory(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType = MEMORY_ACCESS_TYPE::AUTOMATIC, FLAG LOCK = NO)
@@ -5345,6 +5409,34 @@ private:
 	}
 #endif
 
+public:
+
+OPT_SPEED
+
+	static MASQ_INLINE CheatEngine_t::CheatWidth toCheatWidth(MEMORY_ACCESS_WIDTH w)
+	{
+		switch (w)
+		{
+		case MEMORY_ACCESS_WIDTH::EIGHT_BIT:      RETURN CheatEngine_t::CheatWidth::U8;
+		case MEMORY_ACCESS_WIDTH::SIXTEEN_BIT:    RETURN CheatEngine_t::CheatWidth::U16;
+		case MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT:  RETURN CheatEngine_t::CheatWidth::U32;
+		default:                                  RETURN CheatEngine_t::CheatWidth::U16;
+		}
+	}
+
+	static MASQ_INLINE MEMORY_ACCESS_WIDTH toMemoryAccessWidth(CheatEngine_t::CheatWidth w)
+	{
+		switch (w)
+		{
+		case CheatEngine_t::CheatWidth::U8:   RETURN MEMORY_ACCESS_WIDTH::EIGHT_BIT;
+		case CheatEngine_t::CheatWidth::U16:  RETURN MEMORY_ACCESS_WIDTH::SIXTEEN_BIT;
+		case CheatEngine_t::CheatWidth::U32:  RETURN MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT;
+		default:                              RETURN MEMORY_ACCESS_WIDTH::SIXTEEN_BIT;
+		}
+	}
+
+OPT_DEFAULT
+
 private:
 
 	bool processSOC();
@@ -5354,6 +5446,8 @@ private:
 	void cpuIdleCycles();
 
 	void fetchAndDecode(uint32_t newPC);
+
+OPT_SPEED
 
 	MASQ_INLINE bool TickMultiply(FLAG isSigned, uint64_t multiplier) {
 		uint32_t mask = 0xFFFFFF00;
@@ -5564,6 +5658,8 @@ private:
 		}
 		}
 	};
+
+OPT_DEFAULT
 
 	GBA_WORD performShiftOperation(bool updateFlag, SHIFT_TYPE shiftType, uint32_t shiftAmount, uint32_t dataToBeShifted, bool quirkEnabled);
 
@@ -5783,6 +5879,8 @@ private:
 
 private:
 
+OPT_SPEED
+
 	MASQ_INLINE void cntlRegUpdate(TIMER timer, uint16_t data)
 	{
 		// Write should directly happen to "reload" instead of the actual mTIMERxCNT_L)
@@ -5952,45 +6050,575 @@ private:
 		}
 	}
 
+OPT_DEFAULT
+
 	void processTimer(INC64 timerCycles);
 
 private:
 
-	GBA_WORD getDMASADRegister(DMA dma);
+	MASQ_INLINE GBA_WORD getDMASADRegister(DMA dma)
+	{
+		GBA_WORD DMAxSAD = RESET;
+		if (dma == DMA::DMA0)
+		{
+			DMAxSAD = (pGBA_peripherals->mDMA0SAD_L | (pGBA_peripherals->mDMA0SAD_H << SIXTEEN));
+			RETURN(DMAxSAD & 0x07FFFFFF);
+		}
+		if (dma == DMA::DMA1)
+		{
+			DMAxSAD = (pGBA_peripherals->mDMA1SAD_L | (pGBA_peripherals->mDMA1SAD_H << SIXTEEN));
+			RETURN(DMAxSAD & 0x0FFFFFFF);
+		}
+		if (dma == DMA::DMA2)
+		{
+			DMAxSAD = (pGBA_peripherals->mDMA2SAD_L | (pGBA_peripherals->mDMA2SAD_H << SIXTEEN));
+			RETURN(DMAxSAD & 0x0FFFFFFF);
+		}
+		if (dma == DMA::DMA3)
+		{
+			DMAxSAD = (pGBA_peripherals->mDMA3SAD_L | (pGBA_peripherals->mDMA3SAD_H << SIXTEEN));
+			RETURN(DMAxSAD & 0x0FFFFFFF);
+		}
 
-	GBA_WORD getDMADADRegister(DMA dma);
+		FATAL("Unknown DMA");
+		RETURN(GBA_WORD)NULL;
+	}
 
-	GBA_HALFWORD getDMACNTLRegister(DMA dma);
+	MASQ_INLINE GBA_WORD getDMADADRegister(DMA dma)
+	{
+		GBA_WORD DMAxDAD = RESET;
+		if (dma == DMA::DMA0)
+		{
+			DMAxDAD = (pGBA_peripherals->mDMA0DAD_L | (pGBA_peripherals->mDMA0DAD_H << SIXTEEN));
+			RETURN(DMAxDAD & 0x07FFFFFF);
+		}
+		if (dma == DMA::DMA1)
+		{
+			DMAxDAD = (pGBA_peripherals->mDMA1DAD_L | (pGBA_peripherals->mDMA1DAD_H << SIXTEEN));
+			RETURN(DMAxDAD & 0x07FFFFFF);
+		}
+		if (dma == DMA::DMA2)
+		{
+			DMAxDAD = (pGBA_peripherals->mDMA2DAD_L | (pGBA_peripherals->mDMA2DAD_H << SIXTEEN));
+			RETURN(DMAxDAD & 0x07FFFFFF);
+		}
+		if (dma == DMA::DMA3)
+		{
+			DMAxDAD = (pGBA_peripherals->mDMA3DAD_L | (pGBA_peripherals->mDMA3DAD_H << SIXTEEN));
+			RETURN(DMAxDAD & 0x0FFFFFFF);
+		}
 
-	mDMAnCNT_HHalfWord_t* getDMACNTHRegister(DMA dma);
+		FATAL("Unknown DMA");
+		RETURN(GBA_WORD)NULL;
+	}
 
-	void setDMASADRegister(DMA dma, GBA_WORD data);
+	MASQ_INLINE GBA_HALFWORD getDMACNTLRegister(DMA dma)
+	{
+		if (dma == DMA::DMA0)
+		{
+			RETURN(pGBA_peripherals->mDMA0CNT_L & 0x3FFF);
+		}
+		if (dma == DMA::DMA1)
+		{
+			RETURN(pGBA_peripherals->mDMA1CNT_L & 0x3FFF);
+		}
+		if (dma == DMA::DMA2)
+		{
+			RETURN(pGBA_peripherals->mDMA2CNT_L & 0x3FFF);
+		}
+		if (dma == DMA::DMA3)
+		{
+			RETURN(pGBA_peripherals->mDMA3CNT_L & 0xFFFF);
+		}
 
-	void setDMADADRegister(DMA dma, GBA_WORD data);
+		FATAL("Unknown DMA");
+		RETURN(GBA_HALFWORD)NULL;
+	}
 
-	void setDMACNTLRegister(DMA dma, GBA_HALFWORD data);
+	MASQ_INLINE GBA_t::mDMAnCNT_HHalfWord_t* getDMACNTHRegister(DMA dma)
+	{
+		if (dma == DMA::DMA0)
+		{
+			RETURN& pGBA_peripherals->mDMA0CNT_H;
+		}
+		if (dma == DMA::DMA1)
+		{
+			RETURN& pGBA_peripherals->mDMA1CNT_H;
+		}
+		if (dma == DMA::DMA2)
+		{
+			RETURN& pGBA_peripherals->mDMA2CNT_H;
+		}
+		if (dma == DMA::DMA3)
+		{
+			RETURN& pGBA_peripherals->mDMA3CNT_H;
+		}
 
-	void latchDMARegisters(ID dmaID);
+		FATAL("Unknown DMA");
+		RETURN((mDMAnCNT_HHalfWord_t*)nullptr);
+	}
 
-	void OnDMAChannelWritten(DMA dmaID, FLAG oldEnable, FLAG newEnable);
+	MASQ_INLINE void setDMASADRegister(DMA dma, GBA_WORD data)
+	{
+		if (dma == DMA::DMA0)
+		{
+			pGBA_peripherals->mDMA0SAD_L = data & 0xFFFF;
+			pGBA_peripherals->mDMA0SAD_H = (data >> SIXTEEN) & 0xFFFF;
+		}
+		if (dma == DMA::DMA1)
+		{
+			pGBA_peripherals->mDMA1SAD_L = data & 0xFFFF;
+			pGBA_peripherals->mDMA1SAD_H = (data >> SIXTEEN) & 0xFFFF;
+		}
+		if (dma == DMA::DMA2)
+		{
+			pGBA_peripherals->mDMA2SAD_L = data & 0xFFFF;
+			pGBA_peripherals->mDMA2SAD_H = (data >> SIXTEEN) & 0xFFFF;
+		}
+		if (dma == DMA::DMA3)
+		{
+			pGBA_peripherals->mDMA3SAD_L = data & 0xFFFF;
+			pGBA_peripherals->mDMA3SAD_H = (data >> SIXTEEN) & 0xFFFF;
+		}
+	}
 
-	void DelayedDMAActivate(ID dmaID);
+	MASQ_INLINE void setDMADADRegister(DMA dma, GBA_WORD data)
+	{
+		if (dma == DMA::DMA0)
+		{
+			pGBA_peripherals->mDMA0DAD_L = data & 0xFFFF;
+			pGBA_peripherals->mDMA0DAD_H = (data >> SIXTEEN) & 0xFFFF;
+		}
+		if (dma == DMA::DMA1)
+		{
+			pGBA_peripherals->mDMA1DAD_L = data & 0xFFFF;
+			pGBA_peripherals->mDMA1DAD_H = (data >> SIXTEEN) & 0xFFFF;
+		}
+		if (dma == DMA::DMA2)
+		{
+			pGBA_peripherals->mDMA2DAD_L = data & 0xFFFF;
+			pGBA_peripherals->mDMA2DAD_H = (data >> SIXTEEN) & 0xFFFF;
+		}
+		if (dma == DMA::DMA3)
+		{
+			pGBA_peripherals->mDMA3DAD_L = data & 0xFFFF;
+			pGBA_peripherals->mDMA3DAD_H = (data >> SIXTEEN) & 0xFFFF;
+		}
+	}
 
-	void ActivateDMAChannel(ID dmaID);
+	MASQ_INLINE void setDMACNTLRegister(DMA dma, GBA_HALFWORD data)
+	{
+		if (dma == DMA::DMA0)
+		{
+			pGBA_peripherals->mDMA0CNT_L = data;
+		}
+		if (dma == DMA::DMA1)
+		{
+			pGBA_peripherals->mDMA1CNT_L = data;
+		}
+		if (dma == DMA::DMA2)
+		{
+			pGBA_peripherals->mDMA2CNT_L = data;
+		}
+		if (dma == DMA::DMA3)
+		{
+			pGBA_peripherals->mDMA3CNT_L = data;
+		}
+	}
 
-	void RequestDMA(DMA_TIMING timing);
+	MASQ_INLINE void latchDMARegisters(ID dmaID)
+	{
+		pGBA_instance->GBA_state.dma.cache[dmaID].source = (getDMASADRegister((DMA)dmaID) & 0x0FFFFFFF);
+		pGBA_instance->GBA_state.dma.cache[dmaID].destination = (getDMADADRegister((DMA)dmaID) & 0x0FFFFFFF);
+		pGBA_instance->GBA_state.dma.cache[dmaID].length = (getDMACNTLRegister((DMA)dmaID) & 0xFFFF);
 
-	void OnDMAActivated(ID dmaID);
+		// Check if FIFO DMA
 
-	void SelectNextDMA();
+		mDMAnCNT_HHalfWord_t* CNTH = getDMACNTHRegister((DMA)dmaID);
 
-	FLAG IsAnyDMARunning();
+		if ((((DMA_TIMING)CNTH->mDMAnCNT_HFields.DMA_START_TIMING) == DMA_TIMING::SPECIAL)
+			&& ((((DMA)dmaID) == DMA::DMA1) || (((DMA)dmaID) == DMA::DMA2)))
+		{
+			pGBA_instance->GBA_state.dma.cache[dmaID].isFIFODMA = YES;
+
+			pGBA_instance->GBA_state.dma.cache[dmaID].chunkSize = DMA_SIZE::WORD_PER_TRANSFER;	// Refer Sound DMA in http://problemkaputt.de/gbatek-gba-dma-transfers.htm
+
+			// Refer : https://discord.com/channels/465585922579103744/465586361731121162/1217591657109782628
+			// DMA force aligns the address before it goes on bus
+
+			int32_t mask = ~THREE;
+			pGBA_instance->GBA_state.dma.cache[dmaID].source &= mask;
+			pGBA_instance->GBA_state.dma.cache[dmaID].destination &= mask;
+
+			pGBA_instance->GBA_state.dma.cache[dmaID].length = FOUR;	// Refer Sound DMA in http://problemkaputt.de/gbatek-gba-dma-transfers.htm
+		}
+		else
+		{
+			pGBA_instance->GBA_state.dma.cache[dmaID].isFIFODMA = NO;
+
+			pGBA_instance->GBA_state.dma.cache[dmaID].chunkSize = (DMA_SIZE)(CNTH->mDMAnCNT_HFields.DMA_TRANSFER_TYPE);
+
+			// Align the address based on chunk size
+
+			if (pGBA_instance->GBA_state.dma.cache[dmaID].chunkSize == DMA_SIZE::HALFWORD_PER_TRANSFER)
+			{
+				// Refer https://discord.com/channels/465585922579103744/465586361731121162/1217591657109782628
+				// Needed to pass the suite.gba's memory tests
+				// DMA force aligns the address before it goes on bus
+
+				int32_t mask = ~ONE;
+				pGBA_instance->GBA_state.dma.cache[dmaID].source &= mask;
+				pGBA_instance->GBA_state.dma.cache[dmaID].destination &= mask;
+			}
+			else if (pGBA_instance->GBA_state.dma.cache[dmaID].chunkSize == DMA_SIZE::WORD_PER_TRANSFER)
+			{
+				// Refer : https://discord.com/channels/465585922579103744/465586361731121162/1217591657109782628
+				// Needed to pass the suite.gba's memory tests
+				// DMA force aligns the address before it goes on bus
+
+				int32_t mask = ~THREE;
+				pGBA_instance->GBA_state.dma.cache[dmaID].source &= mask;
+				pGBA_instance->GBA_state.dma.cache[dmaID].destination &= mask;
+			}
+
+			// Length of zero is treated as max values; Refer : http://problemkaputt.de/gbatek-gba-dma-transfers.htm
+
+			if (pGBA_instance->GBA_state.dma.cache[dmaID].length == ZERO)
+			{
+				if (((DMA)dmaID) == DMA::DMA3)
+				{
+					pGBA_instance->GBA_state.dma.cache[dmaID].length = 0x10000;
+				}
+				else
+				{
+					pGBA_instance->GBA_state.dma.cache[dmaID].length = 0x4000;
+				}
+			}
+		}
+	}
+
+	MASQ_INLINE void OnDMAChannelWritten(DMA dmaID, FLAG oldEnable, FLAG newEnable)
+	{
+		mDMAnCNT_HHalfWord_t* CNTH = getDMACNTHRegister(dmaID);
+		auto& cache = pGBA_instance->GBA_state.dma.cache[dmaID];
+
+		// Remove from all trigger maps for this particular DMA ID
+		for (int timing = DMA_TIMING::IMMEDIATE; timing < DMA_TIMING::TOTAL_DMA_TIMING; timing++)
+		{
+			UNSETBIT(pGBA_instance->GBA_state.dma.trigCache[timing].dmaIdMap, dmaID);
+		}
+
+		if (newEnable == SET)
+		{
+			cache.scheduleType = (DMA_TIMING)CNTH->mDMAnCNT_HFields.DMA_START_TIMING;
+
+			if (oldEnable == RESET)
+			{
+				// 0->1: Latch registers
+				latchDMARegisters(dmaID);
+				cache.count = ZERO;
+				cache.target = cache.length;
+				cache.currentState = YES;
+			}
+			else
+			{
+				// 1->1: If modifying currently active DMA, trigger re-enter if it was currently running
+				if (pGBA_instance->GBA_state.dma.currentlyActiveDMA == dmaID)
+				{
+					pGBA_instance->GBA_state.dma.shouldReenterTransferLoop = YES;
+				}
+			}
+
+			// Add to trigger map
+			SETBIT(pGBA_instance->GBA_state.dma.trigCache[cache.scheduleType].dmaIdMap, dmaID);
+
+			// Activate if IMMEDIATE
+			if (cache.scheduleType == DMA_TIMING::IMMEDIATE)
+			{
+				DelayedDMAActivate(dmaID);
+			}
+		}
+		else
+		{
+			// Disable
+			cache.currentState = NO;
+			UNSETBIT(pGBA_instance->GBA_state.dma.runnableSet, dmaID);
+
+			// Remove from all trigger maps (already done above, but keeping for clarity)
+			for (int timing = DMA_TIMING::IMMEDIATE; timing < DMA_TIMING::TOTAL_DMA_TIMING; timing++)
+			{
+				UNSETBIT(pGBA_instance->GBA_state.dma.trigCache[timing].dmaIdMap, dmaID);
+			}
+
+			if (pGBA_instance->GBA_state.dma.currentlyActiveDMA == dmaID)
+			{
+				pGBA_instance->GBA_state.dma.shouldReenterTransferLoop = YES;
+				SelectNextDMA();
+			}
+		}
+	}
+
+	MASQ_INLINE void DelayedDMAActivate(ID dmaID)
+	{
+#if (GBA_ENABLE_DELAYED_DMA_ENABLE == YES)
+		// Reset the startup delay
+		// Refer https://discord.com/channels/465585922579103744/465586361731121162/948407365852610590
+		pGBA_instance->GBA_state.dma.cache[dmaID].startupDelay = TWO;
+#else
+		ActivateDMAChannel(dmaID);
+#endif
+	}
+
+	MASQ_INLINE void ActivateDMAChannel(ID dmaID)
+	{
+		auto& dmaState = pGBA_instance->GBA_state.dma;
+
+		if (dmaState.runnableSet == RESET)
+		{
+			dmaState.currentlyActiveDMA = (DMA)dmaID;
+		}
+		else if (dmaID < dmaState.currentlyActiveDMA)
+		{
+			dmaState.currentlyActiveDMA = (DMA)dmaID;
+			dmaState.shouldReenterTransferLoop = YES;
+		}
+
+		SETBIT(dmaState.runnableSet, dmaID);
+	}
+
+	MASQ_INLINE void RequestDMA(DMA_TIMING timing)
+	{
+		MAP8 dmaMap = pGBA_instance->GBA_state.dma.trigCache[timing].dmaIdMap;
+
+		for (ID dmaID = DMA::DMA0; dmaID < DMA::TOTAL_DMA; dmaID++)
+		{
+			if (GETBIT(dmaID, dmaMap))
+			{
+				DelayedDMAActivate(dmaID);
+			}
+		}
+	}
+
+	MASQ_INLINE void OnDMAActivated(ID dmaID)
+	{
+		auto& dmaState = pGBA_instance->GBA_state.dma;
+
+		if (dmaState.runnableSet == RESET)
+		{
+			// First DMA to activate
+			dmaState.currentlyActiveDMA = (DMA)dmaID;
+		}
+		else if (dmaID < dmaState.currentlyActiveDMA)
+		{
+			// Higher priority DMA - preempt
+			dmaState.currentlyActiveDMA = (DMA)dmaID;
+			dmaState.shouldReenterTransferLoop = YES;
+		}
+
+		SETBIT(dmaState.runnableSet, dmaID);
+	}
+
+	MASQ_INLINE void SelectNextDMA()
+	{
+		auto& dmaState = pGBA_instance->GBA_state.dma;
+
+		dmaState.currentlyActiveDMA = DMA::NO_DMA;
+
+		for (ID dmaID = DMA::DMA0; dmaID < DMA::TOTAL_DMA; dmaID++)
+		{
+			if (GETBIT(dmaID, dmaState.runnableSet) == SET)
+			{
+				dmaState.currentlyActiveDMA = (DMA)dmaID;
+				BREAK;
+			}
+		}
+	}
+
+	MASQ_INLINE FLAG IsAnyDMARunning()
+	{
+		RETURN(pGBA_instance->GBA_state.dma.runnableSet != RESET);
+	}
+
+	MASQ_INLINE void RunDMAChannel()
+	{
+		auto& dmaState = pGBA_instance->GBA_state.dma;
+		ID activeDMA = dmaState.currentlyActiveDMA;
+
+		if (activeDMA >= DMA::TOTAL_DMA)
+		{
+			RETURN;
+		}
+
+		auto& cache = dmaState.cache[activeDMA];
+		mDMAnCNT_HHalfWord_t* CNTH = getDMACNTHRegister((DMA)activeDMA);
+
+		SBYTE srcModifier = sourceModifierLUT[CNTH->mDMAnCNT_HFields.DMA_TRANSFER_TYPE][CNTH->mDMAnCNT_HFields.SRC_ADDR_CTRL];
+		SBYTE dstModifier = destinationModifierLUT[CNTH->mDMAnCNT_HFields.DMA_TRANSFER_TYPE][CNTH->mDMAnCNT_HFields.DEST_ADDR_CTRL];
+
+		if (cache.isFIFODMA == YES)
+		{
+			dstModifier = ZERO;
+		}
+
+		cache.didAccessRom = NO;
+
+		// Handles the loop for one DMA ID
+		while (cache.count < cache.target)
+		{
+			// Reason for calling this here : https://discord.com/channels/465585922579103744/465586361731121162/959447055967879218
+			if (dmaState.shouldReenterTransferLoop == YES) MASQ_UNLIKELY
+			{
+				dmaState.shouldReenterTransferLoop = NO;
+			// Returning from here, goes back to loop which handles all DMA IDs and based on priority, next DMA ID (or the same one during 1 -> 1) is scheduled
+			RETURN;
+			}
+
+			MEMORY_ACCESS_TYPE srcType = MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE;
+			MEMORY_ACCESS_TYPE dstType = MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE;
+
+			// Sequential enforcing is done only when transaction starts from ROM and not when source / dest addr becomes ROM addrs mid DMA as part of DMA transfer
+			// Refer https://discord.com/channels/465585922579103744/465586361731121162/757690707199656079
+			if (cache.didAccessRom == NO)
+			{
+				if (cache.source >= GAMEPAK_ROM_WS0_START_ADDRESS)
+				{
+					srcType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
+					cache.didAccessRom = YES;
+				}
+				else if (cache.destination >= GAMEPAK_ROM_WS0_START_ADDRESS)
+				{
+					dstType = MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE;
+					cache.didAccessRom = YES;
+				}
+			}
+
+			if (cache.chunkSize == DMA_SIZE::HALFWORD_PER_TRANSFER)
+			{
+				GBA_HALFWORD data16 = RESET;
+
+				if (cache.source >= EXT_WORK_RAM_START_ADDRESS) MASQ_LIKELY
+				{
+					data16 = readRawMemory<GBA_HALFWORD>(cache.source, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::DMA, srcType);
+
+				// This separate per channel latch is needed to pass the suite's DMA0 R+0x10 tests
+				cache.bus = (data16 << SIXTEEN) | data16;
+
+				// for openbus, independent of channel if last transaction was a DMA (any DMA)
+				dmaState.latchedData = cache.bus;
+				}
+				else
+				{
+					// Refer https://discord.com/channels/465585922579103744/465586361731121162/757700928202735626 for reads < 0x02000000 
+					data16 = (cache.destination & TWO) ? (GBA_HALFWORD)(cache.bus >> SIXTEEN) : (GBA_HALFWORD)(cache.bus);
+					cpuTick(TICK_TYPE::DMA_TICK);
+				}
+
+				writeRawMemory<GBA_HALFWORD>(cache.destination, data16, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::DMA, dstType);
+
+				//LOG("Tick: %d; Access src: %d; Access dest: %d; DMA: %d; HW : src : %d; dst : %d; data : %d"
+				//	, pGBA_instance->GBA_state.emulatorStatus.debugger.counter
+				//	, (srcType == MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE)
+				//	, (dstType == MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE)
+				//	, activeDMA
+				//	, cache.source
+				//	, cache.destination
+				//	, data16);
+				//++pGBA_instance->GBA_state.emulatorStatus.debugger.counter;
+			}
+			else
+			{
+				if (cache.source >= EXT_WORK_RAM_START_ADDRESS) MASQ_LIKELY
+				{
+					// This separate per channel latch is needed to pass the suite's DMA0 R+0x10 tests
+					cache.bus = readRawMemory<GBA_WORD>(cache.source, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::DMA, srcType);
+
+				// for openbus, independent of channel if last transaction was a DMA (any DMA)
+				dmaState.latchedData = cache.bus;
+				}
+				else
+				{
+					// Refer https://discord.com/channels/465585922579103744/465586361731121162/757700928202735626 for reads < 0x02000000 
+					cpuTick(TICK_TYPE::DMA_TICK);
+				}
+
+				writeRawMemory<GBA_WORD>(cache.destination, cache.bus, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::DMA, dstType);
+
+				//LOG("Tick: %d; Access src: %d; Access dest: %d; DMA: %d; W : src : %d; dst : %d; data : %d"
+				//	, pGBA_instance->GBA_state.emulatorStatus.debugger.counter
+				//	, (srcType == MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE)
+				//	, (dstType == MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE)
+				//	, activeDMA
+				//	, cache.source
+				//	, cache.destination
+				//	, cache.bus);
+				//++pGBA_instance->GBA_state.emulatorStatus.debugger.counter;
+			}
+
+			cache.source += srcModifier;
+			cache.destination += dstModifier;
+			cache.length--;
+			cache.count++;
+
+			//LOG("Tick: %d; DMA: %d; src_addr : %d; dst_addr : %d"
+			//	, pGBA_instance->GBA_state.emulatorStatus.debugger.counter
+			//	, activeDMA
+			//	, cache.source
+			//	, cache.destination);
+			//++pGBA_instance->GBA_state.emulatorStatus.debugger.counter;
+		}
+
+		// Completed
+		UNSETBIT(dmaState.runnableSet, activeDMA);
+		cache.count = ZERO;
+
+		if (CNTH->mDMAnCNT_HFields.WORD_COUNT_END_IRQ == SET)
+		{
+			requestInterrupts((GBA_INTERRUPT)(activeDMA + TO_UINT(GBA_INTERRUPT::IRQ_DMA0)));
+		}
+
+		if (CNTH->mDMAnCNT_HFields.DMA_REPEAT == SET && CNTH->mDMAnCNT_HFields.DMA_START_TIMING != DMA_TIMING::IMMEDIATE)
+		{
+			if (CNTH->mDMAnCNT_HFields.DEST_ADDR_CTRL == THREE)
+			{
+				cache.destination = getDMADADRegister((DMA)activeDMA);
+			}
+
+			if (cache.isFIFODMA == YES)
+			{
+				cache.length = FOUR;
+			}
+			else
+			{
+				cache.length = getDMACNTLRegister((DMA)activeDMA) & 0xFFFF;
+				if (cache.length == ZERO)
+				{
+					cache.length = (activeDMA == DMA::DMA3) ? 0x10000 : 0x4000;
+				}
+			}
+
+			cache.target = cache.length;
+			SETBIT(pGBA_instance->GBA_state.dma.trigCache[CNTH->mDMAnCNT_HFields.DMA_START_TIMING].dmaIdMap, activeDMA);
+		}
+		else
+		{
+			CNTH->mDMAnCNT_HFields.DMA_EN = RESET;
+			cache.currentState = NO;
+
+			// Remove from all trigger maps
+			for (int timing = DMA_TIMING::IMMEDIATE; timing < DMA_TIMING::TOTAL_DMA_TIMING; timing++)
+			{
+				UNSETBIT(pGBA_instance->GBA_state.dma.trigCache[timing].dmaIdMap, activeDMA);
+			}
+		}
+
+		SelectNextDMA();
+	}
 
 	void processDMA();
 
-	void RunDMAChannel();
-
 private:
+
+OPT_SPEED
 
 	MASQ_INLINE void tickChannel(AUDIO_CHANNELS channel, INC64 tCycles)
 	{
@@ -6545,11 +7173,15 @@ private:
 		}
 	}
 
+OPT_DEFAULT
+
 	void processAPU(INC64 apuCycles);
 
 	void playTheAudioFrame();
 
 private:
+
+OPT_SPEED
 
 	// ============================================
 	// PIXEL AND WINDOW OPERATIONS
@@ -7168,8 +7800,16 @@ private:
 
 	MASQ_INLINE void SET_INITIAL_OBJ_MODE()
 	{
+		// Read OAM Attr0 (first object) via memory API
+		uint16_t attr0 = readRawMemoryInternal<uint16_t>(
+			OAM_START_ADDRESS + 0,   // object 0, attr0
+			MEMORY_ACCESS_WIDTH::SIXTEEN_BIT,
+			MEMORY_ACCESS_SOURCE::PPU,
+			MEMORY_ACCESS_TYPE::AUTOMATIC
+		);
 
-		if (pGBA_memory->mGBAMemoryMap.mOamAttributes.mOamAttribute[ZERO].mOamAttr01Word.mOamAttr0HalfWord.mOamAttr0Fields.ROTATE_SCALE_FLAG == SET)
+		// Extract ROTATE_SCALE_FLAG (bit 8)
+		if (attr0 & (1 << 8))
 		{
 			pGBA_display->currentObjectIsAffine = OBJECT_TYPE::OBJECT_IS_AFFINE;
 		}
@@ -7177,7 +7817,6 @@ private:
 		{
 			pGBA_display->currentObjectIsAffine = OBJECT_TYPE::OBJECT_IS_NOT_AFFINE;
 		}
-
 	}
 
 	MASQ_INLINE FLAG OBJ_A01_OBJ_CYCLE(ID oamID)
@@ -11359,6 +11998,8 @@ private:
 
 	void displayCompleteScreen();
 
+OPT_DEFAULT
+
 private:
 
 	MASQ_INLINE void processSIO(INC64 sioCycles)
@@ -11452,13 +12093,27 @@ private:
 
 		auto& flash = pGBA_instance->GBA_state.emulatorStatus.backup.flash;
 		const ID currentMemoryBank = (flash.currentMemoryBank == BACKUP_FLASH_MEMORY_BANK::BANK1) ? ONE : ZERO;
+
+		// KEEP direct pointer (DO NOT REMOVE)
 		auto* flashMem = pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[currentMemoryBank];
 
 		const BACKUP_FLASH_FSM state = flash.flashFsmState;
 
+		// Helper lambda for READ via API
+		auto READ_FLASH = [&](uint32_t addr) -> uint8_t
+			{
+				RETURN readRawMemoryInternal<uint8_t>(
+					addr,
+					MEMORY_ACCESS_WIDTH::EIGHT_BIT,
+					MEMORY_ACCESS_SOURCE::HOST,
+					MEMORY_ACCESS_TYPE::AUTOMATIC,
+					YES   // IMPORTANT: LOCK = YES (avoid recursion / DMA side effects)
+				);
+			};
+
 		if (state == BACKUP_FLASH_FSM::STATE0) MASQ_LIKELY
 		{
-			if (flashMem[FLASH_ACCESS_MEMORY2 - GAMEPAK_SRAM_START_ADDRESS] == TO_UINT8(BACKUP_FLASH_CMDS::CMD_1)) MASQ_UNLIKELY
+			if (READ_FLASH(FLASH_ACCESS_MEMORY2) == TO_UINT8(BACKUP_FLASH_CMDS::CMD_1)) MASQ_UNLIKELY
 			{
 				flash.flashFsmState = BACKUP_FLASH_FSM::STATE1;
 				flashMem[FLASH_ACCESS_MEMORY2 - GAMEPAK_SRAM_START_ADDRESS] = RESET;
@@ -11466,7 +12121,7 @@ private:
 		}
 		else if (state == BACKUP_FLASH_FSM::STATE1) MASQ_UNLIKELY
 		{
-			if (flashMem[FLASH_ACCESS_MEMORY3 - GAMEPAK_SRAM_START_ADDRESS] == TO_UINT8(BACKUP_FLASH_CMDS::CMD_2)) MASQ_UNLIKELY
+			if (READ_FLASH(FLASH_ACCESS_MEMORY3) == TO_UINT8(BACKUP_FLASH_CMDS::CMD_2)) MASQ_UNLIKELY
 			{
 				flash.flashFsmState = BACKUP_FLASH_FSM::STATE2;
 				flashMem[FLASH_ACCESS_MEMORY3 - GAMEPAK_SRAM_START_ADDRESS] = RESET;
@@ -11474,7 +12129,6 @@ private:
 		}
 		else if (state == BACKUP_FLASH_FSM::STATE2) MASQ_UNLIKELY
 		{
-			// Handle 4KB erase
 			if (flash.previousFlashCommand == BACKUP_FLASH_CMDS::START_ERASE_CMD
 				&& flash.erase4kbPageNumber != INVALID) MASQ_UNLIKELY
 			{
@@ -11493,14 +12147,14 @@ private:
 			else
 			{
 				const BACKUP_FLASH_CMDS currentCmd =
-					(BACKUP_FLASH_CMDS)flashMem[FLASH_ACCESS_MEMORY2 - GAMEPAK_SRAM_START_ADDRESS];
+					(BACKUP_FLASH_CMDS)READ_FLASH(FLASH_ACCESS_MEMORY2);
 
 				flashMem[FLASH_ACCESS_MEMORY2 - GAMEPAK_SRAM_START_ADDRESS] = RESET;
 				flash.currentFlashCommand = currentCmd;
 
 				if (currentCmd == BACKUP_FLASH_CMDS::NO_OPERATION) MASQ_LIKELY
 				{
-					// Most common case - do nothing
+					// do nothing
 				}
 				else if (currentCmd == BACKUP_FLASH_CMDS::ENTER_CHIP_INDENTIFICATION_MODE) MASQ_UNLIKELY
 				{
@@ -11513,12 +12167,12 @@ private:
 
 						if (backupType == BACKUP_TYPE::FLASH64K)
 						{
-							flashMem[ZERO] = 0x32;  // Panasonic
+							flashMem[ZERO] = 0x32;
 							flashMem[ONE] = 0x1B;
 						}
 						else
 						{
-							flashMem[ZERO] = 0x62;  // Sanyo
+							flashMem[ZERO] = 0x62;
 							flashMem[ONE] = 0x13;
 						}
 					}

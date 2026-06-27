@@ -19,14 +19,14 @@
 static const uint32_t CPU_CYCLES_PER_FRAME = 16666 * TWO;	// 2 MHz
 
 static std::string _JSON_LOCATION;
-static boost::property_tree::ptree testCase;
+static MasqConfig_t testCase;
 
 static uint32_t spaceInvaders_texture;
 static uint32_t matrix_texture;
 static uint32_t matrix[16] = { 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0x000000FF, 0x000000FF, 0x000000FF, 0x000000FF };
 #pragma endregion SPACEINVADERS_SPECIFIC_DECLARATIONS
 
-spaceInvaders_t::spaceInvaders_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, boost::property_tree::ptree& config)
+spaceInvaders_t::spaceInvaders_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config)
 {
 	isBiosEnabled = NO;
 	INC8 indexToCheck = RESET;
@@ -86,7 +86,7 @@ spaceInvaders_t::spaceInvaders_t(int nFiles, std::array<std::string, MAX_NUMBER_
 	}
 }
 
-void spaceInvaders_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void* network)
+void spaceInvaders_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void* input, void* network)
 {
 	INC8 indexToCheck = RESET;
 
@@ -188,52 +188,88 @@ FLAG spaceInvaders_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 	bool vblank = false;
 
 #if (ENABLE_I8080_SST == YES)
-#define SST_DEBUG_PRINT (NO)
-	COUNTER32 opcode = ZERO;
-	while (FOREVER)
+	if (ROM_TYPE == ROM::TEST_SST) MASQ_UNLIKELY
 	{
-		if (opcode > 0xFF)
+#define SST_DEBUG_PRINT (NO)
+		COUNTER32 opcode = ZERO;
+
+		while (FOREVER)
 		{
-			INFO("Completed Running all Tom Harte i8080 (v1) tests");
-			BREAK;
-		}
+			if (opcode > 0xFF)
+			{
+				INFO("Completed Running all Tom Harte i8080 (v1) tests");
+				BREAK;
+			}
 
-		// Get the input
-		std::string testCaseName = std::format("{:02x}", opcode);
-		testCaseName = _JSON_LOCATION + "\\" + testCaseName + ".json";
+			// --------------------------------------------------------
+			// Build file path
+			// --------------------------------------------------------
+			std::string testCaseName = std::format("{:02x}", opcode);
+			std::filesystem::path fullPath = std::filesystem::path(_JSON_LOCATION) / (testCaseName + ".json");
 
-		LOG_NEW_LINE;
-		INFO("Running : %s", testCaseName.c_str());
-		try
-		{
-			boost::property_tree::read_json(testCaseName, testCase);
-		}
-		catch (std::exception& ex)
-		{
-			std::cout << ex.what() << std::endl;
-			RETURN false;
-		}
+			LOG_NEW_LINE;
+			INFO("Running : %s", fullPath.string().c_str());
 
-		// Test the CPU!
+			// --------------------------------------------------------
+			// Read entire file into string, then parse with RapidJSON
+			// --------------------------------------------------------
+			{
+				std::ifstream ifs(fullPath);
+				if (!ifs.is_open())
+				{
+					WARN("Failed to open %s", fullPath.string().c_str());
+					goto next_opcode_8080;
+				}
 
-		// Itterate over each test case in the JSON array
-		for (const auto& item : testCase)
-		{
-			auto quitThisRun = NO;
+				std::string jsonStr((std::istreambuf_iterator<char>(ifs)),
+					std::istreambuf_iterator<char>());
+				ifs.close();
 
-			// Accessing top-level fields
-			std::string name = item.second.get<std::string>("name");
+				rapidjson::Document testCase;
+				testCase.Parse(jsonStr.c_str());
+
+				if (testCase.HasParseError())
+				{
+					WARN("Failed to parse %s: error code %u at offset %zu",
+						fullPath.string().c_str(),
+						(unsigned)testCase.GetParseError(),
+						testCase.GetErrorOffset());
+					goto next_opcode_8080;
+				}
+
+				if (!testCase.IsArray())
+				{
+					WARN("%s does not contain a JSON array", fullPath.string().c_str());
+					goto next_opcode_8080;
+				}
+
+				// --------------------------------------------------------
+				// Iterate each test case in the JSON array
+				// --------------------------------------------------------
+				for (rapidjson::SizeType itemIdx = 0; itemIdx < testCase.Size(); ++itemIdx)
+				{
+					const rapidjson::Value& item = testCase[itemIdx];
+					FLAG quitThisRun = NO;
+
+					// ================= NAME =================
+					std::string name = (item.HasMember("name") && item["name"].IsString())
+						? item["name"].GetString() : "";
+
 #if (SST_DEBUG_PRINT == YES)
-			std::cout << "Name: " << name << std::endl;
+					std::cout << "Name: " << name << std::endl;
 #endif
 
-			CPUTODO("Implement once the tests are available")
+					CPUTODO("Implement once the tests are available")
+				}
+			}
+
+		next_opcode_8080:
+			++opcode;
 		}
-
-		++opcode;
 	}
+	else
 #endif
-	if (ROM_TYPE == ROM::TEST_ROM_COM)
+	if (ROM_TYPE == ROM::TEST_ROM_COM) MASQ_UNLIKELY
 	{
 		LOG("Starting the test");
 		pSi_registers->pc = 0x0100;

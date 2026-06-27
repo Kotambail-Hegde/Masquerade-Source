@@ -9,6 +9,6 @@ class ota_t
 public:
 	ota_t();
 	~ota_t();
-	bool checkForUpdates(boost::property_tree::ptree& pt);
-	bool upgrade(boost::property_tree::ptree& pt);
+	bool checkForUpdates(MasqConfig_t& pt);
+	bool upgrade(MasqConfig_t& pt);
 };

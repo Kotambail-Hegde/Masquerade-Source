@@ -20,101 +20,101 @@
 #define MBC_SIMPLE_MODE									(false)
 #define MBC_ADVANCED_MODE								(true)
 
-#define ROM_00_START_ADDRESS							0x0000
-#define DMG_BIOS_START_ADDRESS							0x0000
-#define DMG_BIOS_END_ADDRESS							0x0100
-#define CGB_BIOS_START_ADDRESS_PART1					0x0000
-#define CGB_BIOS_END_ADDRESS_PART1						0x0100
-#define CGB_BIOS_START_ADDRESS_PART2					0x0200
-#define CGB_BIOS_END_ADDRESS_PART2						0x0900
-#define ROM_00_END_ADDRESS								0x3FFF
-#define ROM_NN_START_ADDRESS							(ROM_00_END_ADDRESS + ONE)
-#define ROM_NN_END_ADDRESS								0x7FFF
-#define VRAM_START_ADDRESS								(ROM_NN_END_ADDRESS + ONE)
-#define TILE_DATA_START_ADDRESS							VRAM_START_ADDRESS
-#define TILE_DATA_END_ADDRESS							0x97FF
-#define TILE_MAP_START_ADDRESS							(TILE_DATA_END_ADDRESS + ONE)
-#define TILE_MAP_END_ADDRESS							0x9FFF
-#define VRAM_END_ADDRESS								TILE_MAP_END_ADDRESS
-#define EXTERNAL_RAM_START_ADDRESS						(VRAM_END_ADDRESS + ONE)
-#define EXTERNAL_RAM_END_ADDRESS						0xBFFF
-#define WORK_RAM_00_START_ADDRESS						(EXTERNAL_RAM_END_ADDRESS + ONE)
-#define WORK_RAM_00_END_ADDRESS							0xCFFF
-#define WORK_RAM_01_START_ADDRESS						(WORK_RAM_00_END_ADDRESS + ONE)
-#define WORK_RAM_01_END_ADDRESS							0xDFFF
-#define ECHO_RAM_START_ADDRESS							(WORK_RAM_01_END_ADDRESS + ONE)
-#define ECHO_RAM_END_ADDRESS							0xFDFF
-#define OAM_START_ADDRESS								(ECHO_RAM_END_ADDRESS + ONE)
-#define OAM_END_ADDRESS									0xFE9F
-#define RESTRICTED_MEMORY_START_ADDRESS					(OAM_END_ADDRESS + ONE)
-#define RESTRICTED_MEMORY_END_ADDRESS					0xFEFF
-#define GB_GBC_IO_MEMORY_START_ADDRESS					0xFF00
-#define P1_JOYP_ADDRESS									GB_GBC_IO_MEMORY_START_ADDRESS
-#define SB_ADDRESS										0xFF01
-#define SC_ADDRESS										0xFF02
-#define DIV_ADDRESS_LSB									0xFF03
-#define DIV_ADDRESS_MSB									0xFF04
-#define TIMA_ADDRESS									0xFF05
-#define TMA_ADDRESS										0xFF06
-#define TAC_ADDRESS										0xFF07
-#define IF_ADDRESS										0xFF0F
-#define NR10_ADDRESS									0xFF10
-#define NR11_ADDRESS									0xFF11
-#define NR12_ADDRESS									0xFF12
-#define NR13_ADDRESS									0xFF13
-#define NR14_ADDRESS									0xFF14
-#define NR21_ADDRESS									0xFF16
-#define NR22_ADDRESS									0xFF17
-#define NR23_ADDRESS									0xFF18
-#define NR24_ADDRESS									0xFF19
-#define NR30_ADDRESS									0xFF1A
-#define NR31_ADDRESS									0xFF1B
-#define NR32_ADDRESS									0xFF1C
-#define NR33_ADDRESS									0xFF1D
-#define NR34_ADDRESS									0xFF1E
-#define NR41_ADDRESS									0xFF20
-#define NR42_ADDRESS									0xFF21
-#define NR43_ADDRESS									0xFF22
-#define NR44_ADDRESS									0xFF23
-#define NR50_ADDRESS									0xFF24
-#define NR51_ADDRESS									0xFF25
-#define NR52_ADDRESS									0xFF26
-#define WAVE_RAM_START_ADDRESS							0xFF30
-#define WAVE_RAM_END_ADDRESS							0xFF3F
-#define LCDC_ADDRESS									0xFF40
-#define STAT_ADDRESS									0xFF41
-#define SCY_ADDRESS										0xFF42
-#define SCX_ADDRESS										0xFF43
-#define LY_ADDRESS										0xFF44
-#define LYC_ADDRESS										0xFF45
-#define DMA_ADDRESS										0xFF46
-#define BGP_ADDRESS										0xFF47
-#define OBP0_ADDRESS									0xFF48
-#define OBP1_ADDRESS									0xFF49
-#define WY_ADDRESS										0xFF4A
-#define WX_ADDRESS										0xFF4B
-#define KEY0_ADDRESS									0xFF4C
-#define KEY1_ADDRESS									0xFF4D
-#define VRAM_BANK_SWITCH								0xFF4F
-#define BANK_ADDRESS									0xFF50
-#define HDMA1_SOURCE_HIGH_REGISTER_ADDRESS				0xFF51
-#define HDMA2_SOURCE_LOW_REGISTER_ADDRESS				0xFF52
-#define HDMA3_DEST_HIGH_REGISTER_ADDRESS				0xFF53
-#define HDMA4_DEST_LOW_REGISTER_ADDRESS					0xFF54
-#define HDMA5_CONFIG_REGISTER_ADDRESS					0xFF55
-#define IR_PORT_ADDRESS									0xFF56
-#define BCPS_ADDRESS									0xFF68
-#define BCPD_ADDRESS									0xFF69
-#define OCPS_ADDRESS									0xFF6A
-#define OCPD_ADDRESS									0xFF6B
-#define OBJECT_PRIORITY_MODE							0xFF6C
-#define WRAM_BANK_SWITCH								0xFF70
-#define PCM12_ADDRESS									0xFF76
-#define PCM34_ADDRESS									0xFF77
-#define GB_GBC_IO_MEMORY_END_ADDRESS					0xFF7F
-#define HIRAM_START_ADDRESS								0xFF80
-#define HIRAM_END_ADDRESS								0xFFFE
-#define IE_ADDRESS										(HIRAM_END_ADDRESS + ONE)
+#define ROM_00_START_ADDRESS                            0x0000  // 0x0000
+#define DMG_BIOS_START_ADDRESS                          0x0000  // 0x0000
+#define DMG_BIOS_END_ADDRESS                            0x0100  // 0x0100
+#define CGB_BIOS_START_ADDRESS_PART1                    0x0000  // 0x0000
+#define CGB_BIOS_END_ADDRESS_PART1                      0x0100  // 0x0100
+#define CGB_BIOS_START_ADDRESS_PART2                    0x0200  // 0x0200
+#define CGB_BIOS_END_ADDRESS_PART2                      0x0900  // 0x0900
+#define ROM_00_END_ADDRESS                              0x3FFF  // 0x3FFF
+#define ROM_NN_START_ADDRESS                            (ROM_00_END_ADDRESS + ONE)                // 0x4000
+#define ROM_NN_END_ADDRESS                              0x7FFF  // 0x7FFF
+#define VRAM_START_ADDRESS                              (ROM_NN_END_ADDRESS + ONE)                // 0x8000
+#define TILE_DATA_START_ADDRESS                         VRAM_START_ADDRESS                        // 0x8000
+#define TILE_DATA_END_ADDRESS                           0x97FF  // 0x97FF
+#define TILE_MAP_START_ADDRESS                          (TILE_DATA_END_ADDRESS + ONE)             // 0x9800
+#define TILE_MAP_END_ADDRESS                            0x9FFF  // 0x9FFF
+#define VRAM_END_ADDRESS                                TILE_MAP_END_ADDRESS                      // 0x9FFF
+#define EXTERNAL_RAM_START_ADDRESS                      (VRAM_END_ADDRESS + ONE)                  // 0xA000
+#define EXTERNAL_RAM_END_ADDRESS                        0xBFFF  // 0xBFFF
+#define WORK_RAM_00_START_ADDRESS                       (EXTERNAL_RAM_END_ADDRESS + ONE)          // 0xC000
+#define WORK_RAM_00_END_ADDRESS                         0xCFFF  // 0xCFFF
+#define WORK_RAM_01_START_ADDRESS                       (WORK_RAM_00_END_ADDRESS + ONE)           // 0xD000
+#define WORK_RAM_01_END_ADDRESS                         0xDFFF  // 0xDFFF
+#define ECHO_RAM_START_ADDRESS                          (WORK_RAM_01_END_ADDRESS + ONE)           // 0xE000
+#define ECHO_RAM_END_ADDRESS                            0xFDFF  // 0xFDFF
+#define OAM_START_ADDRESS                               (ECHO_RAM_END_ADDRESS + ONE)              // 0xFE00
+#define OAM_END_ADDRESS                                 0xFE9F  // 0xFE9F
+#define RESTRICTED_MEMORY_START_ADDRESS                 (OAM_END_ADDRESS + ONE)                   // 0xFEA0
+#define RESTRICTED_MEMORY_END_ADDRESS                   0xFEFF  // 0xFEFF
+#define GB_GBC_IO_MEMORY_START_ADDRESS                  0xFF00  // 0xFF00
+#define P1_JOYP_ADDRESS                                 GB_GBC_IO_MEMORY_START_ADDRESS            // 0xFF00
+#define SB_ADDRESS                                      0xFF01  // 0xFF01
+#define SC_ADDRESS                                      0xFF02  // 0xFF02
+#define DIV_ADDRESS_LSB                                 0xFF03  // 0xFF03
+#define DIV_ADDRESS_MSB                                 0xFF04  // 0xFF04
+#define TIMA_ADDRESS                                    0xFF05  // 0xFF05
+#define TMA_ADDRESS                                     0xFF06  // 0xFF06
+#define TAC_ADDRESS                                     0xFF07  // 0xFF07
+#define IF_ADDRESS                                      0xFF0F  // 0xFF0F
+#define NR10_ADDRESS                                    0xFF10  // 0xFF10
+#define NR11_ADDRESS                                    0xFF11  // 0xFF11
+#define NR12_ADDRESS                                    0xFF12  // 0xFF12
+#define NR13_ADDRESS                                    0xFF13  // 0xFF13
+#define NR14_ADDRESS                                    0xFF14  // 0xFF14
+#define NR21_ADDRESS                                    0xFF16  // 0xFF16
+#define NR22_ADDRESS                                    0xFF17  // 0xFF17
+#define NR23_ADDRESS                                    0xFF18  // 0xFF18
+#define NR24_ADDRESS                                    0xFF19  // 0xFF19
+#define NR30_ADDRESS                                    0xFF1A  // 0xFF1A
+#define NR31_ADDRESS                                    0xFF1B  // 0xFF1B
+#define NR32_ADDRESS                                    0xFF1C  // 0xFF1C
+#define NR33_ADDRESS                                    0xFF1D  // 0xFF1D
+#define NR34_ADDRESS                                    0xFF1E  // 0xFF1E
+#define NR41_ADDRESS                                    0xFF20  // 0xFF20
+#define NR42_ADDRESS                                    0xFF21  // 0xFF21
+#define NR43_ADDRESS                                    0xFF22  // 0xFF22
+#define NR44_ADDRESS                                    0xFF23  // 0xFF23
+#define NR50_ADDRESS                                    0xFF24  // 0xFF24
+#define NR51_ADDRESS                                    0xFF25  // 0xFF25
+#define NR52_ADDRESS                                    0xFF26  // 0xFF26
+#define WAVE_RAM_START_ADDRESS                          0xFF30  // 0xFF30
+#define WAVE_RAM_END_ADDRESS                            0xFF3F  // 0xFF3F
+#define LCDC_ADDRESS                                    0xFF40  // 0xFF40
+#define STAT_ADDRESS                                    0xFF41  // 0xFF41
+#define SCY_ADDRESS                                     0xFF42  // 0xFF42
+#define SCX_ADDRESS                                     0xFF43  // 0xFF43
+#define LY_ADDRESS                                      0xFF44  // 0xFF44
+#define LYC_ADDRESS                                     0xFF45  // 0xFF45
+#define DMA_ADDRESS                                     0xFF46  // 0xFF46
+#define BGP_ADDRESS                                     0xFF47  // 0xFF47
+#define OBP0_ADDRESS                                    0xFF48  // 0xFF48
+#define OBP1_ADDRESS                                    0xFF49  // 0xFF49
+#define WY_ADDRESS                                      0xFF4A  // 0xFF4A
+#define WX_ADDRESS                                      0xFF4B  // 0xFF4B
+#define KEY0_ADDRESS                                    0xFF4C  // 0xFF4C
+#define KEY1_ADDRESS                                    0xFF4D  // 0xFF4D
+#define VRAM_BANK_SWITCH                                0xFF4F  // 0xFF4F
+#define BANK_ADDRESS                                    0xFF50  // 0xFF50
+#define HDMA1_SOURCE_HIGH_REGISTER_ADDRESS              0xFF51  // 0xFF51
+#define HDMA2_SOURCE_LOW_REGISTER_ADDRESS               0xFF52  // 0xFF52
+#define HDMA3_DEST_HIGH_REGISTER_ADDRESS                0xFF53  // 0xFF53
+#define HDMA4_DEST_LOW_REGISTER_ADDRESS                 0xFF54  // 0xFF54
+#define HDMA5_CONFIG_REGISTER_ADDRESS                   0xFF55  // 0xFF55
+#define IR_PORT_ADDRESS                                 0xFF56  // 0xFF56
+#define BCPS_ADDRESS                                    0xFF68  // 0xFF68
+#define BCPD_ADDRESS                                    0xFF69  // 0xFF69
+#define OCPS_ADDRESS                                    0xFF6A  // 0xFF6A
+#define OCPD_ADDRESS                                    0xFF6B  // 0xFF6B
+#define OBJECT_PRIORITY_MODE                            0xFF6C  // 0xFF6C
+#define WRAM_BANK_SWITCH                                0xFF70  // 0xFF70
+#define PCM12_ADDRESS                                   0xFF76  // 0xFF76
+#define PCM34_ADDRESS                                   0xFF77  // 0xFF77
+#define GB_GBC_IO_MEMORY_END_ADDRESS                    0xFF7F  // 0xFF7F
+#define HIRAM_START_ADDRESS                             0xFF80  // 0xFF80
+#define HIRAM_END_ADDRESS                               0xFFFE  // 0xFFFE
+#define IE_ADDRESS                                      (HIRAM_END_ADDRESS + ONE)                 // 0xFFFF
 
 #define DMA_DELAY										TWO
 
@@ -178,7 +178,7 @@ static FLAG _FORCE_GB_FOR_GBC = NO;
 static FLAG _FORCE_GB_GFX_FOR_GBC = NO;
 static FLAG _FORCE_GBC_FOR_GB = NO;
 static std::string _JSON_LOCATION;
-static boost::property_tree::ptree testCase;
+static MasqConfig_t testCase;
 
 static uint32_t gameboy_texture;
 static uint32_t matrix_texture;
@@ -199,7 +199,7 @@ COUNTER32 OAM_STAT_TO_MODE_2_T_CYCLES = RESET;
 #pragma endregion GB_GBC_SPECIFIC_DECLARATIONS
 
 #pragma region INFRASTRUCTURE_DEFINITIONS
-GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, boost::property_tree::ptree& config, CheatEngine_t* ce)
+GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config, CheatEngine_t* ce)
 {
 	setEmulationID(EMULATION_ID::GB_GBC_ID);
 
@@ -247,7 +247,7 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 		}
 
 #ifndef __EMSCRIPTEN__
-		_SAVE_LOCATION = pt.get<std::string>("gb-gbc._save_location");
+		_SAVE_LOCATION = pt.get<std::string>("gb_gbc._save_location");
 #else
 		_SAVE_LOCATION = "assets/saves";
 #endif
@@ -255,15 +255,15 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 		// check if directory mentioned by "_SAVE_LOCATION" exists, if not we need to explicitly create it
 		ifNoDirectoryThenCreate(_SAVE_LOCATION);
 
-		_ENABLE_DMG_BIOS = to_bool(pt.get<std::string>("gb-gbc._use_dmg_bios", _ENABLE_DMG_BIOS ? "true" : "false"));
-		_ENABLE_CGB_BIOS = to_bool(pt.get<std::string>("gb-gbc._use_cgb_bios", _ENABLE_CGB_BIOS ? "true" : "false"));
-		_FORCE_GB_FOR_GBC = to_bool(pt.get<std::string>("gb-gbc._force_gb_for_gbc", _FORCE_GB_FOR_GBC ? "true" : "false"));
-		_FORCE_GB_GFX_FOR_GBC = to_bool(pt.get<std::string>("gb-gbc._force_gb_gfx_for_gbc", _FORCE_GB_GFX_FOR_GBC ? "true" : "false"));
-		_FORCE_GBC_FOR_GB = to_bool(pt.get<std::string>("gb-gbc._force_gbc_for_gb", _FORCE_GBC_FOR_GB ? "true" : "false"));
-		_ENABLE_AUDIO_HPF = to_bool(config.get<std::string>("gb-gbc._enable_audio_hpf", _ENABLE_AUDIO_HPF ? "true" : "false"));
-		_GB_GHOST_FACTOR = config.get<std::float_t>("gb-gbc._gb_ghosting", _GB_GHOST_FACTOR);
-		_GBC_GHOST_FACTOR = config.get<std::float_t>("gb-gbc._gbc_ghosting", _GBC_GHOST_FACTOR);
-		_ACCELEROMETER_SENSITIVITY = config.get<std::float_t>("gb-gbc._accelerometer_sensitivity", _ACCELEROMETER_SENSITIVITY);
+		_ENABLE_DMG_BIOS = to_bool(pt.get<std::string>("gb_gbc._use_dmg_bios", _ENABLE_DMG_BIOS ? "true" : "false"));
+		_ENABLE_CGB_BIOS = to_bool(pt.get<std::string>("gb_gbc._use_cgb_bios", _ENABLE_CGB_BIOS ? "true" : "false"));
+		_FORCE_GB_FOR_GBC = to_bool(pt.get<std::string>("gb_gbc._force_gb_for_gbc", _FORCE_GB_FOR_GBC ? "true" : "false"));
+		_FORCE_GB_GFX_FOR_GBC = to_bool(pt.get<std::string>("gb_gbc._force_gb_gfx_for_gbc", _FORCE_GB_GFX_FOR_GBC ? "true" : "false"));
+		_FORCE_GBC_FOR_GB = to_bool(pt.get<std::string>("gb_gbc._force_gbc_for_gb", _FORCE_GBC_FOR_GB ? "true" : "false"));
+		_ENABLE_AUDIO_HPF = to_bool(config.get<std::string>("gb_gbc._enable_audio_hpf", _ENABLE_AUDIO_HPF ? "true" : "false"));
+		_GB_GHOST_FACTOR = config.get<std::float_t>("gb_gbc._gb_ghosting", _GB_GHOST_FACTOR);
+		_GBC_GHOST_FACTOR = config.get<std::float_t>("gb_gbc._gbc_ghosting", _GBC_GHOST_FACTOR);
+		_ACCELEROMETER_SENSITIVITY = config.get<std::float_t>("gb_gbc._accelerometer_sensitivity", _ACCELEROMETER_SENSITIVITY);
 
 		if (ROM_TYPE == ROM::GAME_BOY && _FORCE_GBC_FOR_GB == YES)
 		{
@@ -294,7 +294,7 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 			INFO("Running in DMG mode");
 
 #ifndef __EMSCRIPTEN__
-			_BIOS_LOCATION = config.get<std::string>("gb-gbc._dmg_bios_location");
+			_BIOS_LOCATION = config.get<std::string>("gb_gbc._dmg_bios_location");
 #else
 			_BIOS_LOCATION = "assets/gb/bios/dmg_rom.bin";
 #endif
@@ -313,7 +313,7 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 			INFO("Running in CGB mode");
 
 #ifndef __EMSCRIPTEN__
-			_BIOS_LOCATION = config.get<std::string>("gb-gbc._cgb_bios_location");
+			_BIOS_LOCATION = config.get<std::string>("gb_gbc._cgb_bios_location");
 #else
 			_BIOS_LOCATION = "assets/gbc/bios/cgb_boot.bin";
 #endif
@@ -457,7 +457,7 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 	}
 }
 
-void GBc_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void* network)
+void GBc_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void* input, void* network)
 {
 	uint8_t indexToCheck = 0;
 
@@ -470,8 +470,14 @@ void GBc_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void*
 		if (!initializeEmulator())
 		{
 			FATAL("memory allocation failure");
+#ifndef __RPI_PICO__
 			throw std::runtime_error("memory allocation failure");
+#else	// !__RPI_PICO__
+			panic("memory allocation failure");
+#endif
 		}
+
+		pInputBackend = static_cast<IInputBackend*>(input);
 
 		loadRom(rom);
 
@@ -972,10 +978,12 @@ uint16_t GBc_t::getROMBankNumber()
 	RETURN((pGBc_emuStatus->currentROMBankNumber.raw) % (getNumberOfROMBanksUsed()));
 }
 
+#ifndef __RPI_PICO__
 void GBc_t::setROMBankNumberB(uint16_t romBankNumber)
 {
 	pGBc_emuStatus->currentROMBankNumberB = romBankNumber;
 }
+#endif // !__RPI_PICO__
 
 uint16_t GBc_t::getROMBankNumberB()
 {
@@ -1142,10 +1150,12 @@ uint8_t GBc_t::getRAMBankNumberB()
 	RETURN pGBc_emuStatus->currentRAMBankNumberB;
 }
 
+#ifndef __RPI_PICO__
 void GBc_t::setRAMBankNumberB(uint8_t ramBankNumber)
 {
 	pGBc_emuStatus->currentRAMBankNumberB = ramBankNumber;
 }
+#endif // !__RPI_PICO__
 
 uint8_t GBc_t::getNumberOfRAMBanksUsed()
 {
@@ -1525,6 +1535,7 @@ MASQ_INLINE void GBc_t::joypadTick()
 
 void GBc_t::serialTick()
 {
+#ifndef __RPI_PICO__
 	/*
 	*   Supported Rates
 	*   8192Hz		-	1KB/s	- Bit 1 cleared, Normal
@@ -1670,12 +1681,11 @@ void GBc_t::serialTick()
 			}
 		}
 	}
+#endif // !__RPI_PICO__
 }
 
 void GBc_t::rtcTick()
 {
-	pGBc_instance->GBc_state.emulatorStatus.ticks.rtcCounter++;
-
 	// Refer : https://gbdev.io/pandocs/MBC3.html?highlight=rtc#mbc3
 
 	if (isRTCAccessEnabled())
@@ -1687,6 +1697,8 @@ void GBc_t::rtcTick()
 			{
 				RETURN;
 			}
+
+			pGBc_instance->GBc_state.emulatorStatus.ticks.rtcCounter++;
 
 			// Ideally, RTC should tick at 32768 Hz, i.e. it should increment by 0.0078125 second for every 32768 clocks
 			// But our minimum resolution of RTC field is 1 second, i.e. the smallest unit that we can increment is by 1 second (fractional seconds is not possible)
@@ -1759,6 +1771,8 @@ void GBc_t::rtcTick()
 		}
 		else if (isHUC3())
 		{
+			pGBc_instance->GBc_state.emulatorStatus.ticks.rtcCounter++;
+
 			// Refer https://gbdev.gg8.se/forums/viewtopic.php?id=744
 			if (pGBc_instance->GBc_state.emulatorStatus.ticks.rtcCounter >= GB_GBC_REFERENCE_CLOCK_HZ)
 			{
@@ -2089,10 +2103,6 @@ void GBc_t::ppuTick()
 				// Initialize the below variable at the very first tick of the MODE_LCD_SEARCHING_OAM
 				if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == ONE)
 				{
-					// Clear the PPU mode specific STAT IRQ lines
-					pGBc_instance->GBc_state.emulatorStatus.STATInterruptSignal.STATInterruptSources.HBLANK_SIGNAL = LO;
-					pGBc_instance->GBc_state.emulatorStatus.STATInterruptSignal.STATInterruptSources.VBLANK_SIGNAL = LO;
-
 					/*
 					* As per section 8.11 of https://raw.githubusercontent.com/AntonioND/giibiiadvance/master/docs/TCAGBD.pdf
 					* STAT interrupt for line 0 happens in next M cycle when compared to lines 1 to 143
@@ -2166,6 +2176,10 @@ void GBc_t::ppuTick()
 
 				if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == ONE)
 				{
+					// Clear the PPU mode specific STAT IRQ lines
+					pGBc_instance->GBc_state.emulatorStatus.STATInterruptSignal.STATInterruptSources.HBLANK_SIGNAL = LO;
+					pGBc_instance->GBc_state.emulatorStatus.STATInterruptSignal.STATInterruptSources.VBLANK_SIGNAL = LO;
+
 					// Process LY == LYC
 					compareLYToLYC(pGBc_peripherals->LY);
 				}
@@ -2517,6 +2531,15 @@ void GBc_t::ppuTick()
 								pGBc_peripherals->STAT.lcdStatusFields.LYC_EQL_LY_FLAG = ZERO;
 								pGBc_instance->GBc_state.emulatorStatus.STATInterruptSignal.STATInterruptSources.LY_LYC_SIGNAL = LO;
 							}
+							
+							// If we need to blank a frame and LCD was just enabled
+							if (pGBc_emuStatus->freezeLCDOneFrame == YES) MASQ_UNLIKELY
+							{
+								freezeLCD();
+
+								// Clear blanking of LCD if needed here as this frame is done...
+								pGBc_emuStatus->freezeLCDOneFrame = CLEAR;
+							}
 						}
 						else
 						{
@@ -2558,8 +2581,17 @@ void GBc_t::ppuTick()
 		}
 		else
 		{
-			// Tick the lcd blank counter needed for gbc
-			++pGBc_instance->GBc_state.emulatorStatus.ticks.lcdBlankCounter;
+			// CGB special case needed for Bug's Life
+			if (pGBc_instance->GBc_state.emulatorStatus.ticks.lcdBlankCounter < LCD_V_BLANK)
+			{
+				// Tick the lcd blank counter needed for gbc
+				++pGBc_instance->GBc_state.emulatorStatus.ticks.lcdBlankCounter;
+
+				if ((ROM_TYPE == ROM::GAME_BOY_COLOR) && (pGBc_instance->GBc_state.emulatorStatus.ticks.lcdBlankCounter >= LCD_V_BLANK)) MASQ_UNLIKELY
+				{
+					freezeLCD();
+				}
+			}
 
 			pGBc_display->fakeBgFetcherRuns = ZERO;
 
@@ -3942,6 +3974,8 @@ float GBc_t::getDACOutput(AUDIO_CHANNELS channel)
 float GBc_t::finHPF(float sampleIn)
 {
 	float sampleOut = MUTE_AUDIO;
+
+#ifndef __RPI_PICO__
 	static float capacitor = MUTE_AUDIO;
 
 	if (_ENABLE_AUDIO_HPF == YES)
@@ -3965,6 +3999,9 @@ float GBc_t::finHPF(float sampleIn)
 	{
 		sampleOut = sampleIn;
 	}
+#else
+	sampleOut = sampleIn;
+#endif
 
 	RETURN sampleOut;
 }
@@ -3977,6 +4014,7 @@ void GBc_t::captureDownsampledAudioSamples()
 	{
 		pGBc_instance->GBc_state.audio.downSamplingRatioCounter -= ((uint32_t)(GB_GBC_REFERENCE_CLOCK_HZ / EMULATED_AUDIO_SAMPLING_RATE_FOR_GB_GBC));
 
+#ifndef __RPI_PICO__
 		GBC_AUDIO_SAMPLE_TYPE leftSample = MUTE_AUDIO;
 		GBC_AUDIO_SAMPLE_TYPE rightSample = MUTE_AUDIO;
 
@@ -4037,7 +4075,7 @@ void GBc_t::captureDownsampledAudioSamples()
 
 		if (pGBc_instance->GBc_state.audio.accumulatedTone >= AUDIO_BUFFER_SIZE_FOR_GB_GBC)
 		{
-			if (ImGui::IsKeyPressed(ImGuiKey_KeypadAdd) == YES)
+			if (pInputBackend->isPressed(EmuKey::Kp) == YES)
 			{
 				auto gain = getEmulationVolume();
 
@@ -4054,7 +4092,7 @@ void GBc_t::captureDownsampledAudioSamples()
 
 				setEmulationVolume(gain);
 			}
-			if (ImGui::IsKeyPressed(ImGuiKey_KeypadSubtract) == YES)
+			if (pInputBackend->isPressed(EmuKey::Kn) == YES)
 			{
 				auto gain = getEmulationVolume();
 
@@ -4089,6 +4127,7 @@ void GBc_t::captureDownsampledAudioSamples()
 			}
 
 		}
+#endif // !__RPI_PICO__
 	}
 
 	RETURN;
@@ -4127,6 +4166,22 @@ void GBc_t::OAMDMASTATModeGlitch()
 		RETURN;
 	}
 #endif
+}
+
+void GBc_t::freezeLCD()
+{
+	Pixel FROZEN;
+
+	if (ROM_TYPE == ROM::GAME_BOY_COLOR)
+	{
+		FROZEN = getColorFromColorIDForGBC(0x7FFF, pGBc_instance->GBc_state.gbc_palette == PALETTE_ID::PALETTE_2).COLOR;
+	}
+	else
+	{
+		FROZEN = paletteIDToColor.at(pGBc_instance->GBc_state.gb_palette).COLOR_000P.COLOR;
+	}
+
+	std::fill_n(pGBc_display->imGuiBuffer.imGuiBuffer1D, sizeof(pGBc_display->imGuiBuffer.imGuiBuffer1D), FROZEN);
 }
 
 void GBc_t::setPPULCDMode(LCD_MODES lcdMode)
@@ -4272,7 +4327,6 @@ void GBc_t::processLCDEnable()
 	{
 		pGBc_emuStatus->freezeLCDOneFrame = NO;
 	}
-
 	pGBc_instance->GBc_state.emulatorStatus.ticks.lcdBlankCounter = RESET;
 }
 
@@ -4324,6 +4378,7 @@ void GBc_t::processLCDDisable()
 
 	// Blank for 1 frame
 	pGBc_emuStatus->freezeLCDOneFrame = YES;
+	pGBc_instance->GBc_state.emulatorStatus.ticks.lcdBlankCounter = RESET;
 
 	setPPULCDMode(LCD_MODES::MODE_LCD_H_BLANK);
 }
@@ -6355,45 +6410,6 @@ void GBc_t::translateGFX(PALETTE_ID from, PALETTE_ID to, PALETTE_ID colorCorrect
 
 void GBc_t::displayCompleteScreen()
 {
-	// If we need to blank a frame and LCD was just enabled
-	if (pGBc_emuStatus->freezeLCDOneFrame == YES && isPPULCDEnabled() == YES) MASQ_UNLIKELY
-	{
-		auto freezeLCDStep = [&](Pixel color)
-			{
-				std::fill_n(pGBc_display->imGuiBuffer.imGuiBuffer1D, sizeof(pGBc_display->imGuiBuffer.imGuiBuffer1D), color);
-
-				// Clear the ghost accumulator when the LCD blanks so the frozen
-				// color does not bleed into the next game scene.
-				if (ghost_decay > 0.0f)
-				{
-					GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, ghost_fbo));
-					GL_CALL(glClearColor(
-						color.r / 255.0f,
-						color.g / 255.0f,
-						color.b / 255.0f,
-						1.0f
-					));
-					GL_CALL(glClear(GL_COLOR_BUFFER_BIT));
-					GL_CALL(glClearColor(0.0f, 0.0f, 0.0f, 1.0f)); // restore default
-					GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, 0));
-				}
-			};
-
-		if (ROM_TYPE == ROM::GAME_BOY_COLOR)
-		{
-			Pixel FROZEN = getColorFromColorIDForGBC(0x7FFF, pGBc_instance->GBc_state.gbc_palette == PALETTE_ID::PALETTE_2).COLOR;
-			freezeLCDStep(FROZEN);
-		}
-		else
-		{
-			Pixel FROZEN = paletteIDToColor.at(pGBc_instance->GBc_state.gb_palette).COLOR_000P.COLOR;
-			freezeLCDStep(FROZEN);
-		}
-
-		// Clear blanking of LCD if needed here as this frame is done...
-		pGBc_emuStatus->freezeLCDOneFrame = CLEAR;
-	}
-
 #if (GL_FIXED_FUNCTION_PIPELINE == YES) && !defined(IMGUI_IMPL_OPENGL_ES2) && !defined(IMGUI_IMPL_OPENGL_ES3)
 	glBindFramebuffer(GL_FRAMEBUFFER, frame_buffer);
 
@@ -6684,7 +6700,7 @@ void GBc_t::setEmulationVolume(float volume)
 {
 	pGBc_instance->GBc_state.audio.emulatorVolume = volume;
 	SDL_SetAudioDeviceGain(SDL_GetAudioStreamDevice(audioStream), volume);
-	pt.put("gb-gbc._volume", volume);
+	pt.put("gb_gbc._volume", volume);
 	boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, pt);
 }
 
@@ -6720,7 +6736,7 @@ void GBc_t::initializeAudio()
 
 	// Setup the volume for audio
 
-	pGBc_instance->GBc_state.audio.emulatorVolume = pt.get<std::float_t>("gb-gbc._volume");
+	pGBc_instance->GBc_state.audio.emulatorVolume = pt.get<std::float_t>("gb_gbc._volume");
 	SDL_SetAudioDeviceGain(SDL_GetAudioStreamDevice(audioStream), pGBc_instance->GBc_state.audio.emulatorVolume);
 }
 
@@ -6771,10 +6787,12 @@ FLAG GBc_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 		COUNTER32 opcode = ZERO;
 		COUNTER32 subopcode = ZERO;
 		FLAG cbMode = NO;
+
 		while (FOREVER)
 		{
 			if (opcode > 0xFF)
 			{
+				opcode = RESET;
 				INFO("Completed Running all Tom Harte sm83 (v1) tests");
 				PAUSE;
 			}
@@ -6804,309 +6822,355 @@ FLAG GBc_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 				}
 			}
 
-			// Get the input
+			// --------------------------------------------------------
+			// Build file path
+			// --------------------------------------------------------
 			std::string testCaseName = std::format("{:02x}", opcode);
+			std::filesystem::path fullPath;
+
 			if (cbMode == NO)
 			{
-				testCaseName = _JSON_LOCATION + "\\" + testCaseName + ".json";
-				//std::string testCaseName = _JSON_LOCATION + "\\" +  "test.json";
+				fullPath = std::filesystem::path(_JSON_LOCATION) / (testCaseName + ".json");
 			}
 			else
 			{
 				std::string subtestCaseName = std::format("{:02x}", subopcode);
-				testCaseName = _JSON_LOCATION + "\\" + testCaseName + " " + subtestCaseName + ".json";
-				//std::string testCaseName = _JSON_LOCATION + "\\" +  "test.json";
+				fullPath = std::filesystem::path(_JSON_LOCATION) / (testCaseName + " " + subtestCaseName + ".json");
 			}
 
 			LOG_NEW_LINE;
-			INFO("Running : %s\n", testCaseName.c_str());
-			try
-			{
-				boost::property_tree::read_json(testCaseName, testCase);
-			}
-			catch (std::exception& ex)
-			{
-				std::cout << ex.what() << std::endl;
-				RETURN false;
-			}
+			INFO("Running : %s\n", fullPath.string().c_str());
 
-			// Test the CPU!
-
-			// Itterate over each test case in the JSON array
-			for (const auto& item : testCase)
+			// --------------------------------------------------------
+			// Read entire file into string, then parse with RapidJSON
+			// --------------------------------------------------------
 			{
-				auto quitThisRun = NO;
-
-				// Accessing top-level fields
-				std::string name = item.second.get<std::string>("name");
-				if (SST_DEBUG_PRINT)
+				std::ifstream ifs(fullPath);
+				if (!ifs.is_open())
 				{
-					std::cout << "Name: " << name << std::endl;
+					WARN("Failed to open %s", fullPath.string().c_str());
+					goto next_opcode;
 				}
 
-				// Accessing initial state
-				auto initial = item.second.get_child("initial");
-				int initial_pc = initial.get<int>("pc");
-				int initial_sp = initial.get<int>("sp");
-				int initial_a = initial.get<int>("a");
-				int initial_b = initial.get<int>("b");
-				int initial_c = initial.get<int>("c");
-				int initial_d = initial.get<int>("d");
-				int initial_e = initial.get<int>("e");
-				int initial_f = initial.get<int>("f");
-				int initial_h = initial.get<int>("h");
-				int initial_l = initial.get<int>("l");
-				//int initial_ime = initial.get<int>("ime");
-				//int initial_ie = initial.get<int>("ie");
+				std::string jsonStr((std::istreambuf_iterator<char>(ifs)),
+					std::istreambuf_iterator<char>());
+				ifs.close();
 
-				if (SST_DEBUG_PRINT)
+				rapidjson::Document testCase;
+				testCase.Parse(jsonStr.c_str());
+
+				if (testCase.HasParseError())
 				{
-					std::cout << "Initial PC: " << initial_pc << ", SP: " << initial_sp
-						<< ", A: " << initial_a << ", B: " << initial_b
-						<< ", C: " << initial_c << ", D: " << initial_d
-						<< ", E: " << initial_e << ", F: " << initial_f
-						<< ", H: " << initial_h << ", L: " << initial_l
-						//<< ", IME: " << initial_ime << ", IE: " << initial_ie 
-						<< std::endl;
+					WARN("Failed to parse %s: error code %u at offset %zu",
+						fullPath.string().c_str(),
+						(unsigned)testCase.GetParseError(),
+						testCase.GetErrorOffset());
+					goto next_opcode;
 				}
 
-				pGBc_registers->pc = initial_pc;
-				pGBc_registers->sp = initial_sp;
-				pGBc_registers->af.aAndFRegisters.a = initial_a;
-				pGBc_registers->bc.bAndCRegisters.b = initial_b;
-				pGBc_registers->bc.bAndCRegisters.c = initial_c;
-				pGBc_registers->de.dAndERegisters.d = initial_d;
-				pGBc_registers->de.dAndERegisters.e = initial_e;
-				pGBc_registers->af.aAndFRegisters.f.flagMemory = initial_f;
-				pGBc_registers->hl.hAndLRegisters.h = initial_h;
-				pGBc_registers->hl.hAndLRegisters.l = initial_l;
-
-				// Accessing RAM in initial state
-				if (SST_DEBUG_PRINT)
+				if (!testCase.IsArray())
 				{
-					std::cout << "Initial RAM:" << std::endl;
+					WARN("%s does not contain a JSON array", fullPath.string().c_str());
+					goto next_opcode;
 				}
-				for (const auto& ram_entry : initial.get_child("ram"))
+
+				// --------------------------------------------------------
+				// Iterate each test case in the JSON array
+				// --------------------------------------------------------
+				for (rapidjson::SizeType itemIdx = 0; itemIdx < testCase.Size(); ++itemIdx)
 				{
-					auto it = ram_entry.second.begin();
-					int address = it->second.get_value<int>(); // First element is the address
-					++it; // Move to the second element
-					int value = it->second.get_value<int>(); // Second element is the value
+					const rapidjson::Value& item = testCase[itemIdx];
+					FLAG quitThisRun = NO;
+
+					// ================= NAME =================
+					std::string name = (item.HasMember("name") && item["name"].IsString())
+						? item["name"].GetString() : "";
+
+					if (SST_DEBUG_PRINT)
+						std::cout << "Name: " << name << std::endl;
+
+					// ================= INITIAL =================
+					if (!item.HasMember("initial") || !item["initial"].IsObject())
+					{
+						WARN("Test '%s' missing 'initial' object", name.c_str());
+						CONTINUE;
+					}
+
+					const rapidjson::Value& initialJson = item["initial"];
+
+					int initial_pc = initialJson.HasMember("pc") ? initialJson["pc"].GetInt() : 0;
+					int initial_sp = initialJson.HasMember("sp") ? initialJson["sp"].GetInt() : 0;
+					int initial_a = initialJson.HasMember("a") ? initialJson["a"].GetInt() : 0;
+					int initial_b = initialJson.HasMember("b") ? initialJson["b"].GetInt() : 0;
+					int initial_c = initialJson.HasMember("c") ? initialJson["c"].GetInt() : 0;
+					int initial_d = initialJson.HasMember("d") ? initialJson["d"].GetInt() : 0;
+					int initial_e = initialJson.HasMember("e") ? initialJson["e"].GetInt() : 0;
+					int initial_f = initialJson.HasMember("f") ? initialJson["f"].GetInt() : 0;
+					int initial_h = initialJson.HasMember("h") ? initialJson["h"].GetInt() : 0;
+					int initial_l = initialJson.HasMember("l") ? initialJson["l"].GetInt() : 0;
+					//int initial_ime = initialJson.HasMember("ime") ? initialJson["ime"].GetInt() : 0;
+					//int initial_ie  = initialJson.HasMember("ie")  ? initialJson["ie"].GetInt()  : 0;
+
 					if (SST_DEBUG_PRINT)
 					{
-						std::cout << "  Address: " << address << ", Value: " << value << std::endl;
+						std::cout << "Initial PC: " << initial_pc << ", SP: " << initial_sp
+							<< ", A: " << initial_a << ", B: " << initial_b
+							<< ", C: " << initial_c << ", D: " << initial_d
+							<< ", E: " << initial_e << ", F: " << initial_f
+							<< ", H: " << initial_h << ", L: " << initial_l
+							//<< ", IME: " << initial_ime << ", IE: " << initial_ie
+							<< std::endl;
 					}
 
-					pGBc_memory->GBcRawMemory[address] = value;
-				}
+					pGBc_registers->pc = initial_pc;
+					pGBc_registers->sp = initial_sp;
+					pGBc_registers->af.aAndFRegisters.a = initial_a;
+					pGBc_registers->bc.bAndCRegisters.b = initial_b;
+					pGBc_registers->bc.bAndCRegisters.c = initial_c;
+					pGBc_registers->de.dAndERegisters.d = initial_d;
+					pGBc_registers->de.dAndERegisters.e = initial_e;
+					pGBc_registers->af.aAndFRegisters.f.flagMemory = initial_f;
+					pGBc_registers->hl.hAndLRegisters.h = initial_h;
+					pGBc_registers->hl.hAndLRegisters.l = initial_l;
 
-				// Run the CPU
-				processSOC();
+					// ================= INITIAL RAM =================
+					if (SST_DEBUG_PRINT)
+						std::cout << "Initial RAM:" << std::endl;
 
-				// Accessing final state
-				auto final = item.second.get_child("final");
-				int final_pc = final.get<int>("pc");
-				int final_sp = final.get<int>("sp");
-				int final_a = final.get<int>("a");
-				int final_b = final.get<int>("b");
-				int final_c = final.get<int>("c");
-				int final_d = final.get<int>("d");
-				int final_e = final.get<int>("e");
-				int final_f = final.get<int>("f");
-				int final_h = final.get<int>("h");
-				int final_l = final.get<int>("l");
-				//int final_ime = final.get<int>("ime");
-				//int final_ie = final.get<int>("ie");
+					if (initialJson.HasMember("ram") && initialJson["ram"].IsArray())
+					{
+						const rapidjson::Value& ramArray = initialJson["ram"];
+						for (rapidjson::SizeType i = 0; i < ramArray.Size(); ++i)
+						{
+							const rapidjson::Value& entry = ramArray[i];
+							if (!entry.IsArray() || entry.Size() < 2) CONTINUE;
 
-				if (SST_DEBUG_PRINT)
-				{
-					std::cout << "Final PC: " << final_pc << ", SP: " << final_sp
-						<< ", A: " << final_a << ", B: " << final_b
-						<< ", C: " << final_c << ", D: " << final_d
-						<< ", E: " << final_e << ", F: " << final_f
-						<< ", H: " << final_h << ", L: " << final_l
-						//<< ", IME: " << final_ime << ", IE: " << final_ie 
-						<< std::endl;
-				}
+							int address = entry[0].GetInt();
+							int value = entry[1].GetInt();
 
-				if (pGBc_registers->pc != final_pc)
-				{
-					WARN("PC Mismatch");
-					quitThisRun = YES;
-				}
-				if (pGBc_registers->sp != final_sp)
-				{
-					WARN("SP Mismatch");
-					quitThisRun = YES;
-				}
-				if (pGBc_registers->af.aAndFRegisters.a != final_a)
-				{
-					WARN("A Mismatch");
-					quitThisRun = YES;
-				}
-				if (pGBc_registers->bc.bAndCRegisters.b != final_b)
-				{
-					WARN("B Mismatch");
-					quitThisRun = YES;
-				}
-				if (pGBc_registers->bc.bAndCRegisters.c != final_c)
-				{
-					WARN("C Mismatch");
-					quitThisRun = YES;
-				}
-				if (pGBc_registers->de.dAndERegisters.d != final_d)
-				{
-					WARN("D Mismatch");
-					quitThisRun = YES;
-				}
-				if (pGBc_registers->de.dAndERegisters.e != final_e)
-				{
-					WARN("E Mismatch");
-					quitThisRun = YES;
-				}
-				if (pGBc_registers->af.aAndFRegisters.f.flagMemory != final_f)
-				{
-					WARN("F Mismatch");
-					quitThisRun = YES;
-				}
-				if (pGBc_registers->hl.hAndLRegisters.h != final_h)
-				{
-					WARN("H Mismatch");
-					quitThisRun = YES;
-				}
-				if (pGBc_registers->hl.hAndLRegisters.l != final_l)
-				{
-					WARN("L Mismatch");
-					quitThisRun = YES;
-				}
+							if (SST_DEBUG_PRINT)
+								std::cout << "  Address: " << address << ", Value: " << value << std::endl;
 
-				pGBc_registers->pc = RESET;
-				pGBc_registers->sp = RESET;
-				pGBc_registers->af.aAndFRegisters.a = RESET;
-				pGBc_registers->bc.bAndCRegisters.b = RESET;
-				pGBc_registers->bc.bAndCRegisters.c = RESET;
-				pGBc_registers->de.dAndERegisters.d = RESET;
-				pGBc_registers->de.dAndERegisters.e = RESET;
-				pGBc_registers->af.aAndFRegisters.f.flagMemory = RESET;
-				pGBc_registers->hl.hAndLRegisters.h = RESET;
-				pGBc_registers->hl.hAndLRegisters.l = RESET;
-				//pGBc_instance->GBc_state.emulatorStatus.interruptMasterEn = CLEAR;
-				//pGBc_memory->GBcMemoryMap.mInterruptEnable.interruptEnableMemory = RESET;
-				pGBc_instance->GBc_state.emulatorStatus.isCPUExecutionBlocked = NO;
-				pGBc_instance->GBc_state.emulatorStatus.isCPUHalted = NO;
+							pGBc_memory->GBcRawMemory[address] = value;
+						}
+					}
 
-				// Accessing RAM in final state
-				if (SST_DEBUG_PRINT)
-				{
-					std::cout << "Final RAM:" << std::endl;
-				}
+					// ================= RUN =================
+					processSOC();
 
-				for (const auto& ram_entry : final.get_child("ram"))
-				{
-					auto it = ram_entry.second.begin();
-					int address = it->second.get_value<int>(); // First element is the address
-					++it; // Move to the second element
-					int value = it->second.get_value<int>(); // Second element is the value
+					// ================= FINAL =================
+					if (!item.HasMember("final") || !item["final"].IsObject())
+					{
+						WARN("Test '%s' missing 'final' object", name.c_str());
+						CONTINUE;
+					}
+
+					const rapidjson::Value& finalJson = item["final"];
+
+					int final_pc = finalJson.HasMember("pc") ? finalJson["pc"].GetInt() : 0;
+					int final_sp = finalJson.HasMember("sp") ? finalJson["sp"].GetInt() : 0;
+					int final_a = finalJson.HasMember("a") ? finalJson["a"].GetInt() : 0;
+					int final_b = finalJson.HasMember("b") ? finalJson["b"].GetInt() : 0;
+					int final_c = finalJson.HasMember("c") ? finalJson["c"].GetInt() : 0;
+					int final_d = finalJson.HasMember("d") ? finalJson["d"].GetInt() : 0;
+					int final_e = finalJson.HasMember("e") ? finalJson["e"].GetInt() : 0;
+					int final_f = finalJson.HasMember("f") ? finalJson["f"].GetInt() : 0;
+					int final_h = finalJson.HasMember("h") ? finalJson["h"].GetInt() : 0;
+					int final_l = finalJson.HasMember("l") ? finalJson["l"].GetInt() : 0;
+					//int final_ime = finalJson.HasMember("ime") ? finalJson["ime"].GetInt() : 0;
+					//int final_ie  = finalJson.HasMember("ie")  ? finalJson["ie"].GetInt()  : 0;
+
 					if (SST_DEBUG_PRINT)
 					{
-						std::cout << "  Address: " << address << ", Value: " << value << std::endl;
+						std::cout << "Final PC: " << final_pc << ", SP: " << final_sp
+							<< ", A: " << final_a << ", B: " << final_b
+							<< ", C: " << final_c << ", D: " << final_d
+							<< ", E: " << final_e << ", F: " << final_f
+							<< ", H: " << final_h << ", L: " << final_l
+							//<< ", IME: " << final_ime << ", IE: " << final_ie
+							<< std::endl;
 					}
 
-					if (pGBc_memory->GBcRawMemory[address] != value)
+					// ================= REGISTER CHECKS =================
+					if (pGBc_registers->pc != final_pc)
 					{
-						WARN("RAM Mismatch");
-						quitThisRun = YES;
+						FATAL("PC Mismatch"); quitThisRun = YES;
+					}
+					if (pGBc_registers->sp != final_sp)
+					{
+						FATAL("SP Mismatch"); quitThisRun = YES;
+					}
+					if (pGBc_registers->af.aAndFRegisters.a != final_a)
+					{
+						FATAL("A Mismatch");  quitThisRun = YES;
+					}
+					if (pGBc_registers->bc.bAndCRegisters.b != final_b)
+					{
+						FATAL("B Mismatch");  quitThisRun = YES;
+					}
+					if (pGBc_registers->bc.bAndCRegisters.c != final_c)
+					{
+						FATAL("C Mismatch");  quitThisRun = YES;
+					}
+					if (pGBc_registers->de.dAndERegisters.d != final_d)
+					{
+						FATAL("D Mismatch");  quitThisRun = YES;
+					}
+					if (pGBc_registers->de.dAndERegisters.e != final_e)
+					{
+						FATAL("E Mismatch");  quitThisRun = YES;
+					}
+					if (pGBc_registers->af.aAndFRegisters.f.flagMemory != final_f)
+					{
+						FATAL("F Mismatch");  quitThisRun = YES;
+					}
+					if (pGBc_registers->hl.hAndLRegisters.h != final_h)
+					{
+						FATAL("H Mismatch");  quitThisRun = YES;
+					}
+					if (pGBc_registers->hl.hAndLRegisters.l != final_l)
+					{
+						FATAL("L Mismatch");  quitThisRun = YES;
 					}
 
-					pGBc_memory->GBcRawMemory[address] = RESET;
-				}
+					pGBc_registers->pc = RESET;
+					pGBc_registers->sp = RESET;
+					pGBc_registers->af.aAndFRegisters.a = RESET;
+					pGBc_registers->bc.bAndCRegisters.b = RESET;
+					pGBc_registers->bc.bAndCRegisters.c = RESET;
+					pGBc_registers->de.dAndERegisters.d = RESET;
+					pGBc_registers->de.dAndERegisters.e = RESET;
+					pGBc_registers->af.aAndFRegisters.f.flagMemory = RESET;
+					pGBc_registers->hl.hAndLRegisters.h = RESET;
+					pGBc_registers->hl.hAndLRegisters.l = RESET;
+					//pGBc_instance->GBc_state.emulatorStatus.interruptMasterEn = CLEAR;
+					//pGBc_memory->GBcMemoryMap.mInterruptEnable.interruptEnableMemory = RESET;
+					pGBc_instance->GBc_state.emulatorStatus.isCPUExecutionBlocked = NO;
+					pGBc_instance->GBc_state.emulatorStatus.isCPUHalted = NO;
+
+					// ================= FINAL RAM =================
+					if (SST_DEBUG_PRINT)
+						std::cout << "Final RAM:" << std::endl;
+
+					if (finalJson.HasMember("ram") && finalJson["ram"].IsArray())
+					{
+						const rapidjson::Value& ramArray = finalJson["ram"];
+						for (rapidjson::SizeType i = 0; i < ramArray.Size(); ++i)
+						{
+							const rapidjson::Value& entry = ramArray[i];
+							if (!entry.IsArray() || entry.Size() < 2) CONTINUE;
+
+							int address = entry[0].GetInt();
+							int value = entry[1].GetInt();
+
+							if (SST_DEBUG_PRINT)
+								std::cout << "  Address: " << address << ", Value: " << value << std::endl;
+
+							if (pGBc_memory->GBcRawMemory[address] != value)
+							{
+								FATAL("RAM Mismatch");
+								quitThisRun = YES;
+							}
+
+							pGBc_memory->GBcRawMemory[address] = RESET;
+						}
+					}
 
 #if (ENABLED)
-				// Accessing cycles
-				if (SST_DEBUG_PRINT)
-				{
-					std::cout << "Cycles:" << std::endl;
-				}
-				pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.cycles.indexer = RESET;
-				INC8 indexer = RESET;
-				INC8 prevRWIndex = RESET;
-				for (const auto& cycle : item.second.get_child("cycles"))
-				{
-					auto it = cycle.second.begin();
-					int cycle_address = it->second.get_value<int>(); // First element
-					++it; // Move to the second element
-					int cycle_value = it->second.get_value<int>(); // Second element
-					++it; // Move to the third element
-					std::string cycle_type = it->second.get_value<std::string>(); // Third element
+					// ================= CYCLES =================
 					if (SST_DEBUG_PRINT)
+						std::cout << "Cycles:" << std::endl;
+
+					pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.cycles.indexer = RESET;
+					INC8 indexer = RESET;
+					INC8 prevRWIndex = RESET;
+
+					if (item.HasMember("cycles") && item["cycles"].IsArray())
 					{
-						std::cout << "Cycle Address: " << cycle_address << ", Value: " << cycle_value << ", Type: " << cycle_type << std::endl;
+						const rapidjson::Value& cyclesArray = item["cycles"];
+						for (rapidjson::SizeType i = 0; i < cyclesArray.Size(); ++i)
+						{
+							const rapidjson::Value& cycle = cyclesArray[i];
+							if (!cycle.IsArray() || cycle.Size() < 3) CONTINUE;
+
+							int         cycle_address = cycle[0].GetInt();
+							int         cycle_value = cycle[1].GetInt();
+							std::string cycle_type = cycle[2].GetString();
+
+							if (SST_DEBUG_PRINT)
+							{
+								std::cout << "Cycle Address: " << cycle_address
+									<< ", Value: " << cycle_value
+									<< ", Type: " << cycle_type << std::endl;
+							}
+
+							std::string temp = "---";
+							if (pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.cycles.cycles[indexer].isWrite == YES)
+							{
+								temp = "-wm";
+								prevRWIndex = indexer;
+							}
+							if (pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.cycles.cycles[indexer].isRead == YES)
+							{
+								temp = "r-m";
+								prevRWIndex = indexer;
+							}
+
+							if (cycle_type.compare(temp))
+							{
+								FATAL("Operation Cycle Mismatch");
+								quitThisRun = YES;
+							}
+
+							if (cycle_address != pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.cycles.cycles[prevRWIndex].address)
+							{
+								FATAL("Address Cycle Mismatch");
+								quitThisRun = YES;
+							}
+
+							if (cycle_value != pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.cycles.cycles[prevRWIndex].data)
+							{
+								FATAL("Data Cycle Mismatch");
+								quitThisRun = YES;
+							}
+
+							++indexer;
+						}
 					}
 
-					std::string temp = "---";
-					if (pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.cycles.cycles[indexer].isWrite == YES)
+					for (INC8 ii = ZERO; ii < TWENTY; ii++)
 					{
-						temp = "-wm";
-						prevRWIndex = indexer;
+						pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.cycles.cycles[ii].reset();
 					}
-					if (pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.cycles.cycles[indexer].isRead == YES)
-					{
-						temp = "r-m";
-						prevRWIndex = indexer;
-					}
-
-					if (cycle_type.compare(temp))
-					{
-						WARN("Operation Cycle Mismatch");
-						quitThisRun = YES;
-					}
-
-					if (cycle_address != pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.cycles.cycles[prevRWIndex].address)
-					{
-						WARN("Address Cycle Mismatch");
-						quitThisRun = YES;
-					}
-
-					if (cycle_value != pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.cycles.cycles[prevRWIndex].data)
-					{
-						WARN("Data Cycle Mismatch");
-						quitThisRun = YES;
-					}
-
-					++indexer;
-				}
-
-				for (INC8 ii = ZERO; ii < TWENTY; ii++)
-				{
-					pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.cycles.cycles[ii].reset();
-				}
 #else
-				pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.cycles.indexer = RESET;
+					pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.cycles.indexer = RESET;
 #endif
 
-				if (quitThisRun == YES)
-				{
-					BREAK;
-				}
+					if (quitThisRun == YES)
+					{
+						BREAK;
+					}
 
-				// Update Stats
-				if (cbMode == NO)
-				{
-					++pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.testCount[opcode];
-				}
-				else
-				{
-					++pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.cbtestCount[subopcode];
-				}
+					// ================= UPDATE STATS =================
+					if (cbMode == NO)
+					{
+						++pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.testCount[opcode];
+					}
+					else
+					{
+						++pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.cbtestCount[subopcode];
+					}
 
 #if _DEBUG
-				if (pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.testCount[192] == 1)
-				{
-					volatile int breakpoint = 0;
-				}
+					if (pGBc_instance->GBc_state.emulatorStatus.debugger.tomHarte.testCount[192] == 1)
+					{
+						volatile int breakpoint = 0;
+					}
 #endif
+				}
 			}
 
+		next_opcode:
 			if (subopcode == 0xFF)
 			{
 				cbMode = NO;
@@ -7132,6 +7196,16 @@ FLAG GBc_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 #endif
 
 		runDebugger();
+	}
+
+	if (pGBc_display->wasVblankJustTriggerred)
+	{
+		// GameShark writes at VBlank -- hardware accurate
+		auto writes = ceGBGBC->getCheatWrites(CheatEngine_t::CHEATING_ENGINE::GAMESHARK);
+		for (auto& w : writes)
+		{
+			writeRawMemory((uint16_t)w.address, (byte)w.data, MEMORY_ACCESS_SOURCE::CPU);
+		}
 	}
 
 	RETURN pGBc_display->wasVblankJustTriggerred;
@@ -7190,14 +7264,14 @@ FLAG GBc_t::initializeEmulator()
 	pGBc_emuStatus->ticks.serialCounter = 0x08;
 
 	// Only the below 2 configurations are read here instead of in the constructor because "pGBc_instance" is not ready at that time...
-	auto gbPaletteStr = pt.get<std::string>("gb-gbc._force_gb_palette", "");
+	auto gbPaletteStr = pt.get<std::string>("gb_gbc._force_gb_palette", "");
 	if (!gbPaletteStr.empty() && configToGbPaletteID.count(gbPaletteStr))
 	{
 		currEnGbPalette = configToGbPaletteID.at(gbPaletteStr);
 	}
 	pGBc_instance->GBc_state.gb_palette = currEnGbPalette;
 
-	auto cgbCorrStr = pt.get<std::string>("gb-gbc._enable_cgb_color_correction", "");
+	auto cgbCorrStr = pt.get<std::string>("gb_gbc._enable_cgb_color_correction", "");
 	if (!cgbCorrStr.empty())
 	{
 		currEnGbcPalette = (to_bool(cgbCorrStr) == YES) ? PALETTE_ID::PALETTE_2 : PALETTE_ID::PALETTE_1;
@@ -8035,10 +8109,16 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 			uint32_t crc_32 = crc32_compute(pGBc_instance->GBc_state.entireRom.entireRomMemory, pAbsolute_GBc_instance->absolute_GBc_state.aboutRom.codeRomSize);
 			switch (crc_32)
 			{
-			case 0x0C38A775:
+			case 0x0C38A775u:
 			{
 				LOG("M161 detected");
 				setMBCType(NULL, MBCType::M161);
+				BREAK;
+			}
+			case 0xABB17913u:  // Pokemon Red+Blue 2-in-1 (Unl) [S].gb
+			{
+				LOG("Pokemon 2-in-1 unlicensed multicart detected");
+				setMBCType(NULL, MBCType::POKE_2IN1);
 				BREAK;
 			}
 			default: BREAK;
@@ -8174,6 +8254,13 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 				}
 			}
 
+			if (isPoke2in1()) MASQ_UNLIKELY
+			{
+				pGBc_emuStatus->poke2in1.MBChi = ZERO;
+				pGBc_emuStatus->poke2in1.bcSelect = NO;
+				pGBc_emuStatus->poke2in1.bank0Change = NO;
+			}
+
 			// initialize the JoyPad state
 			pGBc_peripherals->P1_JOYP.joyPadMemory = 0xCF; // lower nibble set to all ones indicate, no selection and no keys being active; reserved bits are set as well
 
@@ -8203,6 +8290,7 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 				// setup defaults if MBC6
 				if (isMBC6())
 				{
+#ifndef __RPI_PICO__
 					auto& e = pGBc_emuStatus->mbc6;
 
 					e.flashEnable = NO;
@@ -8222,6 +8310,9 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 						e.flashHidden,
 						0xFF,
 						sizeof(e.flashHidden)); // 256 bytes
+#else
+					FATAL("MBC6 is not supported");
+#endif
 				}
 
 				// setup defaults if MBC7
@@ -8265,13 +8356,17 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 				setROMBankNumber(ONE);
 
 				// for mbc6
+#ifndef __RPI_PICO__
 				setROMBankNumberB(TWO);
+#endif // !__RPI_PICO__
 
 				// initialize the RAM Bank number to ZERO (2K external RAM) as this is basic for all MBCs
 				setRAMBankNumber(ZERO);
 
 				// for mbc6
+#ifndef __RPI_PICO__
 				setRAMBankNumberB(ONE);
+#endif // !__RPI_PICO__
 
 				// initialize the VRAM Bank number to ZERO
 				setVRAMBankNumber(ZERO);
@@ -8608,7 +8703,7 @@ FLAG GBc_t::getRomLoadedStatus()
 
 void GBc_t::loadQuirks()
 {
-	if (ImGui::IsKeyPressed(ImGuiKey_C) == true)
+	if (pInputBackend->isPressed(EmuKey::KC) == true)
 	{
 		if (ROM_TYPE == ROM::GAME_BOY_COLOR)
 		{
@@ -8616,12 +8711,12 @@ void GBc_t::loadQuirks()
 			translateGFX(pGBc_instance->GBc_state.gb_palette, pGBc_instance->GBc_state.gb_palette, pGBc_instance->GBc_state.gbc_palette, nextPaletteID);
 			currEnGbcPalette = nextPaletteID;
 			pGBc_instance->GBc_state.gbc_palette = nextPaletteID;
-			pt.put("gb-gbc._enable_cgb_color_correction", pGBc_instance->GBc_state.gbc_palette == PALETTE_ID::PALETTE_2);
+			pt.put("gb_gbc._enable_cgb_color_correction", pGBc_instance->GBc_state.gbc_palette == PALETTE_ID::PALETTE_2);
 			boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, pt);
 		}
 	}
 
-	if (ImGui::IsKeyPressed(ImGuiKey_T) == true)
+	if (pInputBackend->isPressed(EmuKey::KT) == true)
 	{
 		if (ROM_TYPE == ROM::GAME_BOY)
 		{
@@ -8635,13 +8730,13 @@ void GBc_t::loadQuirks()
 			translateGFX(pGBc_instance->GBc_state.gb_palette, nextPaletteID, pGBc_instance->GBc_state.gbc_palette, pGBc_instance->GBc_state.gbc_palette);
 			currEnGbPalette = nextPaletteID;
 			pGBc_instance->GBc_state.gb_palette = nextPaletteID;
-			pt.put<std::string>("gb-gbc._force_gb_palette", gbPaletteIDToConfig.at(nextPaletteID));
+			pt.put<std::string>("gb_gbc._force_gb_palette", gbPaletteIDToConfig.at(nextPaletteID));
 			boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, pt);
 		}
 	}
 
-
-	if (ImGui::IsKeyReleased(ImGuiKey_Q) == true)
+#ifndef __RPI_PICO__
+	if (pInputBackend->isPressed(EmuKey::KQ) == true)
 	{
 		// re-read CONFIG.ini
 		try
@@ -8653,10 +8748,10 @@ void GBc_t::loadQuirks()
 			std::cout << ex.what() << std::endl;
 		}
 
-		_ENABLE_AUDIO_HPF = to_bool(pt.get<std::string>("gb-gbc._enable_audio_hpf", _ENABLE_AUDIO_HPF ? "true" : "false"));
+		_ENABLE_AUDIO_HPF = to_bool(pt.get<std::string>("gb_gbc._enable_audio_hpf", _ENABLE_AUDIO_HPF ? "true" : "false"));
 
 		auto currentPaletteID = pGBc_instance->GBc_state.gb_palette;
-		auto gbPaletteStr = pt.get<std::string>("gb-gbc._force_gb_palette", "");
+		auto gbPaletteStr = pt.get<std::string>("gb_gbc._force_gb_palette", "");
 		if (!gbPaletteStr.empty() && configToGbPaletteID.count(gbPaletteStr))
 		{
 			currEnGbPalette = configToGbPaletteID.at(gbPaletteStr);
@@ -8664,7 +8759,7 @@ void GBc_t::loadQuirks()
 		pGBc_instance->GBc_state.gb_palette = currEnGbPalette;
 
 		auto colorCorrectionCurrentStatus = pGBc_instance->GBc_state.gbc_palette;
-		auto cgbCorrStr = pt.get<std::string>("gb-gbc._enable_cgb_color_correction", "");
+		auto cgbCorrStr = pt.get<std::string>("gb_gbc._enable_cgb_color_correction", "");
 		if (!cgbCorrStr.empty())
 		{
 			currEnGbcPalette = (to_bool(cgbCorrStr) == YES) ? PALETTE_ID::PALETTE_2 : PALETTE_ID::PALETTE_1;
@@ -8680,6 +8775,7 @@ void GBc_t::loadQuirks()
 
 		INFO("CONFIG.ini was reloaded!");
 	}
+#endif // !__RPI_PICO__
 }
 
 #if DEACTIVATED
@@ -9129,8 +9225,9 @@ byte GBc_t::readRawMemory(uint16_t address
 			}
 		}
 
-		int16_t modedData = RESET;
-		int16_t other1 = RESET;
+		uint32_t modedData = 0;
+		uint32_t compareVal = 0;
+		FLAG     hasCompare = NO;
 		uint32_t index = RESET;
 
 		// reading from ROM
@@ -9190,10 +9287,14 @@ byte GBc_t::readRawMemory(uint16_t address
 					ROMBankNumber %= getNumberOfROMBanksUsed();
 				}
 			}
+			else if (isPoke2in1()) MASQ_UNLIKELY
+			{
+				ROMBankNumber = pGBc_emuStatus->poke2in1.MBChi % getNumberOfROMBanksUsed();
+			}
 
-			if ((ceGBGBC->interceptCPURead(address, &modedData, &other1))
+			if ((ceGBGBC->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
 				&&
-				((BYTE)other1 == pGBc_instance->GBc_state.entireRom.romMemoryBanks.mROMBanks[ROMBankNumber][address]))
+				(!hasCompare || (BYTE)compareVal == pGBc_instance->GBc_state.entireRom.romMemoryBanks.mROMBanks[ROMBankNumber][address]))
 			{
 				RETURN TO_UINT8(modedData);
 			}
@@ -9212,6 +9313,7 @@ byte GBc_t::readRawMemory(uint16_t address
 
 			if (isMBC6()) MASQ_UNLIKELY
 			{
+#ifndef __RPI_PICO__
 				// Refer https://gbdev.io/pandocs/MBC6.html
 				// Maximum Flash bank is 0x7F, refer // Refer https://gbdev.io/pandocs/MBC6.html#4000-5fff--romflash-bank-a-00-7f-readwrite-for-flash-read-only-for-rom
 				// Bank A = $4000-$5FFF, Bank B = $6000-$7FFF; each bank is 8 KB (0x2000)
@@ -9246,9 +9348,9 @@ byte GBc_t::readRawMemory(uint16_t address
 					}
 					else
 					{
-						if ((ceGBGBC->interceptCPURead(originalAddress, &modedData, &other1))
+						if ((ceGBGBC->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
 							&&
-							((BYTE)other1 == pGBc_instance->GBc_state.entireRom.romMemoryBanks.mROMBanks8KB[ROMBankNumber][address]))
+							(!hasCompare || (BYTE)compareVal == pGBc_instance->GBc_state.entireRom.romMemoryBanks.mROMBanks8KB[ROMBankNumber][address]))
 						{
 							RETURN TO_UINT8(modedData);
 						}
@@ -9281,14 +9383,14 @@ byte GBc_t::readRawMemory(uint16_t address
 						}
 						else
 						{
-							RETURN (flashAddr < sizeof(pGBc_emuStatus->mbc6.flash)) ? pGBc_emuStatus->mbc6.flash.raw[flashAddr] : 0xFF;
+							RETURN(flashAddr < sizeof(pGBc_emuStatus->mbc6.flash)) ? pGBc_emuStatus->mbc6.flash.raw[flashAddr] : 0xFF;
 						}
 					}
 					else
 					{
-						if ((ceGBGBC->interceptCPURead(originalAddress, &modedData, &other1))
+						if ((ceGBGBC->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
 							&&
-							((BYTE)other1 == pGBc_instance->GBc_state.entireRom.romMemoryBanks.mROMBanks8KB[ROMBankNumberB][address]))
+							(!hasCompare || (BYTE)compareVal == pGBc_instance->GBc_state.entireRom.romMemoryBanks.mROMBanks8KB[ROMBankNumberB][address]))
 						{
 							RETURN TO_UINT8(modedData);
 						}
@@ -9298,6 +9400,9 @@ byte GBc_t::readRawMemory(uint16_t address
 						}
 					}
 				}
+#else
+				FATAL("MBC6 is not supported");
+#endif
 			}
 
 			// ROM NN ($4000-$7FFF)
@@ -9345,9 +9450,9 @@ byte GBc_t::readRawMemory(uint16_t address
 
 			address -= 0x4000;
 
-			if ((ceGBGBC->interceptCPURead(originalAddress, &modedData, &other1))
+			if ((ceGBGBC->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
 				&&
-				((BYTE)other1 == pGBc_instance->GBc_state.entireRom.romMemoryBanks.mROMBanks[ROMBankNumber][address]))
+				(!hasCompare || (BYTE)compareVal == pGBc_instance->GBc_state.entireRom.romMemoryBanks.mROMBanks[ROMBankNumber][address]))
 			{
 				RETURN TO_UINT8(modedData);
 			}
@@ -9402,45 +9507,23 @@ byte GBc_t::readRawMemory(uint16_t address
 
 			if (isMBC6()) MASQ_UNLIKELY
 			{
+#ifndef __RPI_PICO__
 				if (address <= 0xAFFF)
 				{
 					uint8_t RAMBankNumber = getRAMBankNumber();
 					address -= 0xA000;
 
-					if ((ceGBGBC->interceptCPURead(originalAddress, &modedData, &other1))
-						// NOTE: Below check is not needed I guess as only option is "1" or "8" to differentiate bank; Below bank number check is sufficient
-						//&&
-						//((BYTE)(other1 >> FOUR) == EIGHT)
-						&&
-						((BYTE)(other1 & 0x0F) == (BYTE)(RAMBankNumber)))
-					{
-						BYTE data = TO_UINT8(modedData);
-						RETURN TO_UINT8(data);
-					}
-					else
-					{
-						RETURN pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks4KB[RAMBankNumber][address];
-					}
+					RETURN pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks4KB[RAMBankNumber][address];
 				}
 				else
 				{
 					uint8_t RAMBankNumberB = getRAMBankNumberB();
 					address -= 0xB000;
-					if ((ceGBGBC->interceptCPURead(originalAddress, &modedData, &other1))
-						// NOTE: Below check is not needed I guess as only option is "1" or "8" to differentiate bank; Below bank number check is sufficient
-						//&&
-						//((BYTE)(other1 >> FOUR) == EIGHT)
-						&&
-						((BYTE)(other1 & 0x0F) == (BYTE)(RAMBankNumberB)))
-					{
-						BYTE data = TO_UINT8(modedData);
-						RETURN TO_UINT8(data);
-					}
-					else
-					{
-						RETURN pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks4KB[RAMBankNumberB][address];
-					}
+					RETURN pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks4KB[RAMBankNumberB][address];
 				}
+#else
+				FATAL("MBC6 is not supported");
+#endif
 			}
 
 			if (isMBC3())
@@ -9522,20 +9605,8 @@ byte GBc_t::readRawMemory(uint16_t address
 
 			if (isRAMBankEnabled() == YES)
 			{
-				if ((ceGBGBC->interceptCPURead(originalAddress, &modedData, &other1))
-					// NOTE: Below check is not needed I guess as only option is "1" or "8" to differentiate bank; Below bank number check is sufficient
-					//&&
-					//((BYTE)(other1 >> FOUR) == EIGHT)
-					&&
-					((BYTE)(other1 & 0x0F) == (BYTE)(ramBank)))
-				{
-					RETURN TO_UINT8(modedData);
-				}
-				else
-				{
-					// All 8 bits are read properly unlike what pandocs mentions; needed for the HUC3 games
-					RETURN pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[ramBank][address];
-				}
+				// All 8 bits are read properly unlike what pandocs mentions; needed for the HUC3 games
+				RETURN pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[ramBank][address];
 			}
 			else
 			{
@@ -9581,15 +9652,6 @@ byte GBc_t::readRawMemory(uint16_t address
 			// WRAM 00
 			if (address <= WORK_RAM_00_END_ADDRESS)
 			{
-				if (ceGBGBC->interceptCPURead(originalAddress, &modedData, &other1))
-				{
-					RETURN TO_UINT8(modedData);
-				}
-				else
-				{
-					RETURN pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[address];
-				}
-
 				RETURN pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[address];
 			}
 			// WRAM 01
@@ -9604,20 +9666,7 @@ byte GBc_t::readRawMemory(uint16_t address
 						// "getWRAMBankNumber()" is set by the game rom and hence, no tweaking is allowed inside the function
 						// Hence, tweaking is possible only at the interfacing between mWRAM01Banks and "getWRAMBankNumber()"
 						// Therefore, getWRAMBankNumber() is decremented once when used within mWRAM01Banks
-
-						if ((ceGBGBC->interceptCPURead(originalAddress, &modedData, &other1))
-							// NOTE: Below check is not needed I guess as only option is "1" or "9" to differentiate bank; Below bank number check is sufficient
-							//&&
-							//((BYTE)(other1 >> FOUR) == NINE)
-							&&
-							((BYTE)(other1 & 0x0F) == (BYTE)(getWRAMBankNumber())))
-						{
-							RETURN TO_UINT8(modedData);
-						}
-						else
-						{
-							RETURN pGBc_instance->GBc_state.entireWram01.wram01MemoryBanks.mWRAM01Banks[getWRAMBankNumber() - ONE][address];
-						}
+						RETURN pGBc_instance->GBc_state.entireWram01.wram01MemoryBanks.mWRAM01Banks[getWRAMBankNumber() - ONE][address];
 					}
 					else
 					{
@@ -9626,14 +9675,7 @@ byte GBc_t::readRawMemory(uint16_t address
 				}
 				else if (ROM_TYPE == ROM::GAME_BOY)
 				{
-					if (ceGBGBC->interceptCPURead(originalAddress, &modedData, &other1))
-					{
-						RETURN TO_UINT8(modedData);
-					}
-					else
-					{
-						RETURN pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[address];
-					}
+					RETURN pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[address];
 				}
 			}
 		}
@@ -10469,6 +10511,7 @@ void GBc_t::executeHUC3Command()
 	}
 }
 
+#ifndef __RPI_PICO__
 // Refer https://gbdev.io/pandocs/MBC6.html#flash-commands
 //
 // Three separate protection flags:
@@ -10831,6 +10874,7 @@ void GBc_t::processMBC6FlashWrite(uint16_t cpuAddr, BYTE data)
 		BREAK;
 	}
 }
+#endif // !__RPI_PICO__
 
 void GBc_t::updateMMM01RamBanking()
 {
@@ -10999,6 +11043,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 				}
 				else if (isMBC6()) MASQ_UNLIKELY
 				{
+#ifndef __RPI_PICO__
 					if (address <= 0x03FF)
 					{
 						pGBc_emuStatus->dataWrittenToMBCReg0 = data;
@@ -11035,6 +11080,9 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 					{
 						pGBc_emuStatus->dataWrittenToMBCReg8 = data;
 					}
+#else
+					FATAL("MBC6 is not supported");
+#endif
 				}
 				else
 				{
@@ -11109,6 +11157,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 
 			if (isMBC6()) MASQ_UNLIKELY
 			{
+#ifndef __RPI_PICO__
 				if (address <= 0x03FF)
 				{
 					const FLAG ramEnable = ((data & 0x0F) == 0x0A);
@@ -11155,15 +11204,26 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 				{
 					processMBC6FlashWrite(address, data);
 				}
-
+#else
+				FATAL("MBC6 is not supported");
+#endif
 				RETURN;
 			}
 
 			// --- 0x0000 - 0x1FFF : RAM/RTC enable ---
 			if (address <= 0x1FFF)
 			{
-				if (isMBC1() || isMBC1M() || isMBC2() || isMBC3() || isMBC5() || isMBC7() || isHUC1() || isHUC3() || isMMM01())
+				if (isMBC1() || isMBC1M() || isMBC2() || isMBC3() || isMBC5() || isMBC7() || isHUC1() || isHUC3() || isMMM01() || isPoke2in1())
 				{
+					if (isPoke2in1()) MASQ_UNLIKELY
+					{
+						auto& p2 = pGBc_emuStatus->poke2in1;
+						// 0x0000–0x1FFF: RAM enable + bank0Change latch
+						((data & 0x0A) == 0x0A) ? enableRAMBank() : disableRAMBank();
+						p2.bank0Change = ((data & 0xC0) == 0xC0) ? YES : NO;
+						RETURN;
+					}
+
 					// MBC2 special handling
 					if (isMBC2())
 					{
@@ -11292,8 +11352,19 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 			// --- 0x2000 - 0x3FFF : ROM bank lower bits ---
 			else if (address <= 0x3FFF)
 			{
-				if (isMBC1() || isMBC1M() || isMBC2() || isMBC3() || isMBC5() || isMBC7() || isHUC1() || isHUC3() || isMMM01())
+				if (isMBC1() || isMBC1M() || isMBC2() || isMBC3() || isMBC5() || isMBC7() || isHUC1() || isHUC3() || isMMM01() || isPoke2in1())
 				{
+					if (isPoke2in1()) MASQ_UNLIKELY
+					{
+						auto& p2 = pGBc_emuStatus->poke2in1;
+						// 0x0000–0x1FFF: RAM enable + bank0Change latch
+						byte bank = data & 0x7F;
+						if (bank == ZERO) bank = ONE;
+						bank += p2.MBChi;
+						setROMBankNumber(bank % getNumberOfROMBanksUsed());
+						RETURN;
+					}
+
 					auto ROMBankNumber = getROMBankNumber();
 
 					if (isMBC1() || isMBC1M())
@@ -11395,6 +11466,18 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 			// --- 0x4000 - 0x5FFF : RAM bank or upper ROM bits ---
 			else if (address <= 0x5FFF)
 			{
+				if (isPoke2in1()) MASQ_UNLIKELY
+				{
+					auto& p2 = pGBc_emuStatus->poke2in1;
+					// 0x4000–0x5FFF: RAM bank (only if >8KB RAM)
+					if (getNumberOfRAMBanksUsed() > ONE)
+					{
+						uint8_t ramBank = (data & 0x03) % getNumberOfRAMBanksUsed();
+						setRAMBankNumber(ramBank);
+					}
+					RETURN;
+				}
+
 				if (isMBC1() || isMBC1M())
 				{
 					// Refer : https://gekkio.fi/files/gb-docs/gbctr.pdf
@@ -11591,8 +11674,43 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 				}
 			}
 
+			if (isPoke2in1()) MASQ_UNLIKELY
+			{
+				auto& p2 = pGBc_emuStatus->poke2in1;
+
+				// Game select: write to 0xA100 while bank0Change is set and bcSelect not yet locked
+				if (p2.bank0Change == YES && address == 0xA100 && p2.bcSelect == NO)
+				{
+					p2.MBChi = ZERO;
+
+					if (data == 0x01)
+					{
+						p2.MBChi = TWO;   // Pokemon Blue starts at bank 2
+					}
+					else if (data != 0xC0)
+					{
+						p2.MBChi = 66;    // Pokemon Red starts at bank 66
+					}
+					else
+					{
+						p2.bcSelect = YES;  // lock; no further switching
+						// MBChi stays at current value (or 0 if first write)
+					}
+
+					// Remap the entire 0x0000–0x7FFF window to the new base
+					const uint16_t base = p2.MBChi % getNumberOfROMBanksUsed();
+					setROMBankNumber((base + ONE) % getNumberOfROMBanksUsed());
+					// Bank 0 window remap: store base so readRawMemory can use it for 0x0000–0x3FFF
+					// (handled in readRawMemory below)
+				}
+
+				// Always fall through to normal RAM write (if RAM enabled)
+				// so don't RETURN here — let the generic path handle it
+			}
+
 			if (isMBC6()) MASQ_UNLIKELY
 			{
+#ifndef __RPI_PICO__
 				if (address <= 0xAFFF)
 				{
 					uint8_t RAMBankNumber = getRAMBankNumber();
@@ -11607,16 +11725,19 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 					pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks4KB[RAMBankNumberB][address] = data;
 					RETURN;
 				}
+#else
+				FATAL("MBC6 is not supported");
+#endif
 			}
 
-				if (isMBC3())
+			if (isMBC3())
+			{
+				if (isRTCMappedToExternalRAM() == YES)
 				{
-					if (isRTCMappedToExternalRAM() == YES)
-					{
-						writeToRTCRegisterIfApplicable(TO_UINT8(data));
-						RETURN;
-					}
+					writeToRTCRegisterIfApplicable(TO_UINT8(data));
+					RETURN;
 				}
+			}
 
 			if (isHUC1() && pGBc_emuStatus->isHuc1IrMode == YES)
 			{

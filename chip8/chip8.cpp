@@ -8,12 +8,14 @@
 #pragma endregion CHIP8_SPECIFIC_MACROS
 
 #pragma region CHIP8_SPECIFIC_DECLARATIONS
+#ifndef __RPI_PICO__
 static uint32_t chip8_texture;
 static uint32_t matrix_texture;
 static uint32_t matrix[16] = { 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0x000000FF, 0x000000FF, 0x000000FF, 0x000000FF };
+#endif // !__RPI_PICO__
 #pragma endregion CHIP8_SPECIFIC_DECLARATIONS
 
-chip8_t::chip8_t(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, boost::property_tree::ptree& config)
+chip8_t::chip8_t(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config)
 {
 	isBiosEnabled = NO;
 
@@ -21,6 +23,8 @@ chip8_t::chip8_t(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, boos
 
 	this->pt = config;
 
+#ifndef __RPI_PICO__
+	// Save state possible only on non-pico builds
 #ifndef __EMSCRIPTEN__
 	_SAVE_LOCATION = pt.get<std::string>("chip8._save_location", "");
 	if (_SAVE_LOCATION.empty())
@@ -35,21 +39,33 @@ chip8_t::chip8_t(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, boos
 	// check if directory mentioned by "_SAVE_LOCATION" exists, if not we need to explicitly create it
 	ifNoDirectoryThenCreate(_SAVE_LOCATION);
 
+#endif	// !__RPI_PICO__
+
 	this->rom[ZERO] = rom[ZERO];
 }
 
-void chip8_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void* network)
+void chip8_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void* input, void* network)
 {
 	if (!initializeEmulator())
 	{
 		LOG("memory allocation failure");
+#ifndef __RPI_PICO__
 		throw std::runtime_error("memory allocation failure");
+#else	// !__RPI_PICO__
+		panic("memory allocation failure");
+#endif
 	}
+
+	pInputBackend = static_cast<IInputBackend*>(input);
 
 	if (!this->rom[ZERO].empty())
 	{
 		loadRom(rom);
 	}
+
+	MASQ_UNUSED(masqueradeInstance);
+	MASQ_UNUSED(audio);
+	MASQ_UNUSED(network);
 }
 
 uint32_t chip8_t::getScreenWidth()
@@ -145,6 +161,7 @@ bool chip8_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 		RETURN false;
 	}
 
+#ifndef __RPI_PICO__
 	// open the rom file
 
 	FILE* fp = NULL;
@@ -159,13 +176,13 @@ bool chip8_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 		fclose(fp);
 		pAbsolute_chip8_instance->absolute_chip8_state.aboutRom.isRomLoaded = true;
 
-		// Get sha1
-		sha1.update(pChip8_memory->memory + 0x0200, pAbsolute_chip8_instance->absolute_chip8_state.aboutRom.romSize);
-		rom_sha1 = SHA1_CUSTOM::toHexString(sha1.digest());
-
 		// If database search is enabled, then try to get info if available in database... 
 		if (pChip8_quirks->_enable_c8_db == YES)
 		{
+			// Get sha1
+			sha1.update(pChip8_memory->memory + 0x0200, pAbsolute_chip8_instance->absolute_chip8_state.aboutRom.romSize);
+			rom_sha1 = SHA1_CUSTOM::toHexString(sha1.digest());
+
 			if (getRomInfo())
 			{
 				// Get title
@@ -332,25 +349,30 @@ bool chip8_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 											continue;
 										}
 
-										CHIP8_KEYS chipKey = keyMap[chip8KeyIndex].first; // original CHIP8 key
-										ImGuiKey newKey = ImGuiKey_None;                  // default
+										CHIP8_KEYS chipKey = static_cast<CHIP8_KEYS>(chip8KeyIndex); 	// original CHIP8 key
 
-										// Map string to ImGuiKey
-										if (keyName == "up") newKey = ImGuiKey_UpArrow;
-										else if (keyName == "down") newKey = ImGuiKey_DownArrow;
-										else if (keyName == "left") newKey = ImGuiKey_LeftArrow;
-										else if (keyName == "right") newKey = ImGuiKey_RightArrow;
-										else if (keyName == "a") newKey = ImGuiKey_A;
-										else if (keyName == "b") newKey = ImGuiKey_B;
-										else if (keyName == "c") newKey = ImGuiKey_C;
-										else if (keyName == "d") newKey = ImGuiKey_D;
-										else if (keyName == "e") newKey = ImGuiKey_E;
-										else if (keyName == "f") newKey = ImGuiKey_F;
-										// Map Player 2 keys
-										else if (keyName == "player2Up") newKey = ImGuiKey_I;
-										else if (keyName == "player2Down") newKey = ImGuiKey_K;
-										else if (keyName == "player2Left") newKey = ImGuiKey_J;
-										else if (keyName == "player2Right") newKey = ImGuiKey_L;
+										EmuKey newKey = EmuKey::UNKNOWN;                  				// default
+
+										// Map string to EmuKey
+										if (keyName == "up") newKey = EmuKey::UP;
+										else if (keyName == "down") newKey = EmuKey::DOWN;
+										else if (keyName == "left") newKey = EmuKey::LEFT;
+										else if (keyName == "right") newKey = EmuKey::RIGHT;
+
+										else if (keyName == "a") newKey = EmuKey::A;
+										else if (keyName == "b") newKey = EmuKey::B;
+										else if (keyName == "c") newKey = EmuKey::X;
+										else if (keyName == "d") newKey = EmuKey::Y;
+
+										else if (keyName == "e") newKey = EmuKey::L;
+										else if (keyName == "f") newKey = EmuKey::R;
+
+										// Player 2 mapping
+										else if (keyName == "player2Up") newKey = EmuKey::UP;
+										else if (keyName == "player2Down") newKey = EmuKey::DOWN;
+										else if (keyName == "player2Left") newKey = EmuKey::LEFT;
+										else if (keyName == "player2Right") newKey = EmuKey::RIGHT;
+
 										else
 										{
 											FATAL("Unsupported key name: %s", keyName.c_str());
@@ -359,6 +381,7 @@ bool chip8_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 
 										// Call the remap API
 										reMapKeys(chipKey, newKey);
+
 										LOG("Remapped CHIP8 key %u -> %s", chip8KeyIndex, keyName.c_str());
 									}
 								}
@@ -408,6 +431,17 @@ bool chip8_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 		pAbsolute_chip8_instance->absolute_chip8_state.aboutRom.isRomLoaded = false;
 		RETURN false;
 	}
+#else
+	memcpy_portable(
+		pChip8_memory->memory + 0x0200,
+		PICO_ROM_SIZE,
+		PICO_ROM_DATA,
+		PICO_ROM_SIZE
+	);
+
+	pAbsolute_chip8_instance->absolute_chip8_state.aboutRom.romSize = PICO_ROM_SIZE;
+	pAbsolute_chip8_instance->absolute_chip8_state.aboutRom.isRomLoaded = true;
+#endif // !__RPI_PICO__
 
 	RETURN true;
 }
@@ -445,16 +479,26 @@ void chip8_t::dumpRom()
 
 float chip8_t::getEmulationVolume()
 {
+#ifdef __RPI_PICO__
+	// For Raspberry Pi Pico, we will use the default audio output and write directly to it.
+	// No need for SDL audio stream management.
+#else // !__RPI_PICO__
 	pChip8_instance->chip8_state.audio.emulatorVolume = SDL_GetAudioDeviceGain(SDL_GetAudioStreamDevice(audioStream));
+#endif
 	RETURN pChip8_instance->chip8_state.audio.emulatorVolume;
 }
 
 void chip8_t::setEmulationVolume(float volume)
 {
 	pChip8_instance->chip8_state.audio.emulatorVolume = volume;
+#ifdef __RPI_PICO__
+	// For Raspberry Pi Pico, we will use the default audio output and write directly to it.
+	// No need for SDL audio stream management.
+#else // !__RPI_PICO__
 	SDL_SetAudioDeviceGain(SDL_GetAudioStreamDevice(audioStream), volume);
 	pt.put("chip8._volume", volume);
 	boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, pt);
+#endif
 }
 
 void chip8_t::setupVariant(VARIANT ovrd)
@@ -631,6 +675,14 @@ bool chip8_t::initializeEmulator()
 	pChip8_quirks = &(pChip8_instance->chip8_state.quirks);
 	pChip8_io = &(pChip8_instance->chip8_state.io);
 
+#ifdef __RPI_PICO__
+	pChip8_display->waveshareFb = (uint16_t*)malloc(LCD_2IN_WIDTH * LCD_2IN_HEIGHT * sizeof(uint16_t));
+	if (pChip8_display->waveshareFb == nullptr)
+	{
+		panic("memory allocation failure for framebuffer");
+	}
+#endif
+
 	// quirks
 
 	setupVariant();
@@ -646,19 +698,21 @@ bool chip8_t::initializeEmulator()
 	
 	// initialize the graphics
 
+#ifndef __RPI_PICO__
 	uint32_t scanner = 0;
 	for (uint32_t y = 0; y < getScreenHeight(); y++)
 	{
 		for (uint32_t x = 0; x < getScreenWidth(); x++)
 		{
 			pChip8_display->imGuiBuffer.imGuiBuffer1D[scanner] = color1;
-			pChip8_display->gfx.gfx1D[0][scanner] = CLEAR;
-			pChip8_display->gfx.gfx1D[1][scanner] = CLEAR;
-			pChip8_display->gfx.gfx1D[2][scanner] = CLEAR;
-			pChip8_display->gfx.gfx1D[3][scanner] = CLEAR;
+			for (uint32_t z = 0; z < CHIP8_GFX_PLANES; z++)
+			{
+				pChip8_display->gfx.gfx1D[z][scanner] = CLEAR;
+			}
 			scanner++;
 		}
 	}
+#endif // !__RPI_PICO__
 
 	pChip8_display->planes = 0x01; // By default, enable only plane 0 in the bitmap
 
@@ -679,12 +733,12 @@ bool chip8_t::initializeEmulator()
 
 	// load font set
 
-	for (int ii = 0; ii < sizeof(chip8_fontset); ii++)
+	for (unsigned int ii = 0; ii < sizeof(chip8_fontset); ii++)
 	{
 		pChip8_memory->memory[CHIP8_FONT_BASE + ii] = chip8_fontset[ii];
 	}
 
-	for (int ii = 0; ii < sizeof(schip_fontset); ii++)
+	for (unsigned int ii = 0; ii < sizeof(schip_fontset); ii++)
 	{
 		pChip8_memory->memory[SCHIP_FONT_BASE + ii] = schip_fontset[ii];
 	}
@@ -695,12 +749,16 @@ bool chip8_t::initializeEmulator()
 
 	// setup the volume for audio
 
+	pChip8_instance->chip8_state.audio.emulatorVolume = pt.get<float>("chip8._volume", 0.1f);
+
+#ifdef __RPI_PICO__
+	// For Raspberry Pi Pico, we will use the default audio output and write directly to it.
+	// No need for SDL audio stream management.
+#else // !__RPI_PICO__
 	SDL_InitSubSystem(SDL_INIT_AUDIO);
 	const SDL_AudioSpec AudioSettings{ SDL_AUDIO_F32, ONE, TO_UINT(EMULATED_AUDIO_SAMPLING_RATE_FOR_CHIP8) };
 	audioStream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &AudioSettings, NULL, NULL);
 	SDL_ResumeAudioDevice(SDL_GetAudioStreamDevice(audioStream));
-
-	pChip8_instance->chip8_state.audio.emulatorVolume = pt.get<float>("chip8._volume", 0.1f);
 	SDL_SetAudioDeviceGain(SDL_GetAudioStreamDevice(audioStream), pChip8_instance->chip8_state.audio.emulatorVolume);
 
 	for (size_t ii = 0; ii < TO_UINT(EMULATED_AUDIO_SAMPLING_RATE_FOR_CHIP8); ii++)
@@ -709,7 +767,14 @@ bool chip8_t::initializeEmulator()
 		double t = double(ii) * dt;
 		tone[ii] = (CHIP8_AUDIO_SAMPLE_TYPE)(0.5 * sin(2.0 * 1529.0 * 3.14159 * t));
 	}
+#endif
 
+#ifdef __RPI_PICO__
+	// For Raspberry Pi Pico, we will use the default framebuffer and render directly to it.
+	// No need for OpenGL setup or texture management.
+	// Waveshare 2in LCD specific initialization
+	PANEL_SET_PARAMS(pctx, pChip8_display->waveshareFb, LCD_2IN_WIDTH, LCD_2IN_HEIGHT);
+#else // !__RPI_PICO__
 	// initialization specific to OpenGL
 #if (GL_FIXED_FUNCTION_PIPELINE == YES) && !defined(IMGUI_IMPL_OPENGL_ES2) && !defined(IMGUI_IMPL_OPENGL_ES3)
 	glEnable(GL_TEXTURE_2D);
@@ -833,6 +898,7 @@ bool chip8_t::initializeEmulator()
 	DEBUG("BLEND FRAGMENT");
 	DEBUG("%s", blendShader.fragmentSource.c_str());
 #endif
+#endif
 
 	RETURN SUCCESS;
 }
@@ -840,7 +906,14 @@ bool chip8_t::initializeEmulator()
 void chip8_t::destroyEmulator()
 {
 	pAbsolute_chip8_instance.reset();
+#ifdef __RPI_PICO__
+	// For Raspberry Pi Pico, we will use the default framebuffer and render directly to it.
+	// No need for OpenGL cleanup or SDL audio stream management.
 
+	// Waveshare 2in LCD specific cleanup
+	LCD_2IN_Clear(PixelToRGB565(WHITE));
+	DEV_Module_Exit();
+#else // !__RPI_PICO__
 #if (GL_FIXED_FUNCTION_PIPELINE == YES) && !defined(IMGUI_IMPL_OPENGL_ES2) && !defined(IMGUI_IMPL_OPENGL_ES3)
 	glDeleteTextures(1, &chip8_texture);
 	glDeleteTextures(1, &matrix_texture);
@@ -848,7 +921,6 @@ void chip8_t::destroyEmulator()
 	glDeleteTextures(1, &chip8_texture);
 	glDeleteTextures(1, &matrix_texture);
 #endif
-
 	auto audioDevId = SDL_GetAudioStreamDevice(audioStream);
 	SDL_PauseAudioDevice(audioDevId);
 	SDL_ClearAudioStream(audioStream);
@@ -856,6 +928,7 @@ void chip8_t::destroyEmulator()
 	SDL_DestroyAudioStream(audioStream);
 	SDL_CloseAudioDevice(audioDevId);
 	SDL_QuitSubSystem(SDL_INIT_AUDIO);
+#endif
 }
 
 uint32_t chip8_t::getHostCPUCycle()
@@ -878,51 +951,40 @@ void chip8_t::setEmulatedCPUCycle(int64_t cycles)
 	pChip8_instance->chip8_state.cpuInstance.emulatedCPUCycle = cycles;
 }
 
-void chip8_t::reMapKeys(CHIP8_KEYS chipKey, ImGuiKey newKey)
+void chip8_t::reMapKeys(CHIP8_KEYS chipKey, EmuKey newKey)
 {
-	for (auto& pair : keyMap)
-	{
-		if (pair.first == chipKey)
-		{
-			pair.second = newKey;
-			RETURN;
-		}
-	}
+	keyMap[static_cast<size_t>(chipKey)] = newKey;
 }
 
-chip8_t::io_status chip8_t::getKeyStatus(ImGuiKey key)
+chip8_t::io_status chip8_t::getKeyStatus(EmuKey key)
 {
-	if (ImGui::IsKeyPressed(key))
-	{
+	const IInputBackend& input = *pInputBackend;
+
+	if (input.isPressed(key))
 		RETURN io_status::PRESSED;
-	}
-	else if (ImGui::IsKeyDown(key))
-	{
+
+	if (input.isDown(key))
 		RETURN io_status::HELD;
-	}
-	else if (ImGui::IsKeyReleased(key))
-	{
+
+	if (input.isReleased(key))
 		RETURN io_status::RELEASED;
-	}
-	else
-	{
-		RETURN io_status::FREE;
-	}
+
+	RETURN io_status::FREE;
 }
 
 void chip8_t::captureIO()
 {
-	auto updateKey = [this](CHIP8_KEYS key, ImGuiKey imguiKey) {
-		pChip8_io->inputKeys[(uint8_t)key] =
-			ImGui::IsKeyReleased(imguiKey) ? io_status::RELEASED :
-			ImGui::IsKeyPressed(imguiKey) ? io_status::PRESSED :
-			ImGui::IsKeyDown(imguiKey) ? io_status::HELD :
-			io_status::FREE;
-		};
+	const IInputBackend& input = *pInputBackend;
 
-	for (auto& [chipKey, imguiKey] : keyMap)
+	for (size_t i = 0; i < 16; ++i)
 	{
-		updateKey(chipKey, imguiKey);
+		EmuKey key = keyMap[i];
+
+		pChip8_io->inputKeys[i] =
+			input.isPressed(key) ? io_status::PRESSED :
+			input.isReleased(key) ? io_status::RELEASED :
+			input.isDown(key) ? io_status::HELD :
+			io_status::FREE;
 	}
 
 	// TODO: Find a different place to call this
@@ -953,7 +1015,11 @@ void chip8_t::processTimers()
 // Needs to be called immediately after processTimers
 void chip8_t::processAudio()
 {
-	if (ImGui::IsKeyPressed(ImGuiKey_KeypadAdd) == YES)
+#ifdef __RPI_PICO__
+	// For Raspberry Pi Pico, we will use the default audio output and write directly to it.
+	// No need for SDL audio stream management.
+#else // !__RPI_PICO__
+	if (pInputBackend->isPressed(EmuKey::Kp) == YES)
 	{
 		auto gain = getEmulationVolume();
 
@@ -970,7 +1036,7 @@ void chip8_t::processAudio()
 
 		setEmulationVolume(gain);
 	}
-	if (ImGui::IsKeyPressed(ImGuiKey_KeypadSubtract) == YES)
+	if (pInputBackend->isPressed(EmuKey::Kn) == YES)
 	{
 		auto gain = getEmulationVolume();
 
@@ -1031,6 +1097,7 @@ void chip8_t::processAudio()
 	{
 		SDL_PauseAudioDevice(SDL_GetAudioStreamDevice(audioStream));
 	}
+#endif
 }
 
 void chip8_t::scrollDisplay(INC32 H, INC32 V)
@@ -1046,6 +1113,9 @@ void chip8_t::scrollDisplay(INC32 H, INC32 V)
 		{
 			continue; // skip unused planes
 		}
+
+		if (bit >= CHIP8_GFX_PLANES)
+			bit = CHIP8_GFX_PLANES - 1;
 
 		auto& buffer = pChip8_display->gfx.gfx2D[bit];
 
@@ -1113,20 +1183,17 @@ void chip8_t::scrollDisplay(INC32 H, INC32 V)
 
 void chip8_t::displayCompleteScreen()
 {
-	if (pChip8_quirks->_quirk_xo_chip == YES)
-	{
+    if (pChip8_quirks->_quirk_xo_chip == YES)
+    {
 		/*
 		 * NOTE:
 		 * Always render both planes.
 		 * `pChip8_display->planes` is used only to decide whether to add pixel data or not.
 		 * For rendering, all planes MUST be rendered.
 		 */
-
-
 		// --- Configuration ---
 		constexpr uint8_t NUM_PLANES = 2; // Change to 3 or 4 for future XO-Chip expansions
 		constexpr uint8_t NUM_COLORS = 1 << NUM_PLANES; // 2^N colors
-
 		// Example LUT: index = plane bits combination
 		// For 2 planes: 0b00=background, 0b01=plane0 only, 0b10=plane1 only, 0b11=both
 		const uint32_t planeColorLUT[NUM_COLORS] = {
@@ -1135,36 +1202,64 @@ void chip8_t::displayCompleteScreen()
 			color2.n, // 0b10
 			color3.n, // 0b11
 			// Add more if NUM_PLANES > 2
-		};
+        };
+#ifndef __RPI_PICO__
+        for (uint32_t y = 0; y < getScreenHeight(); y++)
+        {
+            for (uint32_t x = 0; x < getScreenWidth(); x++)
+            {
+                uint8_t idx = 0;
+                for (uint8_t plane = 0; plane < NUM_PLANES; plane++)
+                {
+                    if (plane >= CHIP8_GFX_PLANES)
+                        plane = CHIP8_GFX_PLANES - 1;
+                    if (pChip8_display->gfx.gfx2D[plane][y][x] == SET)
+                        idx |= (1 << plane);
+                }
+                pChip8_display->imGuiBuffer.imGuiBuffer2D[y][x].n = planeColorLUT[idx];
+            }
+        }
+#else // __RPI_PICO__
+        PANEL_TRANSFORM_FOR_CHIP8(
+            pctx,
+            reinterpret_cast<const uint8_t*>(&pChip8_display->gfx.gfx1D[0][0]),
+            ((NUM_PLANES > CHIP8_GFX_PLANES) ? CHIP8_GFX_PLANES : NUM_PLANES),
+            planeColorLUT,
+            getScreenWidth(),
+            getScreenHeight()
+        );
+#endif
+    }
+    else
+    {
+        const uint32_t planeColorLUT[2] = { color1.n, color0.n };
+#ifndef __RPI_PICO__
+        for (uint32_t y = 0; y < getScreenHeight(); y++)
+        {
+            for (uint32_t x = 0; x < getScreenWidth(); x++)
+            {
+                pChip8_display->imGuiBuffer.imGuiBuffer2D[y][x].n
+                    = ((pChip8_display->gfx.gfx2D[0][y][x] == SET) ? color0.n : color1.n);
+            }
+        }
+#else // __RPI_PICO__
+        PANEL_TRANSFORM_FOR_CHIP8(
+            pctx,
+            reinterpret_cast<const uint8_t*>(&pChip8_display->gfx.gfx1D[0][0]),
+            ONE,
+            planeColorLUT,
+            getScreenWidth(),
+            getScreenHeight()
+        );
+#endif
+    }
 
-		for (uint32_t y = 0; y < getScreenHeight(); y++)
-		{
-			for (uint32_t x = 0; x < getScreenWidth(); x++)
-			{
-				uint8_t idx = 0;
-				for (uint8_t plane = 0; plane < NUM_PLANES; plane++)
-				{
-					if (pChip8_display->gfx.gfx2D[plane][y][x] == SET)
-					{
-						idx |= (1 << plane);
-					}
-				}
-				pChip8_display->imGuiBuffer.imGuiBuffer2D[y][x].n = planeColorLUT[idx];
-			}
-		}
-	}
-	else
-	{
-		for (uint32_t y = 0; y < getScreenHeight(); y++)
-		{
-			for (uint32_t x = 0; x < getScreenWidth(); x++)
-			{
-				pChip8_display->imGuiBuffer.imGuiBuffer2D[y][x].n 
-					= ((pChip8_display->gfx.gfx2D[0][y][x] == SET) ? color0.n : color1.n);	
-			}
-		}
-	}
-
+#ifdef __RPI_PICO__
+	// For Raspberry Pi Pico, we will use the default framebuffer and render directly to it.
+	// No need for OpenGL setup or texture management.
+    PANEL_PRESENT_FRAME(pctx);
+    PANEL_BACKEND_PRESENT(pctx.fb);
+#else // !__RPI_PICO__
 #if (GL_FIXED_FUNCTION_PIPELINE == YES) && !defined(IMGUI_IMPL_OPENGL_ES2) && !defined(IMGUI_IMPL_OPENGL_ES3)
 	glBindFramebuffer(GL_FRAMEBUFFER, frame_buffer);
 
@@ -1329,10 +1424,18 @@ void chip8_t::displayCompleteScreen()
 	GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter));
 	GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter));
 #endif
+#endif
 }
 
 void chip8_t::clearCompleteScreen()
 {
+#ifdef __RPI_PICO__
+	// For Raspberry Pi Pico, we will use the default framebuffer and render directly to it.
+	// No need for OpenGL setup or texture management.
+
+	// Waveshare 2in LCD specific cleanup
+	LCD_2IN_Clear(PixelToRGB565(WHITE));
+#else // !__RPI_PICO__
 #if (GL_FIXED_FUNCTION_PIPELINE == YES) && !defined(IMGUI_IMPL_OPENGL_ES2) && !defined(IMGUI_IMPL_OPENGL_ES3)
 	// Bind the framebuffer used for the emulator display
 	glBindFramebuffer(GL_FRAMEBUFFER, frame_buffer);
@@ -1359,6 +1462,7 @@ void chip8_t::clearCompleteScreen()
 	// Unbind framebuffer
 	GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, 0));
 #endif
+#endif
 }
 
 bool chip8_t::processInterrupts()
@@ -1368,11 +1472,13 @@ bool chip8_t::processInterrupts()
 
 bool chip8_t::runEmulationAtHostRate(uint32_t currentFrame)
 {
+	MASQ_UNUSED(currentFrame);
 	RETURN true;
 }
 
 bool chip8_t::runEmulationLoopAtHostRate(uint32_t currentFrame)
 {
+	MASQ_UNUSED(currentFrame);
 	RETURN true;
 }
 
@@ -1393,11 +1499,14 @@ bool chip8_t::runEmulationAtFixedRate(uint32_t currentFrame)
 
 	displayCompleteScreen();
 
+	MASQ_UNUSED(currentFrame);
+
 	RETURN status;
 }
 
 bool chip8_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 {
+	MASQ_UNUSED(currentFrame);
 	processCPU();
 
 	RETURN pChip8_display->vblank;
@@ -1423,10 +1532,10 @@ bool chip8_t::processOpcode()
 			{
 				for (uint32_t x = 0; x < getScreenWidth(); x++)
 				{
-					pChip8_display->gfx.gfx1D[0][scanner] = CLEAR;
-					pChip8_display->gfx.gfx1D[1][scanner] = CLEAR;
-					pChip8_display->gfx.gfx1D[2][scanner] = CLEAR;
-					pChip8_display->gfx.gfx1D[3][scanner] = CLEAR;
+					for (uint32_t z = 0; z < CHIP8_GFX_PLANES; z++)
+					{
+						pChip8_display->gfx.gfx1D[z][scanner] = CLEAR;
+					}
 					scanner++;
 				}
 			}
@@ -1532,6 +1641,9 @@ bool chip8_t::processOpcode()
 				{
 					continue; // skip unused planes
 				}
+
+				if (bit >= CHIP8_GFX_PLANES)
+					bit = CHIP8_GFX_PLANES - 1;
 
 				uint32_t scanner = 0;
 				for (uint32_t y = 0; y < getScreenHeight(); y++)
@@ -2731,6 +2843,9 @@ bool chip8_t::processOpcode()
 							// Check bit from MSB to LSB
 							if ((pixel_i & (1 << (sprite_width - 1 - xx))) != 0)														// if bit is set in pixel_i
 							{
+								if (bit >= CHIP8_GFX_PLANES)
+									bit = CHIP8_GFX_PLANES - 1;
+
 								// Chip8 uses XOR logic while displaying pixels
 								if (pChip8_display->gfx.gfx2D[bit][sy][sx] == SET)														// was set
 								{
@@ -2872,6 +2987,9 @@ bool chip8_t::processOpcode()
 							// Check bit from MSB to LSB
 							if ((pixel_i & (1 << (sprite_width - 1 - xx))) != 0)													// if bit is set in pixel_i
 							{
+								if (bit >= CHIP8_GFX_PLANES)
+									bit = CHIP8_GFX_PLANES - 1;
+
 								// Chip8 uses XOR logic while displaying pixels
 								if (pChip8_display->gfx.gfx2D[bit][zy][zx] == SET)													// was set
 								{
@@ -2949,7 +3067,7 @@ bool chip8_t::processOpcode()
 		}
 		else if ((pChip8_instance->chip8_state.cpuInstance.opcode & 0x00FF) == 0x0A)
 		{
-			for (INC8 ii = 0; ii < TO_UINT(CHIP8_KEYS::CHIP8_TOTAL); ii++)
+			for (unsigned int ii = 0; ii < TO_UINT(CHIP8_KEYS::CHIP8_TOTAL); ii++)
 			{
 				if (pChip8_io->inputKeys[ii] == io_status::RELEASED)
 				{
@@ -3077,7 +3195,6 @@ bool chip8_t::processOpcode()
 		status = false;
 		BREAK;
 	}
-
 	}
 
 	if (debugConfig._DEBUG_REGISTERS == true)
@@ -3089,7 +3206,7 @@ bool chip8_t::processOpcode()
 		LOG("I register: \t\t%04x", pChip8_registers->I);
 		LOG("program counter: \t%04x", pChip8_registers->pc);
 		LOG("stack pointer: \t\t%04x", pChip8_registers->sp);
-		for (INC8 ii = 0; ii < (sizeof(pChip8_registers->V) / sizeof(pChip8_registers->V[0])); ii++)
+		for (unsigned int ii = 0; ii < (sizeof(pChip8_registers->V) / sizeof(pChip8_registers->V[0])); ii++)
 		{
 			LOG("V%d: \t\t\t%02x", ii, pChip8_registers->V[ii]);
 		}

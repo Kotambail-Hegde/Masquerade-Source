@@ -92,8 +92,8 @@ public:
     int getCurrentCode(EMULATION_ID id, EmuKey key) const;
 
     // Persist bindings to / from config file
-    void load(boost::property_tree::ptree& config, EMULATION_ID id);
-    void save(boost::property_tree::ptree& config, EMULATION_ID id);
+    void load(MasqConfig_t& config, EMULATION_ID id);
+    void save(MasqConfig_t& config, EMULATION_ID id);
 
 private:
     std::unordered_map<EMULATION_ID, std::unordered_map<int, EmuKey>, EmulationIDHash> bindings;

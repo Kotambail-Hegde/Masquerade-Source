@@ -25,8 +25,8 @@ public:
 		this->pixel_width = 1;
 	}
 	~defaults_t() {};
-	void setupTheCoreOfEmulation(void* masqueradeInstance = nullptr, void* audio = nullptr, void* network = nullptr) override {};
-	void sendBiosToEmulator(bios_t* bios = nullptr) override {};
+	void setupTheCoreOfEmulation(void* masqueradeInstance = nullptr, void* audio = nullptr, void* input = nullptr, void* network = nullptr) override { MASQ_UNUSED(masqueradeInstance); MASQ_UNUSED(audio); MASQ_UNUSED(input); MASQ_UNUSED(network); };
+	void sendBiosToEmulator(bios_t* bios = nullptr) override { MASQ_UNUSED(bios); };
 
 	uint32_t screen_height;
 	uint32_t screen_width;
@@ -40,7 +40,7 @@ private:
 	const char* getEmulatorName() override { RETURN NAME; }
 	float getEmulationFPS() override { RETURN myFPS; }
 	float getEmulationVolume() override { RETURN EMULATION_VOLUME; }
-	void setEmulationVolume(float volume)override { ; }
+	void setEmulationVolume(float volume)override { MASQ_UNUSED(volume); }
 	uint32_t getScreenWidth() override { RETURN this->screen_width; }
 	uint32_t getScreenHeight() override { RETURN this->screen_height; }
 	uint32_t getPixelWidth() override { RETURN this->pixel_width; }
@@ -67,15 +67,15 @@ private:
 	}
 
 	bool getRomLoadedStatus() override { RETURN true; }
-	bool loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom) override { RETURN true; }
+	bool loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom) override { MASQ_UNUSED(rom) ;RETURN true; }
 	void dumpRom() override {}
 #pragma endregion INFRASTRUCTURE_METHOD_DECLARATION
 
 #pragma region EMULATION_METHOD_DECLARATION
 public:
 
-	bool saveState(uint8_t id = 0) override { RETURN false; }
-	bool loadState(uint8_t id = 0) override { RETURN false; }
+	bool saveState(uint8_t id = 0) override { MASQ_UNUSED(id); RETURN false; }
+	bool loadState(uint8_t id = 0) override { MASQ_UNUSED(id); RETURN false; }
 
 	bool fillGamePlayStack() override { RETURN false; }
 	bool rewindGamePlay() override { RETURN false; }
@@ -85,7 +85,7 @@ public:
 	bool runEmulationAtFixedRate(uint32_t) override { RETURN true; }
 	bool runEmulationLoopAtFixedRate(uint32_t) override { RETURN true; }
 
-	FLAG onKeyEvent(EmuKey key, EmuKeyAction action) override { RETURN true; }
+	FLAG onKeyEvent(EmuKey key, EmuKeyAction action) override { MASQ_UNUSED(key); MASQ_UNUSED(action); RETURN true; }
 
 	bool initializeEmulator() override { RETURN true; }
 	void destroyEmulator() override {};

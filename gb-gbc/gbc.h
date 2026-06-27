@@ -49,8 +49,9 @@ public:
 
 private:
 
-	boost::property_tree::ptree pt;
+	MasqConfig_t pt;
 
+#ifndef __RPI_PICO__
 private:
 
 	uint8_t const SST_ROMS = TWO;
@@ -63,6 +64,7 @@ private:
 private:
 
 	CheatEngine_t* ceGBGBC;
+#endif // !__RPI_PICO__
 #pragma endregion INFRASTRUCTURE_DECLARATIONS
 
 #pragma region SM83_DECLARATION
@@ -415,6 +417,7 @@ private:
 		HUC1,
 		HUC3,
 		WISDOM_TREE,
+		POKE_2IN1,
 		INVALID_MBC
 	};
 
@@ -1208,9 +1211,11 @@ private:
 		BYTE sampleReadByChannel4;
 		int32_t downSamplingRatioCounter;
 		uint32_t accumulatedTone;
+		float emulatorVolume;
+#ifndef __RPI_PICO__
 		audioChannelInstance_t audioChannelInstance[(uint8_t)AUDIO_CHANNELS::TOTAL_CHANNELS];
 		GBC_AUDIO_SAMPLE_TYPE audioBuffer[AUDIO_BUFFER_SIZE_FOR_GB_GBC];
-		float emulatorVolume;
+#endif // !__RPI_PICO__
 	} audio_t;
 
 	// Since we are going to sort the OAM objects w.r.t "x", using linked list instead of array
@@ -1547,6 +1552,7 @@ private:
 		FLAG blockOAMW;
 		FLAG blockCGBPalette;
 		int16_t emulatedPPUCyclePerPPUMode;
+		// ---- TODO : Need Memory Optmization ----------------------------
 		uint16_t gfxVisibleColorMap_BG_WINDOW_OBJ[screen_height][screen_width];
 		COLOR_FORMAT gfxVisible_BG_WINDOW_OBJ[screen_height][screen_width];
 		union
@@ -1556,6 +1562,7 @@ private:
 		} imGuiBuffer;
 		COLOR_FORMAT gfx_BG_WINDOW[256][256];
 		COLOR_FORMAT imGuiFullBuffer2D[256][256];
+		// ----------------------------------------------------------------
 		uint64_t filters;
 		uint64_t debugVariable;
 	} display_t;
@@ -1775,6 +1782,12 @@ private:
 		FLAG enableRAMBanking;
 		FLAG isMBC7RamEn1;
 		FLAG isMBC7RamEn2;
+		struct
+		{
+			byte  MBChi;       // high ROM bank base (added to switchable bank number)
+			FLAG  bcSelect;    // once set, game-select writes are locked out
+			FLAG  bank0Change; // set when 0x0000 write has bits 7:6 == 0b11
+		} poke2in1;
 		uint8_t currentRAMBankNumber;
 		uint8_t currentVRAMBankNumber;
 		uint8_t currentWRAMBankNumber;
@@ -1782,6 +1795,7 @@ private:
 		uint16_t serialMaxClockPerTransfer;
 		uint16_t serialMasterByteShiftCount;
 		uint16_t serialSlaveByteShiftCount;
+#ifndef __RPI_PICO__
 		struct
 		{
 			FLAG flashEnable;
@@ -1798,6 +1812,7 @@ private:
 			BYTE flashHidden[256];
 			uint8_t flashCmdState; // 0=IDLE, 1=UNLOCK1, 2=UNLOCK2, 3=PROGRAM, 4=ERASE_SETUP, 5=ERASE_UNLOCK1, 6=ERASE_CMD
 		} mbc6;
+#endif // !__RPI_PICO__
 		struct
 		{
 			FLAG isMMM01Mode1;
@@ -1866,6 +1881,7 @@ private:
 		debugger_t debugger;
 	} emulatorStatus_t;
 
+	// ---- TODO : Need Memory Optmization ----------------------------
 	// Data stored in all the ROM memory banks of the cartridge
 	typedef union
 	{
@@ -1918,6 +1934,7 @@ private:
 		wram01MemoryBanks_t wram01MemoryBanks;
 		uint8_t entireWram01Memory[sizeof(wram01MemoryBanks_t)];
 	} entireWram01_t;
+	// ----------------------------------------------------------------
 
 	// Palette ram of size 64 bytes for background and object 
 	// Palette ram's data granularity is 16 bit; https://gbdev.io/pandocs/Palettes.html#ff69--bcpdbgpd-cgb-mode-only-background-color-palette-data--background-palette-data
@@ -1957,14 +1974,14 @@ private:
 		rtc_t rtcLatched;
 		rtc_t rtc;
 		//
-		entireRom_t entireRom;
-		entireRam_t entireRam;
-		entireVram_t entireVram;
-		entireWram01_t entireWram01;
+		entireRom_t entireRom; // TODO : Need Memory Optmization
+		entireRam_t entireRam; // TODO : Need Memory Optmization
+		entireVram_t entireVram; // TODO : Need Memory Optmization
+		entireWram01_t entireWram01; // TODO : Need Memory Optmization
 		entireBackgroundPaletteRAM_t entireBackgroundPaletteRAM;
 		entireObjectPaletteRAM_t entireObjectPaletteRAM;
 		// semi - core
-		display_t display;
+		display_t display; // TODO : Need Memory Optmization
 		audio_t audio;
 		// non - core
 		quirks_t quirks;
@@ -2015,15 +2032,25 @@ PACK_END
 
 private:
 
+	IInputBackend* pInputBackend = nullptr;
+
+private:
+
+#ifndef __RPI_PICO__
 	SDL_AudioStream* audioStream = nullptr;
+#endif // !__RPI_PICO__
 
 private:
 
+#ifndef __RPI_PICO__
 	// TODO : Placeholder to handle network
+#endif // !__RPI_PICO__
 
 private:
 
+#ifndef __RPI_PICO__
 	std::deque<GBc_state_t> gamePlay;
+#endif // !__RPI_PICO__
 
 private:
 
@@ -2039,6 +2066,8 @@ private:
 #pragma region BESS
 PACK_BEGIN
 private:
+
+#ifndef __RPI_PICO__
 	// BESS specifications
 	// Refer to https://github.com/LIJI32/SameBoy/blob/master/BESS.md
 
@@ -2170,6 +2199,7 @@ private:
 	{
 
 	};
+#endif // !__RPI_PICO__
 
 PACK_END
 #pragma endregion BESS
@@ -2177,8 +2207,8 @@ PACK_END
 #pragma region INFRASTRUCTURE_METHOD_DECLARATION
 public:
 
-	GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, boost::property_tree::ptree& config, CheatEngine_t* ce);
-	void setupTheCoreOfEmulation(void* masqueradeInstance = nullptr, void* audio = nullptr, void* network = nullptr) override;
+	GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config, CheatEngine_t* ce = nullptr);
+	void setupTheCoreOfEmulation(void* masqueradeInstance = nullptr, void* audio = nullptr, void* input = nullptr, void* network = nullptr) override;
 	void sendBiosToEmulator(bios_t* bios = nullptr) override {};
 
 public:
@@ -2334,7 +2364,12 @@ private:
 	}
 	MASQ_INLINE FLAG isMBC6() const
 	{
+#ifdef __RPI_PICO__
+		FATAL("MBC6 is not supported");
+		RETURN NO;
+#else
 		RETURN pGBc_emuStatus->activeMBC == MBCType::MBC6;
+#endif
 	}
 	MASQ_INLINE FLAG isMBC7() const
 	{
@@ -2359,6 +2394,10 @@ private:
 	MASQ_INLINE FLAG isWT() const
 	{
 		RETURN pGBc_emuStatus->activeMBC == MBCType::WISDOM_TREE;
+	}
+	MASQ_INLINE FLAG isPoke2in1() const
+	{
+		RETURN pGBc_emuStatus->activeMBC == MBCType::POKE_2IN1;
 	}
 	void setMBCType(uint16_t mbcType, MBCType force = MBCType::INVALID_MBC);
 	void setROMBankType(uint16_t romBankType);
@@ -2395,7 +2434,9 @@ private:
 public:
 
 	// For MBC6
+#ifndef __RPI_PICO__
 	void processMBC6FlashWrite(uint16_t cpuAddr, BYTE data);
+#endif // !__RPI_PICO__
 
 public:
 
@@ -2456,6 +2497,7 @@ public:
 
 public:
 
+	void freezeLCD();
 	void setPPULCDMode(LCD_MODES lcdMode);
 	LCD_MODES getPPULCDMode();
 	FLAG isPPULCDEnabled();
@@ -2477,7 +2519,6 @@ public:
 
 private:
 
-	void loadConfig();
 	void loadQuirks();
 
 public:
@@ -2585,32 +2626,32 @@ private:
 
 private:
 
-	inline uint16_t GET_PC()
+	MASQ_INLINE uint16_t GET_PC()
 	{
 		RETURN pGBc_registers->pc;
 	}
 
-	inline void SET_PC(uint16_t pc)
+	MASQ_INLINE void SET_PC(uint16_t pc)
 	{
 		pGBc_registers->pc = pc;
 	}
 
-	inline void INCREMENT_BC_BY_ONE()
+	MASQ_INLINE void INCREMENT_BC_BY_ONE()
 	{
 		pGBc_registers->bc.bc_u16memory++;
 	}
 
-	inline void INCREMENT_DE_BY_ONE()
+	MASQ_INLINE void INCREMENT_DE_BY_ONE()
 	{
 		pGBc_registers->de.de_u16memory++;
 	}
 
-	inline void INCREMENT_HL_BY_ONE()
+	MASQ_INLINE void INCREMENT_HL_BY_ONE()
 	{
 		pGBc_registers->hl.hl_u16memory++;
 	}
 
-	inline FLAG INCREMENT_PC_BY_ONE()
+	MASQ_INLINE FLAG INCREMENT_PC_BY_ONE()
 	{
 		if (pGBc_instance->GBc_state.emulatorStatus.isHaltBugActivated == HALT_BUG_STATE::HALT_BUG_ENABLED)
 		{
@@ -2624,32 +2665,32 @@ private:
 		}
 	}
 
-	inline void INCREMENT_SP_BY_ONE()
+	MASQ_INLINE void INCREMENT_SP_BY_ONE()
 	{
 		pGBc_registers->sp++;
 	}
 
-	inline void DECREMENT_BC_BY_ONE()
+	MASQ_INLINE void DECREMENT_BC_BY_ONE()
 	{
 		pGBc_registers->bc.bc_u16memory--;
 	}
 
-	inline void DECREMENT_DE_BY_ONE()
+	MASQ_INLINE void DECREMENT_DE_BY_ONE()
 	{
 		pGBc_registers->de.de_u16memory--;
 	}
 
-	inline void DECREMENT_HL_BY_ONE()
+	MASQ_INLINE void DECREMENT_HL_BY_ONE()
 	{
 		pGBc_registers->hl.hl_u16memory--;
 	}
 
-	inline void DECREMENT_PC_BY_ONE()
+	MASQ_INLINE void DECREMENT_PC_BY_ONE()
 	{
 		pGBc_registers->pc--;
 	}
 
-	inline void DECREMENT_SP_BY_ONE()
+	MASQ_INLINE void DECREMENT_SP_BY_ONE()
 	{
 		pGBc_registers->sp--;
 	}

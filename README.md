@@ -133,19 +133,19 @@ Current Version: **0.7x**
 - Passes all tests within the AGB aging catridge test suite except:
   - Prefetch Buffer
 - Passes all mgba-suite tests except for few test-cases within the following tests:
-  - GamePAK prefetch timing tests
+  - GamePAK prefetch related timing tests
   - Few timer count-up tests
   - Few timer IRQ tests
-  - SIO tests
-  - MISC edge case tests
-- Passes CPU subtests of AGBEEG aging catridge test suite (still fails the Cartridge and DMA subtests)
+  - Few SIO tests
+  - Few MISC edge case tests
+- Passes CPU subtests of AGBEEG aging catridge test suite (still fails the Catridge and DMA subtests)
 - Passes all tests in tonc's test suite
 - Passes all belogic's audio tests
 
 #### Known Issues (other than the ones mentioned above)
-- Audio issue while running GBS
-- Visual artifacts top left corner in Mode 3 for some video ROMs like Pokemon
-- Undesired audio artifacts (expected fix in **_P0152_** variant)
+- No audio issue while running GBS
+- Minor visual artifacts top left corner in Mode 3 for some video ROMs like Pokemon
+- Some undesired audio artifacts (expected fix in **_P0152_** variant)
 - Low end devices still need PGOs to run at full speed (expected fix in **_P0152_** variant)
 
 ---
@@ -216,11 +216,12 @@ Current Version: **0.7x**
   - vram
 
 #### Known Issues (other than the ones mentioned above)
-- Link Cable is not supported
 - Fails cgb-acid-hell
 - Fails windesync-validate.gb
-- Fails many of the docboy-test-suite's tests
-- Fails many of the Mealybug Tearoom tests
+- Fails many docboy-test-suite's APU and CGB tests
+- Fails some of the Mealybug Tearoom tests by a very slight margin (a single pixel offset is seen from the expected!)
+- Link Cable not supported
+- Multiple CGB-specific quirks remain unimplemented
 
 ---
 
@@ -229,21 +230,73 @@ Current Version: **0.7x**
 #### Features
 - 6502 CPU passes Klaus Dormann's 6502_65C02_functional_tests including BCD tests
 - Supports mappers:
-  - NROM
-  - MMC1 (including SEROM, SHROM, SH1ROM, SUROM sub-mappers)
+  - NROM (000)
+  - MMC1 (001)
+    - SEROM
+    - SHROM
+    - SH1ROM
+    - SUROM
+    - SOROM
+    - SNROM
+    - SXROM
   - UxROM (002)
-  - CNROM
-  - MMC3
-  - iNES MAPPER 6
-  - AxROM
-  - MMC2
-  - MMC4
-  - COLOR DREAMS
-  - iNES MAPPER 34 (including both NINA and BNROM sub-mappers)
-  - iNES MAPPER 37
-  - GxROM
-  - Nanjian FC-001
-- Supports GameGenie cheats
+  - CNROM (003)
+  - MMC3 (004)
+  - MMC5 (005)
+    - MMC6
+  - iNES Mapper 6 (006)
+  - AxROM (007)
+  - MMC2 (009)
+  - MMC4 (010)
+  - Color Dreams (011)
+  - CPROM (013)
+  - Bandai FCG (016)
+    - LZ93D50 + 24C01 EEPROM
+    - FCG-1 / FCG-2
+    - LZ93D50 + 24C02 EEPROM
+  - Jaleco SS88006 (018)
+  - Namco 163 (019)
+  - Konami VRC4 (021)
+    - VRC4ac
+  - Konami VRC2 (022)
+    - VRC2a
+  - Konami VRC2 / VRC4 (023)
+    - VRC2b
+    - VRC2c
+    - VRC4e
+  - Konami VRC6 (024)
+    - VRC6a
+  - Konami VRC2 / VRC4 (025)
+    - VRC4b
+    - VRC4c
+    - VRC4d
+    - VRC4f
+  - Konami VRC6 (026)
+    - VRC6b
+  - iNES Mapper 34 (034)
+    - NINA-001
+    - BNROM
+  - iNES Mapper 37 (037)
+  - iNES Mapper 47 (047)
+  - RAMBO-1 (064)
+  - GxROM (066)
+  - iNES Mapper 67 (067)
+  - Sunsoft-4 (068)
+  - Sunsoft FME-7 (069)
+  - iNES Mapper 70 (070)
+  - J87 (087)
+  - iNES Mapper 105 (105)
+  - iNES Mapper 118 (118)
+  - MMC3 + RAMBO-1 (119)
+  - iNES Mapper 152 (152)
+  - iNES Mapper 155 (155)
+  - iNES Mapper 158 (158)
+  - Nanjing FC-001 (163)
+  - iNES Mapper 180 (180)
+  - Namco 175 / Namco 340 (210)
+    - Namco 175
+    - Namco 340
+- Supports Game Genie cheats
 - Supports Zapper in Port 2 (mouse clicks)
 
 #### Test Results
@@ -257,7 +310,7 @@ Current Version: **0.7x**
 - Passes blargg_apu_2005.07.30
 - Passes Blargg sprite_overflow_test suite
 - Passes Blargg sprite_hit_tests_2005.10.05
-- Passes all APU tests
+- Passes all APU tests including DMC
 - Passes Blargg vbl_nmi_timing and ppu_vbl_nmi tests
 - Passes Blargg cpu_interrupt_v2 tests
 - Passes OAM stress tests
@@ -418,6 +471,10 @@ Legacy variant based on One Lone Coder's Pixel Game Engine.
 #### Nintendo Entertainment System
 - [NES Dev Wiki](https://www.nesdev.org/wiki/Nesdev_Wiki) - Comprehensive NES documentation
 - [AprNes Accuracy Coin Guide](https://github.com/erspicu/AprNes/tree/master/MD/AccuracyCoin_Guide/EN) - Comprehensive accuracy coin Test guide
+- [NES Database](https://forums.nesdev.org/viewtopic.php?p=248796&sid=1308dccf364c1c36576f65a65cbb68ee#p248796) - ROM Database for NES ROMs
+
+#### CHIP-8 Family
+- [Chip8 Database](https://github.com/chip-8/chip-8-database) - ROM Database for CHIP-8 family
 
 ### Reference Emulators
 
