@@ -8349,6 +8349,11 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 					std::memset(&pGBc_emuStatus->huc3Rtc, RESET, sizeof(pGBc_emuStatus->huc3Rtc));
 				}
 
+				if (isGameBoyCamera())
+				{
+					std::memset(&pGBc_emuStatus->cameraUnit, RESET, sizeof(pGBc_emuStatus->cameraUnit));
+				}
+
 				// disable ram banking for now
 				disableRAMBank();
 
@@ -8427,6 +8432,7 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 				case 0x1D: // MBC5+RUMBLE+RAM
 				case 0x1E: // MBC5+RUMBLE+RAM+BATTERY
 				case 0x22: // MBC7+SENSOR+RUMBLE+RAM+BATTERY
+				case 0xFC: // Pocket Camera
 				case 0xFE: // HuC3
 				case 0xFF: // HuC1+RAM+BATTERY
 					pGBc_emuStatus->isCartRAMAvailable = YES;
@@ -9287,6 +9293,7 @@ byte GBc_t::readRawMemory(uint16_t address
 					ROMBankNumber %= getNumberOfROMBanksUsed();
 				}
 			}
+			
 			else if (isPoke2in1()) MASQ_UNLIKELY
 			{
 				ROMBankNumber = pGBc_emuStatus->poke2in1.MBChi % getNumberOfROMBanksUsed();
@@ -9595,6 +9602,17 @@ byte GBc_t::readRawMemory(uint16_t address
 				address &= (0x200 - ONE);
 			}
 
+			if (isGameBoyCamera() && pGBc_emuStatus->cameraUnit.isCAMMode == YES) MASQ_UNLIKELY
+			{
+				TODO("Bit 0 of triggerStatus is the busy bit for camera unit; we will hardcode it to not busy, as we don't emulate the camera hardware");
+				UNSETBIT(pGBc_emuStatus->cameraUnit.triggerStatus, ZERO); // This bit is the busy bit for camera unit; we will hardcode it to not busy
+
+				// All registers are mirrored every $80 bytes; Refer https://gbdev.io/pandocs/Gameboy_Camera.html#4000-5fff---ram-bank-numbercam-registers-select-write-only
+				RETURN ((address & 0x7F) == 0)
+					? (pGBc_emuStatus->cameraUnit.triggerStatus & 0x07)
+					: ZERO;
+			}
+
 			uint8_t ramBank = getRAMBankNumber();
 
 			/*
@@ -9605,6 +9623,10 @@ byte GBc_t::readRawMemory(uint16_t address
 
 			if (isRAMBankEnabled() == YES)
 			{
+				if (isGameBoyCamera() && pGBc_emuStatus->cameraUnit.startCapture) MASQ_UNLIKELY
+				{
+					RETURN ZERO;
+				}
 				// All 8 bits are read properly unlike what pandocs mentions; needed for the HUC3 games
 				RETURN pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[ramBank][address];
 			}
@@ -11088,14 +11110,14 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 				{
 					if (address <= 0x1FFF)
 					{
-						if (isMBC1() || isMBC1M() || isMBC2() || isMBC3() || isMBC5() || isMBC7() || isHUC1() || isHUC3() || isMMM01())
+						if (isMBC1() || isMBC1M() || isMBC2() || isMBC3() || isMBC5() || isMBC7() || isHUC1() || isHUC3() || isMMM01() || isGameBoyCamera())
 						{
 							pGBc_emuStatus->dataWrittenToMBCReg0 = data;
 						}
 					}
 					else if (address <= 0x2FFF)
 					{
-						if (isMBC1() || isMBC1M() || isMBC3() || isMBC5() || isMBC7() || isHUC1() || isHUC3() || isMMM01())
+						if (isMBC1() || isMBC1M() || isMBC3() || isMBC5() || isMBC7() || isHUC1() || isHUC3() || isMMM01() || isGameBoyCamera())
 						{
 							pGBc_emuStatus->dataWrittenToMBCReg1 = data;
 						}
@@ -11106,7 +11128,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 					}
 					else if (address <= 0x3FFF)
 					{
-						if (isMBC1() || isMBC1M() || isMBC3() || isMBC7() || isHUC1() || isHUC3() || isMMM01())
+						if (isMBC1() || isMBC1M() || isMBC3() || isMBC7() || isHUC1() || isHUC3() || isMMM01() || isGameBoyCamera())
 						{
 							pGBc_emuStatus->dataWrittenToMBCReg1 = data;
 						}
@@ -11121,7 +11143,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 					}
 					else if (address <= 0x5FFF)
 					{
-						if (isMBC1() || isMBC1M() || isMBC3() || isMBC7() || isHUC1() || isHUC3() || isMMM01())
+						if (isMBC1() || isMBC1M() || isMBC3() || isMBC7() || isHUC1() || isHUC3() || isMMM01() || isGameBoyCamera())
 						{
 							pGBc_emuStatus->dataWrittenToMBCReg2 = data;
 						}
@@ -11320,7 +11342,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 						RETURN;
 					}
 
-					// MBC1/1M/3/5/7/MMM01 RAM or RTC enable
+					// MBC1/1M/3/5/7/MMM01/Pocket-Camera RAM or RTC enable
 					const FLAG ramEnable = ((data & 0x0F) == 0x0A);
 					ramEnable ? enableRAMBank() : disableRAMBank();
 					if (isMBC3())
@@ -11413,11 +11435,11 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 						RETURN;
 					}
 
-					else if (isMBC3() || isMBC7() || isHUC1() || isHUC3())
+					else if (isMBC3() || isMBC7() || isHUC1() || isHUC3() || isGameBoyCamera())
 					{
-						uint8_t bankMask = isMBC7() ? 0x7F : isHUC1() ? 0x3F : isHUC3() ? 0x7F : 0xFF; // MBC30 uses full 8 bits
+						uint8_t bankMask = isMBC7() ? 0x7F : (isHUC1() || isGameBoyCamera()) ? 0x3F : isHUC3() ? 0x7F : 0xFF; // MBC30 uses full 8 bits
 						ROMBankNumber = data & bankMask;
-						if (!isHUC3() && ROMBankNumber == ZERO) ROMBankNumber = ONE; // HuC3 allows bank 0
+						if (!isHUC3() && !isGameBoyCamera() && ROMBankNumber == ZERO) ROMBankNumber = ONE; // HuC3 and Pocket Camera allows bank 0
 						ROMBankNumber %= getNumberOfROMBanksUsed(); // Clamp to ROM size
 						setROMBankNumber(ROMBankNumber);
 						RETURN;
@@ -11566,6 +11588,15 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 					updateMMM01RamBanking();
 					RETURN;
 				}
+				else if (isGameBoyCamera())
+				{
+					pGBc_emuStatus->cameraUnit.isCAMMode = GETBIT(FOUR, data) ? YES : NO;
+					if (pGBc_emuStatus->cameraUnit.isCAMMode == NO)
+					{
+						uint8_t ramBankNumber = (data & 0x0F) % (getNumberOfRAMBanksUsed());
+						setRAMBankNumber(ramBankNumber);
+					}
+				}
 			}
 
 			// --- 0x6000 - 0x7FFF : MBC1 mode select / MBC3 latch ---
@@ -11651,7 +11682,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 			// Below if block needed for MBC block in BESS specifications
 			if (ENABLED)
 			{
-				if (isMBC3() || isHUC1() || isHUC3())
+				if (isMBC3() || isHUC1() || isHUC3() || isGameBoyCamera())
 				{
 					pGBc_emuStatus->dataWrittenToMBCReg4 = data;
 				}
@@ -11977,8 +12008,35 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 				data |= 0xF0; // Mask obtained after analysing the test code
 			}
 
+			if (isGameBoyCamera() && pGBc_emuStatus->cameraUnit.isCAMMode == YES) MASQ_UNLIKELY
+			{
+				// All registers are mirrored every $80 bytes.
+				address = address & 0x7F;
+
+				if (address == 0x0000)
+				{
+					pGBc_emuStatus->cameraUnit.startCapture = GETBIT(ZERO, data) ? YES : NO;
+					TODO("We immediately set the capture to complete for now, as we don't emulate the camera hardware");
+					pGBc_emuStatus->cameraUnit.startCapture = NO;
+					pGBc_emuStatus->cameraUnit.triggerStatus = data & 0x07;
+					RETURN;
+				}
+
+				if (pGBc_emuStatus->cameraUnit.startCapture == NO)
+				{
+					TODO("Yet to emulate the group 2 and 3 registers of camera unit");
+					pGBc_emuStatus->cameraUnit.allRegisters[address] = data;
+				}
+
+				RETURN;
+			}
+
 			if (isRAMBankEnabled() == YES)
 			{
+				if (isGameBoyCamera() && pGBc_emuStatus->cameraUnit.startCapture) MASQ_UNLIKELY
+				{
+					RETURN;
+				}
 				// All 8 bits are written properly unlike what pandocs mentions; needed for the HUC3 games
 				pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[getRAMBankNumber()][address] = data;
 			}
