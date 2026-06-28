@@ -11681,8 +11681,6 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 				// Game select: write to 0xA100 while bank0Change is set and bcSelect not yet locked
 				if (p2.bank0Change == YES && address == 0xA100 && p2.bcSelect == NO)
 				{
-					p2.MBChi = ZERO;
-
 					if (data == 0x01)
 					{
 						p2.MBChi = TWO;   // Pokemon Blue starts at bank 2
