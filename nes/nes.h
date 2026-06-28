@@ -1098,6 +1098,24 @@ private:
 			// Uses lower 64KB of what would otherwise be wasted space
 			BYTE prgRam[0x10000];
 
+			// $5200: Vertical split mode
+			// bit 7 = enabled, bit 6 = right side, bits 0-4 = delimiter tile
+			FLAG  verticalSplitEnabled;
+			FLAG  verticalSplitRightSide;
+			BYTE  verticalSplitDelimiterTile;
+
+			// $5201: Vertical split scroll
+			BYTE  verticalSplitScroll;
+
+			// $5202: Vertical split CHR bank (4KB page index, 5 bits)
+			BYTE  verticalSplitBank;
+
+			// Runtime: whether the current tile column is inside the split region
+			FLAG  splitInSplitRegion;
+
+			// Runtime: coarse tile address within the split's ExRAM nametable
+			uint32_t splitTile;
+
 			// MMC5 Audio
 			struct mmc5Audio_t
 			{

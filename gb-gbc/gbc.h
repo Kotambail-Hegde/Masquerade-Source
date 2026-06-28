@@ -417,6 +417,7 @@ private:
 		HUC1,
 		HUC3,
 		WISDOM_TREE,
+		POCKET_CAMERA,
 		POKE_2IN1,
 		INVALID_MBC
 	};
@@ -430,6 +431,7 @@ private:
 		{0x19, MBCType::MBC5}, {0x1A, MBCType::MBC5}, {0x1B, MBCType::MBC5},{0x1C, MBCType::MBC5}, {0x1D, MBCType::MBC5}, {0x1E, MBCType::MBC5},
 		{0x20, MBCType::MBC6},
 		{0x22, MBCType::MBC7},
+		{0xFC, MBCType::POCKET_CAMERA},
 		{0xFE, MBCType::HUC3},
 		{0xFF, MBCType::HUC1},
 	};
@@ -1782,12 +1784,6 @@ private:
 		FLAG enableRAMBanking;
 		FLAG isMBC7RamEn1;
 		FLAG isMBC7RamEn2;
-		struct
-		{
-			byte  MBChi;       // high ROM bank base (added to switchable bank number)
-			FLAG  bcSelect;    // once set, game-select writes are locked out
-			FLAG  bank0Change; // set when 0x0000 write has bits 7:6 == 0b11
-		} poke2in1;
 		uint8_t currentRAMBankNumber;
 		uint8_t currentVRAMBankNumber;
 		uint8_t currentWRAMBankNumber;
@@ -1825,6 +1821,36 @@ private:
 			BYTE mux0RomBankMid; // stores the romBankMid before mux was enabled
 			MMM01_MODES mmm01Mode;
 		} mmm01;
+		struct
+		{
+			FLAG isCAMMode;
+			FLAG startCapture;
+			union
+			{
+				struct
+				{
+					// A000
+					BYTE triggerStatus;
+					// A001-A005
+					BYTE configuration[5];
+					union
+					{
+						// Raw register view (A006-A035)
+						BYTE registers[48];
+						// Decoded 4×4 × 3-byte matrix
+						BYTE matrix[4][4][3];
+					};
+				};
+				// Complete register space (A000-A035)
+				BYTE allRegisters[54];
+			};
+		} cameraUnit;
+		struct
+		{
+			byte  MBChi;       // high ROM bank base (added to switchable bank number)
+			FLAG  bcSelect;    // once set, game-select writes are locked out
+			FLAG  bank0Change; // set when 0x0000 write has bits 7:6 == 0b11
+		} poke2in1;
 		FLAG m161OneBankSwitchDone;
 		FLAG isBatteryAvailable;
 		FLAG isCartRAMAvailable;
@@ -2394,6 +2420,10 @@ private:
 	MASQ_INLINE FLAG isWT() const
 	{
 		RETURN pGBc_emuStatus->activeMBC == MBCType::WISDOM_TREE;
+	}
+	MASQ_INLINE FLAG isGameBoyCamera() const
+	{
+		RETURN pGBc_emuStatus->activeMBC == MBCType::POCKET_CAMERA;
 	}
 	MASQ_INLINE FLAG isPoke2in1() const
 	{
