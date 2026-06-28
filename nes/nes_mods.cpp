@@ -251,7 +251,7 @@ FLAG NES_t::loadNESDB(const std::string& jsonPath)
 		const auto& g = games[i];
 		if (!g.IsObject()) continue;
 
-		NES20DBEntry_t entry;
+		NES20DBEntry_t entry = {};
 
 		// ---- combined ROM hash (lookup key) ----
 		if (!g.HasMember("rom") || !g["rom"].IsObject()) continue;
