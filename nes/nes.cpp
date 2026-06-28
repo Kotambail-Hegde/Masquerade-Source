@@ -996,6 +996,27 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 			{
 				auto& mmc5 = pNES_instance->NES_state.catridgeInfo.mmc5;
 
+				// --- Vertical split CHR override ---
+				if (mmc5.verticalSplitEnabled == YES
+					&& mmc5.ppuInFrame == YES
+					&& mmc5.splitInSplitRegion == YES
+					&& mmc5.extendedRamMode <= 1)
+				{
+					const uint8_t  scanline = (mmc5.splitTileNumber >= 41)
+						? (uint8_t)(mmc5.scanlineCounter + 1)
+						: (uint8_t)mmc5.scanlineCounter;
+					const uint32_t vertScrollY = ((uint32_t)scanline + mmc5.verticalSplitScroll) % 240;
+					const uint32_t chrAddr = ((uint32_t)mmc5.verticalSplitBank << 12)
+						+ (((address & ~(uint16_t)0x07u) | (uint16_t)(vertScrollY & 0x07u)) & 0x0FFF);
+					const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
+					const bool     isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
+					const uint32_t totalChr8k = isNES2
+						? (hdr.sizeOfChrRomIn8KB | (hdr.flags_8to15.nes2p0.flag9.fields.chrRomMSB << 8))
+						: hdr.sizeOfChrRomIn8KB;
+					const uint32_t chrRomBytes = (totalChr8k == 0) ? 0x2000u : (totalChr8k * 0x2000u);
+					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[chrAddr % chrRomBytes];
+				}
+
 				// --- Extended attribute mode (extendedRamMode == 1) ---
 				// CHR tile fetches for BG tiles are overridden by ExRAM bank data.
 				// CHR low and high byte fetches for extended attribute mode
@@ -1642,6 +1663,45 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 				// STEP 3: idle counter and lastPpuReadAddr LAST
 				mmc5.ppuIdleCounter = 3;
 				mmc5.lastPpuReadAddr = address;
+
+				// --- Vertical split mode ($5200) ---
+				if (mmc5.verticalSplitEnabled == YES
+					&& mmc5.ppuInFrame == YES
+					&& mmc5.extendedRamMode <= 1)
+				{
+					const uint8_t  scanline = (mmc5.splitTileNumber >= 41)
+						? (uint8_t)(mmc5.scanlineCounter + 1)
+						: (uint8_t)mmc5.scanlineCounter;
+					const uint32_t vertScrollY = ((uint32_t)scanline + mmc5.verticalSplitScroll) % 240;
+					const uint8_t  column = (uint8_t)((mmc5.splitTileNumber + 2) % 42);
+
+					if (isNTFetch)
+					{
+						if (column == 0)
+							mmc5.splitInSplitRegion = (mmc5.verticalSplitRightSide == NO) ? YES : NO;
+
+						if (column == mmc5.verticalSplitDelimiterTile && mmc5.splitTileNumber < 42)
+							mmc5.splitInSplitRegion = (mmc5.splitInSplitRegion == YES) ? NO : YES;
+						else if (column > 32)
+							mmc5.splitInSplitRegion = NO;
+
+						if (mmc5.splitInSplitRegion == YES)
+						{
+							mmc5.splitTile = ((vertScrollY & 0xF8) << 2) | column;
+							RETURN mmc5.exRam[mmc5.splitTile & 0x3FF];
+						}
+					}
+					else
+					{
+						if (mmc5.splitInSplitRegion == YES)
+						{
+							const uint8_t  shift = (uint8_t)(((mmc5.splitTile >> 4) & 0x04) | (mmc5.splitTile & 0x02));
+							const uint16_t atAddr = (uint16_t)(0x3C0 | ((mmc5.splitTile & 0x380) >> 4) | ((mmc5.splitTile & 0x01F) >> 2));
+							const uint8_t  palette = (mmc5.exRam[atAddr & 0x3FF] >> shift) & 0x03;
+							RETURN(uint8_t)(palette * 0x55);
+						}
+					}
+				}
 
 				// --- Extended attribute mode ($5104 == 1) ---
 				if (mmc5.extendedRamMode == 1 && mmc5.ppuInFrame == YES)
@@ -6424,9 +6484,23 @@ inline void NES_t::writeCpuRawMemoryInternal(uint16_t address, byte data, MEMORY
 							BREAK;
 						}
 						case 0x5130: mmc5.chrUpperBits = data & 0x03; BREAK;
-						case 0x5200: BREAK; // Vertical split mode — stub
-						case 0x5201: BREAK; // Vertical split scroll — stub
-						case 0x5202: BREAK; // Vertical split bank — stub
+						case 0x5200: BREAK; // Vertical split mode
+						{
+							mmc5.verticalSplitEnabled = (data & 0x80) ? YES : NO;
+							mmc5.verticalSplitRightSide = (data & 0x40) ? YES : NO;
+							mmc5.verticalSplitDelimiterTile = (data & 0x1F);
+							BREAK;
+						}
+						case 0x5201: BREAK; // Vertical split scroll
+						{
+							mmc5.verticalSplitScroll = data;
+							BREAK;
+						}
+						case 0x5202: BREAK; // Vertical split bank
+						{
+							mmc5.verticalSplitBank = data & 0x1F;
+							BREAK;
+						}
 						case 0x5203: mmc5.irqCounterTarget = data; BREAK;
 						case 0x5204:
 							mmc5.irqEnabled = ((data & 0x80) != 0) ? YES : NO;
