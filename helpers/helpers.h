@@ -5,7 +5,7 @@
 // =========================================================
 #pragma region ADDITIONAL_FUNCTIONALITIES_PRE
 #define UNICODE                                     1
-#define VERSION                                     static_cast<float>(0.7011)
+#define VERSION                                     static_cast<float>(0.7012)
 #ifndef __RPI_PICO__
 #define WINDOW_PADDING                              16          // pixels added around SDL window
 #else
