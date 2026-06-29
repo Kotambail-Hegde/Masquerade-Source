@@ -125,8 +125,8 @@ jobs:
         shell: pwsh
 
       # --- Cache all external dependencies
-      # v15: b2 auto-detects MSVC version via _MSC_VER mapping, but VS 2026
-      # (MSVC 19.51) isn't in Boost 1.84's mapping table so b2 falls back to
+      # v16: b2 auto-detects MSVC version via _MSC_VER mapping, but VS 2026
+      # (MSVC 19.51) isn't in Boost 1.89's mapping table so b2 falls back to
       # the bogus "msvc-6.0" tag. This produces paths like:
       #   bin.v2\libs\foo\build\msvc-6.0\release\address-model-64\link-static\...
       # which overflow cmd.exe's 8191-char limit on msvc.archive/msvc.link.dll,
@@ -145,9 +145,9 @@ jobs:
             external/boost
             external/SDL
             external/nativefiledialog-extended
-          key: windows-external-all-v15-${{ hashFiles('.github/workflows/*.yml') }}
+          key: windows-external-all-v16-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: |
-            windows-external-all-v15-
+            windows-external-all-v16-
 
       - name: Clone all dependencies
         if: steps.cache-external.outputs.cache-hit != 'true'
@@ -195,13 +195,13 @@ jobs:
           }
 
           if (-not (Test-Path "boost")) {
-              $boostZip = "boost_1_84_0.zip"
-              $boostUrl = "https://archives.boost.io/release/1.84.0/source/boost_1_84_0.zip"
+              $boostZip = "boost_1_89_0.zip"
+              $boostUrl = "https://archives.boost.io/release/1.89.0/source/boost_1_89_0.zip"
               Write-Host "Downloading Boost source from $boostUrl..."
               Invoke-WebRequest -Uri $boostUrl -OutFile $boostZip
               Write-Host "Extracting Boost source..."
               Expand-Archive $boostZip -DestinationPath .
-              Rename-Item -Path "boost_1_84_0" -NewName "boost"
+              Rename-Item -Path "boost_1_89_0" -NewName "boost"
               Remove-Item -Path $boostZip -Force
               Write-Host "=== Boost source setup complete ==="
           } else {
@@ -269,7 +269,7 @@ jobs:
 
           :: Write a user-config.jam that pins the toolset version to "14.4".
           :: This bypasses b2's _MSC_VER-to-version mapping, which falls back
-          :: to "msvc-6.0" for VS 2026 (MSVC 19.51) because Boost 1.84 was
+          :: to "msvc-6.0" for VS 2026 (MSVC 19.51) because Boost 1.89 was
           :: released before VS 2026 shipped. The "6.0" tag creates paths that
           :: overflow cmd.exe's 8191-char limit on msvc.archive/link.dll calls.
           echo using msvc : 14.4 : "%CL_PATH%" ; > user-config.jam
@@ -392,9 +392,9 @@ jobs:
             external/boost
             external/SDL
             external/nativefiledialog-extended
-          key: linux-external-all-v2-${{ hashFiles('.github/workflows/*.yml') }}
+          key: linux-external-all-v3-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: |
-            linux-external-all-v2-
+            linux-external-all-v3-
 
       - name: Clone all dependencies
         if: steps.cache-external.outputs.cache-hit != 'true'
@@ -414,7 +414,7 @@ jobs:
           [ ! -d "SDL" ]        && git clone --depth 1 https://github.com/libsdl-org/SDL.git SDL
 
           if [ ! -d "boost" ]; then
-            git clone https://github.com/boostorg/boost.git --branch boost-1.84.0 --depth 1
+            git clone https://github.com/boostorg/boost.git --branch boost-1.89.0 --depth 1
             cd boost && git submodule update --init --depth 1 && cd ..
           fi
 
@@ -503,9 +503,9 @@ jobs:
             external/emscripten-browser-file
             external/boost
             external/rapidjson
-          key: emscripten-external-all-v3-${{ hashFiles('.github/workflows/*.yml') }}
+          key: emscripten-external-all-v4-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: |
-            emscripten-external-all-v3-
+            emscripten-external-all-v4-
 
       - name: Cache SDL3 Emscripten
         id: cache-sdl-emscripten
@@ -524,7 +524,7 @@ jobs:
           mkdir -p external && cd external
 
           if [ ! -d "boost" ]; then
-            git clone https://github.com/boostorg/boost.git --branch boost-1.84.0 --depth 1
+            git clone https://github.com/boostorg/boost.git --branch boost-1.89.0 --depth 1
             cd boost && git submodule update --init --depth 1 && cd ..
           fi
 
