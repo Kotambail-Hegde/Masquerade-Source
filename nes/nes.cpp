@@ -2908,6 +2908,10 @@ void NES_t::writePpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 		}
 		case MAPPER::INES_MAPPER_019:
 		case MAPPER::INES_MAPPER_210:
+		case MAPPER::RAMBO1:
+		case MAPPER::INES_MAPPER_158:
+		case MAPPER::MMC2:
+		case MAPPER::MMC4:
 		{
 			// Pattern table writes only land when CHR-RAM (no CHR-ROM)
 			if (pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB == ZERO)
@@ -2924,14 +2928,6 @@ void NES_t::writePpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 			// CHR-ROM: pattern table writes are silently ignored (ROM is read-only)
 			BREAK;
 		}
-		case MAPPER::RAMBO1:
-		case MAPPER::INES_MAPPER_158:
-		{
-			// RAMBO-1 has no CHR-RAM; all CHR is ROM. Writes are silently ignored.
-			BREAK;
-		}
-		case MAPPER::MMC2:
-		case MAPPER::MMC4:
 		default:
 		{
 			FATAL("Read performed for unsupported mapper");
