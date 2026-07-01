@@ -6017,6 +6017,7 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 								if (pGBc_display->bgWinPixelFIFO.pop() == SUCCESS)
 								{
 									++pGBc_display->discardedPixelCount;
+									pGBc_display->pixelRenderCounterPerScanLine += ONE;
 									RETURN;
 								}
 								else
