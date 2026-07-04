@@ -1531,6 +1531,8 @@ private:
 		BYTE xBGPerPixel;
 		COUNTER8 cgbSCYDelayTCycles;
 		BYTE cgbLatchedSCY;
+		COUNTER8 cgbLYCDelayTCycles;
+		BYTE cgbLatchedLYC;
 		int16_t pixelFetcherDots;
 		int16_t pixelRendererDots;
 		int16_t pixelPipelineDots;

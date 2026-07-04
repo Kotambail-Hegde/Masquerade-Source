@@ -11,6 +11,7 @@
 #define GB_GBC_ENABLE_CGB_SCY_WRITE_DELAY				(NO)	// This is not working
 #define GB_GBC_ENABLE_CGB_OBSCURE_TIMER_BEHAVIOUR		(NO)	// Enabling this causes rapid_toggle.gb to fail in CGB mode
 #define GB_GBC_ENABLE_DMA_STAT_OAM_BOUNDARY_GLITCH		(YES)	// This is needed by docboy's "DMA check stat" tests 
+#define GB_GBC_ENABLE_CGB_LYC_WRITE_DELAY				(YES)   // This is working, needed for Wilbert Pol's CGB LYC write timing tests
 #pragma endregion WIP
 
 #define GB_GBC_REFERENCE_CLOCK_HZ						(4194304.0f)
@@ -2633,6 +2634,14 @@ void GBc_t::ppuTick()
 #if (GB_GBC_ENABLE_CGB_SCY_WRITE_DELAY == YES)
 	// Refer : https://github.com/mattcurrie/mealybug-tearoom-tests/blob/master/the-comprehensive-game-boy-ppu-documentation.md#scy-ff42
 	if (pGBc_display->cgbSCYDelayTCycles > RESET && --pGBc_display->cgbSCYDelayTCycles == RESET) pGBc_peripherals->SCY = pGBc_display->cgbLatchedSCY;
+#endif
+
+#if (GB_GBC_ENABLE_CGB_LYC_WRITE_DELAY == YES)
+	if (pGBc_display->cgbLYCDelayTCycles > RESET && --pGBc_display->cgbLYCDelayTCycles == RESET)
+	{
+		pGBc_peripherals->LYC = pGBc_display->cgbLatchedLYC;
+		compareLYToLYC(pGBc_peripherals->LY);
+	}
 #endif
 }
 
@@ -13186,10 +13195,26 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 			// Refer : https://discord.com/channels/465585922579103744/465586075830845475/1331788603516522516
 			if (pGBc_peripherals->LYC != data)
 			{
+#if (GB_GBC_ENABLE_CGB_LYC_WRITE_DELAY == YES)
+				// CGB in single speed resolves an LYC write one M-cycle later relative to the PPU than DMG;
+				if (ROM_TYPE == ROM::GAME_BOY_COLOR && isCGBDoubleSpeedEnabled() == NO)
+				{
+					pGBc_display->cgbLatchedLYC = data;
+					pGBc_display->cgbLYCDelayTCycles = FOUR;
+				}
+				else
+				{
+					pGBc_peripherals->LYC = data;
+
+					// Refer : https://forums.nesdev.org/viewtopic.php?t=16434
+					compareLYToLYC(pGBc_peripherals->LY);
+				}
+#else
 				pGBc_peripherals->LYC = data;
 
 				// Refer : https://forums.nesdev.org/viewtopic.php?t=16434
 				compareLYToLYC(pGBc_peripherals->LY);
+#endif
 			}
 			RETURN;
 		}
