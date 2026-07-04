@@ -8999,6 +8999,7 @@ void NES_t::cpuTickT(CYCLES_TYPE cycleType)
 			ppuTick();
 			ppuTick();
 			apuTick();
+			joypadTick();
 
 			// "Aligment Cycle" to make sure DMA read happens in GET cycle only
 			// Refer to point 1 and 3 of first comment https://forums.nesdev.org/viewtopic.php?t=14120
@@ -9027,6 +9028,7 @@ void NES_t::cpuTickT(CYCLES_TYPE cycleType)
 				ppuTick();
 				ppuTick();
 				apuTick();
+				joypadTick();
 			}
 
 			while (pNES_instance->NES_state.oamDMA.DMAInProgress)
@@ -9051,6 +9053,7 @@ void NES_t::cpuTickT(CYCLES_TYPE cycleType)
 				ppuTick();
 				ppuTick();
 				apuTick();
+				joypadTick();
 
 				// As mentioned in point 1 of https://forums.nesdev.org/viewtopic.php?t=14120
 				// "Values are written on 'put' cycles"
@@ -9072,6 +9075,7 @@ void NES_t::cpuTickT(CYCLES_TYPE cycleType)
 				ppuTick();
 				ppuTick();
 				apuTick();
+				joypadTick();
 
 				if (pNES_instance->NES_state.emulatorStatus.ticks.oamDmaCounter == target)
 				{
@@ -9103,6 +9107,8 @@ void NES_t::cpuTickT(CYCLES_TYPE cycleType)
 					ppuTick();
 					ppuTick();
 					apuTick();
+					joypadTick();
+
 					// Increment the CPU Counter
 					++pNES_instance->NES_state.emulatorStatus.ticks.cpuCounter;
 
@@ -9158,6 +9164,7 @@ void NES_t::syncOtherGBModuleTicks()
 	ppuTick();
 	ppuTick();
 	apuTick();
+	joypadTick();
 }
 
 void NES_t::ppuTick()
@@ -10557,23 +10564,42 @@ void NES_t::apuTick()
 	++pNES_instance->NES_state.emulatorStatus.ticks.apuCounter;
 }
 
+static constexpr uint32_t KEY_SAMPLING_MASK = next_pow2(NES_TOTAL_PPU_CYCLES_PER_SCANLINE) - ONE; // = 511
+
 void NES_t::joypadTick()
 {
-	DO_NOTHING;
+	if (_ENABLE_ACCURATE_INPUT_SAMPLING == YES)
+	{
+		auto& counter = pNES_instance->NES_state.emulatorStatus.ticks.keySamplingCounter;
+		counter = (counter + ONE) & KEY_SAMPLING_MASK;
+		if (counter == RESET)
+		{
+			inputHintCallback();
+		}
+	}
+}
+
+void NES_t::updateKeyStatus()
+{
+	auto& keys = pNES_instance->NES_state.emulatorStatus.controllerInput;
+
+	byte status = 0;
+
+	status |= (byte)(keys.keyA == YES);
+	status |= (byte)(keys.keyB == YES) << ONE;
+	status |= (byte)(keys.keySELECT == YES) << TWO;
+	status |= (byte)(keys.keySTART == YES) << THREE;
+	status |= (byte)(keys.keyUP == YES) << FOUR;
+	status |= (byte)(keys.keyDOWN == YES) << FIVE;
+	status |= (byte)(keys.keyLEFT == YES) << SIX;
+	status |= (byte)(keys.keyRIGHT == YES) << SEVEN;
+
+	pNES_instance->NES_state.controller.keyStatus = status;
 }
 
 void NES_t::captureIO()
 {
-	pNES_instance->NES_state.controller.keyStatus = (
-		(byte)ImGui::IsKeyDown(ImGuiKey_Z)
-		| ((byte)ImGui::IsKeyDown(ImGuiKey_X) << ONE)
-		| ((byte)ImGui::IsKeyDown(ImGuiKey_Space) << TWO)
-		| ((byte)ImGui::IsKeyDown(ImGuiKey_Enter) << THREE)
-		| ((byte)ImGui::IsKeyDown(ImGuiKey_UpArrow) << FOUR)
-		| ((byte)ImGui::IsKeyDown(ImGuiKey_DownArrow) << FIVE)
-		| ((byte)ImGui::IsKeyDown(ImGuiKey_LeftArrow) << SIX)
-		| ((byte)ImGui::IsKeyDown(ImGuiKey_RightArrow) << SEVEN)
-		);
+	DO_NOTHING;
 }
 
 void NES_t::captureDownsampledAudioSamples()
@@ -11442,6 +11468,28 @@ bool NES_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 	}
 
 	RETURN pNES_instance->NES_state.display.wasVblankJustTriggerred;
+}
+
+FLAG NES_t::onKeyEvent(EmuKey key, EmuKeyAction action)
+{
+	bool pressed = (action == EmuKeyAction::PRESSED);
+
+	switch (key)
+	{
+	case EmuKey::A:      pNES_instance->NES_state.emulatorStatus.controllerInput.keyA = pressed; BREAK;
+	case EmuKey::B:      pNES_instance->NES_state.emulatorStatus.controllerInput.keyB = pressed; BREAK;
+	case EmuKey::START:  pNES_instance->NES_state.emulatorStatus.controllerInput.keySTART = pressed; BREAK;
+	case EmuKey::SELECT: pNES_instance->NES_state.emulatorStatus.controllerInput.keySELECT = pressed; BREAK;
+	case EmuKey::UP:     pNES_instance->NES_state.emulatorStatus.controllerInput.keyUP = pressed; BREAK;
+	case EmuKey::DOWN:   pNES_instance->NES_state.emulatorStatus.controllerInput.keyDOWN = pressed; BREAK;
+	case EmuKey::LEFT:   pNES_instance->NES_state.emulatorStatus.controllerInput.keyLEFT = pressed; BREAK;
+	case EmuKey::RIGHT:  pNES_instance->NES_state.emulatorStatus.controllerInput.keyRIGHT = pressed; BREAK;
+	default:             RETURN NO;
+	}
+
+	updateKeyStatus();
+
+	RETURN YES;
 }
 
 bool NES_t::initializeEmulator()

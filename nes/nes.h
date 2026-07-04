@@ -1703,6 +1703,8 @@ private:
 		uint64_t ppuCounterPerLY;
 		uint64_t ppuCounterPerFrame;
 		uint64_t ppuCounterMMC3A12;
+		uint32_t pad;
+		uint32_t keySamplingCounter;
 	} ticks_t;
 
 	typedef struct
@@ -1718,6 +1720,17 @@ private:
 			TYPE_OF_MEMORY_ACCESS currentCPUAccessType;
 		} memoryAccessType;
 		debugger_t debugger;
+		struct controllerInput_t
+		{
+			FLAG keyA;
+			FLAG keyB;
+			FLAG keySELECT;
+			FLAG keySTART;
+			FLAG keyUP;
+			FLAG keyDOWN;
+			FLAG keyLEFT;
+			FLAG keyRIGHT;
+		} controllerInput;
 	} emulatorStatus_t;
 
 	typedef struct
@@ -2451,6 +2464,8 @@ private:
 	void joypadTick();
 
 private:
+
+	void updateKeyStatus();
 
 	void captureIO();
 
@@ -3415,10 +3430,7 @@ private:
 
 	FLAG runEmulationLoopAtFixedRate(uint32_t currentFrame) override;
 
-	FLAG onKeyEvent(EmuKey key, EmuKeyAction action) override
-	{
-		RETURN YES;
-	}
+	FLAG onKeyEvent(EmuKey key, EmuKeyAction action) override;
 
 public:
 
