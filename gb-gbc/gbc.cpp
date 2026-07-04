@@ -1253,8 +1253,25 @@ void GBc_t::cpuTickM(CPU_TICK_TYPE type)
 
 void GBc_t::gbCpuTick2T(FLAG isT2orT3)
 {
+	if (isCGBDoubleSpeedEnabled() == NO)
+	{
+		pGBc_instance->GBc_state.emulatorStatus.ticks.isValidTickForDoubleSpeed = RESET_TICK;
+	}
+
+	auto TICK_RTC_PPU_APU_IF_VALID = [&]()
+		{
+			if (isCGBDoubleSpeedEnabled() == NO
+				|| pGBc_instance->GBc_state.emulatorStatus.ticks.isValidTickForDoubleSpeed == VALID_TICK)
+			{
+				rtcTick();
+				ppuTick();
+				apuTick();
+			}
+		};
+
 	if (isT2orT3 == YES)
 	{
+		pGBc_instance->GBc_state.emulatorStatus.ticks.globalCounter += FOUR;
 		pGBc_instance->GBc_state.emulatorStatus.ticks.cpuCounter++;
 
 		// handle delayed write of 'actual' STAT in GB
@@ -1279,16 +1296,17 @@ void GBc_t::gbCpuTick2T(FLAG isT2orT3)
 	}
 	timerTick();
 	serialTick();
-	rtcTick();
-	ppuTick();
-	apuTick();
+	TICK_RTC_PPU_APU_IF_VALID();
 	handleStopBasedHalt();
 	timerTick();
 	serialTick();
-	rtcTick();
-	ppuTick();
-	apuTick();
+	TICK_RTC_PPU_APU_IF_VALID();
 	handleStopBasedHalt();
+
+	if (isT2orT3 == YES && isCGBDoubleSpeedEnabled() == YES)
+	{
+		pGBc_instance->GBc_state.emulatorStatus.ticks.isValidTickForDoubleSpeed = !pGBc_instance->GBc_state.emulatorStatus.ticks.isValidTickForDoubleSpeed;
+	}
 }
 
 void GBc_t::syncOtherGBModuleTicks()
