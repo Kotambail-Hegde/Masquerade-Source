@@ -702,6 +702,48 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 			}
 			BREAK;
 		}
+		case MAPPER::INES_MAPPER_218:
+		{
+			if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
+			{
+				BYTE* nt = nullptr;
+
+				switch (pNES_instance->NES_state.catridgeInfo.nameTblMir)
+				{
+				case NAMETABLE_MIRROR::VERTICAL_MIRROR:
+					nt = (address & 0x0400)
+						? pNES_ppuMemory->NESMemoryMap.nameTable1
+						: pNES_ppuMemory->NESMemoryMap.nameTable0;
+					BREAK;
+				case NAMETABLE_MIRROR::HORIZONTAL_MIRROR:
+					nt = (address & 0x0800)
+						? pNES_ppuMemory->NESMemoryMap.nameTable1
+						: pNES_ppuMemory->NESMemoryMap.nameTable0;
+					BREAK;
+				case NAMETABLE_MIRROR::ONESCREEN_LO_MIRROR:
+					// $A8: CIRAM A10 <- PPU A12 -> pattern table0 = BLK0, pattern table1 = BLK1
+					nt = (address & 0x1000)
+						? pNES_ppuMemory->NESMemoryMap.nameTable1
+						: pNES_ppuMemory->NESMemoryMap.nameTable0;
+					BREAK;
+				case NAMETABLE_MIRROR::ONESCREEN_HI_MIRROR:
+					// $A9: CIRAM A10 <- PPU A13 -> always BLK0 (A13 is always 0 within $0000-$1FFF)
+					nt = pNES_ppuMemory->NESMemoryMap.nameTable0;
+					BREAK;
+				}
+
+				if (nt == nullptr)
+				{
+					FATAL("Unknown Nametable Mirror Type %d", pNES_instance->NES_state.catridgeInfo.nameTblMir);
+					RETURN ZERO;
+				}
+				else
+				{
+					RETURN nt[address & 0x03FF];
+				}
+			}
+			BREAK;
+		}
 		case MAPPER::CNROM:
 		case MAPPER::J87:
 		{
@@ -1612,30 +1654,44 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 			// --- PATTERN TABLES ($0000 - $1FFF) ---
 			if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
 			{
-				const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
+				if (pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB == ZERO)
+				{
+					if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE0_END_ADDRESS))
+					{
+						RETURN pNES_ppuMemory->NESMemoryMap.patternTable.patternTable0[address - PATTERN_TABLE0_START_ADDRESS];
+					}
+					else if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE1_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
+					{
+						RETURN pNES_ppuMemory->NESMemoryMap.patternTable.patternTable1[address - PATTERN_TABLE1_START_ADDRESS];
+					}
+				}
+				else
+				{
+					const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
 
-				// NES 2.0 identification: bits 2-3 of flag 7 must equal 2
-				const bool isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
+					// NES 2.0 identification: bits 2-3 of flag 7 must equal 2
+					const bool isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
 
-				// Calculate total 8KB banks, accounting for NES 2.0 MSB nibble if applicable
-				const uint32_t totalChr8kBanks = isNES2
-					? (hdr.sizeOfChrRomIn8KB | ((hdr.flags_8to15.nes2p0.flag9.fields.chrRomMSB & 0x0F) << EIGHT))
-					: hdr.sizeOfChrRomIn8KB;
+					// Calculate total 8KB banks, accounting for NES 2.0 MSB nibble if applicable
+					const uint32_t totalChr8kBanks = isNES2
+						? (hdr.sizeOfChrRomIn8KB | ((hdr.flags_8to15.nes2p0.flag9.fields.chrRomMSB & 0x0F) << EIGHT))
+						: hdr.sizeOfChrRomIn8KB;
 
-				const uint32_t totalChr1kBanks = totalChr8kBanks << THREE;
+					const uint32_t totalChr1kBanks = totalChr8kBanks << THREE;
 
-				// Calculate the 1KB bank index (0 to 7) based on the current PPU address
-				// Mapper 69 allows independent mapping of eight 1KB banks
-				const uint32_t bank = address >> 10;
-				const uint32_t offset = address & 0x03FF;
+					// Calculate the 1KB bank index (0 to 7) based on the current PPU address
+					// Mapper 69 allows independent mapping of eight 1KB banks
+					const uint32_t bank = address >> 10;
+					const uint32_t offset = address & 0x03FF;
 
-				// Fetch the physical bank selected by the mapper registers, scale to bytes, and add offset
-				uint32_t index = (pNES_instance->NES_state.catridgeInfo.ines069.chrBank[bank] * 0x0400) + offset;
+					// Fetch the physical bank selected by the mapper registers, scale to bytes, and add offset
+					uint32_t index = (pNES_instance->NES_state.catridgeInfo.ines069.chrBank[bank] * 0x0400) + offset;
 
-				// Mirroring guard: Wrap around if the mapper selects a bank higher than what exists
-				index %= (totalChr1kBanks * 0x0400);
+					// Mirroring guard: Wrap around if the mapper selects a bank higher than what exists
+					index %= (totalChr1kBanks * 0x0400);
 
-				RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index];
+					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index];
+				}
 			}
 			BREAK;
 		}
@@ -2373,6 +2429,42 @@ void NES_t::writePpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 				else if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE1_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
 				{
 					pNES_ppuMemory->NESMemoryMap.patternTable.patternTable1[address - PATTERN_TABLE1_START_ADDRESS] = data;
+				}
+			}
+			BREAK;
+		}
+		case MAPPER::INES_MAPPER_218:
+		{
+			if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
+			{
+				BYTE* nt = nullptr;
+				switch (pNES_instance->NES_state.catridgeInfo.nameTblMir)
+				{
+				case NAMETABLE_MIRROR::VERTICAL_MIRROR:
+					nt = (address & 0x0400)
+						? pNES_ppuMemory->NESMemoryMap.nameTable1
+						: pNES_ppuMemory->NESMemoryMap.nameTable0;
+					BREAK;
+				case NAMETABLE_MIRROR::HORIZONTAL_MIRROR:
+					nt = (address & 0x0800)
+						? pNES_ppuMemory->NESMemoryMap.nameTable1
+						: pNES_ppuMemory->NESMemoryMap.nameTable0;
+					BREAK;
+				case NAMETABLE_MIRROR::ONESCREEN_LO_MIRROR:
+					// $A8: CIRAM A10 <- PPU A12 -> pattern table0 = BLK0, pattern table1 = BLK1
+					nt = (address & 0x1000)
+						? pNES_ppuMemory->NESMemoryMap.nameTable1
+						: pNES_ppuMemory->NESMemoryMap.nameTable0;
+					BREAK;
+				case NAMETABLE_MIRROR::ONESCREEN_HI_MIRROR:
+					// $A9: CIRAM A10 <- PPU A13 -> always BLK0 (A13 is always 0 within $0000-$1FFF)
+					nt = pNES_ppuMemory->NESMemoryMap.nameTable0;
+					BREAK;
+				}
+
+				if (nt != nullptr)
+				{
+					nt[address & 0x03FF] = data;
 				}
 			}
 			BREAK;
@@ -4456,6 +4548,28 @@ inline byte NES_t::readCpuRawMemoryInternal(uint16_t address, MEMORY_ACCESS_SOUR
 					{
 						index = pNES_instance->NES_state.catridgeInfo.axrom.prgBank * 0x8000;
 						index += ((address - CATRIDGE_ROM_BANK0_START_ADDRESS) & 0x7FFF);
+						if ((ceNES->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
+							&&
+							(!hasCompare || (BYTE)compareVal == pNES_catridgeMemory->maxCatridgePRGROM[index]))
+						{
+							RETURN TO_UINT8(modedData);
+						}
+						else
+						{
+							RETURN pNES_catridgeMemory->maxCatridgePRGROM[index];
+						}
+					}
+					BREAK;
+				}
+				case MAPPER::INES_MAPPER_218:
+				{
+					if (IF_ADDRESS_WITHIN(address, UNMAPPED_START_ADDRESS, CATRIDGE_RAM_END_ADDRESS))
+					{
+						RETURN pNES_cpuMemory->NESMemoryMap.catridgeMappedMemory[address - UNMAPPED_START_ADDRESS];
+					}
+					if (IF_ADDRESS_WITHIN(address, CATRIDGE_ROM_BANK0_START_ADDRESS, UNMAPPED_END_ADDRESS))
+					{
+						index = address - CATRIDGE_ROM_BANK0_START_ADDRESS;
 						if ((ceNES->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
 							&&
 							(!hasCompare || (BYTE)compareVal == pNES_catridgeMemory->maxCatridgePRGROM[index]))
@@ -6993,6 +7107,15 @@ inline void NES_t::writeCpuRawMemoryInternal(uint16_t address, byte data, MEMORY
 						}
 						pNES_instance->NES_state.catridgeInfo.axrom.vramPage = (((data & 0x10) == 0x10) ? YES : NO);
 					}
+					BREAK;
+				}
+				case MAPPER::INES_MAPPER_218:
+				{
+					if (IF_ADDRESS_WITHIN(address, UNMAPPED_START_ADDRESS, CATRIDGE_RAM_END_ADDRESS))
+					{
+						pNES_cpuMemory->NESMemoryMap.catridgeMappedMemory[address - UNMAPPED_START_ADDRESS] = data;
+					}
+					// Writes to $8000-$FFFF do nothing.
 					BREAK;
 				}
 				case MAPPER::COLOR_DREAMS:
@@ -11618,7 +11741,7 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 
 				if (pINES->iNES_Fields.iNES_header.fields.flag6.fields.alternativeNametable == SET)
 				{
-					FATAL("Handle alternate nametable arrangement");
+					WARN("Handle alternate nametable arrangement");
 				}
 
 				// check whether trainer is present
@@ -12632,12 +12755,11 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 					if (isNES2)
 					{
 						const BYTE sub = header.flags_8to15.nes2p0.flag8.fields.subMapper;
-						if (sub == 0 || sub == 2) pNES_instance->NES_state.catridgeInfo.isBusConflictPresent = YES;
-						else if (sub == 1)             pNES_instance->NES_state.catridgeInfo.isBusConflictPresent = NO;
+						pNES_instance->NES_state.catridgeInfo.isBusConflictPresent = (sub == 2) ? YES : NO;
 					}
 					else
 					{
-						pNES_instance->NES_state.catridgeInfo.isBusConflictPresent = YES;
+						pNES_instance->NES_state.catridgeInfo.isBusConflictPresent = NO;
 					}
 
 					memset(&(pNES_instance->NES_state.catridgeInfo.axrom), 0,
@@ -12647,18 +12769,89 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 
 					if (prgRomSizeBytes < 0x8000ULL && zeroBanksHandled == NO)
 					{
-						FATAL("AxROM requires >= 32KB PRG-ROM");
+						WARN("AxROM requires >= 32KB PRG-ROM");
 					}
 
 					if (zeroBanksHandled == NO)
 					{
-						memcpy_portable(&(cpuCart[0x0000]), 0x8000, prgRom, 0x8000);
+						memcpy_portable(&(cpuCart[0x0000]), 0x4000, prgRom, 0x4000);
+
+						if (prg16kBanks == ONE)
+						{
+							memcpy_portable(&(cpuCart[0x4000]), 0x4000, prgRom, 0x4000);
+							memcpy_portable(&(pNES_catridgeMemory->maxCatridgePRGROM[0x4000]), 0x4000, prgRom, 0x4000);
+						}
+						else
+						{
+							memcpy_portable(&(cpuCart[0x4000]), 0x4000, &(prgRom[0x4000]), 0x4000);
+						}
 					}
 
 					if ((hasChrRam == NO) && (chrRomSizeBytes == ZERO))
 					{
-						LOG("Warning : AxROM has no CHR memory");
+						WARN("AxROM has no CHR memory");
 					}
+
+					BREAK;
+				}
+				case MAPPER::INES_MAPPER_218:
+				{
+					pNES_instance->NES_state.catridgeInfo.isBusConflictPresent = NO;
+
+					// Mapper 218 uses the iNES header differently:
+					// bit 3 = single-screen mode
+					// bit 0 = variant selection
+					if (header.flag6.fields.alternativeNametable == SET)
+					{
+						// $A8 / $A9
+						if (header.flag6.fields.nametableArrangement == SET)
+						{
+							// $A9 - Single-screen B (CIRAM A10 <- PPU A13)
+							pNES_instance->NES_state.catridgeInfo.nameTblMir = NAMETABLE_MIRROR::ONESCREEN_HI_MIRROR;
+						}
+						else
+						{
+							// $A8 - Single-screen A (CIRAM A10 <- PPU A12)
+							pNES_instance->NES_state.catridgeInfo.nameTblMir = NAMETABLE_MIRROR::ONESCREEN_LO_MIRROR;
+						}
+					}
+					else
+					{
+						// $A0 / $A1
+						if (header.flag6.fields.nametableArrangement == SET)
+						{
+							// $A1 - CIRAM A10 <- PPU A10 ("Vertical mirroring")
+							pNES_instance->NES_state.catridgeInfo.nameTblMir = NAMETABLE_MIRROR::VERTICAL_MIRROR;
+						}
+						else
+						{
+							// $A0 - CIRAM A10 <- PPU A11 ("Horizontal mirroring")
+							pNES_instance->NES_state.catridgeInfo.nameTblMir = NAMETABLE_MIRROR::HORIZONTAL_MIRROR;
+						}
+					}
+
+					if (prgRomSizeBytes < 0x8000ULL && zeroBanksHandled == NO)
+					{
+						WARN("Mapper 218 requires >= 32KB PRG-ROM");
+					}
+
+					if (zeroBanksHandled == NO)
+					{
+						memcpy_portable(&(cpuCart[0x0000]), 0x4000, prgRom, 0x4000);
+
+						if (prg16kBanks == ONE)
+						{
+							memcpy_portable(&(cpuCart[0x4000]), 0x4000, prgRom, 0x4000);
+							memcpy_portable(&(pNES_catridgeMemory->maxCatridgePRGROM[0x4000]), 0x4000, prgRom, 0x4000);
+						}
+						else
+						{
+							memcpy_portable(&(cpuCart[0x4000]), 0x4000, &(prgRom[0x4000]), 0x4000);
+						}
+					}
+
+					// Mapper 218 has no cartridge CHR-ROM/CHR-RAM.
+					// Pattern tables are backed by the console's internal CIRAM.
 
 					BREAK;
 				}
@@ -13123,7 +13316,7 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 					}
 					else
 					{
-						FATAL("Mapper 069 requires CHR-ROM, but size is 0");
+						WARN("Mapper 069 requires CHR-ROM, but size is 0");
 					}
 
 					BREAK;
