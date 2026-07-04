@@ -1503,11 +1503,13 @@ private:
 		FLAG yConditionForWindowIsMetForCurrentFrame;
 		FLAG shouldFetchAndRenderWindowInsteadOfBG;
 		FLAG shouldIncrementWindowLineCounter;
-		FLAG shouldFetchAndRenderBGInsteadOfWindowAfterCurrentTile;
-		FLAG waitForNextLineForWindSyncGlitch;
-		FLAG performWindSyncGlitch;
+		FLAG cachedWinEnablePerFrame;
+		FLAG ignoreSCXLowBitsAfterWindow;
+		FLAG windowAlreadyActivatedThisScanline;
 		FLAG gfxOfCurrentScanLineUpdated;
 		FLAG isNewM3Scanline;
+		FLAG tileSelGlitch;       // 1-T-cycle pulse, set by CPU write, cleared after 1 PPU tick
+		BYTE dataForSelGlitch;    // latched: updated after sprite render and end of mode 3
 		int16_t oamSearchCount;
 		int16_t spriteCountPerScanLine;
 		FLAG shouldSimulateBGScrollingPenaltyNow;

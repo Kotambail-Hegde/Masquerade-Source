@@ -2107,7 +2107,7 @@ public:
 												}
 												ImGui::EndMenu();
 											}
-											if (ImGui::BeginMenu("GB#GBFamily", MASQ_ENABLE_GBC))
+											if (ImGui::BeginMenu("GB##GBFamily", MASQ_ENABLE_GBC))
 											{
 												static FLAG isTicked = to_bool(config.get<std::string>("gb_gbc._force_gbc_for_gb", "false"));
 												if (ImGui::MenuItem("CGB Mode", NULL, isTicked))
