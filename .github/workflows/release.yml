@@ -84,6 +84,20 @@ jobs:
           path: assets/
           if-no-files-found: error
 
+      - name: Upload README
+        uses: actions/upload-artifact@v4
+        with:
+          name: readme
+          path: README.md
+          if-no-files-found: error
+
+      - name: Upload LICENSE
+        uses: actions/upload-artifact@v4
+        with:
+          name: license
+          path: LICENSE.md
+          if-no-files-found: error
+
       - name: Open PR #1 in Masquerade-Source
         env:
           GH_TOKEN: ${{ secrets.EMULATOR_REPO_PAT }}
@@ -634,6 +648,18 @@ jobs:
           name: assets
           path: artifacts/assets
 
+      - name: Download README
+        uses: actions/download-artifact@v4
+        with:
+          name: readme
+          path: artifacts/readme
+
+      - name: Download LICENSE
+        uses: actions/download-artifact@v4
+        with:
+          name: license
+          path: artifacts/license
+
       - name: Download Windows artifacts
         uses: actions/download-artifact@v4
         with:
@@ -763,9 +789,15 @@ jobs:
           echo "✅ Hosting placed"
 
           # ── LICENSE.md → Emulator repo root ──────────────────────────────
-          if [ -f "../artifacts/windows/Release/LICENSE.md" ]; then
-            cp ../artifacts/windows/Release/LICENSE.md ./LICENSE.md
+          if [ -f "../artifacts/license/LICENSE.md" ]; then
+            cp ../artifacts/license/LICENSE.md ./LICENSE.md
             echo "✅ LICENSE.md placed at repo root"
+          fi
+
+          # ── README.md → Emulator repo root ───────────────────────────────
+          if [ -f "../artifacts/readme/README.md" ]; then
+            cp ../artifacts/readme/README.md ./README.md
+            echo "✅ README.md placed at repo root"
           fi
 
           # ── Windows ───────────────────────────────────────────────────────
@@ -818,7 +850,7 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add hosting/ LICENSE.md
+          git add hosting/ LICENSE.md README.md
           [ "${{ github.event.inputs.release_windows }}" = "true" ]    && git add windows/
           [ "${{ github.event.inputs.release_linux }}" = "true" ]      && git add linux/
           [ "${{ github.event.inputs.release_emscripten }}" = "true" ] && git add emscripten/
