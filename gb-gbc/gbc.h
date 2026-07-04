@@ -201,6 +201,14 @@ private:
 
 private:
 
+	enum GBC_MODE : BYTE
+	{
+		CGB,
+		DMG_MGB,
+		PGB0,
+		PGB1
+	};
+
 	enum class MEMORY_ACCESS_SOURCE
 	{
 		DEBUG_PORT,
@@ -785,9 +793,10 @@ private:
 
 	typedef struct
 	{
-		uint8_t Reserved0 : 2; // bits  0 - 1
-		uint8_t DMGCompatibility : 1; // bit  2
-		uint8_t Reserved1 : 5; // bit  3 - 7
+		uint8_t Reserved0 : 1; // Bit 0: Writable, function unknown
+		uint8_t padding : 1; // Bit 1: Padding to align the next field correctly
+		uint8_t mode : 2; // Bits 2-3: Core CPU Mode selection
+		uint8_t Reserved1 : 4; // Bits 4-7: Remaining upper bits
 	} KEY0Fields_t;
 
 	typedef union

@@ -1204,7 +1204,7 @@ void GBc_t::setWRAMBankNumber(uint8_t wramBankNumber)
 
 FLAG GBc_t::isCGBCompatibilityModeEnabled()
 {
-	RETURN pGBc_peripherals->KEY0.KEY0Fields.DMGCompatibility;
+	RETURN (static_cast<GBC_MODE>(pGBc_peripherals->KEY0.KEY0Fields.mode) != GBC_MODE::CGB);
 }
 
 void GBc_t::cpuTickM(CPU_TICK_TYPE type)
@@ -4477,17 +4477,9 @@ void GBc_t::setPaletteIndexForCGB(FLAG isThisForBackground, uint8_t value)
 	// :	   
 	// 63	-> xGP7 byte 3 ->	higher byte color ID 31		-> in xCPD -> G/B
 
-	uint16_t palette_ID = ((value >> 3) & 0x07);
-
-	// perform the following to get the color ID from value
-	// (value / total colors per palettes) = (value / 2) => is same as => ((value >> 1) & 0x03)
-
-	uint16_t color_ID = ((value >> 1) & 0x03);
-
-	// perform the following to determine if higher byte or lower byte of color
-	// if bit 0 is 0, then lower, otherwise higher
-
-	FLAG color_high_byte = (GETBIT(ZERO, value) == ONE ? true : false);
+	// Optimization: Mask out the 6-bit index (0-63). Because of your union layout, 
+	// this matches your exact color/palette bit-shifting matrix layout perfectly.
+	uint8_t current_index = value & 0x3F;
 
 	if (isThisForBackground == true)
 	{
@@ -4497,16 +4489,7 @@ void GBc_t::setPaletteIndexForCGB(FLAG isThisForBackground, uint8_t value)
 		// If we had set the address via BCPS to READ from BG section of Color/Palette RAM via BCPD;
 		// The below code snippet takes care of setting the appropriate data from Color/Palette RAM to BCPD
 
-		if (color_high_byte == true)
-		{
-			pGBc_peripherals->BCPD_BGPD = pGBc_instance->GBc_state.entireBackgroundPaletteRAM.paletteRAM
-				[palette_ID][color_ID].gbcColorByteFields.HIGHER_BYTE;
-		}
-		else
-		{
-			pGBc_peripherals->BCPD_BGPD = pGBc_instance->GBc_state.entireBackgroundPaletteRAM.paletteRAM
-				[palette_ID][color_ID].gbcColorByteFields.LOWER_BYTE;
-		}
+		pGBc_peripherals->BCPD_BGPD = pGBc_instance->GBc_state.entireBackgroundPaletteRAM.paletteRAMMemory[current_index];
 	}
 	else
 	{
@@ -4516,18 +4499,8 @@ void GBc_t::setPaletteIndexForCGB(FLAG isThisForBackground, uint8_t value)
 		// If we had set the address via OCPS to READ from OBJ section of Color/Palette RAM via OCPS;
 		// The below code snippet takes care of setting the appropriate data from Color/Palette RAM to OCPD
 
-		if (color_high_byte == true)
-		{
-			pGBc_peripherals->OCPD_OBPD = pGBc_instance->GBc_state.entireObjectPaletteRAM.paletteRAM
-				[palette_ID][color_ID].gbcColorByteFields.HIGHER_BYTE;
-		}
-		else
-		{
-			pGBc_peripherals->OCPD_OBPD = pGBc_instance->GBc_state.entireObjectPaletteRAM.paletteRAM
-				[palette_ID][color_ID].gbcColorByteFields.LOWER_BYTE;
-		}
+		pGBc_peripherals->OCPD_OBPD = pGBc_instance->GBc_state.entireObjectPaletteRAM.paletteRAMMemory[current_index];
 	}
-
 }
 
 void GBc_t::setPaletteColorForCGB(FLAG isThisForBackground, uint8_t value)
@@ -4546,31 +4519,20 @@ void GBc_t::setPaletteColorForCGB(FLAG isThisForBackground, uint8_t value)
 		// perform the following to get the palette from paletteSpecification
 		// (paletteSpecification / total palettes) = (paletteSpecification / 8) => is same as => ((paletteSpecification >> 3) & 0x07)
 
-		palette_ID = ((paletteSpecification >> 3) & 0x07);
-
 		// perform the following to get the color ID from paletteSpecification
 		// (paletteSpecification / total colors per palettes) = (paletteSpecification / 2) => is same as => ((paletteSpecification >> 1) & 0x03)
-
-		color_ID = ((paletteSpecification >> 1) & 0x03);
 
 		// perform the following to determine if higher byte or lower byte of color
 		// if bit 0 is 0, then lower, otherwise higher
 
-		color_high_byte = (GETBIT(ZERO, paletteSpecification) == ONE ? true : false);
+		// 1. Direct Flat Write
+		uint8_t current_index = pGBc_peripherals->BCPS_BGPI.BCPSFields.Address;
+		pGBc_instance->GBc_state.entireBackgroundPaletteRAM.paletteRAMMemory[current_index] = value;
 
-		if (color_high_byte == true)
-		{
-			pGBc_instance->GBc_state.entireBackgroundPaletteRAM.paletteRAM
-				[palette_ID][color_ID].gbcColorByteFields.HIGHER_BYTE = value;
-		}
-		else
-		{
-			pGBc_instance->GBc_state.entireBackgroundPaletteRAM.paletteRAM
-				[palette_ID][color_ID].gbcColorByteFields.LOWER_BYTE = value;
-		}
-
-		updated_BEFORE_PROCESSING = pGBc_instance->GBc_state.entireBackgroundPaletteRAM.paletteRAM
-			[palette_ID][color_ID].gbcColor;
+		// 2. 100% Optimized Read: Cast the raw memory to a 16-bit pointer.
+		// Since every color is 2 bytes, shifting the byte index right by 1 gives the exact color index (0-31).
+		uint16_t* flat_colors = reinterpret_cast<uint16_t*>(pGBc_instance->GBc_state.entireBackgroundPaletteRAM.paletteRAMMemory);
+		updated_BEFORE_PROCESSING = flat_colors[current_index >> 1];
 	}
 	else
 	{
@@ -4579,31 +4541,19 @@ void GBc_t::setPaletteColorForCGB(FLAG isThisForBackground, uint8_t value)
 		// perform the following to get the palette from paletteSpecification
 		// (paletteSpecification / total palettes) = (paletteSpecification / 8) => is same as => ((paletteSpecification >> 3) & 0x07)
 
-		palette_ID = ((paletteSpecification >> 3) & 0x07);
-
 		// perform the following to get the color ID from paletteSpecification
 		// (paletteSpecification / total colors per palettes) = (paletteSpecification / 2) => is same as => ((paletteSpecification >> 1) & 0x03)
-
-		color_ID = ((paletteSpecification >> 1) & 0x03);
 
 		// perform the following to determine if higher byte or lower byte of color
 		// if bit 0 is 0, then lower, otherwise higher
 
-		color_high_byte = (GETBIT(ZERO, paletteSpecification) == ONE ? true : false);
+		// 1. Direct Flat Write
+		uint8_t current_index = pGBc_peripherals->OCPS_OBPI.OCPSFields.Address;
+		pGBc_instance->GBc_state.entireObjectPaletteRAM.paletteRAMMemory[current_index] = value;
 
-		if (color_high_byte == true)
-		{
-			pGBc_instance->GBc_state.entireObjectPaletteRAM.paletteRAM
-				[palette_ID][color_ID].gbcColorByteFields.HIGHER_BYTE = value;
-		}
-		else
-		{
-			pGBc_instance->GBc_state.entireObjectPaletteRAM.paletteRAM
-				[palette_ID][color_ID].gbcColorByteFields.LOWER_BYTE = value;
-		}
-
-		updated_BEFORE_PROCESSING = pGBc_instance->GBc_state.entireObjectPaletteRAM.paletteRAM
-			[palette_ID][color_ID].gbcColor;
+		// 2. 100% Optimized Read
+		uint16_t* flat_colors = reinterpret_cast<uint16_t*>(pGBc_instance->GBc_state.entireObjectPaletteRAM.paletteRAMMemory);
+		updated_BEFORE_PROCESSING = flat_colors[current_index >> 1];
 	}
 }
 
@@ -10110,16 +10060,16 @@ byte GBc_t::readRawMemory(uint16_t address
 			}
 #endif
 
-				if (ROM_TYPE == ROM::GAME_BOY_COLOR)
-				{
-					pGBc_peripherals->KEY0.KEY0Fields.Reserved0 = 0x03;
-					pGBc_peripherals->KEY0.KEY0Fields.Reserved1 = 0x1F;
-					RETURN pGBc_peripherals->KEY0.KEY0Memory;
-				}
-				else if (ROM_TYPE == ROM::GAME_BOY)
-				{
-					RETURN 0xFF;
-				}
+			if (ROM_TYPE == ROM::GAME_BOY_COLOR)
+			{
+				pGBc_peripherals->KEY0.KEY0Fields.Reserved0 = 0x03;
+				pGBc_peripherals->KEY0.KEY0Fields.Reserved1 = 0x1F;
+				RETURN pGBc_peripherals->KEY0.KEY0Memory;
+			}
+			else if (ROM_TYPE == ROM::GAME_BOY)
+			{
+				RETURN 0xFF;
+			}
 		}
 
 		// reading from KEY1
@@ -10256,18 +10206,30 @@ byte GBc_t::readRawMemory(uint16_t address
 			}
 		}
 
-		// RETURN from BCPD
+		// reading from BCPD
 		if (address == BCPD_ADDRESS)
 		{
 			if (ROM_TYPE == ROM::GAME_BOY_COLOR)
 			{
+				bool boot_rom_finished = (pGBc_peripherals->BANK != RESET);
+
+				// 1. Enforce the DMG compatibility mode lockout ONLY after boot
+				if (isCGBCompatibilityModeEnabled() && boot_rom_finished)
+				{
+					RETURN 0xFF;
+				}
+
+				// 2. Handle standard PPU palette blocking
 				if (pGBc_display->blockCGBPalette == YES
 					&& source == MEMORY_ACCESS_SOURCE::CPU)
 				{
 					RETURN 0xFF;
 				}
 
-				RETURN pGBc_peripherals->BCPD_BGPD;
+				// 3. Dynamic lookup: Read directly from your flat union array 
+				// using the 6-bit index from BCPS
+				BYTE current_index = pGBc_peripherals->BCPS_BGPI.BCPSFields.Address;
+				RETURN pGBc_instance->GBc_state.entireBackgroundPaletteRAM.paletteRAMMemory[current_index];
 			}
 			else if (ROM_TYPE == ROM::GAME_BOY)
 			{
@@ -10294,13 +10256,20 @@ byte GBc_t::readRawMemory(uint16_t address
 		{
 			if (ROM_TYPE == ROM::GAME_BOY_COLOR)
 			{
-				if (pGBc_display->blockCGBPalette == YES
-					&& source == MEMORY_ACCESS_SOURCE::CPU)
+				// 1. Lockout checks
+				if (isCGBCompatibilityModeEnabled() && (pGBc_peripherals->BANK != RESET))
+				{
+					RETURN 0xFF;
+				}
+				if (pGBc_display->blockCGBPalette == YES && source == MEMORY_ACCESS_SOURCE::CPU)
 				{
 					RETURN 0xFF;
 				}
 
-				RETURN pGBc_peripherals->OCPD_OBPD;
+				// 2. Direct flat indexing using your union's byte array!
+				// Mask with 0x3F (0-63 decimal) to strip the auto-increment bit (bit 7)
+				BYTE current_index = pGBc_peripherals->OCPS_OBPI.OCPSFields.Address;
+				RETURN pGBc_instance->GBc_state.entireObjectPaletteRAM.paletteRAMMemory[current_index];
 			}
 			else if (ROM_TYPE == ROM::GAME_BOY)
 			{
@@ -10326,12 +10295,20 @@ byte GBc_t::readRawMemory(uint16_t address
 			RETURN 0xFF;
 		}
 
-		// reading from WRAM BANK switch register; only bits 0 - 3 are valid
+		// reading from WRAM BANK switch register
 		if (address == WRAM_BANK_SWITCH)
 		{
 			if (ROM_TYPE == ROM::GAME_BOY_COLOR)
 			{
-				BYTE data = pGBc_peripherals->SVBK & 0x07;
+				// 1. Lockout DMG homebrew from reading CGB banking specs after boot
+				if (isCGBCompatibilityModeEnabled() && (pGBc_peripherals->BANK != RESET))
+				{
+					RETURN 0xFF;
+				}
+
+				// 2. Read the register, but force bits 3-7 to return 1s (0xF8)
+				// to mimic the physical hardware's open bus behavior.
+				BYTE data = pGBc_peripherals->SVBK | 0xF8;
 				RETURN data;
 			}
 			else if (ROM_TYPE == ROM::GAME_BOY)
@@ -13456,6 +13433,13 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 		// writing to BCPD; i.e. setting background palette
 		if (address == BCPD_ADDRESS)
 		{
+			// Fix: If we're in DMG compatibility mode and boot ROM is over, writes are dead to the hardware
+			bool boot_rom_finished = (pGBc_peripherals->BANK != RESET);
+			if (isCGBCompatibilityModeEnabled() && boot_rom_finished)
+			{
+				RETURN;
+			}
+
 			if (ROM_TYPE == ROM::GAME_BOY_COLOR
 				&& pGBc_display->blockCGBPalette == YES
 				&& source == MEMORY_ACCESS_SOURCE::CPU)
@@ -13494,6 +13478,13 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 		// writing to OCPD; i.e. setting object palette
 		if (address == OCPD_ADDRESS)
 		{
+			// Fix: Protect object palettes from DMG compatibility wipes as well
+			bool boot_rom_finished = (pGBc_peripherals->BANK != RESET);
+			if (isCGBCompatibilityModeEnabled() && boot_rom_finished)
+			{
+				RETURN;
+			}
+
 			if (ROM_TYPE == ROM::GAME_BOY_COLOR
 				&& pGBc_display->blockCGBPalette == YES
 				&& source == MEMORY_ACCESS_SOURCE::CPU)
@@ -13521,7 +13512,19 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 		// writing to object priority mode register
 		if (address == OBJECT_PRIORITY_MODE)
 		{
-			pGBc_peripherals->OPRI = data;
+			// 1. If the boot ROM is running, the BIOS is allowed to configure priority behavior
+			if ((pGBc_peripherals->BANK == RESET))
+			{
+				pGBc_peripherals->OPRI = data;
+			}
+			// 2. If boot ROM is finished, only allow the write if we are NOT in DMG compatibility mode
+			else if (!isCGBCompatibilityModeEnabled()) // Meaning: We are in true CGB Mode
+			{
+				pGBc_peripherals->OPRI = data;
+			}
+
+			// If we are in DMG compatibility mode and the boot ROM is done, 
+			// the write is silently ignored. The hardware lock protects it!
 			RETURN;
 		}
 
