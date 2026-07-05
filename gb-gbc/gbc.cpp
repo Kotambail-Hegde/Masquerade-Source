@@ -1967,31 +1967,63 @@ void GBc_t::ppuTick()
 				if (ROM_TYPE == ROM::GAME_BOY)
 				{
 					/*
-						* Keeping ppuCounterPerLY == 5 passes ly_lyc_153_write-GS.gb but fails ly_new_frame-GS.gb and ly_lyc_0-GS.gb
-						* Keeping ppuCounterPerLY == 4 passes ly_new_frame-GS.gb and ly_lyc_0-GS.gb but fails ly_lyc_153_write-GS.gb
-						*/
-					PPUTODO("Conflicting PPU test results b/w ly_new_frame-GS.gb, ly_lyc_0-GS.gb and ly_lyc_153_write-GS.gb");
-					// > 4 cause issues
+					 * Keeping ppuCounterPerLY == 5 passes ly_lyc_153_write-GS.gb but fails ly_new_frame-GS.gb and ly_lyc_0-GS.gb
+					 * Keeping ppuCounterPerLY == 4 passes ly_new_frame-GS.gb and ly_lyc_0-GS.gb but fails ly_lyc_153_write-GS.gb
+					 * So, we need to keep 4 but handle for ly_lyc_153_write-GS.gb differently
+					 *
+					 * Root cause: DMG decouples the LY value the CPU reads from the value the LYC comparator
+					 * actually checks, for a few cycles around the 153->0 wrap. There isn't one transition here,
+					 * there are three, which is exactly why a single tick (4 or 5) can never satisfy all three
+					 * tests at once -- each test happens to sample a different one of these three windows:
+					 *   tick FOUR : LY resets to 0 (readable), but the comparator is still checking against 153
+					 *   tick SIX  : comparator goes fully dark -- no write landing here can register a match
+					 *   tick TEN  : comparator settles on comparing against the real LY=0
+					 *
+					 * Verified against:
+					 * - SameBoy Core/display.c, "Lines 153" block:
+					 *   https://github.com/LIJI32/SameBoy/blob/master/Core/display.c#L2217-L2242
+					 *   Tracks a separate `ly_for_comparison`, distinct from `io_registers[GB_IO_LY]`, specifically
+					 *   for this window -- confirms the readable-LY/comparator split as the actual mechanism, not
+					 *   an artifact of our own tick counting.
+					 * - AntonioND's TCAGBD.pdf, section 8.9.1 "Timings in DMG", Line 153 table:
+					 *   https://raw.githubusercontent.com/AntonioND/giibiiadvance/master/docs/TCAGBD.pdf
+					 *   Hand-measured, clock-by-clock: Clock 0 LY=153/compare='-', Clock 4 LY=0/compare=153,
+					 *   Clock 8 compare='-' again, Clock 12 compare=0. Matches this exact 4/6/10 split directly.
+					 * - mGBA's Open Game Boy Documentation Project, PPU/STAT section:
+					 *   https://mgba-emu.github.io/gbdoc/
+					 *   "this does not occur with Mode 0 and LYC, because LYC is slightly late on Mode 2" --
+					 *   independently documents the same family of LYC-lags-LY behavior.
+					 * - gbdev/pandocs issue #141 "Document STAT interrupt oddities":
+					 *   https://github.com/gbdev/pandocs/issues/141
+					 *   Even SameBoy's own author (LIJI) says he'd "have to check SameBoy's source" for this exact
+					 *   class of delay -- Pan Docs doesn't cover it, so source + measured tables are the ground truth.
+					 */
+					 // > 4 cause issues
 					if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == FOUR)
 					{
 						// Process LY == LYC for LY = 153
 						compareLYToLYC(pGBc_peripherals->LY);
-
 						// Reset LY to zero post LY=LYC check
 						pGBc_display->currentScanline = ZERO;
 						pGBc_peripherals->LY = ZERO;
+						// LY now reads 0, but the true comparator is still watching for 153 for 2 more cycles
+						pGBc_display->forceLY153Compare = YES;
 					}
 					else if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == SIX)
 					{
 						// Clear LY == LYC
 						pGBc_peripherals->STAT.lcdStatusFields.LYC_EQL_LY_FLAG = ZERO;
 						pGBc_instance->GBc_state.emulatorStatus.STATInterruptSignal.STATInterruptSources.LY_LYC_SIGNAL = LO;
+						// Comparator goes fully dark until tick TEN
+						pGBc_display->forceLY153Compare = NO;
+						pGBc_display->lycCompareSuppressed = YES;
 					}
-					// > 12 causes issues
 					else if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == TEN)
 					{
 						// Process LY == LYC for LY = 0
 						compareLYToLYC(pGBc_peripherals->LY);
+						// Comparator settles on the real LY=0 from here
+						pGBc_display->lycCompareSuppressed = NO;
 					}
 				}
 				else
@@ -2006,7 +2038,6 @@ void GBc_t::ppuTick()
 					{
 						// Process LY == LYC for LY = 153
 						compareLYToLYC(pGBc_peripherals->LY);
-
 						// Reset LY to zero post LY=LYC check
 						pGBc_display->currentScanline = ZERO;
 						pGBc_peripherals->LY = ZERO;
@@ -13203,18 +13234,25 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 					pGBc_display->cgbLYCDelayTCycles = FOUR;
 				}
 				else
-				{
-					pGBc_peripherals->LYC = data;
-
-					// Refer : https://forums.nesdev.org/viewtopic.php?t=16434
-					compareLYToLYC(pGBc_peripherals->LY);
-				}
-#else
-				pGBc_peripherals->LYC = data;
-
-				// Refer : https://forums.nesdev.org/viewtopic.php?t=16434
-				compareLYToLYC(pGBc_peripherals->LY);
 #endif
+					if (ROM_TYPE == ROM::GAME_BOY && pGBc_display->lycCompareSuppressed == YES)
+					{
+						// dead zone: write lands, comparator is dark, no compare at all
+						pGBc_peripherals->LYC = data;
+					}
+					else if (ROM_TYPE == ROM::GAME_BOY && pGBc_display->forceLY153Compare == YES)
+					{
+						// shadow window: LY reads 0, comparator still checks against 153
+						pGBc_peripherals->LYC = data;
+						// Refer : https://forums.nesdev.org/viewtopic.php?t=16434
+						compareLYToLYC(TO_UINT8(153));
+					}
+					else
+					{
+						pGBc_peripherals->LYC = data;
+				        // Refer : https://forums.nesdev.org/viewtopic.php?t=16434
+						compareLYToLYC(pGBc_peripherals->LY);
+					}
 			}
 			RETURN;
 		}

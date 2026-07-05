@@ -1561,6 +1561,8 @@ private:
 		FLAG pushDone;
 		FLAG bgToObjectPenalty;
 		FLAG isTheLastVblankLine;
+		FLAG forceLY153Compare;
+		FLAG lycCompareSuppressed;
 		FLAG blockVramR;
 		FLAG blockOAMR;
 		FLAG blockVramW;
