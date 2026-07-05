@@ -54,8 +54,6 @@ extern uint32_t _REWIND_BUFFER_SIZE;
 extern int32_t _TEST_NUMBER;
 extern FLAG _ENABLE_ACCURATE_INPUT_SAMPLING;
 
-extern FLAG isBiosEnabled;
-
 extern float _ACTUAL_FPS;
 
 #ifndef __RPI_PICO__

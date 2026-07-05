@@ -36,9 +36,9 @@ Current Version: **0.7x**
 - **Ms Pac-Man**
 - **Pac-Man (Midway and Namco variants)**
 - **Space Invaders**
-- **CHIP-8**
-- **S-CHIP**
 - **XO-CHIP**
+- **S-CHIP**
+- **CHIP-8**
 - **Game of Life**
 
 ---
@@ -489,6 +489,11 @@ Legacy variant based on One Lone Coder's Pixel Game Engine.
 - [Accuracy Coin](https://github.com/100thCoin/AccuracyCoin) test suite for NES
 - [Little Things NES](https://github.com/pinobatch/little-things-nes) test suite for NES
 - And all other tests suites mentioned in previous sections...
+
+### Boot ROMs
+
+- [Sameboy](https://github.com/LIJI32/SameBoy) - DMG and CGB BIOS
+- [ReGBA](https://github.com/Nebuleon/ReGBA) - GBA BIOS
 
 ### Community
 

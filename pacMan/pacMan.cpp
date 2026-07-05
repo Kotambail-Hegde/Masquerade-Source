@@ -80,7 +80,6 @@ static uint32_t matrix[16] = { 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0
 
 pacMan_t::pacMan_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config)
 {
-	isBiosEnabled = NO;
 	INC8 indexToCheck = RESET;
 
 	setEmulationID(EMULATION_ID::PACMAN_ID);

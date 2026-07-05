@@ -171,8 +171,6 @@ static double doubleOutput[(uint32_t)(EMULATED_AUDIO_SAMPLING_RATE_FOR_GB_GBC / 
 static FLAG _DISABLE_BG = NO;
 static FLAG _DISABLE_WIN = NO;
 static FLAG _DISABLE_OBJ = NO;
-static FLAG _ENABLE_DMG_BIOS = NO;
-static FLAG _ENABLE_CGB_BIOS = NO;
 static FLAG _ENABLE_AUDIO_HPF = NO;
 static FLAG _FORCE_GB_FOR_GBC = NO;
 static FLAG _FORCE_GB_GFX_FOR_GBC = NO;
@@ -225,8 +223,6 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 	{
 		//SETBIT(ENABLE_LOGS, LOG_VERBOSITY_DISASSEMBLY);
 
-		isBiosEnabled = NO;
-
 		std::transform(rom[ZERO].begin(), rom[ZERO].end(), rom[ZERO].begin(), ::tolower);
 
 		if (rom[ZERO].substr(rom[ZERO].find_last_of(".") + ONE) == "gb")
@@ -251,8 +247,6 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 		// check if directory mentioned by "_SAVE_LOCATION" exists, if not we need to explicitly create it
 		ifNoDirectoryThenCreate(_SAVE_LOCATION);
 
-		_ENABLE_DMG_BIOS = to_bool(pt.get<std::string>("gb_gbc._use_dmg_bios", _ENABLE_DMG_BIOS ? "true" : "false"));
-		_ENABLE_CGB_BIOS = to_bool(pt.get<std::string>("gb_gbc._use_cgb_bios", _ENABLE_CGB_BIOS ? "true" : "false"));
 		_FORCE_GB_FOR_GBC = to_bool(pt.get<std::string>("gb_gbc._force_gb_for_gbc", _FORCE_GB_FOR_GBC ? "true" : "false"));
 		_FORCE_GB_GFX_FOR_GBC = to_bool(pt.get<std::string>("gb_gbc._force_gb_gfx_for_gbc", _FORCE_GB_GFX_FOR_GBC ? "true" : "false"));
 		_FORCE_GBC_FOR_GB = to_bool(pt.get<std::string>("gb_gbc._force_gbc_for_gb", _FORCE_GBC_FOR_GB ? "true" : "false"));
@@ -264,27 +258,19 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 		if (ROM_TYPE == ROM::GAME_BOY && _FORCE_GBC_FOR_GB == YES)
 		{
 			INFO("Running in Forced CGB mode");
-			INFO("Forced CGB mode requires CGB bios to be loaded");
 			ROM_TYPE = ROM::GAME_BOY_COLOR; // .gb loaded to GBC
-			_ENABLE_DMG_BIOS = NO;
-			_ENABLE_CGB_BIOS = YES;
 
 			ghost_decay = _GB_GHOST_FACTOR;
 		}
 		else if (ROM_TYPE == ROM::GAME_BOY_COLOR && _FORCE_GB_FOR_GBC == YES)
 		{
 			INFO("Running in Forced DMG mode");
-			INFO("Forced DMG mode requires DMG bios to be loaded");
 			ROM_TYPE = ROM::GAME_BOY; // .gbc loaded to GB
-			_ENABLE_CGB_BIOS = NO;
 
 			ghost_decay = _GBC_GHOST_FACTOR;
 		}
 
-		FLAG searchForBios = NO;
-
-		if ((ROM_TYPE == ROM::GAME_BOY && _ENABLE_DMG_BIOS == YES)
-			|| (ROM_TYPE == ROM::GAME_BOY_COLOR && _FORCE_GB_FOR_GBC == YES))
+		if (ROM_TYPE == ROM::GAME_BOY || (ROM_TYPE == ROM::GAME_BOY_COLOR && _FORCE_GB_FOR_GBC == YES))
 		{
 			ROM_TYPE = ROM::GAME_BOY;
 			INFO("Running in DMG mode");
@@ -292,18 +278,15 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 #ifndef __EMSCRIPTEN__
 			_BIOS_LOCATION = config.get<std::string>("gb_gbc._dmg_bios_location");
 #else
-			_BIOS_LOCATION = "assets/gb/bios/dmg_rom.bin";
+			_BIOS_LOCATION = "/persistent/dmg_boot.bin";
 #endif
 
-			std::cout << "Searching for BIOS in " << _BIOS_LOCATION << '\n';
+			INFO("Searching for BIOS in %s\n", _BIOS_LOCATION.c_str());
 			dmg_cgb_bios.expectedBiosSize = 0x100;
-			searchForBios = YES;
 
 			ghost_decay = _GB_GHOST_FACTOR;
 		}
-		else if
-			((ROM_TYPE == ROM::GAME_BOY_COLOR && _ENABLE_CGB_BIOS == YES)
-				|| (ROM_TYPE == ROM::GAME_BOY && _FORCE_GBC_FOR_GB == YES))
+		else if (ROM_TYPE == ROM::GAME_BOY_COLOR || (ROM_TYPE == ROM::GAME_BOY && _FORCE_GBC_FOR_GB == YES))
 		{
 			ROM_TYPE = ROM::GAME_BOY_COLOR;
 			INFO("Running in CGB mode");
@@ -311,26 +294,22 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 #ifndef __EMSCRIPTEN__
 			_BIOS_LOCATION = config.get<std::string>("gb_gbc._cgb_bios_location");
 #else
-			_BIOS_LOCATION = "assets/gbc/bios/cgb_boot.bin";
+			_BIOS_LOCATION = "/persistent/cgb_boot.bin";
 #endif
 
-			std::cout << "Searching for BIOS in " << _BIOS_LOCATION << '\n';
+			INFO("Searching for BIOS in %s\n", _BIOS_LOCATION.c_str());
 			dmg_cgb_bios.expectedBiosSize = 0x900;
-			searchForBios = YES;
 
 			ghost_decay = _GBC_GHOST_FACTOR;
 		}
 		else
 		{
-			INFO("By-passing BIOS");
-
-			dmg_cgb_bios.biosFound = NO;
-			dmg_cgb_bios.unMapBios = YES;
+			FATAL("Invalid CONFIG.ini");
 		}
 
-		if (searchForBios == YES)
+		if (ENABLED)
 		{
-			std::cout << "Expected Bios size " << dmg_cgb_bios.expectedBiosSize << '\n';
+			INFO("Expected Bios size %d\n", dmg_cgb_bios.expectedBiosSize);
 
 			// Get the list of files in bios directory
 			dmg_cgb_bios.biosFound = NO;
@@ -407,18 +386,32 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 					}
 					else
 					{
-						dmg_cgb_bios.biosFound = false;
-						dmg_cgb_bios.unMapBios = true;
+						dmg_cgb_bios.biosFound = NO;
+						dmg_cgb_bios.unMapBios = YES;
 					}
 				}
+				else
+				{
+#ifdef __EMSCRIPTEN__
+					emscripten_run_script("alert('Could not find a valid GB/GBC BIOS. To load the BIOS, click on File->Reset')");
+#endif
+					FATAL("Could not find a valid GB/GBC BIOS");
+				}
 			}
+		}
 
-			if (dmg_cgb_bios.biosFound == true)
-			{
-				isBiosEnabled = YES;
-				INFO("Using the above mentioned bios");
-				LOG_NEW_LINE;
-			}
+		// Mandate user to provide BIOS
+		if (dmg_cgb_bios.biosFound == YES)
+		{
+			INFO("Using the above mentioned bios");
+			LOG_NEW_LINE;
+		}
+		else
+		{
+#ifdef __EMSCRIPTEN__
+			emscripten_run_script("alert('Could not find a valid GB/GBC BIOS. To load the BIOS, click on File->Reset')");
+#endif
+			FATAL("Could not find a valid GB/GBC BIOS");
 		}
 
 		this->rom[ZERO] = rom[ZERO];
@@ -7661,8 +7654,6 @@ void GBc_t::destroyEmulator()
 	_DISABLE_BG = NO;
 	_DISABLE_WIN = NO;
 	_DISABLE_OBJ = NO;
-	_ENABLE_DMG_BIOS = NO;
-	_ENABLE_CGB_BIOS = NO;
 	_ENABLE_AUDIO_HPF = NO;
 	_FORCE_GB_FOR_GBC = NO;
 	_FORCE_GB_GFX_FOR_GBC = NO;
@@ -7807,293 +7798,10 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 			}
 			else
 			{
-				if (ROM_TYPE == ROM::GAME_BOY)
-				{
-					INFO("Initialize few registers and memory regions of GB-GBC before starting the emulation");
-
-					cpuSetRegister(REGISTER_TYPE::RT_PC, 0x0100);
-					cpuSetRegister(REGISTER_TYPE::RT_AF, 0x01B0);
-					cpuSetRegister(REGISTER_TYPE::RT_BC, 0x0013);
-					cpuSetRegister(REGISTER_TYPE::RT_DE, 0x00D8);
-					cpuSetRegister(REGISTER_TYPE::RT_HL, 0x014D);
-					cpuSetRegister(REGISTER_TYPE::RT_SP, 0xFFFE);
-
-					// bypassing "writeRawMemory" and directly writing to memory as we don't want the usual memory logic to be applicable here
-
-					// Source : GB Pandocs
-#if ENABLED
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF00] = 0xCF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF01] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF02] = 0x7E;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF03] = 0xFF; // Not documented in pandocs, but mts test expect this register (DIV LSB) to be initialized to 0xFF			
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF04] = 0xAB;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF05] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF06] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF07] = 0xF8;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF08];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF09];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF0A];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF0B];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF0C];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF0D];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF0E];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF0F] = 0xE1;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF10] = 0x80;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF11] = 0xBF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF12] = 0xF3;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF13] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF14] = 0xBF;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF15];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF16] = 0x3F;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF17] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF18] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF19] = 0xBF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF1A] = 0x7F;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF1B] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF1C] = 0x9F;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF1D] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF1E] = 0xBF;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF1F];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF20] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF21] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF22] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF23] = 0xBF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF24] = 0x77;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF25] = 0xF3;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF26] = 0xF1;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF27];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF28];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF29];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF2A];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF2B];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF2C];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF2D];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF2E];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF2F];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF40] = 0x91;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF41] = 0x85;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF42] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF43] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF44] = 0x91; // Deviation from pandocs; this is needed otherwise PPU mode and LY goes out of sync
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF45] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF46] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF47] = 0xFC;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF48];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF49];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF4A] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF4B] = 0x00;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF4C];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF4D] = 0xFF;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF4E];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF4F] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF50] = 0x01; // Deviation; this is needed as per BESS specification
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF51] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF52] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF53] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF54] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF55] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF56] = 0xFF;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF57];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF58];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF59];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF5A];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF5B];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF5C];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF5D];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF5E];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF5F];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF60];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF61];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF62];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF63];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF64];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF65];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF66];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF67];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF68] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF69] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF6A] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF6B] = 0xFF;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF6C];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF6D];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF6E];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF6F];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF70] = 0xFF;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF71];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF78];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF79];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF7A];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF7B];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF7C];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF7D];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF7E];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF7F];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFFFF] = 0x00;
-
-					// initialize wave ram
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF30];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF31];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF32];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF33];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF34];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF35];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF36];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF37];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF38];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF39];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF3A];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF3B];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF3C];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF3D];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF3E];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF3F];
+#ifdef __EMSCRIPTEN__
+				emscripten_run_script("alert('Could not find a valid GB/GBC BIOS. To load the BIOS, click on File->Reset')");
 #endif
-				}
-				else if (ROM_TYPE == ROM::GAME_BOY_COLOR)
-				{
-					INFO("Initialize few registers and memory regions of GB-GBC before starting the emulation");
-
-					cpuSetRegister(REGISTER_TYPE::RT_PC, 0x0100);
-					cpuSetRegister(REGISTER_TYPE::RT_AF, 0x1180);
-					cpuSetRegister(REGISTER_TYPE::RT_BC, 0x0000);
-					cpuSetRegister(REGISTER_TYPE::RT_DE, 0xFF56);
-					cpuSetRegister(REGISTER_TYPE::RT_HL, 0x000D);
-					cpuSetRegister(REGISTER_TYPE::RT_SP, 0xFFFE);
-
-					// bypassing "writeRawMemory" and directly writing to memory as we don't want the usual memory logic to be applicable here
-
-					// Source : GB Pandocs (and few from VBA-M)
-
-#if ENABLED
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF00] = 0xC7;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF01] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF02] = 0x7F;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF03] = 0xFF; // Not documented in pandocs, but mts test expect this register (DIV LSB) to be initialized to 0xFF	
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF04];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF05] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF06] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF07] = 0xF8;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF08];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF09];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF0A];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF0B];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF0C];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF0D];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF0E];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF0F] = 0xE1;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF10] = 0x80;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF11] = 0xBF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF12] = 0xF3;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF13] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF14] = 0xBF;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF15];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF16] = 0x3F;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF17] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF18] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF19] = 0xBF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF1A] = 0x7F;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF1B] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF1C] = 0x9F;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF1D] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF1E] = 0xBF;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF1F];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF20] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF21] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF22] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF23] = 0xBF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF24] = 0x77;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF25] = 0xF3;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF26] = 0xF1;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF27];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF28];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF29];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF2A];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF2B];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF2C];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF2D];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF2E];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF2F];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF40] = 0x91;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF41];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF42] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF43] = 0x00;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF44];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF45] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF46] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF47] = 0xFC;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF48];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF49];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF4A] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF4B] = 0x00;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF4C];
-					TODO("Enabling GBcRawMemory[0xFF4D] = 0xFF causes glitch in \"Denshe de Go!2\" (This register corresponds to KEY1; used for CGB double speed)");
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF4D] = 0xFF;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF4E];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF4F] = 0xFF;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF50];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF51] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF52] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF53] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF54] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF55] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF56] = 0xFF;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF57];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF58];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF59];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF5A];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF5B];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF5C];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF5D];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF5E];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF5F];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF60];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF61];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF62];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF63];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF64];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF65];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF66];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF67];
-					TODO("GBcRawMemory[0xFF68] = 0x80 is slight deviation from pandocs to enable auto increment of BCPD/OCPD in CGB to make \"mezase.gbc\" (Pokemon Jap Intro) work");
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF68] = 0x80;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF69];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF6A];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF6B];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF6C];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF6D];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF6E];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF6F];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF70] = 0xFF;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF71];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF78];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF79];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF7A];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF7B];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF7C];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF7D];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF7E];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF7F];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFFFF] = 0x00;
-
-					// initialize wave ram
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF30];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF31];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF32];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF33];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF34];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF35];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF36];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF37];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF38];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF39];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF3A];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF3B];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF3C];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF3D];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF3E];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF3F];
-#endif
-				}
+				FATAL("Could not find a valid GB/GBC BIOS");
 			}
 
 			// Get current LCD mode and scanline

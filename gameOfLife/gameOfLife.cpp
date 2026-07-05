@@ -16,8 +16,6 @@ static uint32_t matrix[16] = { 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0
 
 gameOfLife_t::gameOfLife_t(MasqConfig_t& config)
 {
-	isBiosEnabled = NO;
-
 	setEmulationID(EMULATION_ID::GAME_OF_LIFE_ID);
 
 	this->pt = config;
