@@ -11714,10 +11714,17 @@ void NES_t::destroyEmulator()
 
 #if (GL_FIXED_FUNCTION_PIPELINE == YES) && !defined(IMGUI_IMPL_OPENGL_ES2) && !defined(IMGUI_IMPL_OPENGL_ES3)
 	glDeleteTextures(1, &nes_texture);
+	nes_texture = 0;
+
 	glDeleteTextures(1, &matrix_texture);
+	matrix_texture = 0;
 #else
+	// 1. Delete and zero out Textures
 	glDeleteTextures(1, &nes_texture);
+	nes_texture = 0;
+
 	glDeleteTextures(1, &matrix_texture);
+	matrix_texture = 0;
 #endif
 
 	auto audioDevId = SDL_GetAudioStreamDevice(audioStream);

@@ -1332,10 +1332,17 @@ void spaceInvaders_t::destroyEmulator()
 
 #if (GL_FIXED_FUNCTION_PIPELINE == YES) && !defined(IMGUI_IMPL_OPENGL_ES2) && !defined(IMGUI_IMPL_OPENGL_ES3)
 		glDeleteTextures(1, &spaceInvaders_texture);
+		spaceInvaders_texture = 0;
+
 		glDeleteTextures(1, &matrix_texture);
+		matrix_texture = 0;
 #else
+		// 1. Delete and zero out Textures
 		glDeleteTextures(1, &spaceInvaders_texture);
+		spaceInvaders_texture = 0;
+
 		glDeleteTextures(1, &matrix_texture);
+		matrix_texture = 0;
 #endif
 
 #if (SPACE_INVADERS_AUDIO_AS_STATIC_BUFFERS == NO)

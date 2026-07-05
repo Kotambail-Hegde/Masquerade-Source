@@ -916,10 +916,17 @@ void chip8_t::destroyEmulator()
 #else // !__RPI_PICO__
 #if (GL_FIXED_FUNCTION_PIPELINE == YES) && !defined(IMGUI_IMPL_OPENGL_ES2) && !defined(IMGUI_IMPL_OPENGL_ES3)
 	glDeleteTextures(1, &chip8_texture);
+	chip8_texture = 0;
+
 	glDeleteTextures(1, &matrix_texture);
+	matrix_texture = 0;
 #else
+	// 1. Delete and zero out Textures
 	glDeleteTextures(1, &chip8_texture);
+	chip8_texture = 0;
+
 	glDeleteTextures(1, &matrix_texture);
+	matrix_texture = 0;
 #endif
 	auto audioDevId = SDL_GetAudioStreamDevice(audioStream);
 	SDL_PauseAudioDevice(audioDevId);

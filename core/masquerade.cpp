@@ -3133,14 +3133,25 @@ public:
 			if (RUN_IMGUI_DEMO == NO)
 			{
 				glDeleteTextures(1, &masquerade_texture);
+				masquerade_texture = 0; // Reset!
+
 				OnUserDestroy(window);
+
 #if (GL_FIXED_FUNCTION_PIPELINE == NO)
 				glDeleteBuffers(1, &fullscreenVBO);
+				fullscreenVBO = 0; // Reset!
+
 				glDeleteVertexArrays(1, &fullscreenVAO);
+				fullscreenVAO = 0; // Reset!
+
 				glDeleteProgram(shaderProgramBasic);
+				shaderProgramBasic = 0; // Reset!
+
 				glDeleteProgram(shaderProgramBlend);
+				shaderProgramBlend = 0; // Reset!
 #endif
 				glDeleteFramebuffers(1, &frame_buffer);
+				frame_buffer = 0; // Reset!
 			}
 
 			NFD_Quit();

@@ -3578,7 +3578,7 @@ FLAG GBc_t::isDACEnabled(AUDIO_CHANNELS channel)
 
 FLAG GBc_t::isChannel3Active()
 {
-	RETURN(pGBc_peripherals->NR52.channelSoundONOFFFields.channel3ONFlag == ONE
+	RETURN (pGBc_peripherals->NR52.channelSoundONOFFFields.channel3ONFlag == ONE
 		&& pGBc_peripherals->NR34.channelHigherPeriodAndControlFields.trigger == ONE
 		&& pGBc_instance->GBc_state.audio.audioChannelInstance[AUDIO_CHANNELS::CHANNEL_3].isChannelActuallyEnabled == ENABLED);
 }
@@ -4086,7 +4086,9 @@ void GBc_t::captureDownsampledAudioSamples()
 
 		leftSample /= FOUR;
 		// Refer to https://x.com/LIJI32/status/964555034011815936/photo/1
-		leftSample *= pGBc_peripherals->NR50.channelMasterVolumeAndVINPanningFields.leftOutputVolume + ONE;
+		// NR50 is 1/8 (quietest) .. 8/8 = unity (loudest), not a x1..x8 boost.
+		// Use 8.0f, not 8 -- integer division here truncates to 0 for every value except 8.
+		leftSample *= (pGBc_peripherals->NR50.channelMasterVolumeAndVINPanningFields.leftOutputVolume + ONE) / 8.0f;
 		leftSample += DC_BIAS_FOR_AUDIO_SAMPLES;
 		// Refer to https://x.com/LIJI32/status/964555034011815936/photo/1
 		leftSample = finHPF(leftSample);
@@ -4111,7 +4113,9 @@ void GBc_t::captureDownsampledAudioSamples()
 
 		rightSample /= FOUR;
 		// Refer to https://x.com/LIJI32/status/964555034011815936/photo/1
-		rightSample *= pGBc_peripherals->NR50.channelMasterVolumeAndVINPanningFields.rightOutputVolume + ONE;
+		// NR50 is 1/8 (quietest) .. 8/8 = unity (loudest), not a x1..x8 boost.
+		// Use 8.0f, not 8 -- integer division here truncates to 0 for every value except 8.
+		rightSample *= (pGBc_peripherals->NR50.channelMasterVolumeAndVINPanningFields.rightOutputVolume + ONE) / 8.0f;
 		rightSample += DC_BIAS_FOR_AUDIO_SAMPLES;
 		// Refer to https://x.com/LIJI32/status/964555034011815936/photo/1
 		rightSample = finHPF(rightSample);
@@ -6582,14 +6586,9 @@ void GBc_t::displayCompleteScreen()
 	// Choose filtering mode (NEAREST or LINEAR)
 	GLint filter = (currEnVFilter == VIDEO_FILTERS::BILINEAR_FILTER) ? GL_LINEAR : GL_NEAREST;
 
-	// Apply filtering only when it changes (optimization)
-	static GLint prevFilterGB = -1;
-	if (filter != prevFilterGB)
-	{
-		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter));
-		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter));
-		prevFilterGB = filter;
-	}
+	// Apply filtering only when it changes
+	GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter));
+	GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter));
 
 	// 1b. Ghost pass – exponential decay blend of gameboy_texture into ghost_texture.
 	//     Runs at native GB/GBC resolution (160x144 or 160x144 GBC) before upscaling.
@@ -7664,10 +7663,31 @@ void GBc_t::destroyEmulator()
 
 #if (GL_FIXED_FUNCTION_PIPELINE == YES) && !defined(IMGUI_IMPL_OPENGL_ES2) && !defined(IMGUI_IMPL_OPENGL_ES3)
 	glDeleteTextures(1, &gameboy_texture);
+	gameboy_texture = 0;
+
 	glDeleteTextures(1, &matrix_texture);
+	matrix_texture = 0;
 #else
+	// 1. Delete and zero out Textures
 	glDeleteTextures(1, &gameboy_texture);
+	gameboy_texture = 0;
+
 	glDeleteTextures(1, &matrix_texture);
+	matrix_texture = 0;
+
+	glDeleteTextures(2, ghost_texture);
+	ghost_texture[0] = 0;
+	ghost_texture[1] = 0;
+
+	// 2. Delete and zero out Framebuffers
+	glDeleteFramebuffers(1, &ghost_fbo);
+	ghost_fbo = 0;
+
+	if (shaderProgramGhost != 0)
+	{
+		glDeleteProgram(shaderProgramGhost);
+		shaderProgramGhost = 0;
+	}
 #endif
 
 	auto audioDevId = SDL_GetAudioStreamDevice(audioStream);
