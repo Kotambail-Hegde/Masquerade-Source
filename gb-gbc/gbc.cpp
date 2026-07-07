@@ -1907,8 +1907,7 @@ void GBc_t::requestHblankStatInterrupt()
 
 void GBc_t::ppuTick()
 {
-	pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY++;
-	pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode++;
+	// Tick ppu frame counter
 	pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerFrame++;
 
 	FLAG effectivePPUState = isPPULCDEnabled();
@@ -1943,6 +1942,10 @@ void GBc_t::ppuTick()
 
 	if (effectivePPUState == ENABLED)
 	{
+		// Tick ppu mode and scanline counters
+		pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY++;
+		pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode++;
+
 		// If not in STOP, PPU is not 'DARK' anymore...
 		pGBc_instance->GBc_state.emulatorStatus.freezeLCD = NO;
 

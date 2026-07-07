@@ -2775,13 +2775,8 @@ private:
 		// Refer : https://discord.com/channels/465585922579103744/465586075830845475/852208456491728897
 		// Refer : https://discord.com/channels/465585922579103744/465586075830845475/1295044210654842980
 
-		/*
-		 * Note that WINDOW_LAYER_ENABLE should not be checked here as mentioned in https ://discord.com/channels/465585922579103744/465586075830845475/757342004052099072
-		 * But, sameboy does check WINDOW_LAYER_ENABLE, so we will keep this as is.
-		 */
-
-		pGBc_display->yConditionForWindowIsMetForCurrentFrame |=
-			((ly == pGBc_peripherals->WY) & (pGBc_peripherals->LCDC.lcdControlFields.WINDOW_LAYER_ENABLE == SET));
+		// Note that WINDOW_LAYER_ENABLE should not be checked here as mentioned in https ://discord.com/channels/465585922579103744/465586075830845475/757342004052099072
+		pGBc_display->yConditionForWindowIsMetForCurrentFrame |= (ly == pGBc_peripherals->WY);
 	}
 	void ppuTick();
 	void apuTick();
