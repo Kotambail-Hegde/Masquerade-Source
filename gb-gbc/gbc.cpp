@@ -1463,14 +1463,16 @@ void GBc_t::timerTick()
 		pGBc_instance->GBc_state.emulatorStatus.timaIncSignal = (timerEnable && ((!muxout) && pGBc_instance->GBc_state.emulatorStatus.fallingEdgeDetectorDelay));
 		pGBc_instance->GBc_state.emulatorStatus.fallingEdgeDetectorDelay = muxout;
 		pGBc_instance->GBc_state.emulatorStatus.instantTimerIF = NO;
-
 	}
 	else if (ROM_TYPE == ROM::GAME_BOY)
-#else
 	{
 		pGBc_instance->GBc_state.emulatorStatus.timaIncSignal = ((!getTIMASignalForGB()) && pGBc_instance->GBc_state.emulatorStatus.fallingEdgeDetectorDelay);
 		pGBc_instance->GBc_state.emulatorStatus.fallingEdgeDetectorDelay = getTIMASignalForGB();
 	}
+#else
+	// GB_GBC_ENABLE_CGB_OBSCURE_TIMER_BEHAVIOUR is disabled: The default behavior applies to BOTH Game Boy and Game Boy Color.
+	pGBc_instance->GBc_state.emulatorStatus.timaIncSignal = ((!getTIMASignalForGB()) && pGBc_instance->GBc_state.emulatorStatus.fallingEdgeDetectorDelay);
+	pGBc_instance->GBc_state.emulatorStatus.fallingEdgeDetectorDelay = getTIMASignalForGB();
 #endif
 
 	if (pGBc_instance->GBc_state.emulatorStatus.timaIncSignal == HI)
