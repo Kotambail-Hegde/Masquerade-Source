@@ -1533,6 +1533,8 @@ private:
 		BYTE cgbLatchedSCY;
 		COUNTER8 cgbLYCDelayTCycles;
 		BYTE cgbLatchedLYC;
+		BYTE latchedWindowDiscardTarget;
+		int16_t latchedXWindow;
 		int16_t pixelFetcherDots;
 		int16_t pixelRendererDots;
 		int16_t pixelPipelineDots;
@@ -1852,7 +1854,7 @@ private:
 					{
 						// Raw register view (A006-A035)
 						BYTE registers[48];
-						// Decoded 4×4 × 3-byte matrix
+						// Decoded 4ï¿½4 ï¿½ 3-byte matrix
 						BYTE matrix[4][4][3];
 					};
 				};
