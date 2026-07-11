@@ -326,7 +326,6 @@ private:
 
 	enum class PIXEL_FETCHER_STATES
 	{
-		DUMMY = ZERO,
 		WAIT_FOR_TILE = ONE,
 		GET_TILE = TWO,
 		WAIT_FOR_DATA_LOW = THREE,
@@ -1529,6 +1528,7 @@ private:
 		struct pixelFIFO_t tempBgWinPixelFIFO;
 		int16_t discardedPixelCount;
 		BYTE xBGPerPixel;
+		FLAG scxLatchedThisScanline;
 		COUNTER8 cgbSCYDelayTCycles;
 		BYTE cgbLatchedSCY;
 		COUNTER8 cgbLYCDelayTCycles;

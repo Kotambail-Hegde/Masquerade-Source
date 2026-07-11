@@ -4938,8 +4938,16 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 			if (pGBc_display->isNewM3Scanline == YES)
 			{
 				pGBc_display->discardedPixelCount = RESET;
-				pGBc_display->xBGPerPixel = (effectiveSCX & SEVEN); // Amount to discard for this scanline
+				pGBc_display->xBGPerPixel = RESET;
+				pGBc_display->scxLatchedThisScanline = NO;
 				pGBc_display->isNewM3Scanline = CLEAR;
+			}
+
+			PPUTODO("Handling the case when SCX is changed mid-scanline to discard pixels is currently done yet WAIT_FOR_DATA_HIGH. This might be off by few cycles and we will need to re-handle when the discard happens when this offset is fixed");
+			if (pGBc_display->scxLatchedThisScanline == NO && pGBc_display->pixelFetcherState == PIXEL_FETCHER_STATES::WAIT_FOR_DATA_HIGH)
+			{
+				pGBc_display->xBGPerPixel = (effectiveSCX & SEVEN);
+				pGBc_display->scxLatchedThisScanline = YES;
 			}
 
 			if (pGBc_display->shouldFetchAndRenderWindowInsteadOfBG == YES)
@@ -5025,11 +5033,6 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 
 			switch (pGBc_display->pixelFetcherState)
 			{
-			case PIXEL_FETCHER_STATES::DUMMY:
-			{
-				FATAL("Unknown Pixel Fetcher State");
-				BREAK;
-			}
 			case PIXEL_FETCHER_STATES::WAIT_FOR_TILE: // 1st cycle
 			{
 				if (pGBc_display->shouldFetchObjInsteadOfWinAndBgNow == YES)
