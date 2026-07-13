@@ -1626,6 +1626,7 @@ private:
 		uint16_t rtcDayCounter;
 		uint16_t timerCounter;
 		uint64_t rtcCounter;
+		uint64_t stopCounter;
 	} ticks_t;
 
 	typedef struct
@@ -1899,7 +1900,9 @@ private:
 		FLAG isCPUHalted;
 		FLAG isCPUJustHalted;
 		FLAG isCPUStopped;
-		FLAG freezeLCD;
+		FLAG stopLCD;
+		FLAG stopLCDDone;
+		FLAG stopKeepDrawingMode3;
 		FLAG freezeLCDOneFrame;
 		int32_t exitHaltInTCycles;
 		enum HALT_BUG_STATE isHaltBugActivated;

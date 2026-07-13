@@ -145,6 +145,7 @@
 
 #define initializeSerialClockSpeed						processSerialClockSpeedBit
 #define performOverFlowCheck							getUpdatedFrequency
+#define triggerStopSamplingEvent						(pGBc_display->wasVblankJustTriggerred = YES)
 
 #define MBC7_EEPROM_WORD(addr)							(((uint16_t*)pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[0])[(addr) & 0x7F])
 #pragma endregion GB_GBC_SPECIFIC_MACROS
@@ -1884,24 +1885,46 @@ void GBc_t::ppuTick()
 	{
 		if (effectivePPUState == ENABLED)
 		{
-			if (pGBc_instance->GBc_state.emulatorStatus.freezeLCD == NO) MASQ_UNLIKELY
+			if (pGBc_instance->GBc_state.emulatorStatus.stopLCD == YES)
 			{
-				Pixel DARK = { 0x00 };
-				if ((ROM_TYPE == ROM::GAME_BOY_COLOR) && (pGBc_display->currentLCDMode != LCD_MODES::MODE_LCD_DISPLAY_PIXELS))
+				if (pGBc_instance->GBc_state.emulatorStatus.stopKeepDrawingMode3 == NO)
 				{
-					DARK = getColorFromColorIDForGBC(0x0000, pGBc_instance->GBc_state.gbc_palette == PALETTE_ID::PALETTE_2).COLOR;
-					std::fill_n(pGBc_display->imGuiBuffer.imGuiBuffer1D, sizeof(pGBc_display->imGuiBuffer.imGuiBuffer1D), DARK);
-				}
-				else if (ROM_TYPE == ROM::GAME_BOY)
-				{
-					DARK = paletteIDToColor.at(pGBc_instance->GBc_state.gb_palette).COLOR_099P.COLOR;
-					std::fill_n(pGBc_display->imGuiBuffer.imGuiBuffer1D, sizeof(pGBc_display->imGuiBuffer.imGuiBuffer1D), DARK);
-				}
-				pGBc_instance->GBc_state.emulatorStatus.freezeLCD = YES;
-			}
+					if (pGBc_instance->GBc_state.emulatorStatus.stopLCDDone == NO)
+					{
+						// For DMG or CGB (when not in Mode 3), we blank the display to white or black respectively continously even if LCD itself remains enabled.
+						Pixel COLOR = { 0x00 };
+						if (ROM_TYPE == ROM::GAME_BOY_COLOR)
+						{
+							COLOR = getColorFromColorIDForGBC(0x0000, pGBc_instance->GBc_state.gbc_palette == PALETTE_ID::PALETTE_2).COLOR;
+						}
+						else if (ROM_TYPE == ROM::GAME_BOY)
+						{
+							COLOR = paletteIDToColor.at(pGBc_instance->GBc_state.gb_palette).COLOR_000P.COLOR;
+						}
+						std::fill_n(pGBc_display->imGuiBuffer.imGuiBuffer1D, (getScreenWidth() * getScreenHeight()), COLOR);
+						pGBc_instance->GBc_state.emulatorStatus.stopLCDDone = YES;
+					}
 
-			effectivePPUState = DISABLED;
+					// PPU is effectively disabled!
+					effectivePPUState = DISABLED;
+				}
+				else
+				{
+					// For CGB, if in Mode 3, we keep rendering the current frame uninterrupted instead of blanking the display to black
+					pGBc_instance->GBc_state.emulatorStatus.stopLCD = NO;
+
+					// PPU remains enabled!
+					effectivePPUState = ENABLED;
+				}
+			}
 		}
+	}
+	else
+	{
+		// If not in STOP, PPU is not 'DARK' anymore...
+		pGBc_instance->GBc_state.emulatorStatus.stopLCD = NO;
+		pGBc_instance->GBc_state.emulatorStatus.stopLCDDone = NO;
+		pGBc_instance->GBc_state.emulatorStatus.stopKeepDrawingMode3 = NO;
 	}
 
 	// Can refer https://discord.com/channels/465585922579103744/465586075830845475/1025910017754419290 for STAT timing
@@ -1912,9 +1935,6 @@ void GBc_t::ppuTick()
 		// Tick ppu mode and scanline counters
 		pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY++;
 		pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode++;
-
-		// If not in STOP, PPU is not 'DARK' anymore...
-		pGBc_instance->GBc_state.emulatorStatus.freezeLCD = NO;
 
 		switch (pGBc_display->currentLCDMode)
 		{
@@ -2593,7 +2613,7 @@ void GBc_t::ppuTick()
 		}
 		}
 	}
-	else
+	else if (pGBc_instance->GBc_state.emulatorStatus.isCPUStopped == NO)
 	{
 		// CGB special case needed for Bug's Life
 		if (pGBc_instance->GBc_state.emulatorStatus.ticks.lcdBlankCounter < LCD_V_BLANK)
@@ -2631,22 +2651,19 @@ void GBc_t::ppuTick()
 	// Refer : https://github.com/mattcurrie/mealybug-tearoom-tests/blob/master/the-comprehensive-game-boy-ppu-documentation.md#tile_sel-bit-4
 	if (pGBc_display->tileSelGlitchTCycles > RESET && --pGBc_display->tileSelGlitchTCycles == RESET) pGBc_display->tileSelGlitch = NO;
 #endif
-
 #if (GB_GBC_ENABLE_CGB_SCY_WRITE_DELAY == YES)
 	// Refer : https://github.com/mattcurrie/mealybug-tearoom-tests/blob/master/the-comprehensive-game-boy-ppu-documentation.md#scy-ff42
 	if (pGBc_display->cgbSCYDelayTCycles > RESET && --pGBc_display->cgbSCYDelayTCycles == RESET) pGBc_peripherals->SCY = pGBc_display->cgbLatchedSCY;
 #endif
-
 #if (GB_GBC_ENABLE_CGB_LYC_WRITE_DELAY == YES)
 	if (pGBc_display->cgbLYCDelayTCycles > RESET && --pGBc_display->cgbLYCDelayTCycles == RESET)
 	{
 		pGBc_peripherals->LYC = pGBc_display->cgbLatchedLYC;
 		compareLYToLYC(pGBc_peripherals->LY);
 	}
-
+#endif
 #if (GB_GBC_ENABLE_WX_WRITE_DELAY == YES)
 	if (pGBc_display->wxDelayTCycles > RESET && --pGBc_display->wxDelayTCycles == RESET) pGBc_peripherals->WX = pGBc_display->latchedWXForDelay;
-#endif
 #endif
 }
 
@@ -6412,59 +6429,59 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 // NOTE: This function is used to dynamically change "themes"
 void GBc_t::translateGFX(PALETTE_ID from, PALETTE_ID to, PALETTE_ID colorCorrectionBefore, PALETTE_ID colorCorrectionAfter)
 {
-	// Reset the flag so that 'DARKENING' can be done once again post theme change
-	pGBc_instance->GBc_state.emulatorStatus.freezeLCD = NO;
-
-	if (ROM_TYPE == ROM::GAME_BOY_COLOR)
+	if (pGBc_instance->GBc_state.emulatorStatus.isCPUStopped == NO) MASQ_LIKELY
 	{
-		if (colorCorrectionBefore != colorCorrectionAfter)
+		if (ROM_TYPE == ROM::GAME_BOY_COLOR)
+		{
+			if (colorCorrectionBefore != colorCorrectionAfter)
+			{
+				for (uint32_t y = 0; y < getScreenHeight(); y++)
+				{
+					for (uint32_t x = 0; x < getScreenWidth(); x++)
+					{
+						pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x] = getColorFromColorIDForGBC(pGBc_display->gfxVisibleColorMap_BG_WINDOW_OBJ[y][x], colorCorrectionAfter == PALETTE_ID::PALETTE_2); // Palette 2 has color correction enabled
+
+						// update the imgui buffer
+
+						pGBc_display->imGuiBuffer.imGuiBuffer2D[y][x] = getColorFromColorIDForGBC(pGBc_display->gfxVisibleColorMap_BG_WINDOW_OBJ[y][x], colorCorrectionAfter == PALETTE_ID::PALETTE_2).COLOR;
+					}
+				}
+			}
+		}
+		else if (ROM_TYPE == ROM::GAME_BOY)
 		{
 			for (uint32_t y = 0; y < getScreenHeight(); y++)
 			{
 				for (uint32_t x = 0; x < getScreenWidth(); x++)
 				{
-					pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x] = getColorFromColorIDForGBC(pGBc_display->gfxVisibleColorMap_BG_WINDOW_OBJ[y][x], colorCorrectionAfter == PALETTE_ID::PALETTE_2); // Palette 2 has color correction enabled
+					switch (pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x].COLOR_ID)
+					{
+					case colorID::COLOR_000P:
+					{
+						pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x] = paletteIDToColor.at(to).COLOR_000P;
+						BREAK;
+					}
+					case colorID::COLOR_033P:
+					{
+						pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x] = paletteIDToColor.at(to).COLOR_033P;
+						BREAK;
+					}
+					case colorID::COLOR_066P:
+					{
+						pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x] = paletteIDToColor.at(to).COLOR_066P;
+						BREAK;
+					}
+					case colorID::COLOR_099P:
+					{
+						pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x] = paletteIDToColor.at(to).COLOR_099P;
+						BREAK;
+					}
+					}
 
 					// update the imgui buffer
 
-					pGBc_display->imGuiBuffer.imGuiBuffer2D[y][x] = getColorFromColorIDForGBC(pGBc_display->gfxVisibleColorMap_BG_WINDOW_OBJ[y][x], colorCorrectionAfter == PALETTE_ID::PALETTE_2).COLOR;
+					pGBc_display->imGuiBuffer.imGuiBuffer2D[y][x] = pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x].COLOR;
 				}
-			}
-		}
-	}
-	else if (ROM_TYPE == ROM::GAME_BOY)
-	{
-		for (uint32_t y = 0; y < getScreenHeight(); y++)
-		{
-			for (uint32_t x = 0; x < getScreenWidth(); x++)
-			{
-				switch (pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x].COLOR_ID)
-				{
-				case colorID::COLOR_000P:
-				{
-					pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x] = paletteIDToColor.at(to).COLOR_000P;
-					BREAK;
-				}
-				case colorID::COLOR_033P:
-				{
-					pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x] = paletteIDToColor.at(to).COLOR_033P;
-					BREAK;
-				}
-				case colorID::COLOR_066P:
-				{
-					pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x] = paletteIDToColor.at(to).COLOR_066P;
-					BREAK;
-				}
-				case colorID::COLOR_099P:
-				{
-					pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x] = paletteIDToColor.at(to).COLOR_099P;
-					BREAK;
-				}
-				}
-
-				// update the imgui buffer
-
-				pGBc_display->imGuiBuffer.imGuiBuffer2D[y][x] = pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x].COLOR;
 			}
 		}
 	}
@@ -6572,7 +6589,7 @@ void GBc_t::displayCompleteScreen()
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	}
 #else
-		// 1. Upload emulator framebuffer to gameboy_texture
+	// 1. Upload emulator framebuffer to gameboy_texture
 	GL_CALL(glBindTexture(GL_TEXTURE_2D, gameboy_texture));
 	GL_CALL(glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, getScreenWidth(), getScreenHeight(), GL_RGBA, GL_UNSIGNED_BYTE,
 		(GLvoid*)pGBc_display->imGuiBuffer.imGuiBuffer1D));
@@ -14211,13 +14228,19 @@ FLAG GBc_t::processSOC()
 		if ((pGBc_peripherals->P1_JOYP.joyPadMemory & 0x0F) != 0x0F)
 		{
 			pGBc_instance->GBc_state.emulatorStatus.isCPUStopped = NO;
-			TODO("Tick 4-T DMA cycles when existing stop mode (source : Sameboy) ");
+			TODO("Tick 4-T DMA cycles when exiting stop mode (source : Sameboy)");
 			pGBc_display->blockOAMR = NO;
 			pGBc_display->blockOAMW = NO;
 			pGBc_display->blockVramR = NO;
 			pGBc_display->blockVramW = NO;
 			pGBc_display->blockCGBPalette = NO;
-			TODO("Tick 8-T cycles when existing stop mode (source : Sameboy)");
+			TODO("Tick 8-T cycles when exiting stop mode (source : Sameboy)");
+		}
+
+		if (++pGBc_instance->GBc_state.emulatorStatus.ticks.stopCounter >= PPU_CYCLES_PER_FRAME)
+		{
+			pGBc_instance->GBc_state.emulatorStatus.ticks.stopCounter = ZERO;
+			triggerStopSamplingEvent;
 		}
 	}
 	// Not In Stop Mode!
@@ -14281,6 +14304,8 @@ FLAG GBc_t::processSOC()
 
 			runCPUPipeline();
 		}
+
+		pGBc_instance->GBc_state.emulatorStatus.ticks.stopCounter = RESET;
 	}
 
 	RETURN status;
