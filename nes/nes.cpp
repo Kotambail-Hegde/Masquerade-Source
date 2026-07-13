@@ -702,6 +702,48 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 			}
 			BREAK;
 		}
+		case MAPPER::INES_MAPPER_218:
+		{
+			if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
+			{
+				BYTE* nt = nullptr;
+
+				switch (pNES_instance->NES_state.catridgeInfo.nameTblMir)
+				{
+				case NAMETABLE_MIRROR::VERTICAL_MIRROR:
+					nt = (address & 0x0400)
+						? pNES_ppuMemory->NESMemoryMap.nameTable1
+						: pNES_ppuMemory->NESMemoryMap.nameTable0;
+					BREAK;
+				case NAMETABLE_MIRROR::HORIZONTAL_MIRROR:
+					nt = (address & 0x0800)
+						? pNES_ppuMemory->NESMemoryMap.nameTable1
+						: pNES_ppuMemory->NESMemoryMap.nameTable0;
+					BREAK;
+				case NAMETABLE_MIRROR::ONESCREEN_LO_MIRROR:
+					// $A8: CIRAM A10 <- PPU A12 -> pattern table0 = BLK0, pattern table1 = BLK1
+					nt = (address & 0x1000)
+						? pNES_ppuMemory->NESMemoryMap.nameTable1
+						: pNES_ppuMemory->NESMemoryMap.nameTable0;
+					BREAK;
+				case NAMETABLE_MIRROR::ONESCREEN_HI_MIRROR:
+					// $A9: CIRAM A10 <- PPU A13 -> always BLK0 (A13 is always 0 within $0000-$1FFF)
+					nt = pNES_ppuMemory->NESMemoryMap.nameTable0;
+					BREAK;
+				}
+
+				if (nt == nullptr)
+				{
+					FATAL("Unknown Nametable Mirror Type %d", pNES_instance->NES_state.catridgeInfo.nameTblMir);
+					RETURN ZERO;
+				}
+				else
+				{
+					RETURN nt[address & 0x03FF];
+				}
+			}
+			BREAK;
+		}
 		case MAPPER::CNROM:
 		case MAPPER::J87:
 		{
@@ -1612,30 +1654,44 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 			// --- PATTERN TABLES ($0000 - $1FFF) ---
 			if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
 			{
-				const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
+				if (pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB == ZERO)
+				{
+					if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE0_END_ADDRESS))
+					{
+						RETURN pNES_ppuMemory->NESMemoryMap.patternTable.patternTable0[address - PATTERN_TABLE0_START_ADDRESS];
+					}
+					else if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE1_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
+					{
+						RETURN pNES_ppuMemory->NESMemoryMap.patternTable.patternTable1[address - PATTERN_TABLE1_START_ADDRESS];
+					}
+				}
+				else
+				{
+					const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
 
-				// NES 2.0 identification: bits 2-3 of flag 7 must equal 2
-				const bool isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
+					// NES 2.0 identification: bits 2-3 of flag 7 must equal 2
+					const bool isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
 
-				// Calculate total 8KB banks, accounting for NES 2.0 MSB nibble if applicable
-				const uint32_t totalChr8kBanks = isNES2
-					? (hdr.sizeOfChrRomIn8KB | ((hdr.flags_8to15.nes2p0.flag9.fields.chrRomMSB & 0x0F) << EIGHT))
-					: hdr.sizeOfChrRomIn8KB;
+					// Calculate total 8KB banks, accounting for NES 2.0 MSB nibble if applicable
+					const uint32_t totalChr8kBanks = isNES2
+						? (hdr.sizeOfChrRomIn8KB | ((hdr.flags_8to15.nes2p0.flag9.fields.chrRomMSB & 0x0F) << EIGHT))
+						: hdr.sizeOfChrRomIn8KB;
 
-				const uint32_t totalChr1kBanks = totalChr8kBanks << THREE;
+					const uint32_t totalChr1kBanks = totalChr8kBanks << THREE;
 
-				// Calculate the 1KB bank index (0 to 7) based on the current PPU address
-				// Mapper 69 allows independent mapping of eight 1KB banks
-				const uint32_t bank = address >> 10;
-				const uint32_t offset = address & 0x03FF;
+					// Calculate the 1KB bank index (0 to 7) based on the current PPU address
+					// Mapper 69 allows independent mapping of eight 1KB banks
+					const uint32_t bank = address >> 10;
+					const uint32_t offset = address & 0x03FF;
 
-				// Fetch the physical bank selected by the mapper registers, scale to bytes, and add offset
-				uint32_t index = (pNES_instance->NES_state.catridgeInfo.ines069.chrBank[bank] * 0x0400) + offset;
+					// Fetch the physical bank selected by the mapper registers, scale to bytes, and add offset
+					uint32_t index = (pNES_instance->NES_state.catridgeInfo.ines069.chrBank[bank] * 0x0400) + offset;
 
-				// Mirroring guard: Wrap around if the mapper selects a bank higher than what exists
-				index %= (totalChr1kBanks * 0x0400);
+					// Mirroring guard: Wrap around if the mapper selects a bank higher than what exists
+					index %= (totalChr1kBanks * 0x0400);
 
-				RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index];
+					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index];
+				}
 			}
 			BREAK;
 		}
@@ -2377,6 +2433,42 @@ void NES_t::writePpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 			}
 			BREAK;
 		}
+		case MAPPER::INES_MAPPER_218:
+		{
+			if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
+			{
+				BYTE* nt = nullptr;
+				switch (pNES_instance->NES_state.catridgeInfo.nameTblMir)
+				{
+				case NAMETABLE_MIRROR::VERTICAL_MIRROR:
+					nt = (address & 0x0400)
+						? pNES_ppuMemory->NESMemoryMap.nameTable1
+						: pNES_ppuMemory->NESMemoryMap.nameTable0;
+					BREAK;
+				case NAMETABLE_MIRROR::HORIZONTAL_MIRROR:
+					nt = (address & 0x0800)
+						? pNES_ppuMemory->NESMemoryMap.nameTable1
+						: pNES_ppuMemory->NESMemoryMap.nameTable0;
+					BREAK;
+				case NAMETABLE_MIRROR::ONESCREEN_LO_MIRROR:
+					// $A8: CIRAM A10 <- PPU A12 -> pattern table0 = BLK0, pattern table1 = BLK1
+					nt = (address & 0x1000)
+						? pNES_ppuMemory->NESMemoryMap.nameTable1
+						: pNES_ppuMemory->NESMemoryMap.nameTable0;
+					BREAK;
+				case NAMETABLE_MIRROR::ONESCREEN_HI_MIRROR:
+					// $A9: CIRAM A10 <- PPU A13 -> always BLK0 (A13 is always 0 within $0000-$1FFF)
+					nt = pNES_ppuMemory->NESMemoryMap.nameTable0;
+					BREAK;
+				}
+
+				if (nt != nullptr)
+				{
+					nt[address & 0x03FF] = data;
+				}
+			}
+			BREAK;
+		}
 		case MAPPER::CPROM:
 		{
 			/*
@@ -2908,6 +3000,10 @@ void NES_t::writePpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 		}
 		case MAPPER::INES_MAPPER_019:
 		case MAPPER::INES_MAPPER_210:
+		case MAPPER::RAMBO1:
+		case MAPPER::INES_MAPPER_158:
+		case MAPPER::MMC2:
+		case MAPPER::MMC4:
 		{
 			// Pattern table writes only land when CHR-RAM (no CHR-ROM)
 			if (pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB == ZERO)
@@ -2924,14 +3020,6 @@ void NES_t::writePpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 			// CHR-ROM: pattern table writes are silently ignored (ROM is read-only)
 			BREAK;
 		}
-		case MAPPER::RAMBO1:
-		case MAPPER::INES_MAPPER_158:
-		{
-			// RAMBO-1 has no CHR-RAM; all CHR is ROM. Writes are silently ignored.
-			BREAK;
-		}
-		case MAPPER::MMC2:
-		case MAPPER::MMC4:
 		default:
 		{
 			FATAL("Read performed for unsupported mapper");
@@ -4460,6 +4548,28 @@ inline byte NES_t::readCpuRawMemoryInternal(uint16_t address, MEMORY_ACCESS_SOUR
 					{
 						index = pNES_instance->NES_state.catridgeInfo.axrom.prgBank * 0x8000;
 						index += ((address - CATRIDGE_ROM_BANK0_START_ADDRESS) & 0x7FFF);
+						if ((ceNES->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
+							&&
+							(!hasCompare || (BYTE)compareVal == pNES_catridgeMemory->maxCatridgePRGROM[index]))
+						{
+							RETURN TO_UINT8(modedData);
+						}
+						else
+						{
+							RETURN pNES_catridgeMemory->maxCatridgePRGROM[index];
+						}
+					}
+					BREAK;
+				}
+				case MAPPER::INES_MAPPER_218:
+				{
+					if (IF_ADDRESS_WITHIN(address, UNMAPPED_START_ADDRESS, CATRIDGE_RAM_END_ADDRESS))
+					{
+						RETURN pNES_cpuMemory->NESMemoryMap.catridgeMappedMemory[address - UNMAPPED_START_ADDRESS];
+					}
+					if (IF_ADDRESS_WITHIN(address, CATRIDGE_ROM_BANK0_START_ADDRESS, UNMAPPED_END_ADDRESS))
+					{
+						index = address - CATRIDGE_ROM_BANK0_START_ADDRESS;
 						if ((ceNES->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
 							&&
 							(!hasCompare || (BYTE)compareVal == pNES_catridgeMemory->maxCatridgePRGROM[index]))
@@ -6999,6 +7109,15 @@ inline void NES_t::writeCpuRawMemoryInternal(uint16_t address, byte data, MEMORY
 					}
 					BREAK;
 				}
+				case MAPPER::INES_MAPPER_218:
+				{
+					if (IF_ADDRESS_WITHIN(address, UNMAPPED_START_ADDRESS, CATRIDGE_RAM_END_ADDRESS))
+					{
+						pNES_cpuMemory->NESMemoryMap.catridgeMappedMemory[address - UNMAPPED_START_ADDRESS] = data;
+					}
+					// Writes to $8000-$FFFF do nothing.
+					BREAK;
+				}
 				case MAPPER::COLOR_DREAMS:
 				{
 					if (IF_ADDRESS_WITHIN(address, CATRIDGE_ROM_BANK0_START_ADDRESS, UNMAPPED_END_ADDRESS))
@@ -8880,6 +8999,7 @@ void NES_t::cpuTickT(CYCLES_TYPE cycleType)
 			ppuTick();
 			ppuTick();
 			apuTick();
+			joypadTick();
 
 			// "Aligment Cycle" to make sure DMA read happens in GET cycle only
 			// Refer to point 1 and 3 of first comment https://forums.nesdev.org/viewtopic.php?t=14120
@@ -8908,6 +9028,7 @@ void NES_t::cpuTickT(CYCLES_TYPE cycleType)
 				ppuTick();
 				ppuTick();
 				apuTick();
+				joypadTick();
 			}
 
 			while (pNES_instance->NES_state.oamDMA.DMAInProgress)
@@ -8932,6 +9053,7 @@ void NES_t::cpuTickT(CYCLES_TYPE cycleType)
 				ppuTick();
 				ppuTick();
 				apuTick();
+				joypadTick();
 
 				// As mentioned in point 1 of https://forums.nesdev.org/viewtopic.php?t=14120
 				// "Values are written on 'put' cycles"
@@ -8953,6 +9075,7 @@ void NES_t::cpuTickT(CYCLES_TYPE cycleType)
 				ppuTick();
 				ppuTick();
 				apuTick();
+				joypadTick();
 
 				if (pNES_instance->NES_state.emulatorStatus.ticks.oamDmaCounter == target)
 				{
@@ -8984,6 +9107,8 @@ void NES_t::cpuTickT(CYCLES_TYPE cycleType)
 					ppuTick();
 					ppuTick();
 					apuTick();
+					joypadTick();
+
 					// Increment the CPU Counter
 					++pNES_instance->NES_state.emulatorStatus.ticks.cpuCounter;
 
@@ -9039,6 +9164,7 @@ void NES_t::syncOtherGBModuleTicks()
 	ppuTick();
 	ppuTick();
 	apuTick();
+	joypadTick();
 }
 
 void NES_t::ppuTick()
@@ -10438,23 +10564,42 @@ void NES_t::apuTick()
 	++pNES_instance->NES_state.emulatorStatus.ticks.apuCounter;
 }
 
+static constexpr uint32_t KEY_SAMPLING_MASK = next_pow2(NES_TOTAL_PPU_CYCLES_PER_SCANLINE) - ONE; // = 511
+
 void NES_t::joypadTick()
 {
-	DO_NOTHING;
+	if (_ENABLE_ACCURATE_INPUT_SAMPLING == YES)
+	{
+		auto& counter = pNES_instance->NES_state.emulatorStatus.ticks.keySamplingCounter;
+		counter = (counter + ONE) & KEY_SAMPLING_MASK;
+		if (counter == RESET)
+		{
+			inputHintCallback();
+		}
+	}
+}
+
+void NES_t::updateKeyStatus()
+{
+	auto& keys = pNES_instance->NES_state.emulatorStatus.controllerInput;
+
+	byte status = 0;
+
+	status |= (byte)(keys.keyA == YES);
+	status |= (byte)(keys.keyB == YES) << ONE;
+	status |= (byte)(keys.keySELECT == YES) << TWO;
+	status |= (byte)(keys.keySTART == YES) << THREE;
+	status |= (byte)(keys.keyUP == YES) << FOUR;
+	status |= (byte)(keys.keyDOWN == YES) << FIVE;
+	status |= (byte)(keys.keyLEFT == YES) << SIX;
+	status |= (byte)(keys.keyRIGHT == YES) << SEVEN;
+
+	pNES_instance->NES_state.controller.keyStatus = status;
 }
 
 void NES_t::captureIO()
 {
-	pNES_instance->NES_state.controller.keyStatus = (
-		(byte)ImGui::IsKeyDown(ImGuiKey_Z)
-		| ((byte)ImGui::IsKeyDown(ImGuiKey_X) << ONE)
-		| ((byte)ImGui::IsKeyDown(ImGuiKey_Space) << TWO)
-		| ((byte)ImGui::IsKeyDown(ImGuiKey_Enter) << THREE)
-		| ((byte)ImGui::IsKeyDown(ImGuiKey_UpArrow) << FOUR)
-		| ((byte)ImGui::IsKeyDown(ImGuiKey_DownArrow) << FIVE)
-		| ((byte)ImGui::IsKeyDown(ImGuiKey_LeftArrow) << SIX)
-		| ((byte)ImGui::IsKeyDown(ImGuiKey_RightArrow) << SEVEN)
-		);
+	DO_NOTHING;
 }
 
 void NES_t::captureDownsampledAudioSamples()
@@ -11325,6 +11470,28 @@ bool NES_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 	RETURN pNES_instance->NES_state.display.wasVblankJustTriggerred;
 }
 
+FLAG NES_t::onKeyEvent(EmuKey key, EmuKeyAction action)
+{
+	bool pressed = (action == EmuKeyAction::PRESSED);
+
+	switch (key)
+	{
+	case EmuKey::A:      pNES_instance->NES_state.emulatorStatus.controllerInput.keyA = pressed; BREAK;
+	case EmuKey::B:      pNES_instance->NES_state.emulatorStatus.controllerInput.keyB = pressed; BREAK;
+	case EmuKey::START:  pNES_instance->NES_state.emulatorStatus.controllerInput.keySTART = pressed; BREAK;
+	case EmuKey::SELECT: pNES_instance->NES_state.emulatorStatus.controllerInput.keySELECT = pressed; BREAK;
+	case EmuKey::UP:     pNES_instance->NES_state.emulatorStatus.controllerInput.keyUP = pressed; BREAK;
+	case EmuKey::DOWN:   pNES_instance->NES_state.emulatorStatus.controllerInput.keyDOWN = pressed; BREAK;
+	case EmuKey::LEFT:   pNES_instance->NES_state.emulatorStatus.controllerInput.keyLEFT = pressed; BREAK;
+	case EmuKey::RIGHT:  pNES_instance->NES_state.emulatorStatus.controllerInput.keyRIGHT = pressed; BREAK;
+	default:             RETURN NO;
+	}
+
+	updateKeyStatus();
+
+	RETURN YES;
+}
+
 bool NES_t::initializeEmulator()
 {
 	bool status = true;
@@ -11547,10 +11714,17 @@ void NES_t::destroyEmulator()
 
 #if (GL_FIXED_FUNCTION_PIPELINE == YES) && !defined(IMGUI_IMPL_OPENGL_ES2) && !defined(IMGUI_IMPL_OPENGL_ES3)
 	glDeleteTextures(1, &nes_texture);
+	nes_texture = 0;
+
 	glDeleteTextures(1, &matrix_texture);
+	matrix_texture = 0;
 #else
+	// 1. Delete and zero out Textures
 	glDeleteTextures(1, &nes_texture);
+	nes_texture = 0;
+
 	glDeleteTextures(1, &matrix_texture);
+	matrix_texture = 0;
 #endif
 
 	auto audioDevId = SDL_GetAudioStreamDevice(audioStream);
@@ -11622,7 +11796,7 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 
 				if (pINES->iNES_Fields.iNES_header.fields.flag6.fields.alternativeNametable == SET)
 				{
-					FATAL("Handle alternate nametable arrangement");
+					WARN("Handle alternate nametable arrangement");
 				}
 
 				// check whether trainer is present
@@ -12636,12 +12810,11 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 					if (isNES2)
 					{
 						const BYTE sub = header.flags_8to15.nes2p0.flag8.fields.subMapper;
-						if (sub == 0 || sub == 2) pNES_instance->NES_state.catridgeInfo.isBusConflictPresent = YES;
-						else if (sub == 1)             pNES_instance->NES_state.catridgeInfo.isBusConflictPresent = NO;
+						pNES_instance->NES_state.catridgeInfo.isBusConflictPresent = (sub == 2) ? YES : NO;
 					}
 					else
 					{
-						pNES_instance->NES_state.catridgeInfo.isBusConflictPresent = YES;
+						pNES_instance->NES_state.catridgeInfo.isBusConflictPresent = NO;
 					}
 
 					memset(&(pNES_instance->NES_state.catridgeInfo.axrom), 0,
@@ -12651,18 +12824,89 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 
 					if (prgRomSizeBytes < 0x8000ULL && zeroBanksHandled == NO)
 					{
-						FATAL("AxROM requires >= 32KB PRG-ROM");
+						WARN("AxROM requires >= 32KB PRG-ROM");
 					}
 
 					if (zeroBanksHandled == NO)
 					{
-						memcpy_portable(&(cpuCart[0x0000]), 0x8000, prgRom, 0x8000);
+						memcpy_portable(&(cpuCart[0x0000]), 0x4000, prgRom, 0x4000);
+
+						if (prg16kBanks == ONE)
+						{
+							memcpy_portable(&(cpuCart[0x4000]), 0x4000, prgRom, 0x4000);
+							memcpy_portable(&(pNES_catridgeMemory->maxCatridgePRGROM[0x4000]), 0x4000, prgRom, 0x4000);
+						}
+						else
+						{
+							memcpy_portable(&(cpuCart[0x4000]), 0x4000, &(prgRom[0x4000]), 0x4000);
+						}
 					}
 
 					if ((hasChrRam == NO) && (chrRomSizeBytes == ZERO))
 					{
-						LOG("Warning : AxROM has no CHR memory");
+						WARN("AxROM has no CHR memory");
 					}
+
+					BREAK;
+				}
+				case MAPPER::INES_MAPPER_218:
+				{
+					pNES_instance->NES_state.catridgeInfo.isBusConflictPresent = NO;
+
+					// Mapper 218 uses the iNES header differently:
+					// bit 3 = single-screen mode
+					// bit 0 = variant selection
+					if (header.flag6.fields.alternativeNametable == SET)
+					{
+						// $A8 / $A9
+						if (header.flag6.fields.nametableArrangement == SET)
+						{
+							// $A9 - Single-screen B (CIRAM A10 <- PPU A13)
+							pNES_instance->NES_state.catridgeInfo.nameTblMir = NAMETABLE_MIRROR::ONESCREEN_HI_MIRROR;
+						}
+						else
+						{
+							// $A8 - Single-screen A (CIRAM A10 <- PPU A12)
+							pNES_instance->NES_state.catridgeInfo.nameTblMir = NAMETABLE_MIRROR::ONESCREEN_LO_MIRROR;
+						}
+					}
+					else
+					{
+						// $A0 / $A1
+						if (header.flag6.fields.nametableArrangement == SET)
+						{
+							// $A1 - CIRAM A10 <- PPU A10 ("Vertical mirroring")
+							pNES_instance->NES_state.catridgeInfo.nameTblMir = NAMETABLE_MIRROR::VERTICAL_MIRROR;
+						}
+						else
+						{
+							// $A0 - CIRAM A10 <- PPU A11 ("Horizontal mirroring")
+							pNES_instance->NES_state.catridgeInfo.nameTblMir = NAMETABLE_MIRROR::HORIZONTAL_MIRROR;
+						}
+					}
+
+					if (prgRomSizeBytes < 0x8000ULL && zeroBanksHandled == NO)
+					{
+						WARN("Mapper 218 requires >= 32KB PRG-ROM");
+					}
+
+					if (zeroBanksHandled == NO)
+					{
+						memcpy_portable(&(cpuCart[0x0000]), 0x4000, prgRom, 0x4000);
+
+						if (prg16kBanks == ONE)
+						{
+							memcpy_portable(&(cpuCart[0x4000]), 0x4000, prgRom, 0x4000);
+							memcpy_portable(&(pNES_catridgeMemory->maxCatridgePRGROM[0x4000]), 0x4000, prgRom, 0x4000);
+						}
+						else
+						{
+							memcpy_portable(&(cpuCart[0x4000]), 0x4000, &(prgRom[0x4000]), 0x4000);
+						}
+					}
+
+					// Mapper 218 has no cartridge CHR-ROM/CHR-RAM.
+					// Pattern tables are backed by the console's internal CIRAM.
 
 					BREAK;
 				}
@@ -13127,7 +13371,7 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 					}
 					else
 					{
-						FATAL("Mapper 069 requires CHR-ROM, but size is 0");
+						WARN("Mapper 069 requires CHR-ROM, but size is 0");
 					}
 
 					BREAK;

@@ -59,9 +59,6 @@ std::vector<uint32_t> skylersalehLogs_BUFFER;
 static FLAG _DISABLE_BG = NO;
 static FLAG _DISABLE_WIN = NO;
 static FLAG _DISABLE_OBJ = NO;
-static FLAG _LOAD_GBA_BIOS = NO;
-static FLAG _ENABLE_GBA_BIOS = NO;
-static FLAG _LOAD_BUT_DONT_EXECUTE_GBA_BIOS = NO;
 static std::string _JSON_LOCATION;
 
 // For debug
@@ -157,8 +154,6 @@ GBA_t::GBA_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 	//SETBIT(ENABLE_LOGS, LOG_VERBOSITY_DEBUG);
 #endif
 
-	isBiosEnabled = NO;
-
 	setEmulationID(EMULATION_ID::GBA_ID);
 
 	std::transform(rom[ZERO].begin(), rom[ZERO].end(), rom[ZERO].begin(), ::tolower);
@@ -228,36 +223,17 @@ GBA_t::GBA_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 #endif
 	// check if directory mentioned by "_SAVE_LOCATION" exists, if not we need to explicitly create it
 	ifNoDirectoryThenCreate(_SAVE_LOCATION);
-	_LOAD_GBA_BIOS = to_bool(config.get<std::string>("gba._load_gba_bios", _LOAD_GBA_BIOS ? "true" : "false"));
-	_ENABLE_GBA_BIOS = to_bool(config.get<std::string>("gba._use_gba_bios", _ENABLE_GBA_BIOS ? "true" : "false"));
 
-	if (_LOAD_GBA_BIOS == YES && _ENABLE_GBA_BIOS == NO)
-	{
-		_LOAD_BUT_DONT_EXECUTE_GBA_BIOS = YES;
-		_ENABLE_GBA_BIOS = YES;
-	}
-
-	FLAG searchForBios = NO;
-
-	if (_ENABLE_GBA_BIOS == YES)
-	{
 #ifndef __EMSCRIPTEN__
-		_BIOS_LOCATION = config.get<std::string>("gba._gba_bios_location");
+	_BIOS_LOCATION = config.get<std::string>("gba._gba_bios_location");
 #else
-		_BIOS_LOCATION = "assets/gba/bios/gba_bios.bin";
+	_BIOS_LOCATION = "/persistent/gba_bios.bin";
 #endif
 
-		LOG("Searching for BIOS in %s", _BIOS_LOCATION.c_str());
-		gba_bios.expectedBiosSize = 0x4000;
-		searchForBios = YES;
-	}
-	else
-	{
-		LOG("By-passing BIOS");
-		gba_bios.biosFound = NO;
-	}
+	LOG("Searching for BIOS in %s", _BIOS_LOCATION.c_str());
+	gba_bios.expectedBiosSize = 0x4000;
 
-	if (searchForBios == YES)
+	if (ENABLED)
 	{
 		LOG("Expected Bios size %d", gba_bios.expectedBiosSize);
 
@@ -330,12 +306,28 @@ GBA_t::GBA_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 					gba_bios.biosFound = NO;
 				}
 			}
+			else
+			{
+#ifdef __EMSCRIPTEN__
+				emscripten_run_script("alert('Could not find a valid GBA BIOS. Load the BIOS click on File->Reset')");
+#endif
+				FATAL("Could not find a valid GBA BIOS");
+			}
 		}
+	}
 
-		if (gba_bios.biosFound == YES)
-		{
-			LOG("Using the above mentioned bios");
-		}
+	// Mandate user to provide BIOS
+	if (gba_bios.biosFound == YES)
+	{
+		LOG("Using the above mentioned bios");
+		LOG_NEW_LINE;
+	}
+	else
+	{
+#ifdef __EMSCRIPTEN__
+		emscripten_run_script("alert('Could not find a valid GBA BIOS. Load the BIOS click on File->Reset')");
+#endif
+		FATAL("Could not find a valid GBA BIOS");
 	}
 
 	if (ROM_TYPE == ROM::GAME_BOY_ADVANCE)
@@ -2079,9 +2071,6 @@ void GBA_t::destroyEmulator()
 	_DISABLE_BG = NO;
 	_DISABLE_WIN = NO;
 	_DISABLE_OBJ = NO;
-	_LOAD_GBA_BIOS = NO;
-	_ENABLE_GBA_BIOS = NO;
-	_LOAD_BUT_DONT_EXECUTE_GBA_BIOS = NO;
 
 	logCounter = ZERO;
 	memset(gbaEmulationCounter, ZERO, ((sizeof(gbaEmulationCounter[100])) / sizeof(gbaEmulationCounter[0])));
@@ -2097,10 +2086,17 @@ void GBA_t::destroyEmulator()
 
 #if (GL_FIXED_FUNCTION_PIPELINE == YES) && !defined(IMGUI_IMPL_OPENGL_ES2) && !defined(IMGUI_IMPL_OPENGL_ES3)
 	glDeleteTextures(1, &gameboyAdvance_texture);
-	glDeleteTextures(1, &gameboyAdvance_matrix_texture);
+	gameboy_texture = 0;
+
+	glDeleteTextures(1, &matrix_texture);
+	matrix_texture = 0;
 #else
+	// 1. Delete and zero out Textures
 	glDeleteTextures(1, &gameboyAdvance_texture);
+	gameboyAdvance_texture = 0;
+
 	glDeleteTextures(1, &gameboyAdvance_matrix_texture);
+	gameboyAdvance_matrix_texture = 0;
 #endif
 
 	auto audioDevId = SDL_GetAudioStreamDevice(audioStream);
@@ -2162,49 +2158,12 @@ FLAG GBA_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 				pGBA_cpuInstance->pipeline.decodeStageOpCode.opCode.rawOpCode = 0xF0000000; // NOP with condition set to always
 				pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode = 0xF0000000; // NOP with condition set to always
 			}
-
-			if (gba_bios.biosFound == NO || _LOAD_BUT_DONT_EXECUTE_GBA_BIOS == YES)
+			else
 			{
-				if (_LOAD_BUT_DONT_EXECUTE_GBA_BIOS == YES)
-				{
-					WARN("BIOS is loaded but bypassed!");
-					_ENABLE_GBA_BIOS = NO; // make sure bios is not executed
-				}
-
-				WARN("Initializing few registers and memory regions of GBA before starting the emulation as we are skipping BIOS");
-
-				// put the cpu in system mode
-				setARMMode(OP_MODE_TYPE::OP_SYS);
-
-				// run the cpu in arm state
-				setARMState(STATE_TYPE::ST_ARM);
-
-				pGBA_registers->unbankedLORegisters[ZERO] = 0x00000000;
-				pGBA_registers->unbankedLORegisters[ONE] = 0x00000000;
-				pGBA_registers->unbankedLORegisters[TWO] = 0x00000000;
-				pGBA_registers->unbankedLORegisters[THREE] = 0x00000000;
-				pGBA_registers->unbankedLORegisters[FOUR] = 0x00000000;
-				pGBA_registers->unbankedLORegisters[FIVE] = 0x00000000;
-				pGBA_registers->unbankedLORegisters[SIX] = 0x00000000;
-				pGBA_registers->unbankedLORegisters[SEVEN] = 0x00000000;
-				pGBA_registers->bankedHIRegisters[(BYTE)getCurrentlyValidRegisterBank()][ZERO] = 0x00000000;
-				pGBA_registers->bankedHIRegisters[(BYTE)getCurrentlyValidRegisterBank()][ONE] = 0x00000000;
-				pGBA_registers->bankedHIRegisters[(BYTE)getCurrentlyValidRegisterBank()][TWO] = 0x00000000;
-				pGBA_registers->bankedHIRegisters[(BYTE)getCurrentlyValidRegisterBank()][THREE] = 0x00000000;
-				pGBA_registers->bankedHIRegisters[(BYTE)getCurrentlyValidRegisterBank()][FOUR] = 0x00000000;
-				pGBA_registers->bankedHIRegisters[(BYTE)getCurrentlyValidRegisterBank()][FIVE] = 0x03007F00;
-				pGBA_registers->bankedHIRegisters[(BYTE)REGISTER_BANK_TYPE::RB_IRQ][FIVE] = 0x3007FA0;
-				pGBA_registers->bankedHIRegisters[(BYTE)REGISTER_BANK_TYPE::RB_SVC][FIVE] = 0x3007FA0;
-				pGBA_registers->bankedHIRegisters[(BYTE)getCurrentlyValidRegisterBank()][SIX] = 0x00000000;
-				pGBA_registers->pc = 0x08000000;
-				pGBA_registers->cpsr.psrMemory = 0x000000DF;
-				pGBA_registers->spsr[(BYTE)getCurrentlyValidRegisterBank()].psrMemory = 0x000000DF;
-
-				// initialize the pipeline
-
-				pGBA_cpuInstance->pipeline.fetchStageOpCode.opCode.rawOpCode = 0xF0000000; // NOP with condition set to always
-				pGBA_cpuInstance->pipeline.decodeStageOpCode.opCode.rawOpCode = 0xF0000000; // NOP with condition set to always
-				pGBA_cpuInstance->pipeline.executeStageOpCode.opCode.rawOpCode = 0xF0000000; // NOP with condition set to always
+#ifdef __EMSCRIPTEN__
+				emscripten_run_script("alert('Could not find a valid GBA BIOS. Load the BIOS click on File->Reset')");
+#endif
+				FATAL("Could not find a valid GBA BIOS");
 			}
 
 			// now, time to load the rom

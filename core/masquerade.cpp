@@ -256,7 +256,6 @@ DockSpace   ID=0x08BD597D Window=0x1BBC0F80 Pos=1112,555 Size=336,301 Split=X Se
 INC8  numberOfRomsSelected = RESET;
 std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> romsToRun;
 
-FLAG          isBiosEnabled = NO;
 unsigned long crcTable[256] = { 0 };
 ROM           ROM_TYPE = ROM::NO_ROM;
 
@@ -359,6 +358,10 @@ extern "C" void onSavePersistentFSComplete() {
 }
 extern "C" void onClearPersistentFSComplete() {
 	ClearPersistentFSComplete = YES;
+}
+
+extern "C" void onSilentSavePersistentFSComplete() {
+	INFO("BIOS saved to IndexedDB silently. No restart required.");
 }
 
 extern "C" {
@@ -526,6 +529,7 @@ class Emulation_t
 public:
 
 #ifdef __EMSCRIPTEN__
+	char const* bootromfilters = { ".bin,.BIN" };
 	char const* golfilters = { ".gol,.GOL" };
 	char const* chip8filters = { ".ch8,.CH8,.c8,.C8,.sc8,.SC8,.xo8,.XO8" };
 	char const* spaceInvadersFilter = { ".e,.f,.g,.h,.zip" };
@@ -1091,6 +1095,46 @@ private:
 
 		INFO("=== handle_upload_file complete ===");
 	}
+
+	template <ROM biosType>
+	static void handle_upload_bios(std::string const& /*filename*/, std::string const& mime_type, std::string_view buffer, void* user_data)
+	{
+		if (buffer.empty())
+		{
+			INFO("Empty Buffer"); RETURN;
+		}
+
+		std::string persistent_path;
+
+		switch (biosType)
+		{
+		case ROM::GAME_BOY:         persistent_path = "/persistent/dmg_boot.bin";   BREAK;
+		case ROM::GAME_BOY_COLOR:   persistent_path = "/persistent/cgb_boot.bin"; BREAK;
+		case ROM::GAME_BOY_ADVANCE: persistent_path = "/persistent/gba_bios.bin"; BREAK;
+		default: FATAL("Unsupported BIOS type"); RETURN;
+		}
+
+		// Create directory tree if missing
+		std::filesystem::path p(persistent_path);
+		std::error_code ec;
+		std::filesystem::create_directories(p.parent_path(), ec);
+		if (ec) INFO("Failed to create directory %s: %s", p.parent_path().string().c_str(), ec.message().c_str());
+
+		// Write the file
+		std::ofstream ofs(persistent_path, std::ios::binary);
+		if (!ofs)
+		{
+			INFO("CRITICAL: Failed to open file for writing: %s", persistent_path.c_str()); RETURN;
+		}
+		ofs.write(buffer.data(), buffer.size());
+		ofs.close();
+
+		// Sync to IndexedDB silently without triggering the main loop reboot!
+		INFO("Calling silent savePersistentFS...");
+		savePersistentFS(onSilentSavePersistentFSComplete);
+
+		INFO("=== handle_upload_bios complete ===");
+	}
 #endif // __EMSCRIPTEN__
 
 	// ---- ROM / BIOS / audio file selection (desktop only) ---
@@ -1189,7 +1233,15 @@ private:
 
 	void bootRomSelect(ROM type)
 	{
-#ifndef __EMSCRIPTEN__
+#ifdef __EMSCRIPTEN__
+		switch (type)
+		{
+		case ROM::GAME_BOY:         INFO("GB BIOS");  emscripten_browser_file::upload(bootromfilters, handle_upload_bios<ROM::GAME_BOY>); BREAK;
+		case ROM::GAME_BOY_COLOR:   INFO("GBC BIOS"); emscripten_browser_file::upload(bootromfilters, handle_upload_bios<ROM::GAME_BOY_COLOR>); BREAK;
+		case ROM::GAME_BOY_ADVANCE: INFO("GBA BIOS"); emscripten_browser_file::upload(bootromfilters, handle_upload_bios<ROM::GAME_BOY_ADVANCE>); BREAK;
+		default: FATAL("Unsupported BIOS type : %u", TO_UINT(type)); RETURN;
+		}
+#else // !__EMSCRIPTEN__
 		nfdu8char_t* outPath = nullptr;
 		const nfdpathset_t* outPaths = nullptr;
 		nfdu8filteritem_t     filters[1];
@@ -1205,7 +1257,7 @@ private:
 		{
 			INFO("Load : %s", outPath);
 
-			if (type == ROM::GAME_BOY)         config.put("gb_gbc._dmg_bios_location", std::string(outPath));
+			if (type == ROM::GAME_BOY)              config.put("gb_gbc._dmg_bios_location", std::string(outPath));
 			else if (type == ROM::GAME_BOY_COLOR)   config.put("gb_gbc._cgb_bios_location", std::string(outPath));
 			else if (type == ROM::GAME_BOY_ADVANCE) config.put("gba._gba_bios_location", std::string(outPath));
 
@@ -1220,7 +1272,7 @@ private:
 		{
 			FATAL("Error: %s", NFD_GetError());
 		}
-#endif // !__EMSCRIPTEN__
+#endif // __EMSCRIPTEN__
 	}
 
 	void loadSIAudioWAV(std::string type)
@@ -1351,7 +1403,7 @@ public:
 		colors[ImGuiCol_NavHighlight] = ImVec4(1.00f, 0.00f, 0.00f, 1.00f);
 		colors[ImGuiCol_NavWindowingHighlight] = ImVec4(1.00f, 0.00f, 0.00f, 0.70f);
 		colors[ImGuiCol_NavWindowingDimBg] = ImVec4(1.00f, 0.00f, 0.00f, 0.20f);
-		colors[ImGuiCol_ModalWindowDimBg] = ImVec4(1.00f, 0.00f, 0.00f, 0.35f);
+		colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.00f, 0.00f, 0.00f, 0.60f);
 
 		// ---- Custom palette override --------------------------------
 		if (currentEmuTheme == THEME_CUSTOM)
@@ -1734,6 +1786,11 @@ public:
 							static FLAG showCheatWin = NO;
 							static FLAG maintainAspectRatio = config.get<FLAG>("mods._MAINTAIN_ASPECT_RATIO", true);
 							static FLAG accurateInputSampling = config.get<FLAG>("mods._ENABLE_ACCURATE_INPUT_SAMPLING", false);
+#ifndef __EMSCRIPTEN__
+							static FLAG showBiosPrompt = !to_bool(config.get<std::string>("internal._first_boot_bios_prompt_done", "false"));
+#else
+							static const FLAG showBiosPrompt = NO;
+#endif
 
 							tickAtStart = SDL_GetTicksNS();
 
@@ -1767,6 +1824,87 @@ public:
 							if (!showUpdWin && !showAboutWin && !showLoggerWin)
 								dockSpaceFlags |= ImGuiDockNodeFlags_NoTabBar;
 							ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(), dockSpaceFlags);
+
+#ifndef __EMSCRIPTEN__
+							// Only show the prompt if it's the first boot AND the init splash screen is dismissed
+							if (showBiosPrompt == YES && initScreen == NO)
+							{
+								ImGui::OpenPopup("Initial BIOS Setup");
+							}
+
+							ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+							ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+
+							if (ImGui::BeginPopupModal("Initial BIOS Setup", NULL, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking))
+							{
+								ImGui::Text("Welcome to Masquerade Emulator!");
+								ImGui::Separator();
+								ImGui::TextWrapped("To ensure the highest accuracy for Game Boy, Game Boy Color, and Game Boy Advance,");
+								ImGui::TextWrapped("It is highly recommended to dump and provide the path to the official BIOS files now.");
+
+								ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
+								ImGui::TextWrapped("WARNING: If you skip this step, Masquerade will use a less accurate built-in BIOS by default.");
+								ImGui::PopStyleColor();
+								ImGui::Separator();
+
+								std::string gbPath = config.get<std::string>("gb_gbc._dmg_bios_location", "");
+								std::string gbcPath = config.get<std::string>("gb_gbc._cgb_bios_location", "");
+								std::string gbaPath = config.get<std::string>("gba._gba_bios_location", "");
+
+								float btnWidth = 80.0f;
+								// INCREASED WIDTH to prevent text cutoff
+								float contentWidth = 650.0f;
+
+								auto drawBiosRow = [&](const char* label, const std::string& path, ROM romType) {
+									ImGui::Text("%s", label);
+									ImGui::SameLine(100.0f);
+
+									std::string displayPath = "Not Set";
+									ImVec4 pathColor = ImVec4(0.6f, 0.6f, 0.6f, 1.0f);
+
+									if (!path.empty())
+									{
+										pathColor = ImVec4(0.4f, 1.0f, 0.4f, 1.0f);
+										try
+										{
+											// EXTRACT FILENAME ONLY: Removes absolute/relative paths entirely
+											displayPath = std::filesystem::path(path).filename().string();
+										}
+										catch (const std::exception& e)
+										{
+											displayPath = "Valid Path Set";
+											MASQ_UNUSED(e);
+										}
+									}
+
+									ImGui::TextColored(pathColor, "%s", displayPath.c_str());
+
+									ImGui::SameLine(contentWidth - btnWidth);
+									if (ImGui::Button((std::string("Select##") + label).c_str(), ImVec2(btnWidth, 0)))
+									{
+										bootRomSelect(romType);
+									}
+									};
+
+								drawBiosRow("GB BIOS:", gbPath, ROM::GAME_BOY);
+								drawBiosRow("GBC BIOS:", gbcPath, ROM::GAME_BOY_COLOR);
+								drawBiosRow("GBA BIOS:", gbaPath, ROM::GAME_BOY_ADVANCE);
+
+								ImGui::Separator();
+
+								ImGui::SetCursorPosX((contentWidth - 150.0f) * 0.5f);
+								if (ImGui::Button("Finish & Continue", ImVec2(150.0f, 0)))
+								{
+									config.put("internal._first_boot_bios_prompt_done", "true");
+									boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
+
+									showBiosPrompt = NO;
+									ImGui::CloseCurrentPopup();
+								}
+
+								ImGui::EndPopup();
+							}
+#endif // !__EMSCRIPTEN__
 
 							if (initScreen == NO)
 							{
@@ -1883,38 +2021,17 @@ public:
 										{
 											if (ImGui::BeginMenu("GB Bios##GBBios", MASQ_ENABLE_GBC))
 											{
-												static FLAG isTicked = to_bool(config.get<std::string>("gb_gbc._use_dmg_bios", "true"));
-												if (ImGui::MenuItem("Load##GB Bios", NULL, NO, inEnscriptenMode == NO)) bootRomSelect(ROM::GAME_BOY);
-												if (ImGui::MenuItem("Enable##GB Bios", NULL, isTicked))
-												{
-													isTicked = !isTicked;
-													config.put("gb_gbc._use_dmg_bios", isTicked);
-													boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
-												}
+												if (ImGui::MenuItem("Load##GB Bios", NULL, NO)) bootRomSelect(ROM::GAME_BOY);
 												ImGui::EndMenu();
 											}
 											if (ImGui::BeginMenu("GBC Bios##GBCBios", MASQ_ENABLE_GBC))
 											{
-												static FLAG isTicked = to_bool(config.get<std::string>("gb_gbc._use_cgb_bios", "true"));
-												if (ImGui::MenuItem("Load##GBC Bios", NULL, NO, inEnscriptenMode == NO)) bootRomSelect(ROM::GAME_BOY_COLOR);
-												if (ImGui::MenuItem("Enable##GBC Bios", NULL, isTicked))
-												{
-													isTicked = !isTicked;
-													config.put("gb_gbc._use_cgb_bios", isTicked);
-													boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
-												}
+												if (ImGui::MenuItem("Load##GBC Bios", NULL, NO)) bootRomSelect(ROM::GAME_BOY_COLOR);
 												ImGui::EndMenu();
 											}
 											if (ImGui::BeginMenu("GBA Bios##GBABios", MASQ_ENABLE_GBA))
 											{
-												static FLAG isTicked = to_bool(config.get<std::string>("gba._use_gba_bios", "true"));
-												if (ImGui::MenuItem("Load##GBA Bios", NULL, NO, inEnscriptenMode == NO)) bootRomSelect(ROM::GAME_BOY_ADVANCE);
-												if (ImGui::MenuItem("Enable##GBA Bios", NULL, isTicked))
-												{
-													isTicked = !isTicked;
-													config.put("gba._use_gba_bios", isTicked);
-													boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
-												}
+												if (ImGui::MenuItem("Load##GBA Bios", NULL, NO)) bootRomSelect(ROM::GAME_BOY_ADVANCE);
 												ImGui::EndMenu();
 											}
 											ImGui::EndMenu();
@@ -2107,7 +2224,7 @@ public:
 												}
 												ImGui::EndMenu();
 											}
-											if (ImGui::BeginMenu("GB#GBFamily", MASQ_ENABLE_GBC))
+											if (ImGui::BeginMenu("GB##GBFamily", MASQ_ENABLE_GBC))
 											{
 												static FLAG isTicked = to_bool(config.get<std::string>("gb_gbc._force_gbc_for_gb", "false"));
 												if (ImGui::MenuItem("CGB Mode", NULL, isTicked))
@@ -2972,18 +3089,21 @@ public:
 
 								ImGui::PopStyleVar(); // ScrollbarSize
 
-								// ---- Per-frame emulation update --------------
-								if (OnUserUpdate() != SUCCESS)
+								if (showBiosPrompt == NO)
 								{
-#ifndef __EMSCRIPTEN__
-									done = YES;
-#else
-									if (SavePersistentFSComplete == YES || ClearPersistentFSComplete == YES)
+									// ---- Per-frame emulation update --------------
+									if (OnUserUpdate() != SUCCESS)
 									{
-										SavePersistentFSComplete = NO; ClearPersistentFSComplete = NO;
+#ifndef __EMSCRIPTEN__
 										done = YES;
-									}
+#else
+										if (SavePersistentFSComplete == YES || ClearPersistentFSComplete == YES)
+										{
+											SavePersistentFSComplete = NO; ClearPersistentFSComplete = NO;
+											done = YES;
+										}
 #endif
+									}
 								}
 							}
 							else // initScreen == YES
@@ -3133,14 +3253,25 @@ public:
 			if (RUN_IMGUI_DEMO == NO)
 			{
 				glDeleteTextures(1, &masquerade_texture);
+				masquerade_texture = 0; // Reset!
+
 				OnUserDestroy(window);
+
 #if (GL_FIXED_FUNCTION_PIPELINE == NO)
 				glDeleteBuffers(1, &fullscreenVBO);
+				fullscreenVBO = 0; // Reset!
+
 				glDeleteVertexArrays(1, &fullscreenVAO);
+				fullscreenVAO = 0; // Reset!
+
 				glDeleteProgram(shaderProgramBasic);
+				shaderProgramBasic = 0; // Reset!
+
 				glDeleteProgram(shaderProgramBlend);
+				shaderProgramBlend = 0; // Reset!
 #endif
 				glDeleteFramebuffers(1, &frame_buffer);
+				frame_buffer = 0; // Reset!
 			}
 
 			NFD_Quit();

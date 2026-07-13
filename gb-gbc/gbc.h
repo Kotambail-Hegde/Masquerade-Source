@@ -14,6 +14,9 @@
 #pragma region WIP
 #pragma endregion WIP
 #define GB_GBC_FPS										59.73f
+#define RESET_TICK										FALSE
+#define INVALID_TICK									NO
+#define VALID_TICK										YES
 #define EMULATED_AUDIO_SAMPLING_RATE_FOR_GB_GBC			48000.0f
 #ifdef __EMSCRIPTEN__
 #define AUDIO_BUFFER_SIZE_FOR_GB_GBC					(CEIL((EMULATED_AUDIO_SAMPLING_RATE_FOR_GB_GBC / GB_GBC_FPS)))  // 32
@@ -201,6 +204,14 @@ private:
 
 private:
 
+	enum GBC_MODE : BYTE
+	{
+		CGB,
+		DMG_MGB,
+		PGB0,
+		PGB1
+	};
+
 	enum class MEMORY_ACCESS_SOURCE
 	{
 		DEBUG_PORT,
@@ -318,7 +329,6 @@ private:
 
 	enum class PIXEL_FETCHER_STATES
 	{
-		DUMMY = ZERO,
 		WAIT_FOR_TILE = ONE,
 		GET_TILE = TWO,
 		WAIT_FOR_DATA_LOW = THREE,
@@ -785,9 +795,10 @@ private:
 
 	typedef struct
 	{
-		uint8_t Reserved0 : 2; // bits  0 - 1
-		uint8_t DMGCompatibility : 1; // bit  2
-		uint8_t Reserved1 : 5; // bit  3 - 7
+		uint8_t Reserved0 : 1; // Bit 0: Writable, function unknown
+		uint8_t padding : 1; // Bit 1: Padding to align the next field correctly
+		uint8_t mode : 2; // Bits 2-3: Core CPU Mode selection
+		uint8_t Reserved1 : 4; // Bits 4-7: Remaining upper bits
 	} KEY0Fields_t;
 
 	typedef union
@@ -1503,11 +1514,13 @@ private:
 		FLAG yConditionForWindowIsMetForCurrentFrame;
 		FLAG shouldFetchAndRenderWindowInsteadOfBG;
 		FLAG shouldIncrementWindowLineCounter;
-		FLAG shouldFetchAndRenderBGInsteadOfWindowAfterCurrentTile;
-		FLAG waitForNextLineForWindSyncGlitch;
-		FLAG performWindSyncGlitch;
+		FLAG cachedWinEnablePerFrame;
+		FLAG ignoreSCXLowBitsAfterWindow;
+		FLAG windowAlreadyActivatedThisScanline;
 		FLAG gfxOfCurrentScanLineUpdated;
 		FLAG isNewM3Scanline;
+		FLAG tileSelGlitch;       // 1-T-cycle pulse, set by CPU write, cleared after 1 PPU tick
+		BYTE dataForSelGlitch;    // latched: updated after sprite render and end of mode 3
 		int16_t oamSearchCount;
 		int16_t spriteCountPerScanLine;
 		FLAG shouldSimulateBGScrollingPenaltyNow;
@@ -1518,8 +1531,16 @@ private:
 		struct pixelFIFO_t tempBgWinPixelFIFO;
 		int16_t discardedPixelCount;
 		BYTE xBGPerPixel;
+		FLAG scxLatchedThisScanline;
 		COUNTER8 cgbSCYDelayTCycles;
 		BYTE cgbLatchedSCY;
+		COUNTER8 cgbLYCDelayTCycles;
+		BYTE cgbLatchedLYC;
+		BYTE wxDelayTCycles;
+		BYTE latchedWXForDelay;
+		BYTE latchedWindowDiscardTarget;
+		BYTE latchedWX;
+		int16_t latchedXWindow;
 		int16_t pixelFetcherDots;
 		int16_t pixelRendererDots;
 		int16_t pixelPipelineDots;
@@ -1548,6 +1569,8 @@ private:
 		FLAG pushDone;
 		FLAG bgToObjectPenalty;
 		FLAG isTheLastVblankLine;
+		FLAG forceLY153Compare;
+		FLAG lycCompareSuppressed;
 		FLAG blockVramR;
 		FLAG blockOAMR;
 		FLAG blockVramW;
@@ -1593,7 +1616,7 @@ private:
 		uint32_t lcdBlankCounter;
 		uint64_t apuCounter;
 		uint64_t cpuCounter;
-		FLAG isValidTickForDoubleSpeed;
+		FLAG isDoubleSpeedHi;
 		BYTE pad[3];
 		uint16_t dividerCounter;
 		uint16_t serialCounter;
@@ -1603,6 +1626,7 @@ private:
 		uint16_t rtcDayCounter;
 		uint16_t timerCounter;
 		uint64_t rtcCounter;
+		uint64_t stopCounter;
 	} ticks_t;
 
 	typedef struct
@@ -1876,7 +1900,9 @@ private:
 		FLAG isCPUHalted;
 		FLAG isCPUJustHalted;
 		FLAG isCPUStopped;
-		FLAG freezeLCD;
+		FLAG stopLCD;
+		FLAG stopLCDDone;
+		FLAG stopKeepDrawingMode3;
 		FLAG freezeLCDOneFrame;
 		int32_t exitHaltInTCycles;
 		enum HALT_BUG_STATE isHaltBugActivated;
@@ -2748,6 +2774,28 @@ private:
 	void cpuTickM(CPU_TICK_TYPE type = CPU_TICK_TYPE::READ_WRITE);
 	void gbCpuTick2T(FLAG isT2orT3);
 	void syncOtherGBModuleTicks();
+	MASQ_INLINE FLAG isDoubleSpeedTickHi() const
+	{
+		RETURN (pGBc_instance->GBc_state.emulatorStatus.ticks.isDoubleSpeedHi == YES);
+	}
+	MASQ_INLINE void setNextTickForDoubleSpeed()
+	{
+		pGBc_instance->GBc_state.emulatorStatus.ticks.isDoubleSpeedHi = !pGBc_instance->GBc_state.emulatorStatus.ticks.isDoubleSpeedHi;
+	}
+	MASQ_INLINE void resetTickForDoubleSpeed()
+	{
+		pGBc_instance->GBc_state.emulatorStatus.ticks.isDoubleSpeedHi = RESET_TICK;
+	}
+	MASQ_INLINE void tickDotClockModules(FLAG onHI)
+	{
+		// Encapsulated gating logic
+		if (isCGBDoubleSpeedEnabled() == NO || isDoubleSpeedTickHi() == onHI)
+		{
+			rtcTick();
+			ppuTick();
+			apuTick();
+		}
+	}
 	void dmaTick();
 	void joypadTick();
 	void timerTick();
@@ -2760,13 +2808,8 @@ private:
 		// Refer : https://discord.com/channels/465585922579103744/465586075830845475/852208456491728897
 		// Refer : https://discord.com/channels/465585922579103744/465586075830845475/1295044210654842980
 
-		/*
-		 * Note that WINDOW_LAYER_ENABLE should not be checked here as mentioned in https ://discord.com/channels/465585922579103744/465586075830845475/757342004052099072
-		 * But, sameboy does check WINDOW_LAYER_ENABLE, so we will keep this as is.
-		 */
-
-		pGBc_display->yConditionForWindowIsMetForCurrentFrame |=
-			((ly == pGBc_peripherals->WY) & (pGBc_peripherals->LCDC.lcdControlFields.WINDOW_LAYER_ENABLE == SET));
+		// Note that WINDOW_LAYER_ENABLE should not be checked here as mentioned in https ://discord.com/channels/465585922579103744/465586075830845475/757342004052099072
+		pGBc_display->yConditionForWindowIsMetForCurrentFrame |= (ly == pGBc_peripherals->WY);
 	}
 	void ppuTick();
 	void apuTick();

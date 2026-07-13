@@ -5,10 +5,13 @@
 #pragma region GB_GBC_SPECIFIC_MACROS
 #pragma region WIP
 #define GB_GBC_ENABLE_PPU_BG_MODE3_RUN_FOR_174_DOTS		(YES)	// Needed for sprite based PPU timing tests
-#define GB_GBC_ENABLE_TILE_SEL_GLITCH					(NO)	// This is not working
-#define GB_GBC_ENABLE_WIN_EN_GLITCH						(NO)	// Not yet implemented
-#define GB_GBC_ENABLE_WINDESYNC_GLITCH					(NO)	// This is not working
-#define GB_GBC_ENABLE_CGB_SCY_WRITE_DELAY				(NO)	// Enabling this causes pokemon "video.gbc" to have graphical artifacts; Check if this is valid in CGB double speed
+#define GB_GBC_ENABLE_CGB_SCY_WRITE_DELAY				(YES)	// This is not working
+#define GB_GBC_ENABLE_CGB_LYC_WRITE_DELAY				(YES)   // TODO: This is working, needed for Wilbert Pol's CGB LYC write timing tests, but not sure why this is needed?
+#define GB_GBC_ENABLE_WX_WRITE_DELAY					(YES)   // TODO: This is working, need for many of the mealybug windows tests, but not sure why this is needed?
+#define GB_GBC_ENABLE_TILE_SEL_GLITCH					(YES)	// This is not working
+#define GB_GBC_ENABLE_WIN_EN_GLITCH						(YES)	// This is not working
+#define GB_GBC_ENABLE_WINDESYNC_GLITCH					(YES)	// This is working
+#define GB_GBC_ENABLE_WIN_REACTIVATION_GLITCH			(YES)	// This is working
 #define GB_GBC_ENABLE_CGB_OBSCURE_TIMER_BEHAVIOUR		(NO)	// Enabling this causes rapid_toggle.gb to fail in CGB mode
 #define GB_GBC_ENABLE_DMA_STAT_OAM_BOUNDARY_GLITCH		(YES)	// This is needed by docboy's "DMA check stat" tests 
 #pragma endregion WIP
@@ -140,12 +143,9 @@
 #define DISABLE_WAVE_CHANNEL							NO
 #define DISABLE_NOISE_CHANNEL							NO
 
-#define RESET_TICK										FALSE
-#define INVALID_TICK									NO
-#define VALID_TICK										YES
-
 #define initializeSerialClockSpeed						processSerialClockSpeedBit
 #define performOverFlowCheck							getUpdatedFrequency
+#define triggerStopSamplingEvent						(pGBc_display->wasVblankJustTriggerred = YES)
 
 #define MBC7_EEPROM_WORD(addr)							(((uint16_t*)pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[0])[(addr) & 0x7F])
 #pragma endregion GB_GBC_SPECIFIC_MACROS
@@ -171,8 +171,6 @@ static double doubleOutput[(uint32_t)(EMULATED_AUDIO_SAMPLING_RATE_FOR_GB_GBC / 
 static FLAG _DISABLE_BG = NO;
 static FLAG _DISABLE_WIN = NO;
 static FLAG _DISABLE_OBJ = NO;
-static FLAG _ENABLE_DMG_BIOS = NO;
-static FLAG _ENABLE_CGB_BIOS = NO;
 static FLAG _ENABLE_AUDIO_HPF = NO;
 static FLAG _FORCE_GB_FOR_GBC = NO;
 static FLAG _FORCE_GB_GFX_FOR_GBC = NO;
@@ -192,10 +190,6 @@ static float  ghost_decay = 0.0f;  // 0.0 = off, ~0.6 = DMG feel, ~0.4 = GBC (le
 static float _GB_GHOST_FACTOR = 0.6f;
 static float _GBC_GHOST_FACTOR = 0.4f;
 static float _ACCELEROMETER_SENSITIVITY = 0.4f;
-
-#if _DEBUG
-COUNTER32 OAM_STAT_TO_MODE_2_T_CYCLES = RESET;
-#endif
 #pragma endregion GB_GBC_SPECIFIC_DECLARATIONS
 
 #pragma region INFRASTRUCTURE_DEFINITIONS
@@ -229,8 +223,6 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 	{
 		//SETBIT(ENABLE_LOGS, LOG_VERBOSITY_DISASSEMBLY);
 
-		isBiosEnabled = NO;
-
 		std::transform(rom[ZERO].begin(), rom[ZERO].end(), rom[ZERO].begin(), ::tolower);
 
 		if (rom[ZERO].substr(rom[ZERO].find_last_of(".") + ONE) == "gb")
@@ -255,8 +247,6 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 		// check if directory mentioned by "_SAVE_LOCATION" exists, if not we need to explicitly create it
 		ifNoDirectoryThenCreate(_SAVE_LOCATION);
 
-		_ENABLE_DMG_BIOS = to_bool(pt.get<std::string>("gb_gbc._use_dmg_bios", _ENABLE_DMG_BIOS ? "true" : "false"));
-		_ENABLE_CGB_BIOS = to_bool(pt.get<std::string>("gb_gbc._use_cgb_bios", _ENABLE_CGB_BIOS ? "true" : "false"));
 		_FORCE_GB_FOR_GBC = to_bool(pt.get<std::string>("gb_gbc._force_gb_for_gbc", _FORCE_GB_FOR_GBC ? "true" : "false"));
 		_FORCE_GB_GFX_FOR_GBC = to_bool(pt.get<std::string>("gb_gbc._force_gb_gfx_for_gbc", _FORCE_GB_GFX_FOR_GBC ? "true" : "false"));
 		_FORCE_GBC_FOR_GB = to_bool(pt.get<std::string>("gb_gbc._force_gbc_for_gb", _FORCE_GBC_FOR_GB ? "true" : "false"));
@@ -268,27 +258,19 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 		if (ROM_TYPE == ROM::GAME_BOY && _FORCE_GBC_FOR_GB == YES)
 		{
 			INFO("Running in Forced CGB mode");
-			INFO("Forced CGB mode requires CGB bios to be loaded");
 			ROM_TYPE = ROM::GAME_BOY_COLOR; // .gb loaded to GBC
-			_ENABLE_DMG_BIOS = NO;
-			_ENABLE_CGB_BIOS = YES;
 
 			ghost_decay = _GB_GHOST_FACTOR;
 		}
 		else if (ROM_TYPE == ROM::GAME_BOY_COLOR && _FORCE_GB_FOR_GBC == YES)
 		{
 			INFO("Running in Forced DMG mode");
-			INFO("Forced DMG mode requires DMG bios to be loaded");
 			ROM_TYPE = ROM::GAME_BOY; // .gbc loaded to GB
-			_ENABLE_CGB_BIOS = NO;
 
 			ghost_decay = _GBC_GHOST_FACTOR;
 		}
 
-		FLAG searchForBios = NO;
-
-		if ((ROM_TYPE == ROM::GAME_BOY && _ENABLE_DMG_BIOS == YES)
-			|| (ROM_TYPE == ROM::GAME_BOY_COLOR && _FORCE_GB_FOR_GBC == YES))
+		if (ROM_TYPE == ROM::GAME_BOY || (ROM_TYPE == ROM::GAME_BOY_COLOR && _FORCE_GB_FOR_GBC == YES))
 		{
 			ROM_TYPE = ROM::GAME_BOY;
 			INFO("Running in DMG mode");
@@ -296,18 +278,15 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 #ifndef __EMSCRIPTEN__
 			_BIOS_LOCATION = config.get<std::string>("gb_gbc._dmg_bios_location");
 #else
-			_BIOS_LOCATION = "assets/gb/bios/dmg_rom.bin";
+			_BIOS_LOCATION = "/persistent/dmg_boot.bin";
 #endif
 
-			std::cout << "Searching for BIOS in " << _BIOS_LOCATION << '\n';
+			INFO("Searching for BIOS in %s\n", _BIOS_LOCATION.c_str());
 			dmg_cgb_bios.expectedBiosSize = 0x100;
-			searchForBios = YES;
 
 			ghost_decay = _GB_GHOST_FACTOR;
 		}
-		else if
-			((ROM_TYPE == ROM::GAME_BOY_COLOR && _ENABLE_CGB_BIOS == YES)
-				|| (ROM_TYPE == ROM::GAME_BOY && _FORCE_GBC_FOR_GB == YES))
+		else if (ROM_TYPE == ROM::GAME_BOY_COLOR || (ROM_TYPE == ROM::GAME_BOY && _FORCE_GBC_FOR_GB == YES))
 		{
 			ROM_TYPE = ROM::GAME_BOY_COLOR;
 			INFO("Running in CGB mode");
@@ -315,26 +294,22 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 #ifndef __EMSCRIPTEN__
 			_BIOS_LOCATION = config.get<std::string>("gb_gbc._cgb_bios_location");
 #else
-			_BIOS_LOCATION = "assets/gbc/bios/cgb_boot.bin";
+			_BIOS_LOCATION = "/persistent/cgb_boot.bin";
 #endif
 
-			std::cout << "Searching for BIOS in " << _BIOS_LOCATION << '\n';
+			INFO("Searching for BIOS in %s\n", _BIOS_LOCATION.c_str());
 			dmg_cgb_bios.expectedBiosSize = 0x900;
-			searchForBios = YES;
 
 			ghost_decay = _GBC_GHOST_FACTOR;
 		}
 		else
 		{
-			INFO("By-passing BIOS");
-
-			dmg_cgb_bios.biosFound = NO;
-			dmg_cgb_bios.unMapBios = YES;
+			FATAL("Invalid CONFIG.ini");
 		}
 
-		if (searchForBios == YES)
+		if (ENABLED)
 		{
-			std::cout << "Expected Bios size " << dmg_cgb_bios.expectedBiosSize << '\n';
+			INFO("Expected Bios size %d\n", dmg_cgb_bios.expectedBiosSize);
 
 			// Get the list of files in bios directory
 			dmg_cgb_bios.biosFound = NO;
@@ -411,18 +386,32 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 					}
 					else
 					{
-						dmg_cgb_bios.biosFound = false;
-						dmg_cgb_bios.unMapBios = true;
+						dmg_cgb_bios.biosFound = NO;
+						dmg_cgb_bios.unMapBios = YES;
 					}
 				}
+				else
+				{
+#ifdef __EMSCRIPTEN__
+					emscripten_run_script("alert('Could not find a valid GB/GBC BIOS. To load the BIOS, click on File->Reset')");
+#endif
+					FATAL("Could not find a valid GB/GBC BIOS");
+				}
 			}
+		}
 
-			if (dmg_cgb_bios.biosFound == true)
-			{
-				isBiosEnabled = YES;
-				INFO("Using the above mentioned bios");
-				LOG_NEW_LINE;
-			}
+		// Mandate user to provide BIOS
+		if (dmg_cgb_bios.biosFound == YES)
+		{
+			INFO("Using the above mentioned bios");
+			LOG_NEW_LINE;
+		}
+		else
+		{
+#ifdef __EMSCRIPTEN__
+			emscripten_run_script("alert('Could not find a valid GB/GBC BIOS. To load the BIOS, click on File->Reset')");
+#endif
+			FATAL("Could not find a valid GB/GBC BIOS");
 		}
 
 		this->rom[ZERO] = rom[ZERO];
@@ -1208,7 +1197,7 @@ void GBc_t::setWRAMBankNumber(uint8_t wramBankNumber)
 
 FLAG GBc_t::isCGBCompatibilityModeEnabled()
 {
-	RETURN pGBc_peripherals->KEY0.KEY0Fields.DMGCompatibility;
+	RETURN (static_cast<GBC_MODE>(pGBc_peripherals->KEY0.KEY0Fields.mode) != GBC_MODE::CGB);
 }
 
 void GBc_t::cpuTickM(CPU_TICK_TYPE type)
@@ -1257,8 +1246,10 @@ void GBc_t::cpuTickM(CPU_TICK_TYPE type)
 
 void GBc_t::gbCpuTick2T(FLAG isT2orT3)
 {
-	if (isT2orT3 == YES)
+	// STAT/DMA/Joypad (Gate to T2/T3)
+	if (!isT2orT3)
 	{
+		pGBc_instance->GBc_state.emulatorStatus.ticks.globalCounter += FOUR;
 		pGBc_instance->GBc_state.emulatorStatus.ticks.cpuCounter++;
 
 		// handle delayed write of 'actual' STAT in GB
@@ -1283,38 +1274,21 @@ void GBc_t::gbCpuTick2T(FLAG isT2orT3)
 	}
 	timerTick();
 	serialTick();
-	rtcTick();
-	ppuTick();
-	apuTick();
+	tickDotClockModules(YES);
 	handleStopBasedHalt();
 	timerTick();
 	serialTick();
-	rtcTick();
-	ppuTick();
-	apuTick();
+	tickDotClockModules(NO);
 	handleStopBasedHalt();
+
+	if (isT2orT3 == YES && isCGBDoubleSpeedEnabled() == YES)
+	{
+		setNextTickForDoubleSpeed();
+	}
 }
 
 void GBc_t::syncOtherGBModuleTicks()
 {
-	// Helper Lamba Functions
-
-	auto IS_VALID_TICK_FOR_DOUBLE_SPEED = [&]()
-		{
-			RETURN(pGBc_instance->GBc_state.emulatorStatus.ticks.isValidTickForDoubleSpeed == VALID_TICK);
-		};
-
-	auto SET_NEXT_TICK_FOR_DOUBLE_SPEED = [&]()
-		{
-			pGBc_instance->GBc_state.emulatorStatus.ticks.isValidTickForDoubleSpeed =
-				!pGBc_instance->GBc_state.emulatorStatus.ticks.isValidTickForDoubleSpeed;
-		};
-
-	auto RESET_TICK_FOR_DOUBLE_SPEED = [&]()
-		{
-			pGBc_instance->GBc_state.emulatorStatus.ticks.isValidTickForDoubleSpeed = RESET_TICK;
-		};
-
 	// SOC Timing Sequence
 
 	if (isCGBDoubleSpeedEnabled() == YES)
@@ -1323,7 +1297,7 @@ void GBc_t::syncOtherGBModuleTicks()
 		joypadTick();
 		timerTick();
 		serialTick();
-		if (IS_VALID_TICK_FOR_DOUBLE_SPEED() == YES)
+		if (isDoubleSpeedTickHi() == YES)
 		{
 			rtcTick();
 			ppuTick();
@@ -1332,7 +1306,7 @@ void GBc_t::syncOtherGBModuleTicks()
 		handleStopBasedHalt();
 		timerTick();
 		serialTick();
-		if (IS_VALID_TICK_FOR_DOUBLE_SPEED() == YES)
+		if (isDoubleSpeedTickHi() == NO)
 		{
 			rtcTick();
 			ppuTick();
@@ -1341,7 +1315,7 @@ void GBc_t::syncOtherGBModuleTicks()
 		handleStopBasedHalt();
 		timerTick();
 		serialTick();
-		if (IS_VALID_TICK_FOR_DOUBLE_SPEED() == YES)
+		if (isDoubleSpeedTickHi() == YES)
 		{
 			rtcTick();
 			ppuTick();
@@ -1350,18 +1324,18 @@ void GBc_t::syncOtherGBModuleTicks()
 		handleStopBasedHalt();
 		timerTick();
 		serialTick();
-		if (IS_VALID_TICK_FOR_DOUBLE_SPEED() == YES)
+		if (isDoubleSpeedTickHi() == NO)
 		{
 			rtcTick();
 			ppuTick();
 			apuTick();
 		}
 		handleStopBasedHalt();
-		SET_NEXT_TICK_FOR_DOUBLE_SPEED();
+		setNextTickForDoubleSpeed();
 	}
 	else
 	{
-		RESET_TICK_FOR_DOUBLE_SPEED();
+		resetTickForDoubleSpeed();
 		dmaTick();
 		joypadTick();
 		timerTick();
@@ -1448,14 +1422,16 @@ void GBc_t::timerTick()
 		pGBc_instance->GBc_state.emulatorStatus.timaIncSignal = (timerEnable && ((!muxout) && pGBc_instance->GBc_state.emulatorStatus.fallingEdgeDetectorDelay));
 		pGBc_instance->GBc_state.emulatorStatus.fallingEdgeDetectorDelay = muxout;
 		pGBc_instance->GBc_state.emulatorStatus.instantTimerIF = NO;
-
 	}
 	else if (ROM_TYPE == ROM::GAME_BOY)
-#else
 	{
 		pGBc_instance->GBc_state.emulatorStatus.timaIncSignal = ((!getTIMASignalForGB()) && pGBc_instance->GBc_state.emulatorStatus.fallingEdgeDetectorDelay);
 		pGBc_instance->GBc_state.emulatorStatus.fallingEdgeDetectorDelay = getTIMASignalForGB();
 	}
+#else
+	// GB_GBC_ENABLE_CGB_OBSCURE_TIMER_BEHAVIOUR is disabled: The default behavior applies to BOTH Game Boy and Game Boy Color.
+	pGBc_instance->GBc_state.emulatorStatus.timaIncSignal = ((!getTIMASignalForGB()) && pGBc_instance->GBc_state.emulatorStatus.fallingEdgeDetectorDelay);
+	pGBc_instance->GBc_state.emulatorStatus.fallingEdgeDetectorDelay = getTIMASignalForGB();
 #endif
 
 	if (pGBc_instance->GBc_state.emulatorStatus.timaIncSignal == HI)
@@ -1892,13 +1868,8 @@ void GBc_t::requestHblankStatInterrupt()
 
 void GBc_t::ppuTick()
 {
-	pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY++;
-	pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode++;
+	// Tick ppu frame counter
 	pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerFrame++;
-
-#if _DEBUG
-	++OAM_STAT_TO_MODE_2_T_CYCLES;
-#endif
 
 	FLAG effectivePPUState = isPPULCDEnabled();
 
@@ -1907,202 +1878,649 @@ void GBc_t::ppuTick()
 	{
 		if (effectivePPUState == ENABLED)
 		{
-			if (pGBc_instance->GBc_state.emulatorStatus.freezeLCD == NO) MASQ_UNLIKELY
+			if (pGBc_instance->GBc_state.emulatorStatus.stopLCD == YES)
 			{
-				Pixel DARK = { 0x00 };
-				if ((ROM_TYPE == ROM::GAME_BOY_COLOR) && (pGBc_display->currentLCDMode != LCD_MODES::MODE_LCD_DISPLAY_PIXELS))
+				if (pGBc_instance->GBc_state.emulatorStatus.stopKeepDrawingMode3 == NO)
 				{
-					DARK = getColorFromColorIDForGBC(0x0000, pGBc_instance->GBc_state.gbc_palette == PALETTE_ID::PALETTE_2).COLOR;
-					std::fill_n(pGBc_display->imGuiBuffer.imGuiBuffer1D, sizeof(pGBc_display->imGuiBuffer.imGuiBuffer1D), DARK);
-				}
-				else if (ROM_TYPE == ROM::GAME_BOY)
-				{
-					DARK = paletteIDToColor.at(pGBc_instance->GBc_state.gb_palette).COLOR_099P.COLOR;
-					std::fill_n(pGBc_display->imGuiBuffer.imGuiBuffer1D, sizeof(pGBc_display->imGuiBuffer.imGuiBuffer1D), DARK);
-				}
-				pGBc_instance->GBc_state.emulatorStatus.freezeLCD = YES;
-			}
+					if (pGBc_instance->GBc_state.emulatorStatus.stopLCDDone == NO)
+					{
+						// For DMG or CGB (when not in Mode 3), we blank the display to white or black respectively continously even if LCD itself remains enabled.
+						Pixel COLOR = { 0x00 };
+						if (ROM_TYPE == ROM::GAME_BOY_COLOR)
+						{
+							COLOR = getColorFromColorIDForGBC(0x0000, pGBc_instance->GBc_state.gbc_palette == PALETTE_ID::PALETTE_2).COLOR;
+						}
+						else if (ROM_TYPE == ROM::GAME_BOY)
+						{
+							COLOR = paletteIDToColor.at(pGBc_instance->GBc_state.gb_palette).COLOR_000P.COLOR;
+						}
+						std::fill_n(pGBc_display->imGuiBuffer.imGuiBuffer1D, (getScreenWidth() * getScreenHeight()), COLOR);
+						pGBc_instance->GBc_state.emulatorStatus.stopLCDDone = YES;
+					}
 
-			effectivePPUState = DISABLED;
+					// PPU is effectively disabled!
+					effectivePPUState = DISABLED;
+				}
+				else
+				{
+					// For CGB, if in Mode 3, we keep rendering the current frame uninterrupted instead of blanking the display to black
+					pGBc_instance->GBc_state.emulatorStatus.stopLCD = NO;
+
+					// PPU remains enabled!
+					effectivePPUState = ENABLED;
+				}
+			}
 		}
 	}
+	else
+	{
+		// If not in STOP, PPU is not 'DARK' anymore...
+		pGBc_instance->GBc_state.emulatorStatus.stopLCD = NO;
+		pGBc_instance->GBc_state.emulatorStatus.stopLCDDone = NO;
+		pGBc_instance->GBc_state.emulatorStatus.stopKeepDrawingMode3 = NO;
+	}
 
-		// Can refer https://discord.com/channels/465585922579103744/465586075830845475/1025910017754419290 for STAT timing
-		// Also refer https://forums.nesdev.org/viewtopic.php?f=20&t=13727#p162444
+	// Can refer https://discord.com/channels/465585922579103744/465586075830845475/1025910017754419290 for STAT timing
+	// Also refer https://forums.nesdev.org/viewtopic.php?f=20&t=13727#p162444
 
-		if (effectivePPUState == ENABLED)
+	if (effectivePPUState == ENABLED)
+	{
+		// Tick ppu mode and scanline counters
+		pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY++;
+		pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode++;
+
+		switch (pGBc_display->currentLCDMode)
 		{
-			// If not in STOP, PPU is not 'DARK' anymore...
-			pGBc_instance->GBc_state.emulatorStatus.freezeLCD = NO;
+		case LCD_MODES::MODE_LCD_V_BLANK:
+		{
+			// Allow VRAM and OAM read access if blocked
+			pGBc_display->blockVramR = NO;
+			pGBc_display->blockOAMR = NO;
 
-			switch (pGBc_display->currentLCDMode)
+			// Allow VRAM and OAM write access if blocked
+			pGBc_display->blockVramR = NO;
+			pGBc_display->blockOAMR = NO;
+
+			// Refer https://www.reddit.com/r/emulation/comments/68p6wt/comment/dh3me0b/?utm_source=reddit&utm_medium=web2x&context=3
+			// When LY == 153, LY register should reads 0 after the initial 4 dots of the scanline is done, eventhough we are still in VBLANK
+			if ((pGBc_peripherals->LY == (getScreenHeight() + VBLANK_SCANLINES - ONE)) || (pGBc_display->isTheLastVblankLine == YES))
 			{
-			case LCD_MODES::MODE_LCD_V_BLANK:
-			{
-				// Allow VRAM and OAM read access if blocked
-				pGBc_display->blockVramR = NO;
-				pGBc_display->blockOAMR = NO;
+				pGBc_display->isTheLastVblankLine = YES;
 
-				// Allow VRAM and OAM write access if blocked
-				pGBc_display->blockVramR = NO;
-				pGBc_display->blockOAMR = NO;
-
-				// Refer https://www.reddit.com/r/emulation/comments/68p6wt/comment/dh3me0b/?utm_source=reddit&utm_medium=web2x&context=3
-				// When LY == 153, LY register should reads 0 after the initial 4 dots of the scanline is done, eventhough we are still in VBLANK
-				if ((pGBc_peripherals->LY == (getScreenHeight() + VBLANK_SCANLINES - ONE)) || (pGBc_display->isTheLastVblankLine == YES))
+				if (ROM_TYPE == ROM::GAME_BOY)
 				{
-					pGBc_display->isTheLastVblankLine = YES;
+					/*
+					 * Keeping ppuCounterPerLY == 5 passes ly_lyc_153_write-GS.gb but fails ly_new_frame-GS.gb and ly_lyc_0-GS.gb
+					 * Keeping ppuCounterPerLY == 4 passes ly_new_frame-GS.gb and ly_lyc_0-GS.gb but fails ly_lyc_153_write-GS.gb
+					 * So, we need to keep 4 but handle for ly_lyc_153_write-GS.gb differently
+					 *
+					 * Root cause: DMG decouples the LY value the CPU reads from the value the LYC comparator
+					 * actually checks, for a few cycles around the 153->0 wrap. There isn't one transition here,
+					 * there are three, which is exactly why a single tick (4 or 5) can never satisfy all three
+					 * tests at once -- each test happens to sample a different one of these three windows:
+					 *   tick FOUR : LY resets to 0 (readable), but the comparator is still checking against 153
+					 *   tick SIX  : comparator goes fully dark -- no write landing here can register a match
+					 *   tick TEN  : comparator settles on comparing against the real LY=0
+					 *
+					 * Verified against:
+					 * - SameBoy Core/display.c, "Lines 153" block:
+					 *   https://github.com/LIJI32/SameBoy/blob/master/Core/display.c#L2217-L2242
+					 *   Tracks a separate `ly_for_comparison`, distinct from `io_registers[GB_IO_LY]`, specifically
+					 *   for this window -- confirms the readable-LY/comparator split as the actual mechanism, not
+					 *   an artifact of our own tick counting.
+					 * - AntonioND's TCAGBD.pdf, section 8.9.1 "Timings in DMG", Line 153 table:
+					 *   https://raw.githubusercontent.com/AntonioND/giibiiadvance/master/docs/TCAGBD.pdf
+					 *   Hand-measured, clock-by-clock: Clock 0 LY=153/compare='-', Clock 4 LY=0/compare=153,
+					 *   Clock 8 compare='-' again, Clock 12 compare=0. Matches this exact 4/6/10 split directly.
+					 * - mGBA's Open Game Boy Documentation Project, PPU/STAT section:
+					 *   https://mgba-emu.github.io/gbdoc/
+					 *   "this does not occur with Mode 0 and LYC, because LYC is slightly late on Mode 2" --
+					 *   independently documents the same family of LYC-lags-LY behavior.
+					 * - gbdev/pandocs issue #141 "Document STAT interrupt oddities":
+					 *   https://github.com/gbdev/pandocs/issues/141
+					 *   Even SameBoy's own author (LIJI) says he'd "have to check SameBoy's source" for this exact
+					 *   class of delay -- Pan Docs doesn't cover it, so source + measured tables are the ground truth.
+					 */
+					 // > 4 cause issues
+					if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == FOUR)
+					{
+						// Process LY == LYC for LY = 153
+						compareLYToLYC(pGBc_peripherals->LY);
+						// Reset LY to zero post LY=LYC check
+						pGBc_display->currentScanline = ZERO;
+						pGBc_peripherals->LY = ZERO;
+						// LY now reads 0, but the true comparator is still watching for 153 for 2 more cycles
+						pGBc_display->forceLY153Compare = YES;
+					}
+					else if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == SIX)
+					{
+						// Clear LY == LYC
+						pGBc_peripherals->STAT.lcdStatusFields.LYC_EQL_LY_FLAG = ZERO;
+						pGBc_instance->GBc_state.emulatorStatus.STATInterruptSignal.STATInterruptSources.LY_LYC_SIGNAL = LO;
+						// Comparator goes fully dark until tick TEN
+						pGBc_display->forceLY153Compare = NO;
+						pGBc_display->lycCompareSuppressed = YES;
+					}
+					else if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == TEN)
+					{
+						// Process LY == LYC for LY = 0
+						compareLYToLYC(pGBc_peripherals->LY);
+						// Comparator settles on the real LY=0 from here
+						pGBc_display->lycCompareSuppressed = NO;
+					}
+				}
+				else
+				{
+					if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == TWO)
+					{
+						// Process LY == LYC for LY = 153
+						compareLYToLYC(pGBc_peripherals->LY);
+					}
+					// > 8 causes issues
+					else if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == SIX)
+					{
+						// Process LY == LYC for LY = 153
+						compareLYToLYC(pGBc_peripherals->LY);
+						// Reset LY to zero post LY=LYC check
+						pGBc_display->currentScanline = ZERO;
+						pGBc_peripherals->LY = ZERO;
+					}
+					// > 12 causes issues
+					else if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == TEN)
+					{
+						// Process LY == LYC for LY = 0
+						compareLYToLYC(pGBc_peripherals->LY);
+					}
+				}
+			}
+			// When LY = 144 - 152
+			else
+			{
+				if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == ONE)
+				{
+					if (pGBc_peripherals->LY == getScreenHeight())
+					{
+						// Request VBLANK interrupt
+						requestInterrupts(INTERRUPTS::VBLANK_INTERRUPT);
+
+						// Generate STAT interrupt if required
+						requestVblankStatInterrupt();
+
+						// Set PPU mode
+						setPPULCDMode(LCD_MODES::MODE_LCD_V_BLANK);
+
+						// Clear the PPU mode specific STAT IRQ lines
+						pGBc_instance->GBc_state.emulatorStatus.STATInterruptSignal.STATInterruptSources.HBLANK_SIGNAL = LO;
+						pGBc_instance->GBc_state.emulatorStatus.STATInterruptSignal.STATInterruptSources.OAM_SIGNAL = LO;
+					}
+
+					// Process LY == LYC
+					compareLYToLYC(pGBc_peripherals->LY);
+				}
+			}
+
+			// PPU ticks per line >= 456
+			if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == LCD_MODE_CYCLES::LCD_TOTAL_CYCLES_PER_SCANLINE)
+			{
+				// 144 <= LY < 153
+				if ((pGBc_peripherals->LY >= getScreenHeight()) && (pGBc_peripherals->LY < (getScreenHeight() + VBLANK_SCANLINES - ONE)))
+				{
+					// Increment LY
+					pGBc_display->currentScanline++;
+					pGBc_peripherals->LY = pGBc_display->currentScanline;
+
+					// Needed by round 7 of "ly_lyc_144-GS.gb" and "ly_lyc_144-C.gb"
+					if (ROM_TYPE == ROM::GAME_BOY)
+					{
+						pGBc_peripherals->STAT.lcdStatusFields.LYC_EQL_LY_FLAG = ZERO;
+						pGBc_instance->GBc_state.emulatorStatus.STATInterruptSignal.STATInterruptSources.LY_LYC_SIGNAL = LO;
+					}
+				}
+
+				if (pGBc_display->isTheLastVblankLine == YES)
+				{
+					pGBc_display->isTheLastVblankLine = CLEAR;
+
+					// Reset the y condition latch for window
+					// Refer to https://discord.com/channels/465585922579103744/465586075830845475/852208456491728897
+					// But refer to https://discord.com/channels/465585922579103744/465586075830845475/1325933355547627612 as well
+					pGBc_display->yConditionForWindowIsMetForCurrentFrame = NO;
+#if (GB_GBC_ENABLE_WINDESYNC_GLITCH == YES)
+					pGBc_display->cachedWinEnablePerFrame = CLEAR;
+#endif
+
+					PPUINFO("LCD MODE : V-Blank; Dots : %d", pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode);
+					pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode = RESET;
+
+					// Set the next LCD Mode
+					pGBc_display->currentLCDMode = LCD_MODES::MODE_LCD_SEARCHING_OAM;
 
 					if (ROM_TYPE == ROM::GAME_BOY)
 					{
 						/*
-						 * Keeping ppuCounterPerLY == 5 passes ly_lyc_153_write-GS.gb but fails ly_new_frame-GS.gb and ly_lyc_0-GS.gb
-						 * Keeping ppuCounterPerLY == 4 passes ly_new_frame-GS.gb and ly_lyc_0-GS.gb but fails ly_lyc_153_write-GS.gb
-						 */
-						PPUTODO("Conflicting PPU test results b/w ly_new_frame-GS.gb, ly_lyc_0-GS.gb and ly_lyc_153_write-GS.gb");
-						// > 4 cause issues
-						if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == FOUR)
-						{
-							// Process LY == LYC for LY = 153
-							compareLYToLYC(pGBc_peripherals->LY);
-
-							// Reset LY to zero post LY=LYC check
-							pGBc_display->currentScanline = ZERO;
-							pGBc_peripherals->LY = ZERO;
-						}
-						else if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == SIX)
-						{
-							// Clear LY == LYC
-							pGBc_peripherals->STAT.lcdStatusFields.LYC_EQL_LY_FLAG = ZERO;
-							pGBc_instance->GBc_state.emulatorStatus.STATInterruptSignal.STATInterruptSources.LY_LYC_SIGNAL = LO;
-						}
-						// > 12 causes issues
-						else if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == TEN)
-						{
-							// Process LY == LYC for LY = 0
-							compareLYToLYC(pGBc_peripherals->LY);
-						}
+						* Needed by "ly00_mode0_2-GS.gb", "ly_lyc_0-GS.gb" and "stat_irq_blocking.gb"
+						* Make sure to run with bios enabled
+						*/
+						setPPULCDMode(LCD_MODES::MODE_LCD_BITS_CLEAR);
 					}
-					else
-					{
-						if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == TWO)
-						{
-							// Process LY == LYC for LY = 153
-							compareLYToLYC(pGBc_peripherals->LY);
-						}
-						// > 8 causes issues
-						else if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == SIX)
-						{
-							// Process LY == LYC for LY = 153
-							compareLYToLYC(pGBc_peripherals->LY);
 
-							// Reset LY to zero post LY=LYC check
-							pGBc_display->currentScanline = ZERO;
-							pGBc_peripherals->LY = ZERO;
-						}
-						// > 12 causes issues
-						else if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == TEN)
-						{
-							// Process LY == LYC for LY = 0
-							compareLYToLYC(pGBc_peripherals->LY);
-						}
-					}
-				}
-				// When LY = 144 - 152
-				else
-				{
-					if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == ONE)
-					{
-						if (pGBc_peripherals->LY == getScreenHeight())
-						{
-							// Request VBLANK interrupt
-							requestInterrupts(INTERRUPTS::VBLANK_INTERRUPT);
-
-							// Generate STAT interrupt if required
-							requestVblankStatInterrupt();
-
-							// Set PPU mode
-							setPPULCDMode(LCD_MODES::MODE_LCD_V_BLANK);
-
-							// Clear the PPU mode specific STAT IRQ lines
-							pGBc_instance->GBc_state.emulatorStatus.STATInterruptSignal.STATInterruptSources.HBLANK_SIGNAL = LO;
-							pGBc_instance->GBc_state.emulatorStatus.STATInterruptSignal.STATInterruptSources.OAM_SIGNAL = LO;
-						}
-
-						// Process LY == LYC
-						compareLYToLYC(pGBc_peripherals->LY);
-					}
+					// Reset PPU mode counter
+					pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerFrame = ZERO;
 				}
 
-				// PPU ticks per line >= 456
-				if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == LCD_MODE_CYCLES::LCD_TOTAL_CYCLES_PER_SCANLINE)
-				{
-					// 144 <= LY < 153
-					if ((pGBc_peripherals->LY >= getScreenHeight()) && (pGBc_peripherals->LY < (getScreenHeight() + VBLANK_SCANLINES - ONE)))
-					{
-						// Increment LY
-						pGBc_display->currentScanline++;
-						pGBc_peripherals->LY = pGBc_display->currentScanline;
-
-						// Needed by round 7 of "ly_lyc_144-GS.gb" and "ly_lyc_144-C.gb"
-						if (ROM_TYPE == ROM::GAME_BOY)
-						{
-							pGBc_peripherals->STAT.lcdStatusFields.LYC_EQL_LY_FLAG = ZERO;
-							pGBc_instance->GBc_state.emulatorStatus.STATInterruptSignal.STATInterruptSources.LY_LYC_SIGNAL = LO;
-						}
-					}
-
-					if (pGBc_display->isTheLastVblankLine == YES)
-					{
-						pGBc_display->isTheLastVblankLine = CLEAR;
-
-						// Reset the y condition latch for window
-						// Refer to https://discord.com/channels/465585922579103744/465586075830845475/852208456491728897
-						// But refer to https://discord.com/channels/465585922579103744/465586075830845475/1325933355547627612 as well
-						pGBc_display->yConditionForWindowIsMetForCurrentFrame = NO;
-
-						PPUINFO("LCD MODE : V-Blank; Dots : %d", pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode);
-						pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode = RESET;
-
-						// Set the next LCD Mode
-						pGBc_display->currentLCDMode = LCD_MODES::MODE_LCD_SEARCHING_OAM;
-
-						if (ROM_TYPE == ROM::GAME_BOY)
-						{
-							/*
-							* Needed by "ly00_mode0_2-GS.gb", "ly_lyc_0-GS.gb" and "stat_irq_blocking.gb"
-							* Make sure to run with bios enabled
-							*/
-							setPPULCDMode(LCD_MODES::MODE_LCD_BITS_CLEAR);
-						}
-
-						// Reset PPU mode counter
-						pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerFrame = ZERO;
-					}
-
-					// PPU ticks per line
-					pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY = ZERO;
-				}
-
-				BREAK;
+				// PPU ticks per line
+				pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY = ZERO;
 			}
-			case LCD_MODES::MODE_LCD_SEARCHING_OAM:
+
+			BREAK;
+		}
+		case LCD_MODES::MODE_LCD_SEARCHING_OAM:
+		{
+			// Allow VRAM read access to CPU if blocked
+			pGBc_display->blockVramR = NO;
+
+			// Block OAM read access to CPU
+			pGBc_display->blockOAMR = YES;
+
+			// Allow VRAM write access to CPU if blocked
+			pGBc_display->blockVramW = NO;
+
+			// Block OAM write access to CPU
+			pGBc_display->blockOAMW = YES;
+
+			// Initialize the below variable at the very first tick of the MODE_LCD_SEARCHING_OAM
+			if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == ONE)
 			{
-				// Allow VRAM read access to CPU if blocked
-				pGBc_display->blockVramR = NO;
+				/*
+				* As per section 8.11 of https://raw.githubusercontent.com/AntonioND/giibiiadvance/master/docs/TCAGBD.pdf
+				* STAT interrupt for line 0 happens in next M cycle when compared to lines 1 to 143
+				* For T-cycle accuracy, we refered to sameboy cycles provided in
+				* https://discord.com/channels/465585922579103744/465586075830845475/1025910040395251732
+				* which mentions that STAT interrupt happens at same cycle as mode set, not 1-T cycle before
+				* Many mooneye and wilbert pol's tests depend on this
+				*/
+				if (pGBc_peripherals->LY == ZERO)
+				{
+					requestOamStatInterrupt();
+				}
 
-				// Block OAM read access to CPU
-				pGBc_display->blockOAMR = YES;
+				// Set the LCD Mode bits
+				setPPULCDMode(LCD_MODES::MODE_LCD_SEARCHING_OAM);
 
-				// Allow VRAM write access to CPU if blocked
-				pGBc_display->blockVramW = NO;
+				// Reset the fetcher FSM
+				pGBc_display->pixelFetcherState = PIXEL_FETCHER_STATES::WAIT_FOR_TILE;
 
-				// Block OAM write access to CPU
+				// Set the dummy fetch flag as we are in new scanline
+				pGBc_display->fakeBgFetcherRuns = ZERO;
+
+				// Reset the Pixel FIFOs
+				pGBc_display->bgWinPixelFIFO.clearFIFO();
+				pGBc_display->tempBgWinPixelFIFO.clearFIFO();
+				pGBc_display->objPixelFIFO.clearFIFO();
+
+				// Reset other flags
+				pGBc_display->shouldFetchObjInsteadOfWinAndBgNow = CLEAR;
+				pGBc_display->isThereAnyObjectCurrentlyGettingRendered = CLEAR;
+				pGBc_display->indexOfOBJToFetchFromVisibleSpritesArray = INVALID;
+				pGBc_display->visibleObjectsPerScanLine = NULL;
+
+				pGBc_display->shouldIncrementWindowLineCounter = CLEAR;
+				pGBc_display->shouldFetchAndRenderWindowInsteadOfBG = NO;
+
+#if (GB_GBC_ENABLE_WIN_EN_GLITCH == YES)
+				pGBc_display->ignoreSCXLowBitsAfterWindow = CLEAR;
+				pGBc_display->windowAlreadyActivatedThisScanline = CLEAR;
+#endif
+
+				pGBc_display->pixelFetcherCounterPerScanLine = RESET;
+				pGBc_display->pixelRenderCounterPerScanLine = -EIGHT;
+
+				pGBc_display->pixelFetcherDots = RESET;
+				pGBc_display->pixelRendererDots = RESET;
+				pGBc_display->pixelPipelineDots = RESET;
+
+				pGBc_display->shouldSimulateBGScrollingPenaltyNow = YES;
+
+				pGBc_display->oamSearchCount = ZERO;
+				pGBc_display->spriteCountPerScanLine = ZERO;
+				pGBc_display->nX159SpritesPresent = ZERO;
+
+				pGBc_display->bgToObjectPenalty = NO;
+				pGBc_display->discardedPixelCount = RESET;
+
+				pGBc_display->wasFetchingOBJ = NO;
+				pGBc_display->prevSpriteX = INVALID;
+				pGBc_display->wasNotFirstSpriteInX = NO;
+				pGBc_display->wasX0Object = NO;
+
+				pGBc_display->x159SpritesPresent = NO;
+				pGBc_display->x159SpritesDone = NO;
+
+				pGBc_display->isNewM3Scanline = YES;
+
+				// clear "visibleOamIndexPerLY" as we are in new frame
+				visibleOamIndexPerLY.clear();
+
+				// Note that sameboy does this check in multiple place unlike what is mentioned in pandocs
+				// As per latest discord, check happens atleast twice per line https://discord.com/channels/465585922579103744/465586075830845475/1042070805644845147
+				checkWindowYTrigger(pGBc_peripherals->LY);
+			}
+
+			if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == ONE)
+			{
+				// Clear the PPU mode specific STAT IRQ lines
+				pGBc_instance->GBc_state.emulatorStatus.STATInterruptSignal.STATInterruptSources.HBLANK_SIGNAL = LO;
+				pGBc_instance->GBc_state.emulatorStatus.STATInterruptSignal.STATInterruptSources.VBLANK_SIGNAL = LO;
+
+				// Process LY == LYC
+				compareLYToLYC(pGBc_peripherals->LY);
+			}
+
+			// The operation of searching OAM for valid sprites should be equally split among the 80 cycles of MODE_LCD_SEARCHING_OAM
+			// In total, we need to search through 40 sprites, hence we take 2 dots per oam entry
+			if (((pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY & 0x01) == ZERO) // every alternate cycle
+				&& pGBc_display->oamSearchCount < FORTY) // itterate over all the 40 sprites in OAM memory
+			{
+				if (pGBc_display->spriteCountPerScanLine < TEN)
+				{
+					int16_t yPosition = pGBc_memory->GBcMemoryMap.mOAM.OAMFields.OAM[pGBc_display->oamSearchCount].yPosition - SIXTEEN;
+
+					auto verticalSizeOfSprite = (pGBc_peripherals->LCDC.lcdControlFields.OBJ_SIZE == ONE) ? SIXTEEN : EIGHT;
+
+					if ((yPosition <= pGBc_peripherals->LY) && (pGBc_peripherals->LY < yPosition + verticalSizeOfSprite))
+					{
+						visibleObjects_t* entry =
+							&(pGBc_display->arrayOfVisibleObjectsPerScanLine[pGBc_display->spriteCountPerScanLine]);
+
+						++pGBc_display->spriteCountPerScanLine;
+
+						entry->oamEntry = pGBc_memory->GBcMemoryMap.mOAM.OAMFields.OAM[pGBc_display->oamSearchCount];
+						entry->indexWithinOAMMemory = pGBc_display->oamSearchCount;
+						entry->alreadyProcessed = NO;
+						entry->next = NULL;
+
+						PPUTODO("Kind of a dirty hack (part 1) for handling timing for sprites at X = 159 at %d in %s", __LINE__, __FILE__);
+						const DIM8 xPosSLimit = getScreenWidth() + EIGHT - ONE;
+						if (pGBc_memory->GBcMemoryMap.mOAM.OAMFields.OAM[pGBc_display->oamSearchCount].xPosition == xPosSLimit)
+						{
+							++pGBc_display->nX159SpritesPresent;
+							pGBc_display->x159SpritesPresent = YES;
+						}
+
+						// for debugger
+						visibleOamIndexPerLY.insert(TO_UINT8(pGBc_display->oamSearchCount));
+						visibleOamIndexPerFrame.insert(TO_UINT8(pGBc_display->oamSearchCount));
+
+						if (!pGBc_display->visibleObjectsPerScanLine)
+						{
+							entry->next = pGBc_display->visibleObjectsPerScanLine;
+							pGBc_display->visibleObjectsPerScanLine = entry;
+						}
+						else
+						{
+							visibleObjects_t* le = pGBc_display->visibleObjectsPerScanLine;
+
+							while (le->next)
+							{
+								le = le->next;
+							}
+
+							le->next = entry;
+						}
+					}
+				}
+
+				++pGBc_display->oamSearchCount;
+			}
+
+			// PPU ticks per line >= 80 AND we have searched through all possible OAM sprites
+			if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == LCD_MODE_CYCLES::LCD_SEARCHING_OAM
+				&& pGBc_display->oamSearchCount == FORTY)
+			{
+				PPUINFO("LCD MODE : OAM Search; Dots : %d", pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode);
+				pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode = RESET;
+
+				// Set the next LCD Mode
+				pGBc_display->currentLCDMode = LCD_MODES::MODE_LCD_DISPLAY_PIXELS;
+
+				// To handle double-halt-cancel.gb and double-halt-cancel-gbconly.gb
+				if (ROM_TYPE == ROM::GAME_BOY)
+				{
+					// Block VRAM access to CPU
+					pGBc_display->blockVramR = YES;
+				}
+
+				// Un-block OAM write access to CPU (just for this cycle, will get blocked again in next cycle)
+				// This momentary unblocking is needed by lcdon_write_timing-GS.gb
+				pGBc_display->blockOAMW = NO;
+			}
+
+			BREAK;
+		}
+		case LCD_MODES::MODE_LCD_DISPLAY_PIXELS:
+		{
+			// Block VRAM read access to CPU (Needed when we directly come to mode 3 in line 0 post lcd on)
+			pGBc_display->blockVramR = YES;
+
+			// Block OAM read access to CPU (Needed when we directly come to mode 3 in line 0 post lcd on)
+			pGBc_display->blockOAMR = YES;
+
+			// Block VRAM write access to CPU (Needed when we directly come to mode 3 in line 0 post lcd on)
+			pGBc_display->blockVramW = YES;
+
+			// Block OAM write access to CPU (Needed when we directly come to mode 3 in line 0 post lcd on)
+			pGBc_display->blockOAMW = YES;
+
+			// Block CGB palette access to CPU
+			pGBc_display->blockCGBPalette = YES;
+
+			// Set the LCD Mode bits
+			processPixelPipelineAndRender(ONE);
+
+			if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == EIGHTYONE)
+			{
+				pGBc_instance->GBc_state.emulatorStatus.STATInterruptSignal.STATInterruptSources.HBLANK_SIGNAL = LO;
+				pGBc_instance->GBc_state.emulatorStatus.STATInterruptSignal.STATInterruptSources.OAM_SIGNAL = LO;
+				pGBc_instance->GBc_state.emulatorStatus.STATInterruptSignal.STATInterruptSources.VBLANK_SIGNAL = LO;
+				setPPULCDMode(LCD_MODES::MODE_LCD_DISPLAY_PIXELS);
+			}
+
+#if (GB_GBC_ENABLE_PPU_BG_MODE3_RUN_FOR_174_DOTS == YES)
+			/*
+			* Since we can remain in pixelRenderCounterPerScanLine == 159 condition for multiple dots for example when multiple sprites are present in X == 159 location
+			* Ideally, what I want is to set the HBLANK mode on the last dot where pixelRenderCounterPerScanLine == 159
+			* To detemine this, we have a very dirty solution below
+			*/
+			PPUTODO("Kind of a dirty hack (part 3) for handling timing for sprites at X = 159 at %d in %s", __LINE__, __FILE__);
+			PPUTODO("Ideally, how is the below messed up if condition at %d in %s handled by GB/GBC HW?", __LINE__, __FILE__);
+			if ((getPPULCDMode() != LCD_MODES::MODE_LCD_H_BLANK)
+				&& (pGBc_display->pixelRenderCounterPerScanLine >= (TO_UINT16(getScreenWidth()) - ONE))
+				&& (pGBc_display->shouldFetchObjInsteadOfWinAndBgPostBGFetchIsDone == NO)
+				&& (pGBc_display->shouldFetchObjInsteadOfWinAndBgNow == NO))
+			{
+				FLAG proceedX159Sprites = (pGBc_display->x159SpritesPresent == NO) || (pGBc_display->x159SpritesDone == YES);
+				if (proceedX159Sprites)
+				{
+					// Set the LCD Mode bits
+					setPPULCDMode(LCD_MODES::MODE_LCD_H_BLANK);
+				}
+			}
+#endif
+
+#if (GB_GBC_ENABLE_TILE_SEL_GLITCH == YES)
+			if (pGBc_display->pixelFetcherState == PIXEL_FETCHER_STATES::WAIT_FOR_DATA_HIGH
+				|| pGBc_display->pixelFetcherState == PIXEL_FETCHER_STATES::GET_TILE_DATA_HIGH)
+			{
+				pGBc_display->pixelFetcherContext.bgWinTileDataHi = pGBc_display->pixelFetcherContext.bgWinTileDataLo;
+				// Note: data_for_sel_glitch update is intentionally commented out in SameBoy here
+			}
+#endif
+
+			if (pGBc_display->pixelRenderCounterPerScanLine == TO_UINT16(getScreenWidth()))
+			{
+				if (pGBc_display->shouldIncrementWindowLineCounter == YES)
+				{
+					pGBc_display->windowLineCounter++;
+				}
+
+				pGBc_display->shouldFetchObjInsteadOfWinAndBgNow = CLEAR;
+				pGBc_display->isThereAnyObjectCurrentlyGettingRendered = CLEAR;
+				pGBc_display->indexOfOBJToFetchFromVisibleSpritesArray = INVALID;
+				pGBc_display->visibleObjectsPerScanLine = NULL;
+
+				pGBc_display->shouldIncrementWindowLineCounter = CLEAR;
+				pGBc_display->shouldFetchAndRenderWindowInsteadOfBG = NO;
+
+				pGBc_display->pixelFetcherCounterPerScanLine = RESET;
+				pGBc_display->pixelRenderCounterPerScanLine = -EIGHT;
+
+				pGBc_display->pixelFetcherDots = RESET;
+				pGBc_display->pixelRendererDots = RESET;
+				pGBc_display->pixelPipelineDots = RESET;
+
+				PPUINFO("LCD MODE : Display Pixels; Dots : %d", pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode);
+				pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode = RESET;
+
+				// Set the next LCD Mode
+				pGBc_display->tickAtMode3ToMode0 = pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY;
+				pGBc_display->currentLCDMode = LCD_MODES::MODE_LCD_H_BLANK;
+
+#if (GB_GBC_ENABLE_PPU_BG_MODE3_RUN_FOR_174_DOTS == YES)
+				// Generate STAT interrupt if required
+				requestHblankStatInterrupt();
+#endif
+
+				// Allow OAM read access to CPU if blocked
+				pGBc_display->blockOAMR = NO;
+
+				// Keep OAM write access blocked to CPU
 				pGBc_display->blockOAMW = YES;
 
-				// Initialize the below variable at the very first tick of the MODE_LCD_SEARCHING_OAM
-				if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == ONE)
+				// We are about enter HBLANK, so allow HDMA to block cpu pipeline if proper conditions are met
+				if (pGBc_instance->GBc_state.emulatorStatus.cgbDMAMode == CGB_DMA_MODE::HDMA
+					&& pGBc_instance->GBc_state.emulatorStatus.isHDMAActive == YES)
 				{
+					pGBc_instance->GBc_state.emulatorStatus.isHDMAAllowedToBlockCPUPipeline = YES;
+				}
+			}
+			BREAK;
+		}
+		case LCD_MODES::MODE_LCD_H_BLANK:
+		{
+			pGBc_display->fakeBgFetcherRuns = ZERO;
+
+			// Allow VRAM and OAM read access to CPU if blocked
+			pGBc_display->blockVramR = NO;
+			pGBc_display->blockOAMR = NO;
+
+			// Allow VRAM and OAM write access to CPU if blocked
+			pGBc_display->blockVramW = NO;
+			pGBc_display->blockOAMW = NO;
+
+			// Allow CGB palette access to CPU
+			pGBc_display->blockCGBPalette = NO;
+
+#if (GB_GBC_ENABLE_PPU_BG_MODE3_RUN_FOR_174_DOTS == NO)
+			if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == pGBc_display->tickAtMode3ToMode0 + ONE)
+			{
+				// Set the LCD Mode bits
+				setPPULCDMode(LCD_MODES::MODE_LCD_H_BLANK);
+			}
+
+			if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == pGBc_display->tickAtMode3ToMode0 + TWO)
+			{
+				// Generate STAT interrupt if required
+				requestHblankStatInterrupt();
+			}
+#endif
+
+			// PPU ticks per line >= 456
+			if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == LCD_MODE_CYCLES::LCD_TOTAL_CYCLES_PER_SCANLINE)
+			{
+				if (pGBc_display->skipMode2 == YES && pGBc_display->currentScanline == RESET)
+				{
+					pGBc_display->skipMode2 = NO;
+					pGBc_display->lcdJustEn = CLEAR;
+
+					if (ENABLED)
+					{
+						// Reset the fetcher FSM
+						pGBc_display->pixelFetcherState = PIXEL_FETCHER_STATES::WAIT_FOR_TILE;
+
+						// Set the dummy fetch flag as we are in new scanline
+						pGBc_display->fakeBgFetcherRuns = ZERO;
+
+						// Reset the Pixel FIFOs
+						pGBc_display->bgWinPixelFIFO.clearFIFO();
+						pGBc_display->tempBgWinPixelFIFO.clearFIFO();
+						pGBc_display->objPixelFIFO.clearFIFO();
+
+						// Reset other flags
+						pGBc_display->shouldFetchObjInsteadOfWinAndBgNow = CLEAR;
+						pGBc_display->isThereAnyObjectCurrentlyGettingRendered = CLEAR;
+						pGBc_display->indexOfOBJToFetchFromVisibleSpritesArray = INVALID;
+						pGBc_display->visibleObjectsPerScanLine = NULL;
+
+						pGBc_display->shouldIncrementWindowLineCounter = CLEAR;
+						pGBc_display->shouldFetchAndRenderWindowInsteadOfBG = NO;
+
+#if (GB_GBC_ENABLE_WIN_EN_GLITCH == YES)
+						pGBc_display->ignoreSCXLowBitsAfterWindow = CLEAR;
+						pGBc_display->windowAlreadyActivatedThisScanline = CLEAR;
+#endif
+
+						pGBc_display->pixelFetcherCounterPerScanLine = RESET;
+						pGBc_display->pixelRenderCounterPerScanLine = -EIGHT;
+
+						pGBc_display->pixelFetcherDots = RESET;
+						pGBc_display->pixelRendererDots = RESET;
+						pGBc_display->pixelPipelineDots = RESET;
+
+						pGBc_display->shouldSimulateBGScrollingPenaltyNow = YES;
+
+						pGBc_display->oamSearchCount = ZERO;
+						pGBc_display->spriteCountPerScanLine = ZERO;
+
+						pGBc_display->bgToObjectPenalty = NO;
+						pGBc_display->discardedPixelCount = RESET;
+
+						pGBc_display->wasFetchingOBJ = NO;
+						pGBc_display->prevSpriteX = INVALID;
+						pGBc_display->wasNotFirstSpriteInX = NO;
+						pGBc_display->wasX0Object = NO;
+
+						pGBc_display->x159SpritesPresent = NO;
+						pGBc_display->nX159SpritesPresent = ZERO;
+						pGBc_display->x159SpritesDone = NO;
+
+						pGBc_display->isNewM3Scanline = YES;
+
+						// clear "visibleOamIndexPerLY" as we are in new frame
+						visibleOamIndexPerLY.clear();
+					}
+
+					PPUINFO("LCD MODE : H-Blank; Dots : %d", pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode);
+					pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode = RESET;
+
+					// Set the next LCD Mode
+					pGBc_display->currentLCDMode = LCD_MODES::MODE_LCD_DISPLAY_PIXELS;
+
+					// PPU ticks per line (Resetting to 80 to handle special case of skiping mode 2)
+					pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY = EIGHTY;
+				}
+				else
+				{
+					PPUINFO("LCD MODE : H-Blank; Dots : %d", pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode);
+					pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode = RESET;
+
+					// Note that sameboy does this check in multiple place unlike what is mentioned in pandocs
+					// As per latest discord, check happens atleast twice per line https://discord.com/channels/465585922579103744/465586075830845475/1042070805644845147
+					checkWindowYTrigger(pGBc_peripherals->LY);
+
+					// Increment LY
+					pGBc_display->currentScanline++;
+					pGBc_peripherals->LY = pGBc_display->currentScanline;
+
 					/*
 					* As per section 8.11 of https://raw.githubusercontent.com/AntonioND/giibiiadvance/master/docs/TCAGBD.pdf
 					* STAT interrupt for line 0 happens in next M cycle when compared to lines 1 to 143
@@ -2111,525 +2529,134 @@ void GBc_t::ppuTick()
 					* which mentions that STAT interrupt happens at same cycle as mode set, not 1-T cycle before
 					* Many mooneye and wilbert pol's tests depend on this
 					*/
-					if (pGBc_peripherals->LY == ZERO)
+					if (pGBc_display->currentScanline != ZERO)
 					{
+						// Generate STAT interrupt if required
+						// Note: OAM STAT interrupt will be set even if we are about to enter VBlank state
+						// Refer : https://github.com/Gekkio/mooneye-test-suite/blob/main/acceptance/ppu/vblank_stat_intr-GS.s
 						requestOamStatInterrupt();
 					}
 
-					// Set the LCD Mode bits
-					setPPULCDMode(LCD_MODES::MODE_LCD_SEARCHING_OAM);
-
-					// Reset the fetcher FSM
-					pGBc_display->pixelFetcherState = PIXEL_FETCHER_STATES::WAIT_FOR_TILE;
-
-					// Set the dummy fetch flag as we are in new scanline
-					pGBc_display->fakeBgFetcherRuns = ZERO;
-
-					// Reset the Pixel FIFOs
-					pGBc_display->bgWinPixelFIFO.clearFIFO();
-					pGBc_display->tempBgWinPixelFIFO.clearFIFO();
-					pGBc_display->objPixelFIFO.clearFIFO();
-
-					// Reset other flags
-					pGBc_display->shouldFetchObjInsteadOfWinAndBgNow = CLEAR;
-					pGBc_display->isThereAnyObjectCurrentlyGettingRendered = CLEAR;
-					pGBc_display->indexOfOBJToFetchFromVisibleSpritesArray = INVALID;
-					pGBc_display->visibleObjectsPerScanLine = NULL;
-
-					pGBc_display->shouldIncrementWindowLineCounter = CLEAR;
-					pGBc_display->waitForNextLineForWindSyncGlitch = NO;
-					pGBc_display->performWindSyncGlitch = NO;
-					pGBc_display->shouldFetchAndRenderWindowInsteadOfBG = NO;
-					pGBc_display->shouldFetchAndRenderBGInsteadOfWindowAfterCurrentTile = NO;
-
-					pGBc_display->pixelFetcherCounterPerScanLine = RESET;
-					pGBc_display->pixelRenderCounterPerScanLine = -EIGHT;
-
-					pGBc_display->pixelFetcherDots = RESET;
-					pGBc_display->pixelRendererDots = RESET;
-					pGBc_display->pixelPipelineDots = RESET;
-
-					pGBc_display->shouldSimulateBGScrollingPenaltyNow = YES;
-
-					pGBc_display->oamSearchCount = ZERO;
-					pGBc_display->spriteCountPerScanLine = ZERO;
-					pGBc_display->nX159SpritesPresent = ZERO;
-
-					pGBc_display->bgToObjectPenalty = NO;
-					pGBc_display->discardedPixelCount = RESET;
-
-					pGBc_display->wasFetchingOBJ = NO;
-					pGBc_display->prevSpriteX = INVALID;
-					pGBc_display->wasNotFirstSpriteInX = NO;
-					pGBc_display->wasX0Object = NO;
-
-					pGBc_display->x159SpritesPresent = NO;
-					pGBc_display->x159SpritesDone = NO;
-
-					// clear "visibleOamIndexPerLY" as we are in new frame
-					visibleOamIndexPerLY.clear();
-
-					// Note that sameboy does this check in multiple place unlike what is mentioned in pandocs
-					// As per latest discord, check happens atleast twice per line https://discord.com/channels/465585922579103744/465586075830845475/1042070805644845147
-					checkWindowYTrigger(pGBc_peripherals->LY);
-				}
-
-				if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == ONE)
-				{
-					// Clear the PPU mode specific STAT IRQ lines
-					pGBc_instance->GBc_state.emulatorStatus.STATInterruptSignal.STATInterruptSources.HBLANK_SIGNAL = LO;
-					pGBc_instance->GBc_state.emulatorStatus.STATInterruptSignal.STATInterruptSources.VBLANK_SIGNAL = LO;
-
-					// Process LY == LYC
-					compareLYToLYC(pGBc_peripherals->LY);
-				}
-
-				// The operation of searching OAM for valid sprites should be equally split among the 80 cycles of MODE_LCD_SEARCHING_OAM
-				// In total, we need to search through 40 sprites, hence we take 2 dots per oam entry
-				if (((pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY & 0x01) == ZERO) // every alternate cycle
-					&& pGBc_display->oamSearchCount < FORTY) // itterate over all the 40 sprites in OAM memory
-				{
-					if (pGBc_display->spriteCountPerScanLine < TEN)
+					// LY == 144
+					if (pGBc_display->currentScanline == getScreenHeight())
 					{
-						int16_t yPosition = pGBc_memory->GBcMemoryMap.mOAM.OAMFields.OAM[pGBc_display->oamSearchCount].yPosition - SIXTEEN;
-
-						auto verticalSizeOfSprite = (pGBc_peripherals->LCDC.lcdControlFields.OBJ_SIZE == ONE) ? SIXTEEN : EIGHT;
-
-						if ((yPosition <= pGBc_peripherals->LY) && (pGBc_peripherals->LY < yPosition + verticalSizeOfSprite))
-						{
-							visibleObjects_t* entry =
-								&(pGBc_display->arrayOfVisibleObjectsPerScanLine[pGBc_display->spriteCountPerScanLine]);
-
-							++pGBc_display->spriteCountPerScanLine;
-
-							entry->oamEntry = pGBc_memory->GBcMemoryMap.mOAM.OAMFields.OAM[pGBc_display->oamSearchCount];
-							entry->indexWithinOAMMemory = pGBc_display->oamSearchCount;
-							entry->alreadyProcessed = NO;
-							entry->next = NULL;
-
-							PPUTODO("Kind of a dirty hack (part 1) for handling timing for sprites at X = 159 at %d in %s", __LINE__, __FILE__);
-							const DIM8 xPosSLimit = getScreenWidth() + EIGHT - ONE;
-							if (pGBc_memory->GBcMemoryMap.mOAM.OAMFields.OAM[pGBc_display->oamSearchCount].xPosition == xPosSLimit)
-							{
-								++pGBc_display->nX159SpritesPresent;
-								pGBc_display->x159SpritesPresent = YES;
-							}
-
-							// for debugger
-							visibleOamIndexPerLY.insert(TO_UINT8(pGBc_display->oamSearchCount));
-							visibleOamIndexPerFrame.insert(TO_UINT8(pGBc_display->oamSearchCount));
-
-							if (!pGBc_display->visibleObjectsPerScanLine)
-							{
-								entry->next = pGBc_display->visibleObjectsPerScanLine;
-								pGBc_display->visibleObjectsPerScanLine = entry;
-							}
-							else
-							{
-								visibleObjects_t* le = pGBc_display->visibleObjectsPerScanLine;
-
-								while (le->next)
-								{
-									le = le->next;
-								}
-
-								le->next = entry;
-							}
-						}
-					}
-
-					++pGBc_display->oamSearchCount;
-				}
-
-				// PPU ticks per line >= 80 AND we have searched through all possible OAM sprites
-				if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == LCD_MODE_CYCLES::LCD_SEARCHING_OAM
-					&& pGBc_display->oamSearchCount == FORTY)
-				{
-					pGBc_display->isNewM3Scanline = YES;
-
-					PPUINFO("LCD MODE : OAM Search; Dots : %d", pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode);
-					pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode = RESET;
-
-					// Set the next LCD Mode
-					pGBc_display->currentLCDMode = LCD_MODES::MODE_LCD_DISPLAY_PIXELS;
-
-					// To handle double-halt-cancel.gb and double-halt-cancel-gbconly.gb
-					if (ROM_TYPE == ROM::GAME_BOY)
-					{
-						// Block VRAM access to CPU
-						pGBc_display->blockVramR = YES;
-					}
-
-					// Un-block OAM write access to CPU (just for this cycle, will get blocked again in next cycle)
-					// This momentary unblocking is needed by lcdon_write_timing-GS.gb
-					pGBc_display->blockOAMW = NO;
-				}
-
-				BREAK;
-			}
-			case LCD_MODES::MODE_LCD_DISPLAY_PIXELS:
-			{
-				// Block VRAM read access to CPU (Needed when we directly come to mode 3 in line 0 post lcd on)
-				pGBc_display->blockVramR = YES;
-
-				// Block OAM read access to CPU (Needed when we directly come to mode 3 in line 0 post lcd on)
-				pGBc_display->blockOAMR = YES;
-
-				// Block VRAM write access to CPU (Needed when we directly come to mode 3 in line 0 post lcd on)
-				pGBc_display->blockVramW = YES;
-
-				// Block OAM write access to CPU (Needed when we directly come to mode 3 in line 0 post lcd on)
-				pGBc_display->blockOAMW = YES;
-
-				// Block CGB palette access to CPU
-				pGBc_display->blockCGBPalette = YES;
-
-				// Set the LCD Mode bits
-				processPixelPipelineAndRender(ONE);
-
-				if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == EIGHTYONE)
-				{
-					pGBc_instance->GBc_state.emulatorStatus.STATInterruptSignal.STATInterruptSources.HBLANK_SIGNAL = LO;
-					pGBc_instance->GBc_state.emulatorStatus.STATInterruptSignal.STATInterruptSources.OAM_SIGNAL = LO;
-					pGBc_instance->GBc_state.emulatorStatus.STATInterruptSignal.STATInterruptSources.VBLANK_SIGNAL = LO;
-					setPPULCDMode(LCD_MODES::MODE_LCD_DISPLAY_PIXELS);
-				}
-
-#if (GB_GBC_ENABLE_PPU_BG_MODE3_RUN_FOR_174_DOTS == YES)
-				/*
-				* Since we can remain in pixelRenderCounterPerScanLine == 159 condition for multiple dots for example when multiple sprites are present in X == 159 location
-				* Ideally, what I want is to set the HBLANK mode on the last dot where pixelRenderCounterPerScanLine == 159
-				* To detemine this, we have a very dirty solution below
-				*/
-				PPUTODO("Kind of a dirty hack (part 3) for handling timing for sprites at X = 159 at %d in %s", __LINE__, __FILE__);
-				PPUTODO("Ideally, how is the below messed up if condition at %d in %s handled by GB/GBC HW?", __LINE__, __FILE__);
-				if ((getPPULCDMode() != LCD_MODES::MODE_LCD_H_BLANK)
-					&& (pGBc_display->pixelRenderCounterPerScanLine >= (TO_UINT16(getScreenWidth()) - ONE))
-					&& (pGBc_display->shouldFetchObjInsteadOfWinAndBgPostBGFetchIsDone == NO)
-					&& (pGBc_display->shouldFetchObjInsteadOfWinAndBgNow == NO))
-				{
-					FLAG proceedX159Sprites = (pGBc_display->x159SpritesPresent == NO) || (pGBc_display->x159SpritesDone == YES);
-					if (proceedX159Sprites)
-					{
-						// Set the LCD Mode bits
-						setPPULCDMode(LCD_MODES::MODE_LCD_H_BLANK);
-#if _DEBUG
-						constexpr COUNTER32 T_CYCLE_THR = LCD_SEARCHING_OAM + TX_DATA_LCD_CTRL_MIN + ONE;
-						if ((OAM_STAT_TO_MODE_2_T_CYCLES > T_CYCLE_THR) && (pGBc_peripherals->LY != ZERO))
-						{
-							DEBUG("OAM_STAT_TO_MODE_2_T_CYCLES : %d", OAM_STAT_TO_MODE_2_T_CYCLES);
-						}
-#endif
-					}
-				}
-#endif
-
-				if (pGBc_display->pixelRenderCounterPerScanLine == TO_UINT16(getScreenWidth()))
-				{
-					if (pGBc_display->shouldIncrementWindowLineCounter == YES)
-					{
-						pGBc_display->windowLineCounter++;
-					}
-
-					pGBc_display->shouldFetchObjInsteadOfWinAndBgNow = CLEAR;
-					pGBc_display->isThereAnyObjectCurrentlyGettingRendered = CLEAR;
-					pGBc_display->indexOfOBJToFetchFromVisibleSpritesArray = INVALID;
-					pGBc_display->visibleObjectsPerScanLine = NULL;
-
-					pGBc_display->shouldIncrementWindowLineCounter = CLEAR;
-					pGBc_display->waitForNextLineForWindSyncGlitch = NO;
-					pGBc_display->performWindSyncGlitch = NO;
-					pGBc_display->shouldFetchAndRenderWindowInsteadOfBG = NO;
-					pGBc_display->shouldFetchAndRenderBGInsteadOfWindowAfterCurrentTile = NO;
-
-					pGBc_display->pixelFetcherCounterPerScanLine = RESET;
-					pGBc_display->pixelRenderCounterPerScanLine = -EIGHT;
-
-					pGBc_display->pixelFetcherDots = RESET;
-					pGBc_display->pixelRendererDots = RESET;
-					pGBc_display->pixelPipelineDots = RESET;
-
-					PPUINFO("LCD MODE : Display Pixels; Dots : %d", pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode);
-					pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode = RESET;
-
-					// Set the next LCD Mode
-					pGBc_display->tickAtMode3ToMode0 = pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY;
-					pGBc_display->currentLCDMode = LCD_MODES::MODE_LCD_H_BLANK;
-
-#if (GB_GBC_ENABLE_PPU_BG_MODE3_RUN_FOR_174_DOTS == YES)
-					// Generate STAT interrupt if required
-					requestHblankStatInterrupt();
-#endif
-
-					// Allow OAM read access to CPU if blocked
-					pGBc_display->blockOAMR = NO;
-
-					// Keep OAM write access blocked to CPU
-					pGBc_display->blockOAMW = YES;
-
-					// We are about enter HBLANK, so allow HDMA to block cpu pipeline if proper conditions are met
-					if (pGBc_instance->GBc_state.emulatorStatus.cgbDMAMode == CGB_DMA_MODE::HDMA
-						&& pGBc_instance->GBc_state.emulatorStatus.isHDMAActive == YES)
-					{
-						pGBc_instance->GBc_state.emulatorStatus.isHDMAAllowedToBlockCPUPipeline = YES;
-					}
-				}
-				BREAK;
-			}
-			case LCD_MODES::MODE_LCD_H_BLANK:
-			{
-				pGBc_display->fakeBgFetcherRuns = ZERO;
-
-				// Allow VRAM and OAM read access to CPU if blocked
-				pGBc_display->blockVramR = NO;
-				pGBc_display->blockOAMR = NO;
-
-				// Allow VRAM and OAM write access to CPU if blocked
-				pGBc_display->blockVramW = NO;
-				pGBc_display->blockOAMW = NO;
-
-				// Allow CGB palette access to CPU
-				pGBc_display->blockCGBPalette = NO;
-
-#if (GB_GBC_ENABLE_PPU_BG_MODE3_RUN_FOR_174_DOTS == NO)
-				if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == pGBc_display->tickAtMode3ToMode0 + ONE)
-				{
-					// Set the LCD Mode bits
-					setPPULCDMode(LCD_MODES::MODE_LCD_H_BLANK);
-				}
-
-				if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == pGBc_display->tickAtMode3ToMode0 + TWO)
-				{
-					// Generate STAT interrupt if required
-					requestHblankStatInterrupt();
-				}
-#endif
-
-				// PPU ticks per line >= 456
-				if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY == LCD_MODE_CYCLES::LCD_TOTAL_CYCLES_PER_SCANLINE)
-				{
-					if (pGBc_display->skipMode2 == YES && pGBc_display->currentScanline == RESET)
-					{
-						pGBc_display->skipMode2 = NO;
-						pGBc_display->lcdJustEn = CLEAR;
-
-						if (ENABLED)
-						{
-							// Reset the fetcher FSM
-							pGBc_display->pixelFetcherState = PIXEL_FETCHER_STATES::WAIT_FOR_TILE;
-
-							// Set the dummy fetch flag as we are in new scanline
-							pGBc_display->fakeBgFetcherRuns = ZERO;
-
-							// Reset the Pixel FIFOs
-							pGBc_display->bgWinPixelFIFO.clearFIFO();
-							pGBc_display->tempBgWinPixelFIFO.clearFIFO();
-							pGBc_display->objPixelFIFO.clearFIFO();
-
-							// Reset other flags
-							pGBc_display->shouldFetchObjInsteadOfWinAndBgNow = CLEAR;
-							pGBc_display->isThereAnyObjectCurrentlyGettingRendered = CLEAR;
-							pGBc_display->indexOfOBJToFetchFromVisibleSpritesArray = INVALID;
-							pGBc_display->visibleObjectsPerScanLine = NULL;
-
-							pGBc_display->shouldIncrementWindowLineCounter = CLEAR;
-							pGBc_display->waitForNextLineForWindSyncGlitch = NO;
-							pGBc_display->performWindSyncGlitch = NO;
-							pGBc_display->shouldFetchAndRenderWindowInsteadOfBG = NO;
-							pGBc_display->shouldFetchAndRenderBGInsteadOfWindowAfterCurrentTile = NO;
-
-							pGBc_display->pixelFetcherCounterPerScanLine = RESET;
-							pGBc_display->pixelRenderCounterPerScanLine = -EIGHT;
-
-							pGBc_display->pixelFetcherDots = RESET;
-							pGBc_display->pixelRendererDots = RESET;
-							pGBc_display->pixelPipelineDots = RESET;
-
-							pGBc_display->shouldSimulateBGScrollingPenaltyNow = YES;
-
-							pGBc_display->oamSearchCount = ZERO;
-							pGBc_display->spriteCountPerScanLine = ZERO;
-
-							pGBc_display->bgToObjectPenalty = NO;
-							pGBc_display->discardedPixelCount = RESET;
-
-							pGBc_display->wasFetchingOBJ = NO;
-							pGBc_display->prevSpriteX = INVALID;
-							pGBc_display->wasNotFirstSpriteInX = NO;
-							pGBc_display->wasX0Object = NO;
-
-							pGBc_display->x159SpritesPresent = NO;
-							pGBc_display->nX159SpritesPresent = ZERO;
-							pGBc_display->x159SpritesDone = NO;
-
-							// clear "visibleOamIndexPerLY" as we are in new frame
-							visibleOamIndexPerLY.clear();
-						}
-
-						pGBc_display->isNewM3Scanline = YES;
-
-						PPUINFO("LCD MODE : H-Blank; Dots : %d", pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode);
-						pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode = RESET;
-
 						// Set the next LCD Mode
-						pGBc_display->currentLCDMode = LCD_MODES::MODE_LCD_DISPLAY_PIXELS;
+						pGBc_display->currentLCDMode = LCD_MODES::MODE_LCD_V_BLANK;
 
-						// PPU ticks per line (Resetting to 80 to handle special case of skiping mode 2)
-						pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY = EIGHTY;
+						// Clear "visibleOamIndexPerFrame" as we are enterring Vblank (and new frame)
+						visibleOamIndexPerFrame.clear();
+
+						// Set the VBLANK flag
+						pGBc_display->wasVblankJustTriggerred = YES;
+
+						// Reset the window line counter since we are in Vblank
+						pGBc_display->windowLineCounter = RESET;
+
+						if (ROM_TYPE == ROM::GAME_BOY)
+						{
+							// Refer 8.9.1 of https://raw.githubusercontent.com/AntonioND/giibiiadvance/master/docs/TCAGBD.pdf
+							pGBc_peripherals->STAT.lcdStatusFields.LYC_EQL_LY_FLAG = ZERO;
+							pGBc_instance->GBc_state.emulatorStatus.STATInterruptSignal.STATInterruptSources.LY_LYC_SIGNAL = LO;
+						}
+							
+						// If we need to blank a frame and LCD was just enabled
+						if (pGBc_emuStatus->freezeLCDOneFrame == YES) MASQ_UNLIKELY
+						{
+							freezeLCD();
+
+							// Clear blanking of LCD if needed here as this frame is done...
+							pGBc_emuStatus->freezeLCDOneFrame = CLEAR;
+						}
 					}
 					else
 					{
-						PPUINFO("LCD MODE : H-Blank; Dots : %d", pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode);
-						pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode = RESET;
+						// Set the next LCD Mode
+						pGBc_display->currentLCDMode = LCD_MODES::MODE_LCD_SEARCHING_OAM;
 
-						// Note that sameboy does this check in multiple place unlike what is mentioned in pandocs
-						// As per latest discord, check happens atleast twice per line https://discord.com/channels/465585922579103744/465586075830845475/1042070805644845147
-						checkWindowYTrigger(pGBc_peripherals->LY);
+						// Block OAM read access to CPU
+						pGBc_display->blockOAMR = YES;
 
-						// Increment LY
-						pGBc_display->currentScanline++;
-						pGBc_peripherals->LY = pGBc_display->currentScanline;
-
-						/*
-						* As per section 8.11 of https://raw.githubusercontent.com/AntonioND/giibiiadvance/master/docs/TCAGBD.pdf
-						* STAT interrupt for line 0 happens in next M cycle when compared to lines 1 to 143
-						* For T-cycle accuracy, we refered to sameboy cycles provided in
-						* https://discord.com/channels/465585922579103744/465586075830845475/1025910040395251732
-						* which mentions that STAT interrupt happens at same cycle as mode set, not 1-T cycle before
-						* Many mooneye and wilbert pol's tests depend on this
-						*/
-						if (pGBc_display->currentScanline != ZERO)
+						if (ROM_TYPE == ROM::GAME_BOY_COLOR)
 						{
-							// Generate STAT interrupt if required
-							// Note: OAM STAT interrupt will be set even if we are about to enter VBlank state
-							// Refer : https://github.com/Gekkio/mooneye-test-suite/blob/main/acceptance/ppu/vblank_stat_intr-GS.s
-							requestOamStatInterrupt();
-
-#if _DEBUG
-							OAM_STAT_TO_MODE_2_T_CYCLES = RESET;
-#endif
+							// Keep OAM write access blocked to CPU
+							pGBc_display->blockOAMW = YES;
 						}
-
-						// LY == 144
-						if (pGBc_display->currentScanline == getScreenHeight())
+						else if (ROM_TYPE == ROM::GAME_BOY)
 						{
-							// Set the next LCD Mode
-							pGBc_display->currentLCDMode = LCD_MODES::MODE_LCD_V_BLANK;
+							// Keep OAM write access unblocked to CPU
+							pGBc_display->blockOAMW = NO;
 
-							// Clear "visibleOamIndexPerFrame" as we are enterring Vblank (and new frame)
-							visibleOamIndexPerFrame.clear();
-
-							// Set the VBLANK flag
-							pGBc_display->wasVblankJustTriggerred = YES;
-
-							// Reset the window line counter since we are in Vblank
-							pGBc_display->windowLineCounter = RESET;
-
-							if (ROM_TYPE == ROM::GAME_BOY)
-							{
-								// Refer 8.9.1 of https://raw.githubusercontent.com/AntonioND/giibiiadvance/master/docs/TCAGBD.pdf
-								pGBc_peripherals->STAT.lcdStatusFields.LYC_EQL_LY_FLAG = ZERO;
-								pGBc_instance->GBc_state.emulatorStatus.STATInterruptSignal.STATInterruptSources.LY_LYC_SIGNAL = LO;
-							}
-							
-							// If we need to blank a frame and LCD was just enabled
-							if (pGBc_emuStatus->freezeLCDOneFrame == YES) MASQ_UNLIKELY
-							{
-								freezeLCD();
-
-								// Clear blanking of LCD if needed here as this frame is done...
-								pGBc_emuStatus->freezeLCDOneFrame = CLEAR;
-							}
+							// Refer 8.9.1 of https://raw.githubusercontent.com/AntonioND/giibiiadvance/master/docs/TCAGBD.pdf
+							// To handle ly_lyc_0-GS.gb and ly_lyc_0-C.gb
+							pGBc_peripherals->STAT.lcdStatusFields.LYC_EQL_LY_FLAG = ZERO;
+							pGBc_instance->GBc_state.emulatorStatus.STATInterruptSignal.STATInterruptSources.LY_LYC_SIGNAL = LO;
 						}
-						else
-						{
-							// Set the next LCD Mode
-							pGBc_display->currentLCDMode = LCD_MODES::MODE_LCD_SEARCHING_OAM;
-
-							// Block OAM read access to CPU
-							pGBc_display->blockOAMR = YES;
-
-							if (ROM_TYPE == ROM::GAME_BOY_COLOR)
-							{
-								// Keep OAM write access blocked to CPU
-								pGBc_display->blockOAMW = YES;
-							}
-							else if (ROM_TYPE == ROM::GAME_BOY)
-							{
-								// Keep OAM write access unblocked to CPU
-								pGBc_display->blockOAMW = NO;
-
-								// Refer 8.9.1 of https://raw.githubusercontent.com/AntonioND/giibiiadvance/master/docs/TCAGBD.pdf
-								// To handle ly_lyc_0-GS.gb and ly_lyc_0-C.gb
-								pGBc_peripherals->STAT.lcdStatusFields.LYC_EQL_LY_FLAG = ZERO;
-								pGBc_instance->GBc_state.emulatorStatus.STATInterruptSignal.STATInterruptSources.LY_LYC_SIGNAL = LO;
-							}
-						}
-
-						// PPU ticks per line (Resetting to 0 for next line)
-						pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY = ZERO;
 					}
-				}
 
-				BREAK;
+					// PPU ticks per line (Resetting to 0 for next line)
+					pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY = ZERO;
+				}
 			}
-			default:
-			{
-				FATAL("Invalid PPU Mode");
-			}
-			}
+
+			BREAK;
 		}
-		else
+		default:
 		{
-			// CGB special case needed for Bug's Life
-			if (pGBc_instance->GBc_state.emulatorStatus.ticks.lcdBlankCounter < LCD_V_BLANK)
+			FATAL("Invalid PPU Mode");
+		}
+		}
+	}
+	else if (pGBc_instance->GBc_state.emulatorStatus.isCPUStopped == NO)
+	{
+		// CGB special case needed for Bug's Life
+		if (pGBc_instance->GBc_state.emulatorStatus.ticks.lcdBlankCounter < LCD_V_BLANK)
+		{
+			// Tick the lcd blank counter needed for gbc
+			++pGBc_instance->GBc_state.emulatorStatus.ticks.lcdBlankCounter;
+
+			if ((ROM_TYPE == ROM::GAME_BOY_COLOR) && (pGBc_instance->GBc_state.emulatorStatus.ticks.lcdBlankCounter >= LCD_V_BLANK)) MASQ_UNLIKELY
 			{
-				// Tick the lcd blank counter needed for gbc
-				++pGBc_instance->GBc_state.emulatorStatus.ticks.lcdBlankCounter;
-
-				if ((ROM_TYPE == ROM::GAME_BOY_COLOR) && (pGBc_instance->GBc_state.emulatorStatus.ticks.lcdBlankCounter >= LCD_V_BLANK)) MASQ_UNLIKELY
-				{
-					freezeLCD();
-				}
-			}
-
-			pGBc_display->fakeBgFetcherRuns = ZERO;
-
-			// Allow VRAM access if blocked
-			pGBc_display->blockOAMR = NO;
-			pGBc_display->blockVramR = NO;
-			pGBc_display->blockOAMW = NO;
-			pGBc_display->blockVramW = NO;
-			pGBc_display->blockCGBPalette = NO;
-
-			if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerFrame >= PPU_CYCLES_PER_FRAME)
-			{
-				pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY = ZERO;
-				pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode = ZERO;
-				pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerFrame = ZERO;
-
-				// Set the VBLANK flag
-				pGBc_display->wasVblankJustTriggerred = YES;
+				freezeLCD();
 			}
 		}
+
+		pGBc_display->fakeBgFetcherRuns = ZERO;
+
+		// Allow VRAM access if blocked
+		pGBc_display->blockOAMR = NO;
+		pGBc_display->blockVramR = NO;
+		pGBc_display->blockOAMW = NO;
+		pGBc_display->blockVramW = NO;
+		pGBc_display->blockCGBPalette = NO;
+
+		if (pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerFrame >= PPU_CYCLES_PER_FRAME)
+		{
+			pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY = ZERO;
+			pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode = ZERO;
+			pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerFrame = ZERO;
+
+			// Set the VBLANK flag
+			pGBc_display->wasVblankJustTriggerred = YES;
+		}
+	}
 
 #if (GB_GBC_ENABLE_TILE_SEL_GLITCH == YES)
 	// Refer : https://github.com/mattcurrie/mealybug-tearoom-tests/blob/master/the-comprehensive-game-boy-ppu-documentation.md#tile_sel-bit-4
-	if (pGBc_display->tileSelGlitchTCycles > RESET)
-	{
-		--pGBc_display->tileSelGlitchTCycles;
-	}
+	if (pGBc_display->tileSelGlitchTCycles > RESET && --pGBc_display->tileSelGlitchTCycles == RESET) pGBc_display->tileSelGlitch = NO;
 #endif
-
 #if (GB_GBC_ENABLE_CGB_SCY_WRITE_DELAY == YES)
 	// Refer : https://github.com/mattcurrie/mealybug-tearoom-tests/blob/master/the-comprehensive-game-boy-ppu-documentation.md#scy-ff42
-	if (pGBc_display->cgbSCYDelayTCycles > RESET)
+	if (pGBc_display->cgbSCYDelayTCycles > RESET && --pGBc_display->cgbSCYDelayTCycles == RESET) pGBc_peripherals->SCY = pGBc_display->cgbLatchedSCY;
+#endif
+#if (GB_GBC_ENABLE_CGB_LYC_WRITE_DELAY == YES)
+	if (pGBc_display->cgbLYCDelayTCycles > RESET && --pGBc_display->cgbLYCDelayTCycles == RESET)
 	{
-		if (--pGBc_display->cgbSCYDelayTCycles == RESET)
-		{
-			pGBc_peripherals->SCY = pGBc_display->cgbLatchedSCY;
-		}
+		pGBc_peripherals->LYC = pGBc_display->cgbLatchedLYC;
+		compareLYToLYC(pGBc_peripherals->LY);
 	}
+#endif
+#if (GB_GBC_ENABLE_WX_WRITE_DELAY == YES)
+	if (pGBc_display->wxDelayTCycles > RESET && --pGBc_display->wxDelayTCycles == RESET) pGBc_peripherals->WX = pGBc_display->latchedWXForDelay;
 #endif
 }
 
@@ -3535,7 +3562,7 @@ FLAG GBc_t::isDACEnabled(AUDIO_CHANNELS channel)
 
 FLAG GBc_t::isChannel3Active()
 {
-	RETURN(pGBc_peripherals->NR52.channelSoundONOFFFields.channel3ONFlag == ONE
+	RETURN (pGBc_peripherals->NR52.channelSoundONOFFFields.channel3ONFlag == ONE
 		&& pGBc_peripherals->NR34.channelHigherPeriodAndControlFields.trigger == ONE
 		&& pGBc_instance->GBc_state.audio.audioChannelInstance[AUDIO_CHANNELS::CHANNEL_3].isChannelActuallyEnabled == ENABLED);
 }
@@ -4043,7 +4070,9 @@ void GBc_t::captureDownsampledAudioSamples()
 
 		leftSample /= FOUR;
 		// Refer to https://x.com/LIJI32/status/964555034011815936/photo/1
-		leftSample *= pGBc_peripherals->NR50.channelMasterVolumeAndVINPanningFields.leftOutputVolume + ONE;
+		// NR50 is 1/8 (quietest) .. 8/8 = unity (loudest), not a x1..x8 boost.
+		// Use 8.0f, not 8 -- integer division here truncates to 0 for every value except 8.
+		leftSample *= (pGBc_peripherals->NR50.channelMasterVolumeAndVINPanningFields.leftOutputVolume + ONE) / 8.0f;
 		leftSample += DC_BIAS_FOR_AUDIO_SAMPLES;
 		// Refer to https://x.com/LIJI32/status/964555034011815936/photo/1
 		leftSample = finHPF(leftSample);
@@ -4068,7 +4097,9 @@ void GBc_t::captureDownsampledAudioSamples()
 
 		rightSample /= FOUR;
 		// Refer to https://x.com/LIJI32/status/964555034011815936/photo/1
-		rightSample *= pGBc_peripherals->NR50.channelMasterVolumeAndVINPanningFields.rightOutputVolume + ONE;
+		// NR50 is 1/8 (quietest) .. 8/8 = unity (loudest), not a x1..x8 boost.
+		// Use 8.0f, not 8 -- integer division here truncates to 0 for every value except 8.
+		rightSample *= (pGBc_peripherals->NR50.channelMasterVolumeAndVINPanningFields.rightOutputVolume + ONE) / 8.0f;
 		rightSample += DC_BIAS_FOR_AUDIO_SAMPLES;
 		// Refer to https://x.com/LIJI32/status/964555034011815936/photo/1
 		rightSample = finHPF(rightSample);
@@ -4256,16 +4287,17 @@ void GBc_t::processLCDEnable()
 	pGBc_display->indexOfOBJToFetchFromVisibleSpritesArray = INVALID;
 	pGBc_display->visibleObjectsPerScanLine = NULL;
 	pGBc_display->shouldIncrementWindowLineCounter = CLEAR;
-	pGBc_display->waitForNextLineForWindSyncGlitch = NO;
-	pGBc_display->performWindSyncGlitch = NO;
 	pGBc_display->shouldFetchAndRenderWindowInsteadOfBG = NO;
-	pGBc_display->shouldFetchAndRenderBGInsteadOfWindowAfterCurrentTile = NO;
 	pGBc_display->pixelFetcherCounterPerScanLine = RESET;
 	pGBc_display->pixelRenderCounterPerScanLine = -EIGHT;
 	pGBc_display->pixelFetcherDots = RESET;
 	pGBc_display->pixelRendererDots = RESET;
 	pGBc_display->pixelPipelineDots = RESET;
 	pGBc_display->isNewM3Scanline = YES;
+#if (GB_GBC_ENABLE_WIN_EN_GLITCH == YES)
+	pGBc_display->ignoreSCXLowBitsAfterWindow = CLEAR;
+	pGBc_display->windowAlreadyActivatedThisScanline = CLEAR;
+#endif
 	pGBc_display->shouldSimulateBGScrollingPenaltyNow = YES;
 	pGBc_display->oamSearchCount = ZERO;
 	pGBc_display->spriteCountPerScanLine = ZERO;
@@ -4349,16 +4381,17 @@ void GBc_t::processLCDDisable()
 	pGBc_display->indexOfOBJToFetchFromVisibleSpritesArray = INVALID;
 	pGBc_display->visibleObjectsPerScanLine = NULL;
 	pGBc_display->shouldIncrementWindowLineCounter = CLEAR;
-	pGBc_display->waitForNextLineForWindSyncGlitch = NO;
-	pGBc_display->performWindSyncGlitch = NO;
 	pGBc_display->shouldFetchAndRenderWindowInsteadOfBG = NO;
-	pGBc_display->shouldFetchAndRenderBGInsteadOfWindowAfterCurrentTile = NO;
 	pGBc_display->pixelFetcherCounterPerScanLine = RESET;
 	pGBc_display->pixelRenderCounterPerScanLine = -EIGHT;
 	pGBc_display->pixelFetcherDots = RESET;
 	pGBc_display->pixelRendererDots = RESET;
 	pGBc_display->pixelPipelineDots = RESET;
 	pGBc_display->isNewM3Scanline = YES;
+#if (GB_GBC_ENABLE_WIN_EN_GLITCH == YES)
+	pGBc_display->ignoreSCXLowBitsAfterWindow = CLEAR;
+	pGBc_display->windowAlreadyActivatedThisScanline = CLEAR;
+#endif
 	pGBc_display->shouldSimulateBGScrollingPenaltyNow = YES;
 	pGBc_display->oamSearchCount = ZERO;
 	pGBc_display->spriteCountPerScanLine = ZERO;
@@ -4375,6 +4408,9 @@ void GBc_t::processLCDDisable()
 	pGBc_display->nX159SpritesPresent = ZERO;
 	pGBc_display->wasX0Object = NO;
 	pGBc_display->yConditionForWindowIsMetForCurrentFrame = NO;
+#if (GB_GBC_ENABLE_WINDESYNC_GLITCH == YES)
+	pGBc_display->cachedWinEnablePerFrame = CLEAR;
+#endif
 
 	// Blank for 1 frame
 	pGBc_emuStatus->freezeLCDOneFrame = YES;
@@ -4469,17 +4505,9 @@ void GBc_t::setPaletteIndexForCGB(FLAG isThisForBackground, uint8_t value)
 	// :	   
 	// 63	-> xGP7 byte 3 ->	higher byte color ID 31		-> in xCPD -> G/B
 
-	uint16_t palette_ID = ((value >> 3) & 0x07);
-
-	// perform the following to get the color ID from value
-	// (value / total colors per palettes) = (value / 2) => is same as => ((value >> 1) & 0x03)
-
-	uint16_t color_ID = ((value >> 1) & 0x03);
-
-	// perform the following to determine if higher byte or lower byte of color
-	// if bit 0 is 0, then lower, otherwise higher
-
-	FLAG color_high_byte = (GETBIT(ZERO, value) == ONE ? true : false);
+	// Optimization: Mask out the 6-bit index (0-63). Because of your union layout, 
+	// this matches your exact color/palette bit-shifting matrix layout perfectly.
+	uint8_t current_index = value & 0x3F;
 
 	if (isThisForBackground == true)
 	{
@@ -4489,16 +4517,7 @@ void GBc_t::setPaletteIndexForCGB(FLAG isThisForBackground, uint8_t value)
 		// If we had set the address via BCPS to READ from BG section of Color/Palette RAM via BCPD;
 		// The below code snippet takes care of setting the appropriate data from Color/Palette RAM to BCPD
 
-		if (color_high_byte == true)
-		{
-			pGBc_peripherals->BCPD_BGPD = pGBc_instance->GBc_state.entireBackgroundPaletteRAM.paletteRAM
-				[palette_ID][color_ID].gbcColorByteFields.HIGHER_BYTE;
-		}
-		else
-		{
-			pGBc_peripherals->BCPD_BGPD = pGBc_instance->GBc_state.entireBackgroundPaletteRAM.paletteRAM
-				[palette_ID][color_ID].gbcColorByteFields.LOWER_BYTE;
-		}
+		pGBc_peripherals->BCPD_BGPD = pGBc_instance->GBc_state.entireBackgroundPaletteRAM.paletteRAMMemory[current_index];
 	}
 	else
 	{
@@ -4508,18 +4527,8 @@ void GBc_t::setPaletteIndexForCGB(FLAG isThisForBackground, uint8_t value)
 		// If we had set the address via OCPS to READ from OBJ section of Color/Palette RAM via OCPS;
 		// The below code snippet takes care of setting the appropriate data from Color/Palette RAM to OCPD
 
-		if (color_high_byte == true)
-		{
-			pGBc_peripherals->OCPD_OBPD = pGBc_instance->GBc_state.entireObjectPaletteRAM.paletteRAM
-				[palette_ID][color_ID].gbcColorByteFields.HIGHER_BYTE;
-		}
-		else
-		{
-			pGBc_peripherals->OCPD_OBPD = pGBc_instance->GBc_state.entireObjectPaletteRAM.paletteRAM
-				[palette_ID][color_ID].gbcColorByteFields.LOWER_BYTE;
-		}
+		pGBc_peripherals->OCPD_OBPD = pGBc_instance->GBc_state.entireObjectPaletteRAM.paletteRAMMemory[current_index];
 	}
-
 }
 
 void GBc_t::setPaletteColorForCGB(FLAG isThisForBackground, uint8_t value)
@@ -4538,31 +4547,20 @@ void GBc_t::setPaletteColorForCGB(FLAG isThisForBackground, uint8_t value)
 		// perform the following to get the palette from paletteSpecification
 		// (paletteSpecification / total palettes) = (paletteSpecification / 8) => is same as => ((paletteSpecification >> 3) & 0x07)
 
-		palette_ID = ((paletteSpecification >> 3) & 0x07);
-
 		// perform the following to get the color ID from paletteSpecification
 		// (paletteSpecification / total colors per palettes) = (paletteSpecification / 2) => is same as => ((paletteSpecification >> 1) & 0x03)
-
-		color_ID = ((paletteSpecification >> 1) & 0x03);
 
 		// perform the following to determine if higher byte or lower byte of color
 		// if bit 0 is 0, then lower, otherwise higher
 
-		color_high_byte = (GETBIT(ZERO, paletteSpecification) == ONE ? true : false);
+		// 1. Direct Flat Write
+		uint8_t current_index = pGBc_peripherals->BCPS_BGPI.BCPSFields.Address;
+		pGBc_instance->GBc_state.entireBackgroundPaletteRAM.paletteRAMMemory[current_index] = value;
 
-		if (color_high_byte == true)
-		{
-			pGBc_instance->GBc_state.entireBackgroundPaletteRAM.paletteRAM
-				[palette_ID][color_ID].gbcColorByteFields.HIGHER_BYTE = value;
-		}
-		else
-		{
-			pGBc_instance->GBc_state.entireBackgroundPaletteRAM.paletteRAM
-				[palette_ID][color_ID].gbcColorByteFields.LOWER_BYTE = value;
-		}
-
-		updated_BEFORE_PROCESSING = pGBc_instance->GBc_state.entireBackgroundPaletteRAM.paletteRAM
-			[palette_ID][color_ID].gbcColor;
+		// 2. 100% Optimized Read: Cast the raw memory to a 16-bit pointer.
+		// Since every color is 2 bytes, shifting the byte index right by 1 gives the exact color index (0-31).
+		uint16_t* flat_colors = reinterpret_cast<uint16_t*>(pGBc_instance->GBc_state.entireBackgroundPaletteRAM.paletteRAMMemory);
+		updated_BEFORE_PROCESSING = flat_colors[current_index >> 1];
 	}
 	else
 	{
@@ -4571,31 +4569,19 @@ void GBc_t::setPaletteColorForCGB(FLAG isThisForBackground, uint8_t value)
 		// perform the following to get the palette from paletteSpecification
 		// (paletteSpecification / total palettes) = (paletteSpecification / 8) => is same as => ((paletteSpecification >> 3) & 0x07)
 
-		palette_ID = ((paletteSpecification >> 3) & 0x07);
-
 		// perform the following to get the color ID from paletteSpecification
 		// (paletteSpecification / total colors per palettes) = (paletteSpecification / 2) => is same as => ((paletteSpecification >> 1) & 0x03)
-
-		color_ID = ((paletteSpecification >> 1) & 0x03);
 
 		// perform the following to determine if higher byte or lower byte of color
 		// if bit 0 is 0, then lower, otherwise higher
 
-		color_high_byte = (GETBIT(ZERO, paletteSpecification) == ONE ? true : false);
+		// 1. Direct Flat Write
+		uint8_t current_index = pGBc_peripherals->OCPS_OBPI.OCPSFields.Address;
+		pGBc_instance->GBc_state.entireObjectPaletteRAM.paletteRAMMemory[current_index] = value;
 
-		if (color_high_byte == true)
-		{
-			pGBc_instance->GBc_state.entireObjectPaletteRAM.paletteRAM
-				[palette_ID][color_ID].gbcColorByteFields.HIGHER_BYTE = value;
-		}
-		else
-		{
-			pGBc_instance->GBc_state.entireObjectPaletteRAM.paletteRAM
-				[palette_ID][color_ID].gbcColorByteFields.LOWER_BYTE = value;
-		}
-
-		updated_BEFORE_PROCESSING = pGBc_instance->GBc_state.entireObjectPaletteRAM.paletteRAM
-			[palette_ID][color_ID].gbcColor;
+		// 2. 100% Optimized Read
+		uint16_t* flat_colors = reinterpret_cast<uint16_t*>(pGBc_instance->GBc_state.entireObjectPaletteRAM.paletteRAMMemory);
+		updated_BEFORE_PROCESSING = flat_colors[current_index >> 1];
 	}
 }
 
@@ -4902,7 +4888,6 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 			FLAG tileIDRequiresSignedAddressing = NO;
 			uint16_t baseTileDataAddress = ZERO;
 			uint16_t baseTileMapAddress = ZERO;
-			int16_t xWindow = (int16_t)((int16_t)pGBc_peripherals->WX - SEVEN);
 			int16_t tileID = ZERO;
 			uint8_t yWithinPixelCoordinate = ZERO;
 			uint16_t yTileCoordinate = ZERO;
@@ -4916,14 +4901,31 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 			int16_t xObjCoordinate = ZERO;
 			int16_t yObjCoordinate = ZERO;
 			FLAG is8x16 = pGBc_peripherals->LCDC.lcdControlFields.OBJ_SIZE == ONE;
+			uint8_t effectiveSCX = pGBc_peripherals->SCX;
+
+#if (GB_GBC_ENABLE_WIN_EN_GLITCH == YES)
+			// Refer to point 2 of https://github.com/mattcurrie/mealybug-tearoom-tests/blob/master/the-comprehensive-game-boy-ppu-documentation.md#win_en-bit-5
+			if (pGBc_display->ignoreSCXLowBitsAfterWindow == YES)
+			{
+				effectiveSCX &= 0xF8; // ignore lower 3 bits of SCX
+			}
+#endif
 
 			// Refer : https://gbdev.io/pandocs/Scrolling.html#scrolling
-			// Alsp refer https://github.com/Ashiepaws/GBEDG/blob/master/ppu/index.md#scx-at-a-sub-tile-layer
+			// Also refer https://github.com/Ashiepaws/GBEDG/blob/master/ppu/index.md#scx-at-a-sub-tile-layer
 			if (pGBc_display->isNewM3Scanline == YES)
 			{
 				pGBc_display->discardedPixelCount = RESET;
-				pGBc_display->xBGPerPixel = (pGBc_peripherals->SCX & SEVEN); // Amount to discard for this scanline
+				pGBc_display->xBGPerPixel = RESET;
+				pGBc_display->scxLatchedThisScanline = NO;
 				pGBc_display->isNewM3Scanline = CLEAR;
+			}
+
+			PPUTODO("Handling the case when SCX is changed mid-scanline to discard pixels is currently done yet WAIT_FOR_DATA_HIGH. This might be off by few cycles and we will need to re-handle when the discard happens when this offset is fixed");
+			if (pGBc_display->scxLatchedThisScanline == NO && pGBc_display->pixelFetcherState == PIXEL_FETCHER_STATES::WAIT_FOR_DATA_HIGH)
+			{
+				pGBc_display->xBGPerPixel = (effectiveSCX & SEVEN);
+				pGBc_display->scxLatchedThisScanline = YES;
 			}
 
 			if (pGBc_display->shouldFetchAndRenderWindowInsteadOfBG == YES)
@@ -4975,7 +4977,7 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 				if (pGBc_display->shouldFetchAndRenderWindowInsteadOfBG == YES)
 				{
 					yWithinPixelCoordinate = pGBc_display->windowLineCounter & SEVEN;
-					xTileCoordinate = (pGBc_display->pixelFetcherCounterPerScanLine - xWindow) / EIGHT;
+					xTileCoordinate = (pGBc_display->pixelFetcherCounterPerScanLine - pGBc_display->latchedXWindow) / EIGHT;
 					xTileCoordinate &= 0x1F;
 					yTileCoordinate = pGBc_display->windowLineCounter / EIGHT;
 					yTileCoordinate &= 0x1F;
@@ -4987,7 +4989,7 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 					// Low 3 bits of SCX should be read only during start of new scanline
 					// Refer :  https://gbdev.io/pandocs/Scrolling.html#scrolling
 					// But here, pGBc_peripherals->SCX divide by 8 masks our the last 3 bits and hence alls good!
-					xTileCoordinate = (pGBc_display->pixelFetcherCounterPerScanLine + pGBc_peripherals->SCX) / EIGHT;
+					xTileCoordinate = (pGBc_display->pixelFetcherCounterPerScanLine + effectiveSCX) / EIGHT;
 					xTileCoordinate &= 0x1F;
 					yTileCoordinate = (pGBc_peripherals->LY + pGBc_peripherals->SCY) / EIGHT;
 					if (ROM_TYPE == ROM::GAME_BOY_COLOR)
@@ -5009,11 +5011,6 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 
 			switch (pGBc_display->pixelFetcherState)
 			{
-			case PIXEL_FETCHER_STATES::DUMMY:
-			{
-				FATAL("Unknown Pixel Fetcher State");
-				BREAK;
-			}
 			case PIXEL_FETCHER_STATES::WAIT_FOR_TILE: // 1st cycle
 			{
 				if (pGBc_display->shouldFetchObjInsteadOfWinAndBgNow == YES)
@@ -5148,20 +5145,25 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 				else
 				{
 #if (GB_GBC_ENABLE_TILE_SEL_GLITCH == YES)
-					FLAG isGlitched = pGBc_display->tileSelGlitchTCycles > RESET;
 					FLAG useGlitched = NO;
 
-					if (isGlitched == YES)
+					if (pGBc_display->tileSelGlitch == YES)
 					{
-						if (pGBc_display->cached_BG_WINDOW_TILE_DATA_AREA == SET)
+						// CGB-E behaviour (from SameBoy display.c data_for_tile_sel_glitch):
+						// last_tileset SET (0x8000 mode): use tile index as data, gated by !(tileID & 0x80)
+						// last_tileset CLEAR (0x8800 mode): use dataForSelGlitch
+						if (pGBc_display->cached_BG_WINDOW_TILE_DATA_AREA == ONE) // 0x8000 mode
 						{
 							useGlitched = !((FLAG)(pGBc_display->pixelFetcherContext.bgWinTileID & 0x80));
-							pGBc_display->pixelFetcherContext.bgWinTileDataLo = pGBc_display->pixelFetcherContext.bgWinTileID;
+							if (useGlitched == YES)
+							{
+								pGBc_display->pixelFetcherContext.bgWinTileDataLo = pGBc_display->pixelFetcherContext.bgWinTileID;
+							}
 						}
-						else
+						else // 0x8800 mode
 						{
 							useGlitched = YES;
-							pGBc_display->pixelFetcherContext.bgWinTileDataLo = pGBc_display->tileSelGlitchedData;
+							pGBc_display->pixelFetcherContext.bgWinTileDataLo = pGBc_display->dataForSelGlitch;
 						}
 					}
 
@@ -5184,21 +5186,18 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 						}
 					}
 
-					if (pGBc_display->cached_BG_WINDOW_TILE_DATA_AREA == SET && isGlitched == YES)
+					// SameBoy: when last_tileset (0x8000 mode) AND glitch active, ALSO update dataForSelGlitch from VRAM lo
+					if (pGBc_display->tileSelGlitch == YES && pGBc_display->cached_BG_WINDOW_TILE_DATA_AREA == ONE)
 					{
-						if (ROM_TYPE == ROM::GAME_BOY_COLOR && pGBc_display->cached_BG_TILE_VRAM_BANK_NUMBER == ONE)
+						if (pGBc_display->cached_BG_TILE_VRAM_BANK_NUMBER == ONE)
 						{
-							pGBc_display->tileSelGlitchedData
+							pGBc_display->dataForSelGlitch
 								= readRawMemory(pGBc_display->addressInTileDataArea, MEMORY_ACCESS_SOURCE::PPU, true);
 						}
-						else if (ROM_TYPE == ROM::GAME_BOY_COLOR && pGBc_display->cached_BG_TILE_VRAM_BANK_NUMBER == ZERO)
+						else
 						{
-							pGBc_display->tileSelGlitchedData
+							pGBc_display->dataForSelGlitch
 								= readRawMemory(pGBc_display->addressInTileDataArea, MEMORY_ACCESS_SOURCE::PPU, false, true);
-						}
-						else if (ROM_TYPE == ROM::GAME_BOY)
-						{
-							FATAL("TILE_SEL glitch not applicable in DMG");
 						}
 					}
 #else
@@ -5310,6 +5309,10 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 							= readRawMemory(pGBc_display->addressInTileDataArea + ONE, MEMORY_ACCESS_SOURCE::PPU);
 					}
 
+#if (GB_GBC_ENABLE_TILE_SEL_GLITCH == YES)
+					pGBc_display->dataForSelGlitch = pGBc_display->pixelFetcherContext.objTileDataHi;
+#endif
+
 					byte tileDataHi = pGBc_display->pixelFetcherContext.objTileDataHi;
 
 					auto pixelFifoEntriesCount = ZERO;
@@ -5383,20 +5386,22 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 					byte tileDataLo = pGBc_display->pixelFetcherContext.bgWinTileDataLo;
 
 #if (GB_GBC_ENABLE_TILE_SEL_GLITCH == YES)
-					FLAG isGlitched = pGBc_display->tileSelGlitchTCycles > RESET;
 					FLAG useGlitched = NO;
 
-					if (isGlitched == YES)
+					if (pGBc_display->tileSelGlitch == YES)
 					{
-						if (pGBc_display->cached_BG_WINDOW_TILE_DATA_AREA == SET)
+						if (pGBc_display->cached_BG_WINDOW_TILE_DATA_AREA == ONE) // 0x8000 mode
 						{
 							useGlitched = !((FLAG)(pGBc_display->pixelFetcherContext.bgWinTileID & 0x80));
-							pGBc_display->pixelFetcherContext.bgWinTileDataHi = pGBc_display->pixelFetcherContext.bgWinTileID;
+							if (useGlitched == YES)
+							{
+								pGBc_display->pixelFetcherContext.bgWinTileDataHi = pGBc_display->pixelFetcherContext.bgWinTileID;
+							}
 						}
-						else
+						else // 0x8800 mode
 						{
 							useGlitched = YES;
-							pGBc_display->pixelFetcherContext.bgWinTileDataHi = pGBc_display->tileSelGlitchedData;
+							pGBc_display->pixelFetcherContext.bgWinTileDataHi = pGBc_display->dataForSelGlitch;
 						}
 					}
 
@@ -5406,15 +5411,13 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 						{
 							pGBc_display->pixelFetcherContext.bgWinTileDataHi
 								= readRawMemory(pGBc_display->addressInTileDataArea + ONE, MEMORY_ACCESS_SOURCE::PPU, true);
-
-							pGBc_display->tileSelGlitchedData = pGBc_display->pixelFetcherContext.bgWinTileDataHi;
+							pGBc_display->dataForSelGlitch = pGBc_display->pixelFetcherContext.bgWinTileDataHi;
 						}
 						else if (ROM_TYPE == ROM::GAME_BOY_COLOR && pGBc_display->cached_BG_TILE_VRAM_BANK_NUMBER == ZERO)
 						{
 							pGBc_display->pixelFetcherContext.bgWinTileDataHi
 								= readRawMemory(pGBc_display->addressInTileDataArea + ONE, MEMORY_ACCESS_SOURCE::PPU, false, true);
-
-							pGBc_display->tileSelGlitchedData = pGBc_display->pixelFetcherContext.bgWinTileDataHi;
+							pGBc_display->dataForSelGlitch = pGBc_display->pixelFetcherContext.bgWinTileDataHi;
 						}
 						else if (ROM_TYPE == ROM::GAME_BOY)
 						{
@@ -5423,21 +5426,18 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 						}
 					}
 
-					if (pGBc_display->cached_BG_WINDOW_TILE_DATA_AREA == SET && isGlitched == YES)
+					// SameBoy: when last_tileset (0x8000 mode) AND glitch active, ALSO update dataForSelGlitch from VRAM hi
+					if (pGBc_display->tileSelGlitch == YES && pGBc_display->cached_BG_WINDOW_TILE_DATA_AREA == ONE)
 					{
-						if (ROM_TYPE == ROM::GAME_BOY_COLOR && pGBc_display->cached_BG_TILE_VRAM_BANK_NUMBER == ONE)
+						if (pGBc_display->cached_BG_TILE_VRAM_BANK_NUMBER == ONE)
 						{
-							pGBc_display->tileSelGlitchedData
+							pGBc_display->dataForSelGlitch
 								= readRawMemory(pGBc_display->addressInTileDataArea + ONE, MEMORY_ACCESS_SOURCE::PPU, true);
 						}
-						else if (ROM_TYPE == ROM::GAME_BOY_COLOR && pGBc_display->cached_BG_TILE_VRAM_BANK_NUMBER == ZERO)
+						else
 						{
-							pGBc_display->tileSelGlitchedData
+							pGBc_display->dataForSelGlitch
 								= readRawMemory(pGBc_display->addressInTileDataArea + ONE, MEMORY_ACCESS_SOURCE::PPU, false, true);
-						}
-						else if (ROM_TYPE == ROM::GAME_BOY)
-						{
-							FATAL("TILE_SEL glitch not applicable in DMG");
 						}
 					}
 #else
@@ -5823,6 +5823,9 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 			pixelFIFOEntity_t bgWinpixelToBePushed;
 			pixelFIFOEntity_t objPixelToBePushed;
 
+			FLAG insertZeroPixel = NO;
+			FLAG glitchThisPixel = NO;
+
 			// Refer to last sentence in https://www.reddit.com/r/EmuDev/comments/s6cpis/gameboy_trying_to_understand_sprite_fifo_behavior/htlwkx9/?context=3
 			// Also refer to https://www.reddit.com/r/EmuDev/comments/1902c0e/comment/lkt5ae4/?utm_source=share&utm_medium=web3x&utm_name=web3xcss&utm_term=1&utm_content=share_button
 			// As per the above links, BG FIFO should have data before checking for sprite, hence (pGBc_display->bgWinPixelFIFO.isEmpty() == NO) check is valid
@@ -5862,8 +5865,22 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 								*/
 								if (pGBc_display->pixelRenderCounterPerScanLine + SEVEN == pGBc_peripherals->WX)
 								{
+#if (GB_GBC_ENABLE_WINDESYNC_GLITCH == YES)
+									pGBc_display->cachedWinEnablePerFrame = YES;
+#endif
 									if (pGBc_display->shouldFetchAndRenderWindowInsteadOfBG == NO)
 									{
+#if (GB_GBC_ENABLE_WIN_EN_GLITCH == YES)
+										// Refer : https://github.com/mattcurrie/mealybug-tearoom-tests/blob/master/the-comprehensive-game-boy-ppu-documentation.md#win_en-bit-5
+										// Spec point 3: if window already activated this scanline, re-trigger only allowed
+										// if WX targets an undrawn pixel (which the pixelRenderCounterPerScanLine check already ensures)
+										// Spec point 4: if re-activating (already activated once), draw NEXT row immediately
+										if (pGBc_display->windowAlreadyActivatedThisScanline == YES)
+										{
+											pGBc_display->windowLineCounter++;  // next row of window
+										}
+										pGBc_display->windowAlreadyActivatedThisScanline = YES;
+#endif
 										pGBc_display->shouldFetchAndRenderWindowInsteadOfBG = YES; //  All conditions for window is met; so we use this flag indirectly to increment the window line counter as well...
 										pGBc_display->pixelFetcherState = PIXEL_FETCHER_STATES::WAIT_FOR_TILE;
 										pGBc_display->bgWinPixelFIFO.clearFIFO();
@@ -5871,24 +5888,45 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 										pGBc_display->fetchDone = NO;
 										pGBc_display->pushDone = YES;
 										pGBc_display->pixelFetcherCounterPerScanLine = pGBc_display->pixelRenderCounterPerScanLine;
+										pGBc_display->latchedWindowDiscardTarget = (pGBc_peripherals->WX < SEVEN) ? (BYTE)(SEVEN - pGBc_peripherals->WX) : ZERO;
+										// Latch the WX-derived window origin at the moment of trigger.
+										pGBc_display->latchedWX = pGBc_peripherals->WX;
+										pGBc_display->latchedXWindow = (int16_t)((int16_t)pGBc_peripherals->WX - SEVEN);
 										// We should increment WLY after the current scanline is renderred, 
 										// hence we just set a flag here, and in the next PPU mode, we increment the WLY based on this flag
 										pGBc_display->shouldIncrementWindowLineCounter = YES;
 										RETURN;
 									}
+#if (GB_GBC_ENABLE_WIN_REACTIVATION_GLITCH == YES)
+									else if (ROM_TYPE == ROM::GAME_BOY)
+									{ 
+										if (pGBc_display->pixelFetcherState == PIXEL_FETCHER_STATES::WAIT_FOR_TILE && pGBc_display->bgWinPixelFIFO.numberOfEntities == EIGHT 
+											// TODO: The below condition helps in passing m3_wx_6_change with GB_GBC_ENABLE_WIN_REACTIVATION_GLITCH enabled
+											// When GB_GBC_ENABLE_WIN_REACTIVATION_GLITCH is disabled, m3_wx_6_change passes as is
+											// What this condition seems to do is basically avoid this reactivation immediately after a fresh window was activated and not even a single pixel was rendered yet, which is not a glitch, but a normal behavior
+											&& (pGBc_display->pixelRenderCounterPerScanLine + SEVEN != pGBc_display->latchedWX))
+										{
+											insertZeroPixel = YES;
+										}
+									}
+#endif
 								}
 							}
 							else
 							{
-								// Refer https://github.com/mattcurrie/mealybug-tearoom-tests/blob/master/the-comprehensive-game-boy-ppu-documentation.md#win_en-bit-5
 								// WINDOW LAYER is disabled while in middle of rendering the window
-								if (pGBc_display->shouldFetchAndRenderWindowInsteadOfBG == YES || pGBc_display->shouldFetchAndRenderBGInsteadOfWindowAfterCurrentTile == YES)
+								if (pGBc_display->shouldFetchAndRenderWindowInsteadOfBG == YES)
 								{
-									// Wait until tile boundary to reset the fetcher to fetch BG
-									if ((pGBc_display->pixelRenderCounterPerScanLine & SEVEN) == ZERO)
+#if (GB_GBC_ENABLE_WIN_EN_GLITCH == YES)
+									pGBc_display->ignoreSCXLowBitsAfterWindow = YES;
+									// Refer https://github.com/mattcurrie/mealybug-tearoom-tests/blob/master/the-comprehensive-game-boy-ppu-documentation.md#win_en-bit-5
+									// Wait until tile boundary (spec: disabling takes effect at end of current window tile)
+									// Guard against negative pixelRenderCounterPerScanLine giving wrong modulo result
+									if (pGBc_display->pixelRenderCounterPerScanLine >= ZERO
+										&& (pGBc_display->pixelRenderCounterPerScanLine & SEVEN) == SEVEN)
+#endif
 									{
 										pGBc_display->shouldFetchAndRenderWindowInsteadOfBG = NO;
-										pGBc_display->shouldFetchAndRenderBGInsteadOfWindowAfterCurrentTile = NO;
 										pGBc_display->pixelFetcherState = PIXEL_FETCHER_STATES::WAIT_FOR_TILE;
 										pGBc_display->bgWinPixelFIFO.clearFIFO();
 										pGBc_display->tempBgWinPixelFIFO.clearFIFO();
@@ -5897,29 +5935,48 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 										pGBc_display->pixelFetcherCounterPerScanLine = pGBc_display->pixelRenderCounterPerScanLine;
 										RETURN;
 									}
-									else
+								}
+#if (GB_GBC_ENABLE_WINDESYNC_GLITCH == YES)
+								if (ROM_TYPE == ROM::GAME_BOY)
+								{
+									// Refer https://github.com/nitro2k01/little-things-gb/tree/main/windesync-validate#summary-of-the-glitch
+									// Supposed to start on subsequent scanline after window is disabled, 
+									// but we will do it on the same scanline as condition (3) takes care of not triggering in same scanline as window is disabled 
+									// unless WX is shifted within the same scanline but post window disabled
+									// Condition (1): window was active this frame but WIN_EN is now clear
+									if (pGBc_display->cachedWinEnablePerFrame == YES)
 									{
-										pGBc_display->shouldFetchAndRenderBGInsteadOfWindowAfterCurrentTile = YES;
+										// Condition (2)
+										if (pGBc_peripherals->WX >= ZERO && pGBc_peripherals->WX <= ONEHUNDREDSIXTYSIX)
+										{
+											// Condition (3)
+											if (pGBc_display->pixelRenderCounterPerScanLine + SEVEN == pGBc_peripherals->WX)
+											{
+												// Condition (4)
+												if ((pGBc_peripherals->WX & 0x07) == (SEVEN - (pGBc_peripherals->SCX & 0x07)))
+												{
+													glitchThisPixel = YES;
+												}
+											}
+										}
 									}
 								}
+#endif
 							}
 						}
 						else
 						{
 							pGBc_display->shouldFetchAndRenderWindowInsteadOfBG = NO;
-							pGBc_display->shouldFetchAndRenderBGInsteadOfWindowAfterCurrentTile = NO;
 						}
 					}
 					else
 					{
 						pGBc_display->shouldFetchAndRenderWindowInsteadOfBG = NO;
-						pGBc_display->shouldFetchAndRenderBGInsteadOfWindowAfterCurrentTile = NO;
 					}
 				}
 				else
 				{
 					pGBc_display->shouldFetchAndRenderWindowInsteadOfBG = NO;
-					pGBc_display->shouldFetchAndRenderBGInsteadOfWindowAfterCurrentTile = NO;
 				}
 
 				if (_DISABLE_OBJ == NO)
@@ -6010,13 +6067,14 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 				{
 					if (pGBc_display->shouldFetchAndRenderWindowInsteadOfBG == YES)
 					{
-						if (pGBc_peripherals->WX < SEVEN)
+						if (pGBc_display->latchedWindowDiscardTarget > ZERO)
 						{
-							if (pGBc_display->discardedPixelCount < (SEVEN - pGBc_peripherals->WX))
+							if (pGBc_display->discardedPixelCount < pGBc_display->latchedWindowDiscardTarget)
 							{
 								if (pGBc_display->bgWinPixelFIFO.pop() == SUCCESS)
 								{
 									++pGBc_display->discardedPixelCount;
+									pGBc_display->pixelRenderCounterPerScanLine += ONE;
 									RETURN;
 								}
 								else
@@ -6044,7 +6102,21 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 				}
 
 				bgWinpixelToBePushed.validity = INVALID;
-				if (pGBc_display->bgWinPixelFIFO.pop(&bgWinpixelToBePushed) == SUCCESS || _DISABLE_BG == YES || _DISABLE_WIN == YES)
+				FLAG haveBgPixel = FAILURE;
+				if (glitchThisPixel || insertZeroPixel)
+				{
+					bgWinpixelToBePushed.validity = VALID;
+					bgWinpixelToBePushed.color = COLOR_ID_ZERO;
+					bgWinpixelToBePushed.palette = 0;
+					bgWinpixelToBePushed.backgroundPriority = 0;
+					haveBgPixel = SUCCESS;
+				}
+				else
+				{
+					haveBgPixel = pGBc_display->bgWinPixelFIFO.pop(&bgWinpixelToBePushed);
+				}
+
+				if (haveBgPixel == SUCCESS || _DISABLE_BG == YES || _DISABLE_WIN == YES)
 				{
 					if (ROM_TYPE == ROM::GAME_BOY_COLOR && isCGBCompatibilityModeEnabled() == NO)
 					{
@@ -6350,59 +6422,59 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 // NOTE: This function is used to dynamically change "themes"
 void GBc_t::translateGFX(PALETTE_ID from, PALETTE_ID to, PALETTE_ID colorCorrectionBefore, PALETTE_ID colorCorrectionAfter)
 {
-	// Reset the flag so that 'DARKENING' can be done once again post theme change
-	pGBc_instance->GBc_state.emulatorStatus.freezeLCD = NO;
-
-	if (ROM_TYPE == ROM::GAME_BOY_COLOR)
+	if (pGBc_instance->GBc_state.emulatorStatus.isCPUStopped == NO) MASQ_LIKELY
 	{
-		if (colorCorrectionBefore != colorCorrectionAfter)
+		if (ROM_TYPE == ROM::GAME_BOY_COLOR)
+		{
+			if (colorCorrectionBefore != colorCorrectionAfter)
+			{
+				for (uint32_t y = 0; y < getScreenHeight(); y++)
+				{
+					for (uint32_t x = 0; x < getScreenWidth(); x++)
+					{
+						pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x] = getColorFromColorIDForGBC(pGBc_display->gfxVisibleColorMap_BG_WINDOW_OBJ[y][x], colorCorrectionAfter == PALETTE_ID::PALETTE_2); // Palette 2 has color correction enabled
+
+						// update the imgui buffer
+
+						pGBc_display->imGuiBuffer.imGuiBuffer2D[y][x] = getColorFromColorIDForGBC(pGBc_display->gfxVisibleColorMap_BG_WINDOW_OBJ[y][x], colorCorrectionAfter == PALETTE_ID::PALETTE_2).COLOR;
+					}
+				}
+			}
+		}
+		else if (ROM_TYPE == ROM::GAME_BOY)
 		{
 			for (uint32_t y = 0; y < getScreenHeight(); y++)
 			{
 				for (uint32_t x = 0; x < getScreenWidth(); x++)
 				{
-					pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x] = getColorFromColorIDForGBC(pGBc_display->gfxVisibleColorMap_BG_WINDOW_OBJ[y][x], colorCorrectionAfter == PALETTE_ID::PALETTE_2); // Palette 2 has color correction enabled
+					switch (pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x].COLOR_ID)
+					{
+					case colorID::COLOR_000P:
+					{
+						pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x] = paletteIDToColor.at(to).COLOR_000P;
+						BREAK;
+					}
+					case colorID::COLOR_033P:
+					{
+						pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x] = paletteIDToColor.at(to).COLOR_033P;
+						BREAK;
+					}
+					case colorID::COLOR_066P:
+					{
+						pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x] = paletteIDToColor.at(to).COLOR_066P;
+						BREAK;
+					}
+					case colorID::COLOR_099P:
+					{
+						pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x] = paletteIDToColor.at(to).COLOR_099P;
+						BREAK;
+					}
+					}
 
 					// update the imgui buffer
 
-					pGBc_display->imGuiBuffer.imGuiBuffer2D[y][x] = getColorFromColorIDForGBC(pGBc_display->gfxVisibleColorMap_BG_WINDOW_OBJ[y][x], colorCorrectionAfter == PALETTE_ID::PALETTE_2).COLOR;
+					pGBc_display->imGuiBuffer.imGuiBuffer2D[y][x] = pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x].COLOR;
 				}
-			}
-		}
-	}
-	else if (ROM_TYPE == ROM::GAME_BOY)
-	{
-		for (uint32_t y = 0; y < getScreenHeight(); y++)
-		{
-			for (uint32_t x = 0; x < getScreenWidth(); x++)
-			{
-				switch (pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x].COLOR_ID)
-				{
-				case colorID::COLOR_000P:
-				{
-					pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x] = paletteIDToColor.at(to).COLOR_000P;
-					BREAK;
-				}
-				case colorID::COLOR_033P:
-				{
-					pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x] = paletteIDToColor.at(to).COLOR_033P;
-					BREAK;
-				}
-				case colorID::COLOR_066P:
-				{
-					pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x] = paletteIDToColor.at(to).COLOR_066P;
-					BREAK;
-				}
-				case colorID::COLOR_099P:
-				{
-					pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x] = paletteIDToColor.at(to).COLOR_099P;
-					BREAK;
-				}
-				}
-
-				// update the imgui buffer
-
-				pGBc_display->imGuiBuffer.imGuiBuffer2D[y][x] = pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x].COLOR;
 			}
 		}
 	}
@@ -6510,7 +6582,7 @@ void GBc_t::displayCompleteScreen()
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	}
 #else
-		// 1. Upload emulator framebuffer to gameboy_texture
+	// 1. Upload emulator framebuffer to gameboy_texture
 	GL_CALL(glBindTexture(GL_TEXTURE_2D, gameboy_texture));
 	GL_CALL(glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, getScreenWidth(), getScreenHeight(), GL_RGBA, GL_UNSIGNED_BYTE,
 		(GLvoid*)pGBc_display->imGuiBuffer.imGuiBuffer1D));
@@ -6518,14 +6590,9 @@ void GBc_t::displayCompleteScreen()
 	// Choose filtering mode (NEAREST or LINEAR)
 	GLint filter = (currEnVFilter == VIDEO_FILTERS::BILINEAR_FILTER) ? GL_LINEAR : GL_NEAREST;
 
-	// Apply filtering only when it changes (optimization)
-	static GLint prevFilterGB = -1;
-	if (filter != prevFilterGB)
-	{
-		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter));
-		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter));
-		prevFilterGB = filter;
-	}
+	// Apply filtering only when it changes
+	GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter));
+	GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter));
 
 	// 1b. Ghost pass – exponential decay blend of gameboy_texture into ghost_texture.
 	//     Runs at native GB/GBC resolution (160x144 or 160x144 GBC) before upscaling.
@@ -7587,8 +7654,6 @@ void GBc_t::destroyEmulator()
 	_DISABLE_BG = NO;
 	_DISABLE_WIN = NO;
 	_DISABLE_OBJ = NO;
-	_ENABLE_DMG_BIOS = NO;
-	_ENABLE_CGB_BIOS = NO;
 	_ENABLE_AUDIO_HPF = NO;
 	_FORCE_GB_FOR_GBC = NO;
 	_FORCE_GB_GFX_FOR_GBC = NO;
@@ -7600,10 +7665,31 @@ void GBc_t::destroyEmulator()
 
 #if (GL_FIXED_FUNCTION_PIPELINE == YES) && !defined(IMGUI_IMPL_OPENGL_ES2) && !defined(IMGUI_IMPL_OPENGL_ES3)
 	glDeleteTextures(1, &gameboy_texture);
+	gameboy_texture = 0;
+
 	glDeleteTextures(1, &matrix_texture);
+	matrix_texture = 0;
 #else
+	// 1. Delete and zero out Textures
 	glDeleteTextures(1, &gameboy_texture);
+	gameboy_texture = 0;
+
 	glDeleteTextures(1, &matrix_texture);
+	matrix_texture = 0;
+
+	glDeleteTextures(2, ghost_texture);
+	ghost_texture[0] = 0;
+	ghost_texture[1] = 0;
+
+	// 2. Delete and zero out Framebuffers
+	glDeleteFramebuffers(1, &ghost_fbo);
+	ghost_fbo = 0;
+
+	if (shaderProgramGhost != 0)
+	{
+		glDeleteProgram(shaderProgramGhost);
+		shaderProgramGhost = 0;
+	}
 #endif
 
 	auto audioDevId = SDL_GetAudioStreamDevice(audioStream);
@@ -7712,293 +7798,10 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 			}
 			else
 			{
-				if (ROM_TYPE == ROM::GAME_BOY)
-				{
-					INFO("Initialize few registers and memory regions of GB-GBC before starting the emulation");
-
-					cpuSetRegister(REGISTER_TYPE::RT_PC, 0x0100);
-					cpuSetRegister(REGISTER_TYPE::RT_AF, 0x01B0);
-					cpuSetRegister(REGISTER_TYPE::RT_BC, 0x0013);
-					cpuSetRegister(REGISTER_TYPE::RT_DE, 0x00D8);
-					cpuSetRegister(REGISTER_TYPE::RT_HL, 0x014D);
-					cpuSetRegister(REGISTER_TYPE::RT_SP, 0xFFFE);
-
-					// bypassing "writeRawMemory" and directly writing to memory as we don't want the usual memory logic to be applicable here
-
-					// Source : GB Pandocs
-#if ENABLED
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF00] = 0xCF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF01] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF02] = 0x7E;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF03] = 0xFF; // Not documented in pandocs, but mts test expect this register (DIV LSB) to be initialized to 0xFF			
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF04] = 0xAB;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF05] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF06] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF07] = 0xF8;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF08];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF09];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF0A];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF0B];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF0C];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF0D];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF0E];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF0F] = 0xE1;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF10] = 0x80;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF11] = 0xBF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF12] = 0xF3;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF13] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF14] = 0xBF;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF15];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF16] = 0x3F;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF17] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF18] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF19] = 0xBF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF1A] = 0x7F;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF1B] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF1C] = 0x9F;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF1D] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF1E] = 0xBF;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF1F];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF20] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF21] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF22] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF23] = 0xBF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF24] = 0x77;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF25] = 0xF3;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF26] = 0xF1;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF27];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF28];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF29];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF2A];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF2B];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF2C];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF2D];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF2E];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF2F];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF40] = 0x91;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF41] = 0x85;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF42] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF43] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF44] = 0x91; // Deviation from pandocs; this is needed otherwise PPU mode and LY goes out of sync
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF45] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF46] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF47] = 0xFC;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF48];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF49];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF4A] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF4B] = 0x00;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF4C];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF4D] = 0xFF;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF4E];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF4F] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF50] = 0x01; // Deviation; this is needed as per BESS specification
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF51] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF52] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF53] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF54] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF55] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF56] = 0xFF;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF57];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF58];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF59];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF5A];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF5B];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF5C];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF5D];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF5E];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF5F];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF60];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF61];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF62];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF63];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF64];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF65];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF66];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF67];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF68] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF69] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF6A] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF6B] = 0xFF;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF6C];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF6D];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF6E];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF6F];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF70] = 0xFF;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF71];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF78];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF79];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF7A];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF7B];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF7C];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF7D];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF7E];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF7F];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFFFF] = 0x00;
-
-					// initialize wave ram
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF30];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF31];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF32];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF33];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF34];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF35];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF36];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF37];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF38];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF39];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF3A];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF3B];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF3C];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF3D];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF3E];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF3F];
+#ifdef __EMSCRIPTEN__
+				emscripten_run_script("alert('Could not find a valid GB/GBC BIOS. To load the BIOS, click on File->Reset')");
 #endif
-				}
-				else if (ROM_TYPE == ROM::GAME_BOY_COLOR)
-				{
-					INFO("Initialize few registers and memory regions of GB-GBC before starting the emulation");
-
-					cpuSetRegister(REGISTER_TYPE::RT_PC, 0x0100);
-					cpuSetRegister(REGISTER_TYPE::RT_AF, 0x1180);
-					cpuSetRegister(REGISTER_TYPE::RT_BC, 0x0000);
-					cpuSetRegister(REGISTER_TYPE::RT_DE, 0xFF56);
-					cpuSetRegister(REGISTER_TYPE::RT_HL, 0x000D);
-					cpuSetRegister(REGISTER_TYPE::RT_SP, 0xFFFE);
-
-					// bypassing "writeRawMemory" and directly writing to memory as we don't want the usual memory logic to be applicable here
-
-					// Source : GB Pandocs (and few from VBA-M)
-
-#if ENABLED
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF00] = 0xC7;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF01] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF02] = 0x7F;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF03] = 0xFF; // Not documented in pandocs, but mts test expect this register (DIV LSB) to be initialized to 0xFF	
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF04];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF05] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF06] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF07] = 0xF8;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF08];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF09];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF0A];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF0B];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF0C];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF0D];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF0E];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF0F] = 0xE1;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF10] = 0x80;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF11] = 0xBF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF12] = 0xF3;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF13] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF14] = 0xBF;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF15];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF16] = 0x3F;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF17] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF18] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF19] = 0xBF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF1A] = 0x7F;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF1B] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF1C] = 0x9F;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF1D] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF1E] = 0xBF;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF1F];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF20] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF21] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF22] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF23] = 0xBF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF24] = 0x77;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF25] = 0xF3;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF26] = 0xF1;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF27];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF28];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF29];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF2A];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF2B];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF2C];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF2D];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF2E];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF2F];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF40] = 0x91;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF41];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF42] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF43] = 0x00;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF44];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF45] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF46] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF47] = 0xFC;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF48];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF49];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF4A] = 0x00;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF4B] = 0x00;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF4C];
-					TODO("Enabling GBcRawMemory[0xFF4D] = 0xFF causes glitch in \"Denshe de Go!2\" (This register corresponds to KEY1; used for CGB double speed)");
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF4D] = 0xFF;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF4E];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF4F] = 0xFF;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF50];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF51] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF52] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF53] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF54] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF55] = 0xFF;
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF56] = 0xFF;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF57];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF58];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF59];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF5A];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF5B];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF5C];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF5D];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF5E];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF5F];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF60];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF61];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF62];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF63];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF64];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF65];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF66];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF67];
-					TODO("GBcRawMemory[0xFF68] = 0x80 is slight deviation from pandocs to enable auto increment of BCPD/OCPD in CGB to make \"mezase.gbc\" (Pokemon Jap Intro) work");
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF68] = 0x80;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF69];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF6A];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF6B];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF6C];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF6D];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF6E];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF6F];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF70] = 0xFF;
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF71];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF78];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF79];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF7A];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF7B];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF7C];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF7D];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF7E];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF7F];
-					pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFFFF] = 0x00;
-
-					// initialize wave ram
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF30];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF31];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF32];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF33];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF34];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF35];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF36];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF37];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF38];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF39];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF3A];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF3B];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF3C];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF3D];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF3E];
-					//pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0xFF3F];
-#endif
-				}
+				FATAL("Could not find a valid GB/GBC BIOS");
 			}
 
 			// Get current LCD mode and scanline
@@ -10036,16 +9839,16 @@ byte GBc_t::readRawMemory(uint16_t address
 			}
 #endif
 
-				if (ROM_TYPE == ROM::GAME_BOY_COLOR)
-				{
-					pGBc_peripherals->KEY0.KEY0Fields.Reserved0 = 0x03;
-					pGBc_peripherals->KEY0.KEY0Fields.Reserved1 = 0x1F;
-					RETURN pGBc_peripherals->KEY0.KEY0Memory;
-				}
-				else if (ROM_TYPE == ROM::GAME_BOY)
-				{
-					RETURN 0xFF;
-				}
+			if (ROM_TYPE == ROM::GAME_BOY_COLOR)
+			{
+				pGBc_peripherals->KEY0.KEY0Fields.Reserved0 = 0x03;
+				pGBc_peripherals->KEY0.KEY0Fields.Reserved1 = 0x1F;
+				RETURN pGBc_peripherals->KEY0.KEY0Memory;
+			}
+			else if (ROM_TYPE == ROM::GAME_BOY)
+			{
+				RETURN 0xFF;
+			}
 		}
 
 		// reading from KEY1
@@ -10182,18 +9985,30 @@ byte GBc_t::readRawMemory(uint16_t address
 			}
 		}
 
-		// RETURN from BCPD
+		// reading from BCPD
 		if (address == BCPD_ADDRESS)
 		{
 			if (ROM_TYPE == ROM::GAME_BOY_COLOR)
 			{
+				bool boot_rom_finished = (pGBc_peripherals->BANK != RESET);
+
+				// 1. Enforce the DMG compatibility mode lockout ONLY after boot
+				if (isCGBCompatibilityModeEnabled() && boot_rom_finished)
+				{
+					RETURN 0xFF;
+				}
+
+				// 2. Handle standard PPU palette blocking
 				if (pGBc_display->blockCGBPalette == YES
 					&& source == MEMORY_ACCESS_SOURCE::CPU)
 				{
 					RETURN 0xFF;
 				}
 
-				RETURN pGBc_peripherals->BCPD_BGPD;
+				// 3. Dynamic lookup: Read directly from your flat union array 
+				// using the 6-bit index from BCPS
+				BYTE current_index = pGBc_peripherals->BCPS_BGPI.BCPSFields.Address;
+				RETURN pGBc_instance->GBc_state.entireBackgroundPaletteRAM.paletteRAMMemory[current_index];
 			}
 			else if (ROM_TYPE == ROM::GAME_BOY)
 			{
@@ -10220,13 +10035,20 @@ byte GBc_t::readRawMemory(uint16_t address
 		{
 			if (ROM_TYPE == ROM::GAME_BOY_COLOR)
 			{
-				if (pGBc_display->blockCGBPalette == YES
-					&& source == MEMORY_ACCESS_SOURCE::CPU)
+				// 1. Lockout checks
+				if (isCGBCompatibilityModeEnabled() && (pGBc_peripherals->BANK != RESET))
+				{
+					RETURN 0xFF;
+				}
+				if (pGBc_display->blockCGBPalette == YES && source == MEMORY_ACCESS_SOURCE::CPU)
 				{
 					RETURN 0xFF;
 				}
 
-				RETURN pGBc_peripherals->OCPD_OBPD;
+				// 2. Direct flat indexing using your union's byte array!
+				// Mask with 0x3F (0-63 decimal) to strip the auto-increment bit (bit 7)
+				BYTE current_index = pGBc_peripherals->OCPS_OBPI.OCPSFields.Address;
+				RETURN pGBc_instance->GBc_state.entireObjectPaletteRAM.paletteRAMMemory[current_index];
 			}
 			else if (ROM_TYPE == ROM::GAME_BOY)
 			{
@@ -10252,12 +10074,20 @@ byte GBc_t::readRawMemory(uint16_t address
 			RETURN 0xFF;
 		}
 
-		// reading from WRAM BANK switch register; only bits 0 - 3 are valid
+		// reading from WRAM BANK switch register
 		if (address == WRAM_BANK_SWITCH)
 		{
 			if (ROM_TYPE == ROM::GAME_BOY_COLOR)
 			{
-				BYTE data = pGBc_peripherals->SVBK & 0x07;
+				// 1. Lockout DMG homebrew from reading CGB banking specs after boot
+				if (isCGBCompatibilityModeEnabled() && (pGBc_peripherals->BANK != RESET))
+				{
+					RETURN 0xFF;
+				}
+
+				// 2. Read the register, but force bits 3-7 to return 1s (0xF8)
+				// to mimic the physical hardware's open bus behavior.
+				BYTE data = pGBc_peripherals->SVBK | 0xF8;
 				RETURN data;
 			}
 			else if (ROM_TYPE == ROM::GAME_BOY)
@@ -13038,23 +12868,13 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 #if (GB_GBC_ENABLE_TILE_SEL_GLITCH == YES)
 			if (ROM_TYPE == ROM::GAME_BOY_COLOR)
 			{
-				// Refer // Refer : https://github.com/mattcurrie/mealybug-tearoom-tests/blob/master/the-comprehensive-game-boy-ppu-documentation.md#tile_sel-bit-4
-
 				BYTE oldTileSel = GETBIT(FOUR, oldLCDC.lcdControlMemory);
 				BYTE newTileSel = GETBIT(FOUR, data);
-
-				// Different behaviours for double speed and normal speed is based on 
-				// Refer : https://github.com/LIJI32/SameBoy/blob/master/Core/sm83_cpu.c#L271
-				// Refer : https://github.com/LIJI32/SameBoy/blob/master/Core/sm83_cpu.c#L288
-				if (isCGBDoubleSpeedEnabled() == YES)
+				if (oldTileSel != newTileSel)
 				{
-					// Double speed: glitch on any change (0->1 or 1->0)
-					pGBc_display->tileSelGlitchTCycles = (oldTileSel != newTileSel) ? TWO : RESET;
-				}
-				else
-				{
-					// Single speed: glitch only when resetting (1->0)
-					pGBc_display->tileSelGlitchTCycles = ((oldTileSel == ONE && newTileSel == ZERO)) ? ONE : RESET;
+					pGBc_display->tileSelGlitch = YES;
+					// Single speed: glitch lasts 1 T-cycle; double speed: 2 T-cycles
+					pGBc_display->tileSelGlitchTCycles = isCGBDoubleSpeedEnabled() == YES ? TWO : ONE;
 				}
 			}
 #endif
@@ -13145,10 +12965,33 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 			// Refer : https://discord.com/channels/465585922579103744/465586075830845475/1331788603516522516
 			if (pGBc_peripherals->LYC != data)
 			{
-				pGBc_peripherals->LYC = data;
-
-				// Refer : https://forums.nesdev.org/viewtopic.php?t=16434
-				compareLYToLYC(pGBc_peripherals->LY);
+#if (GB_GBC_ENABLE_CGB_LYC_WRITE_DELAY == YES)
+				// CGB in single speed resolves an LYC write one M-cycle later relative to the PPU than DMG;
+				if (ROM_TYPE == ROM::GAME_BOY_COLOR && isCGBDoubleSpeedEnabled() == NO)
+				{
+					pGBc_display->cgbLatchedLYC = data;
+					pGBc_display->cgbLYCDelayTCycles = FOUR;
+				}
+				else
+#endif
+					if (ROM_TYPE == ROM::GAME_BOY && pGBc_display->lycCompareSuppressed == YES)
+					{
+						// dead zone: write lands, comparator is dark, no compare at all
+						pGBc_peripherals->LYC = data;
+					}
+					else if (ROM_TYPE == ROM::GAME_BOY && pGBc_display->forceLY153Compare == YES)
+					{
+						// shadow window: LY reads 0, comparator still checks against 153
+						pGBc_peripherals->LYC = data;
+						// Refer : https://forums.nesdev.org/viewtopic.php?t=16434
+						compareLYToLYC(TO_UINT8(153));
+					}
+					else
+					{
+						pGBc_peripherals->LYC = data;
+				        // Refer : https://forums.nesdev.org/viewtopic.php?t=16434
+						compareLYToLYC(pGBc_peripherals->LY);
+					}
 			}
 			RETURN;
 		}
@@ -13196,6 +13039,22 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 		if (address == BGP_ADDRESS)
 		{
 			pGBc_peripherals->BGP = data;
+		}
+
+		// write to WX register
+		if (address == WX_ADDRESS)
+		{
+#if (GB_GBC_ENABLE_WX_WRITE_DELAY == YES)
+			// A WX write landing on the same PPU dot as the trigger comparison
+			// (renderPos+7==WX) must not be visible to that comparison yet -- the
+			// real hardware comparison for that dot still sees the pre-write value.
+			// Mirrors the existing CGB SCY write-delay pattern.
+			pGBc_display->wxDelayTCycles = ONE;
+			pGBc_display->latchedWXForDelay = data;
+#else
+			pGBc_peripherals->WX = data;
+#endif
+			RETURN;
 		}
 
 		// writing to KEY0
@@ -13392,6 +13251,13 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 		// writing to BCPD; i.e. setting background palette
 		if (address == BCPD_ADDRESS)
 		{
+			// Fix: If we're in DMG compatibility mode and boot ROM is over, writes are dead to the hardware
+			bool boot_rom_finished = (pGBc_peripherals->BANK != RESET);
+			if (isCGBCompatibilityModeEnabled() && boot_rom_finished)
+			{
+				RETURN;
+			}
+
 			if (ROM_TYPE == ROM::GAME_BOY_COLOR
 				&& pGBc_display->blockCGBPalette == YES
 				&& source == MEMORY_ACCESS_SOURCE::CPU)
@@ -13430,6 +13296,13 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 		// writing to OCPD; i.e. setting object palette
 		if (address == OCPD_ADDRESS)
 		{
+			// Fix: Protect object palettes from DMG compatibility wipes as well
+			bool boot_rom_finished = (pGBc_peripherals->BANK != RESET);
+			if (isCGBCompatibilityModeEnabled() && boot_rom_finished)
+			{
+				RETURN;
+			}
+
 			if (ROM_TYPE == ROM::GAME_BOY_COLOR
 				&& pGBc_display->blockCGBPalette == YES
 				&& source == MEMORY_ACCESS_SOURCE::CPU)
@@ -13457,7 +13330,19 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 		// writing to object priority mode register
 		if (address == OBJECT_PRIORITY_MODE)
 		{
-			pGBc_peripherals->OPRI = data;
+			// 1. If the boot ROM is running, the BIOS is allowed to configure priority behavior
+			if ((pGBc_peripherals->BANK == RESET))
+			{
+				pGBc_peripherals->OPRI = data;
+			}
+			// 2. If boot ROM is finished, only allow the write if we are NOT in DMG compatibility mode
+			else if (!isCGBCompatibilityModeEnabled()) // Meaning: We are in true CGB Mode
+			{
+				pGBc_peripherals->OPRI = data;
+			}
+
+			// If we are in DMG compatibility mode and the boot ROM is done, 
+			// the write is silently ignored. The hardware lock protects it!
 			RETURN;
 		}
 
@@ -14051,16 +13936,22 @@ FLAG GBc_t::processSOC()
 		if ((pGBc_peripherals->P1_JOYP.joyPadMemory & 0x0F) != 0x0F)
 		{
 			pGBc_instance->GBc_state.emulatorStatus.isCPUStopped = NO;
-			TODO("Tick 4-T DMA cycles when existing stop mode (source : Sameboy) ");
+			TODO("Tick 4-T DMA cycles when exiting stop mode (source : Sameboy)");
 			pGBc_display->blockOAMR = NO;
 			pGBc_display->blockOAMW = NO;
 			pGBc_display->blockVramR = NO;
 			pGBc_display->blockVramW = NO;
 			pGBc_display->blockCGBPalette = NO;
-			TODO("Tick 8-T cycles when existing stop mode (source : Sameboy)");
+			TODO("Tick 8-T cycles when exiting stop mode (source : Sameboy)");
+		}
+
+		if (++pGBc_instance->GBc_state.emulatorStatus.ticks.stopCounter >= PPU_CYCLES_PER_FRAME)
+		{
+			pGBc_instance->GBc_state.emulatorStatus.ticks.stopCounter = ZERO;
+			triggerStopSamplingEvent;
 		}
 	}
-		// Not In Stop Mode!
+	// Not In Stop Mode!
 	else
 	{
 		// Refer : https://www.reddit.com/r/EmuDev/comments/7206vh/sameboy_now_correctly_emulates_pinball_deluxe/
@@ -14072,9 +13963,7 @@ FLAG GBc_t::processSOC()
 		// Refer : https://discord.com/channels/465585922579103744/465586075830845475/529008578065989642
 		CPUTODO("Find more documentation for the need of gbCpuTick2T?");
 
-		if (pGBc_instance->GBc_state.emulatorStatus.isCPUHalted == YES
-			&& ROM_TYPE == ROM::GAME_BOY
-			&& pGBc_instance->GBc_state.emulatorStatus.isCPUJustHalted == NO)
+		if (pGBc_instance->GBc_state.emulatorStatus.isCPUHalted == YES && ROM_TYPE == ROM::GAME_BOY && pGBc_instance->GBc_state.emulatorStatus.isCPUJustHalted == NO)
 		{
 			gbCpuTick2T(NO);
 		}
@@ -14083,8 +13972,7 @@ FLAG GBc_t::processSOC()
 
 		if (pGBc_instance->GBc_state.emulatorStatus.isCPUHalted == YES)
 		{
-			if (ROM_TYPE == ROM::GAME_BOY_COLOR
-				|| pGBc_instance->GBc_state.emulatorStatus.isCPUJustHalted == YES)
+			if (ROM_TYPE == ROM::GAME_BOY_COLOR || pGBc_instance->GBc_state.emulatorStatus.isCPUJustHalted == YES)
 			{
 				cpuTickM();
 			}
@@ -14124,6 +14012,8 @@ FLAG GBc_t::processSOC()
 
 			runCPUPipeline();
 		}
+
+		pGBc_instance->GBc_state.emulatorStatus.ticks.stopCounter = RESET;
 	}
 
 	RETURN status;

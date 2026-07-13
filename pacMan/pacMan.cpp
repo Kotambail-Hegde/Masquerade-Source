@@ -80,7 +80,6 @@ static uint32_t matrix[16] = { 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0
 
 pacMan_t::pacMan_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config)
 {
-	isBiosEnabled = NO;
 	INC8 indexToCheck = RESET;
 
 	setEmulationID(EMULATION_ID::PACMAN_ID);
@@ -4495,10 +4494,17 @@ void pacMan_t::destroyEmulator()
 	{
 #if (GL_FIXED_FUNCTION_PIPELINE == YES) && !defined(IMGUI_IMPL_OPENGL_ES2) && !defined(IMGUI_IMPL_OPENGL_ES3)
 		glDeleteTextures(1, &pacman_texture);
+		pacman_texture = 0;
+
 		glDeleteTextures(1, &matrix_texture);
+		matrix_texture = 0;
 #else
+		// 1. Delete and zero out Textures
 		glDeleteTextures(1, &pacman_texture);
+		pacman_texture = 0;
+
 		glDeleteTextures(1, &matrix_texture);
+		matrix_texture = 0;
 #endif
 
 		auto audioDevId = SDL_GetAudioStreamDevice(audioStream);
