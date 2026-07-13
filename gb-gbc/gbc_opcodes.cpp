@@ -1803,10 +1803,11 @@ void GBc_t::runCPUPipeline()
 						INCREMENT_PC_BY_ONE();
 						pGBc_instance->GBc_state.emulatorStatus.isCPUHalted = YES;
 						pGBc_instance->GBc_state.emulatorStatus.isCPUJustHalted = YES;
-						CPUTODO("Pandocs mentions \"exitHaltInTCycles\" = 0x20000, but sameboy uses 0x20008, and we pass the speed switch tests with 0x20008");
+						CPUTODO("Pandocs mentions \"exitHaltInTCycles\" = 0x20000, but sameboy uses 0x20008, and we pass the speed switch tests with 0x20004");
+						// Maybe the above cpuTickM handles the 4 out of 0x20008 and hence we need only 0x20004 to be set here. But we need to investigate this further.
 						// Refer (Pandocs) : https://gbdev.io/pandocs/Reducing_Power_Consumption.html?highlight=STOP#the-bizarre-case-of-the-game-boy-stop-instruction-before-even-considering-timing
 						// Refer (Sameboy) : https://github.com/LIJI32/SameBoy/blob/master/Core/sm83_cpu.c#L434
-						pGBc_instance->GBc_state.emulatorStatus.exitHaltInTCycles = 0x20008;
+						pGBc_instance->GBc_state.emulatorStatus.exitHaltInTCycles = 0x20004;
 						pGBc_peripherals->DIV.divMemory = RESET;
 						handleCGBSpeedSwitch(); // API checks whether CGB or not before switch speed
 					}

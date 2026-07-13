@@ -14,6 +14,9 @@
 #pragma region WIP
 #pragma endregion WIP
 #define GB_GBC_FPS										59.73f
+#define RESET_TICK										FALSE
+#define INVALID_TICK									NO
+#define VALID_TICK										YES
 #define EMULATED_AUDIO_SAMPLING_RATE_FOR_GB_GBC			48000.0f
 #ifdef __EMSCRIPTEN__
 #define AUDIO_BUFFER_SIZE_FOR_GB_GBC					(CEIL((EMULATED_AUDIO_SAMPLING_RATE_FOR_GB_GBC / GB_GBC_FPS)))  // 32
@@ -1612,7 +1615,7 @@ private:
 		uint32_t lcdBlankCounter;
 		uint64_t apuCounter;
 		uint64_t cpuCounter;
-		FLAG isValidTickForDoubleSpeed;
+		FLAG isDoubleSpeedHi;
 		BYTE pad[3];
 		uint16_t dividerCounter;
 		uint16_t serialCounter;
@@ -2767,6 +2770,28 @@ private:
 	void cpuTickM(CPU_TICK_TYPE type = CPU_TICK_TYPE::READ_WRITE);
 	void gbCpuTick2T(FLAG isT2orT3);
 	void syncOtherGBModuleTicks();
+	MASQ_INLINE FLAG isDoubleSpeedTickHi() const
+	{
+		RETURN (pGBc_instance->GBc_state.emulatorStatus.ticks.isDoubleSpeedHi == YES);
+	}
+	MASQ_INLINE void setNextTickForDoubleSpeed()
+	{
+		pGBc_instance->GBc_state.emulatorStatus.ticks.isDoubleSpeedHi = !pGBc_instance->GBc_state.emulatorStatus.ticks.isDoubleSpeedHi;
+	}
+	MASQ_INLINE void resetTickForDoubleSpeed()
+	{
+		pGBc_instance->GBc_state.emulatorStatus.ticks.isDoubleSpeedHi = RESET_TICK;
+	}
+	MASQ_INLINE void tickDotClockModules(FLAG onHI)
+	{
+		// Encapsulated gating logic
+		if (isCGBDoubleSpeedEnabled() == NO || isDoubleSpeedTickHi() == onHI)
+		{
+			rtcTick();
+			ppuTick();
+			apuTick();
+		}
+	}
 	void dmaTick();
 	void joypadTick();
 	void timerTick();
