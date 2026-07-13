@@ -1539,6 +1539,7 @@ private:
 		BYTE wxDelayTCycles;
 		BYTE latchedWXForDelay;
 		BYTE latchedWindowDiscardTarget;
+		BYTE latchedWX;
 		int16_t latchedXWindow;
 		int16_t pixelFetcherDots;
 		int16_t pixelRendererDots;
