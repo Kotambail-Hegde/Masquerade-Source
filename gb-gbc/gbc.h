@@ -1515,6 +1515,7 @@ private:
 		FLAG shouldFetchAndRenderWindowInsteadOfBG;
 		FLAG shouldIncrementWindowLineCounter;
 		FLAG cachedWinEnablePerFrame;
+		FLAG windowDisableGlitchPixel;
 		FLAG ignoreSCXLowBitsAfterWindow;
 		FLAG windowAlreadyActivatedThisScanline;
 		FLAG gfxOfCurrentScanLineUpdated;

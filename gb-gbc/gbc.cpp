@@ -2314,6 +2314,11 @@ void GBc_t::ppuTick()
 			// Block CGB palette access to CPU
 			pGBc_display->blockCGBPalette = YES;
 
+#if (GB_GBC_ENABLE_WINDESYNC_GLITCH == YES)
+			// Window glitch pixel is only valid if applicable from new lines onwards, so we clear it here
+			pGBc_display->windowDisableGlitchPixel = CLEAR;
+#endif
+
 			// Set the LCD Mode bits
 			processPixelPipelineAndRender(ONE);
 
@@ -5941,10 +5946,8 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 								{
 									// Refer https://github.com/nitro2k01/little-things-gb/tree/main/windesync-validate#summary-of-the-glitch
 									// Supposed to start on subsequent scanline after window is disabled, 
-									// but we will do it on the same scanline as condition (3) takes care of not triggering in same scanline as window is disabled 
-									// unless WX is shifted within the same scanline but post window disabled
-									// Condition (1): window was active this frame but WIN_EN is now clear
-									if (pGBc_display->cachedWinEnablePerFrame == YES)
+									// windowDisableGlitchPixel kind of ensures this.
+									if (pGBc_display->cachedWinEnablePerFrame == YES && pGBc_display->windowDisableGlitchPixel == NO)
 									{
 										// Condition (2)
 										if (pGBc_peripherals->WX >= ZERO && pGBc_peripherals->WX <= ONEHUNDREDSIXTYSIX)
@@ -12876,6 +12879,14 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 					// Single speed: glitch lasts 1 T-cycle; double speed: 2 T-cycles
 					pGBc_display->tileSelGlitchTCycles = isCGBDoubleSpeedEnabled() == YES ? TWO : ONE;
 				}
+			}
+#endif
+
+#if (GB_GBC_ENABLE_WINDESYNC_GLITCH == YES)
+			// This is to enforce that the WINDOW glitch pixel should start from subsequent line and not the current line.
+			if ((GETBIT(FIVE, oldLCDC.lcdControlMemory) == ONE) && (GETBIT(FIVE, data) == ZERO))
+			{
+				pGBc_display->windowDisableGlitchPixel = YES;
 			}
 #endif
 
