@@ -1540,6 +1540,7 @@ private:
 		BYTE wxDelayTCycles;
 		BYTE latchedWXForDelay;
 		BYTE latchedWindowDiscardTarget;
+		FLAG noPixelRenderedSinceWindowTrigger;
 		BYTE latchedWX;
 		int16_t latchedXWindow;
 		int16_t pixelFetcherDots;

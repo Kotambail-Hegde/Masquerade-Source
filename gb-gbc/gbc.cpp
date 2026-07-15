@@ -2171,6 +2171,9 @@ void GBc_t::ppuTick()
 				pGBc_display->ignoreSCXLowBitsAfterWindow = CLEAR;
 				pGBc_display->windowAlreadyActivatedThisScanline = CLEAR;
 #endif
+#if (GB_GBC_ENABLE_WIN_REACTIVATION_GLITCH == YES)
+				pGBc_display->noPixelRenderedSinceWindowTrigger = CLEAR;
+#endif
 
 				pGBc_display->pixelFetcherCounterPerScanLine = RESET;
 				pGBc_display->pixelRenderCounterPerScanLine = -EIGHT;
@@ -2472,6 +2475,9 @@ void GBc_t::ppuTick()
 #if (GB_GBC_ENABLE_WIN_EN_GLITCH == YES)
 						pGBc_display->ignoreSCXLowBitsAfterWindow = CLEAR;
 						pGBc_display->windowAlreadyActivatedThisScanline = CLEAR;
+#endif
+#if (GB_GBC_ENABLE_WIN_REACTIVATION_GLITCH == YES)
+						pGBc_display->noPixelRenderedSinceWindowTrigger = CLEAR;
 #endif
 
 						pGBc_display->pixelFetcherCounterPerScanLine = RESET;
@@ -4303,6 +4309,9 @@ void GBc_t::processLCDEnable()
 	pGBc_display->ignoreSCXLowBitsAfterWindow = CLEAR;
 	pGBc_display->windowAlreadyActivatedThisScanline = CLEAR;
 #endif
+#if (GB_GBC_ENABLE_WIN_REACTIVATION_GLITCH == YES)
+	pGBc_display->noPixelRenderedSinceWindowTrigger = CLEAR;
+#endif
 	pGBc_display->shouldSimulateBGScrollingPenaltyNow = YES;
 	pGBc_display->oamSearchCount = ZERO;
 	pGBc_display->spriteCountPerScanLine = ZERO;
@@ -4396,6 +4405,9 @@ void GBc_t::processLCDDisable()
 #if (GB_GBC_ENABLE_WIN_EN_GLITCH == YES)
 	pGBc_display->ignoreSCXLowBitsAfterWindow = CLEAR;
 	pGBc_display->windowAlreadyActivatedThisScanline = CLEAR;
+#endif
+#if (GB_GBC_ENABLE_WIN_REACTIVATION_GLITCH == YES)
+	pGBc_display->noPixelRenderedSinceWindowTrigger = CLEAR;
 #endif
 	pGBc_display->shouldSimulateBGScrollingPenaltyNow = YES;
 	pGBc_display->oamSearchCount = ZERO;
@@ -4981,22 +4993,26 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 			{
 				if (pGBc_display->shouldFetchAndRenderWindowInsteadOfBG == YES)
 				{
-					yWithinPixelCoordinate = pGBc_display->windowLineCounter & SEVEN;
+					// X
 					xTileCoordinate = (pGBc_display->pixelFetcherCounterPerScanLine - pGBc_display->latchedXWindow) / EIGHT;
 					xTileCoordinate &= 0x1F;
+					// Y
+					yWithinPixelCoordinate = pGBc_display->windowLineCounter & SEVEN;
 					yTileCoordinate = pGBc_display->windowLineCounter / EIGHT;
 					yTileCoordinate &= 0x1F;
 				}
 				else
 				{
-					yWithinPixelCoordinate = (pGBc_peripherals->LY + pGBc_peripherals->SCY) & SEVEN;
-
 					// Low 3 bits of SCX should be read only during start of new scanline
 					// Refer :  https://gbdev.io/pandocs/Scrolling.html#scrolling
 					// But here, pGBc_peripherals->SCX divide by 8 masks our the last 3 bits and hence alls good!
+					// X
 					xTileCoordinate = (pGBc_display->pixelFetcherCounterPerScanLine + effectiveSCX) / EIGHT;
 					xTileCoordinate &= 0x1F;
+					// Y
+					yWithinPixelCoordinate = (pGBc_peripherals->LY + pGBc_peripherals->SCY) & SEVEN;
 					yTileCoordinate = (pGBc_peripherals->LY + pGBc_peripherals->SCY) / EIGHT;
+					// Handle special conditions
 					if (ROM_TYPE == ROM::GAME_BOY_COLOR)
 					{
 						// Refer : https://gbdev.io/pandocs/Scrolling.html#scrolling (CGB-E)
@@ -5894,6 +5910,9 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 										pGBc_display->pushDone = YES;
 										pGBc_display->pixelFetcherCounterPerScanLine = pGBc_display->pixelRenderCounterPerScanLine;
 										pGBc_display->latchedWindowDiscardTarget = (pGBc_peripherals->WX < SEVEN) ? (BYTE)(SEVEN - pGBc_peripherals->WX) : ZERO;
+#if (GB_GBC_ENABLE_WIN_REACTIVATION_GLITCH == YES)
+										pGBc_display->noPixelRenderedSinceWindowTrigger = YES;
+#endif
 										// Latch the WX-derived window origin at the moment of trigger.
 										pGBc_display->latchedWX = pGBc_peripherals->WX;
 										pGBc_display->latchedXWindow = (int16_t)((int16_t)pGBc_peripherals->WX - SEVEN);
@@ -5908,8 +5927,8 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 										if (pGBc_display->pixelFetcherState == PIXEL_FETCHER_STATES::WAIT_FOR_TILE && pGBc_display->bgWinPixelFIFO.numberOfEntities == EIGHT 
 											// TODO: The below condition helps in passing m3_wx_6_change with GB_GBC_ENABLE_WIN_REACTIVATION_GLITCH enabled
 											// When GB_GBC_ENABLE_WIN_REACTIVATION_GLITCH is disabled, m3_wx_6_change passes as is
-											// What this condition seems to do is basically avoid this reactivation immediately after a fresh window was activated and not even a single pixel was rendered yet, which is not a glitch, but a normal behavior
-											&& (pGBc_display->pixelRenderCounterPerScanLine + SEVEN != pGBc_display->latchedWX))
+											// What this condition seems to do is basically avoid this reactivation immediately after a new window was just activated and not even a single pixel was rendered yet, which is not a glitch, but a normal behavior
+											&& (pGBc_display->noPixelRenderedSinceWindowTrigger == NO))
 										{
 											insertZeroPixel = YES;
 										}
@@ -6078,6 +6097,9 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 								{
 									++pGBc_display->discardedPixelCount;
 									pGBc_display->pixelRenderCounterPerScanLine += ONE;
+#if (GB_GBC_ENABLE_WIN_REACTIVATION_GLITCH == YES)
+									pGBc_display->noPixelRenderedSinceWindowTrigger = NO;
+#endif
 									RETURN;
 								}
 								else
@@ -6094,6 +6116,9 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 							if (pGBc_display->bgWinPixelFIFO.pop() == SUCCESS)
 							{
 								++pGBc_display->discardedPixelCount;
+#if (GB_GBC_ENABLE_WIN_REACTIVATION_GLITCH == YES)
+								pGBc_display->noPixelRenderedSinceWindowTrigger = NO;
+#endif
 								RETURN;
 							}
 							else
@@ -6402,6 +6427,10 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 				}
 
 				pGBc_display->pixelRenderCounterPerScanLine += ONE;
+#if (GB_GBC_ENABLE_WIN_REACTIVATION_GLITCH == YES)
+				pGBc_display->noPixelRenderedSinceWindowTrigger = NO;
+#endif
+				RETURN;
 			}
 		};
 
