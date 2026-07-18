@@ -9,6 +9,7 @@
 #define GB_GBC_ENABLE_CGB_LYC_WRITE_DELAY				(YES)   // TODO: This is working, needed for Wilbert Pol's CGB LYC write timing tests, but not sure why this is needed?
 #define GB_GBC_ENABLE_WX_WRITE_DELAY					(YES)   // TODO: This is working, need for many of the mealybug windows tests, but not sure why this is needed?
 #define GB_GBC_ENABLE_BGP_OBP_MID_SCANLINE_GLITCH		(YES)	// This is working
+#define GB_GBC_ENABLE_LCDC_MID_SCANLINE_GLITCH			(YES)	// This is not working
 #define GB_GBC_ENABLE_TILE_SEL_GLITCH					(YES)	// This is not working
 #define GB_GBC_ENABLE_WIN_EN_GLITCH						(YES)	// This is not working
 #define GB_GBC_ENABLE_WINDESYNC_GLITCH					(YES)	// This is working
@@ -2666,7 +2667,19 @@ void GBc_t::ppuTick()
 
 #if (GB_GBC_ENABLE_TILE_SEL_GLITCH == YES)
 	// Refer : https://github.com/mattcurrie/mealybug-tearoom-tests/blob/master/the-comprehensive-game-boy-ppu-documentation.md#tile_sel-bit-4
-	if (pGBc_display->tileSelGlitchTCycles > RESET && --pGBc_display->tileSelGlitchTCycles == RESET) pGBc_display->tileSelGlitch = NO;
+	if (pGBc_display->tileSelGlitchTCycles > RESET && --pGBc_display->tileSelGlitchTCycles == RESET)
+	{
+		pGBc_display->tileSelGlitch = NO;
+	}
+#endif
+#if (GB_GBC_ENABLE_LCDC_MID_SCANLINE_GLITCH == YES)
+	// Refer : https://github.com/mattcurrie/mealybug-tearoom-tests/blob/master/the-comprehensive-game-boy-ppu-documentation.md#tile_sel-bit-4
+	if (pGBc_display->latchedLCDCForDelay > RESET && --pGBc_display->latchedLCDCForDelay == RESET)
+	{
+		BYTE oldLCDC = pGBc_peripherals->LCDC.lcdControlMemory;
+		pGBc_peripherals->LCDC.lcdControlMemory = pGBc_display->latchedLCDC;
+		processLCDCTransition(oldLCDC, pGBc_peripherals->LCDC.lcdControlMemory);
+	}
 #endif
 #if (GB_GBC_ENABLE_CGB_SCY_WRITE_DELAY == YES)
 	// Refer : https://github.com/mattcurrie/mealybug-tearoom-tests/blob/master/the-comprehensive-game-boy-ppu-documentation.md#scy-ff42
@@ -12937,48 +12950,52 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 		// writing to LCDC
 		if (address == LCDC_ADDRESS)
 		{
-			auto oldLCDC = pGBc_peripherals->LCDC;
+			const auto oldLCDC = pGBc_peripherals->LCDC;
 
-#if (GB_GBC_ENABLE_TILE_SEL_GLITCH == YES)
-			if (ROM_TYPE == ROM::GAME_BOY_COLOR)
-			{
-				BYTE oldTileSel = GETBIT(FOUR, oldLCDC.lcdControlMemory);
-				BYTE newTileSel = GETBIT(FOUR, data);
-				if (oldTileSel != newTileSel)
-				{
-					pGBc_display->tileSelGlitch = YES;
-					// Single speed: glitch lasts 1 T-cycle; double speed: 2 T-cycles
-					pGBc_display->tileSelGlitchTCycles = isCGBDoubleSpeedEnabled() == YES ? TWO : ONE;
-				}
-			}
-#endif
+#if (GB_GBC_ENABLE_LCDC_MID_SCANLINE_GLITCH == YES)
+			const FLAG isMode3 = (pGBc_display->currentLCDMode == LCD_MODES::MODE_LCD_DISPLAY_PIXELS);
 
-#if (GB_GBC_ENABLE_WINDESYNC_GLITCH == YES)
-			// This is to enforce that the WINDOW glitch pixel should start from subsequent line and not the current line.
-			if ((GETBIT(FIVE, oldLCDC.lcdControlMemory) == ONE) && (GETBIT(FIVE, data) == ZERO))
+			// In mode 3, during double speed, the main action happens in the pputick before and after the actual LCDC write; nothing really happens during LCDC write dot.
+			if (isMode3 && ROM_TYPE == ROM::GAME_BOY_COLOR && isCGBDoubleSpeedEnabled() == YES)
 			{
-				pGBc_display->windowDisableGlitchPixel = YES;
+				// At this point, current value of register is the new value (modded in speculative write) and latched value before speculation is the old
+				processLCDCTransition(pGBc_display->latchedOldLCDC, pGBc_peripherals->LCDC.lcdControlMemory);
+				RETURN;
 			}
 #endif
 
 			pGBc_peripherals->LCDC.lcdControlMemory = data;
 
-			// LCD/PPU enabled
-			// https://www.reddit.com/r/Gameboy/comments/a1c8h0/what_happens_when_a_gameboy_screen_is_disabled/
-			// https://forums.nesdev.org/viewtopic.php?t=12990
-			if ((GETBIT(SEVEN, oldLCDC.lcdControlMemory) == ZERO) && (GETBIT(SEVEN, data) == ONE))
+#if (GB_GBC_ENABLE_TILE_SEL_GLITCH == YES)
+			if (ROM_TYPE == ROM::GAME_BOY_COLOR)
 			{
-				// LCD cannot be enabled instantaneously
-				processLCDEnable();
+				BIT oldTileSel = GETBIT(FOUR, oldLCDC.lcdControlMemory);
+				BIT newTileSel = GETBIT(FOUR, data);
+
+				FLAG triggerGlitch = (isCGBDoubleSpeedEnabled() == YES)
+					? (oldTileSel != newTileSel)					// 0->1 or 1->0
+					: (oldTileSel == ONE && newTileSel == ZERO);	// 1->0 only
+
+				if (triggerGlitch == YES)
+				{
+					pGBc_display->tileSelGlitch = YES;
+					pGBc_display->tileSelGlitchTCycles = ONE;
+				}
 			}
-			// LCD/PPU disabled
-			// https://forums.nesdev.org/viewtopic.php?f=20&t=16434#p203762
-			// https://www.reddit.com/r/Gameboy/comments/a1c8h0/what_happens_when_a_gameboy_screen_is_disabled/
-			// https://forums.nesdev.org/viewtopic.php?t=12990
-			else if ((GETBIT(SEVEN, oldLCDC.lcdControlMemory) == ONE) && (GETBIT(SEVEN, data) == ZERO))
+#endif
+
+#if (GB_GBC_ENABLE_WINDESYNC_GLITCH == YES)
+			if (ROM_TYPE == ROM::GAME_BOY)
 			{
-				processLCDDisable();
+				// This is to enforce that the WINDOW glitch pixel should start from subsequent line and not the current line.
+				if ((GETBIT(FIVE, oldLCDC.lcdControlMemory) == ONE) && (GETBIT(FIVE, data) == ZERO))
+				{
+					pGBc_display->windowDisableGlitchPixel = YES;
+				}
 			}
+#endif
+
+			processLCDCTransition(oldLCDC.lcdControlMemory, data);
 
 			RETURN;
 		}
@@ -13145,10 +13162,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 		if (address == WX_ADDRESS)
 		{
 #if (GB_GBC_ENABLE_WX_WRITE_DELAY == YES)
-			// A WX write landing on the same PPU dot as the trigger comparison
-			// (renderPos+7==WX) must not be visible to that comparison yet -- the
-			// real hardware comparison for that dot still sees the pre-write value.
-			// Mirrors the existing CGB SCY write-delay pattern.
+			PPUTODO("Need source for WX write is delayed by 1 T-cycle in CGB mode");
 			pGBc_display->wxDelayTCycles = ONE;
 			pGBc_display->latchedWXForDelay = data;
 #else

@@ -1522,6 +1522,9 @@ private:
 		FLAG isNewM3Scanline;
 		FLAG tileSelGlitch;       // 1-T-cycle pulse, set by CPU write, cleared after 1 PPU tick
 		BYTE dataForSelGlitch;    // latched: updated after sprite render and end of mode 3
+		BYTE latchedOldLCDC;
+		BYTE latchedLCDC;
+		COUNTER8 latchedLCDCForDelay;
 		int16_t oamSearchCount;
 		int16_t spriteCountPerScanLine;
 		FLAG shouldSimulateBGScrollingPenaltyNow;
@@ -1874,7 +1877,7 @@ private:
 					{
 						// Raw register view (A006-A035)
 						BYTE registers[48];
-						// Decoded 4×4 × 3-byte matrix
+						// Decoded 4ï¿½4 ï¿½ 3-byte matrix
 						BYTE matrix[4][4][3];
 					};
 				};
@@ -2825,10 +2828,31 @@ private:
 		// Note that WINDOW_LAYER_ENABLE should not be checked here as mentioned in https ://discord.com/channels/465585922579103744/465586075830845475/757342004052099072
 		pGBc_display->yConditionForWindowIsMetForCurrentFrame |= (ly == pGBc_peripherals->WY);
 	}
+	MASQ_INLINE void processLCDCTransition(BYTE oldLCDC, BYTE newLCDC)
+	{
+		// LCD/PPU enabled
+		// https://www.reddit.com/r/Gameboy/comments/a1c8h0/what_happens_when_a_gameboy_screen_is_disabled/
+		// https://forums.nesdev.org/viewtopic.php?t=12990
+		if ((GETBIT(SEVEN, oldLCDC) == ZERO) && (GETBIT(SEVEN, newLCDC) == ONE))
+		{
+			// LCD cannot be enabled instantaneously
+			processLCDEnable();
+		}
+		// LCD/PPU disabled
+		// https://forums.nesdev.org/viewtopic.php?f=20&t=16434#p203762
+		// https://www.reddit.com/r/Gameboy/comments/a1c8h0/what_happens_when_a_gameboy_screen_is_disabled/
+		// https://forums.nesdev.org/viewtopic.php?t=12990
+		else if ((GETBIT(SEVEN, oldLCDC) == ONE) && (GETBIT(SEVEN, newLCDC) == ZERO))
+		{
+			processLCDDisable();
+		}
+	}
 	void ppuTick();
 	void apuTick();
 	MASQ_INLINE void speculativeCpuMemWrite(uint16_t address, BYTE data)
 	{
+		const FLAG isMode3 = (pGBc_display->currentLCDMode == LCD_MODES::MODE_LCD_DISPLAY_PIXELS);
+
 #if (GB_GBC_ENABLE_BGP_OBP_MID_SCANLINE_GLITCH == YES)
 		if ((uint16_t)(address - BGP_ADDRESS) <= (uint16_t)(OBP1_ADDRESS - BGP_ADDRESS))
 		{
@@ -2841,7 +2865,7 @@ private:
 			};
 
 			// Check if we are in the pixel transfer mode (Mode 3)
-			if (pGBc_display->currentLCDMode == LCD_MODES::MODE_LCD_DISPLAY_PIXELS)
+			if (isMode3)
 			{
 				BYTE* const target = (BYTE*)((char*)pGBc_peripherals + PALETTE_LUT[address - BGP_ADDRESS]);
 
@@ -2885,6 +2909,107 @@ private:
 			RETURN;
 		}
 #endif
+#if (GB_GBC_ENABLE_SCX_MID_SCANLINE_GLITCH == YES)
+		if (address == SCX_ADDRESS)
+		{
+			// Check if we are in the pixel transfer mode (Mode 3)
+			if (isMode3)
+			{
+				if (ROM_TYPE == ROM::GAME_BOY)
+				{
+					pGBc_peripherals->SCX = data;
+				}
+			}
+			RETURN;
+		}
+#endif
+#if (GB_GBC_ENABLE_SCY_MID_SCANLINE_GLITCH == YES)
+		if (address == SCY_ADDRESS)
+		{
+			// Check if we are in the pixel transfer mode (Mode 3)
+			if (isMode3)
+			{
+				if ((ROM_TYPE == ROM::GAME_BOY) || (ROM_TYPE == ROM::GAME_BOY_COLOR && isCGBDoubleSpeedEnabled() == YES))
+				{
+					pGBc_peripherals->SCY = data;
+				}
+			}
+			RETURN;
+		}
+#endif
+#if (GB_GBC_ENABLE_LCDC_MID_SCANLINE_GLITCH == YES)
+		if (address == LCDC_ADDRESS)
+		{
+			// Check if we are in the pixel transfer mode (Mode 3)
+			if (isMode3)
+			{
+				if (ROM_TYPE == ROM::GAME_BOY_COLOR && isCGBDoubleSpeedEnabled() == YES)
+				{
+					PPUTODO("For CGB doublespeed, the doublespeed HI and LO cycle handling for LCDC mode 3 glitch is not handled; timing is most likely not complete");
+					lcdControl_t oldLCDC = { RESET };
+					lcdControl_t newLCDC = { RESET };
+
+					oldLCDC.lcdControlMemory = pGBc_peripherals->LCDC.lcdControlMemory;
+					pGBc_display->latchedOldLCDC = oldLCDC.lcdControlMemory;
+
+					newLCDC.lcdControlMemory = data;
+
+#define LCDC_BG_EN_MASK      (1U << ZERO)
+#define LCDC_ENABLE_MASK     (1U << SEVEN)
+					lcdControl_t tempLCDC = newLCDC;
+					tempLCDC.lcdControlMemory =
+						(newLCDC.lcdControlMemory & ~(LCDC_BG_EN_MASK | LCDC_ENABLE_MASK)) |
+						(oldLCDC.lcdControlMemory & (LCDC_BG_EN_MASK | LCDC_ENABLE_MASK));
+#undef LCDC_BG_EN_MASK
+#undef LCDC_ENABLE_MASK
+
+#if (GB_GBC_ENABLE_TILE_SEL_GLITCH == YES)
+					BIT oldTileSel = GETBIT(FOUR, oldLCDC.lcdControlMemory);
+					BIT newTileSel = GETBIT(FOUR, newLCDC.lcdControlMemory);
+					FLAG triggerGlitch = (oldTileSel != newTileSel);	// 0->1 or 1->0
+					if (triggerGlitch == YES)
+					{
+						pGBc_display->tileSelGlitch = YES;
+						pGBc_display->tileSelGlitchTCycles = ONE;
+					}
+#endif
+
+					pGBc_display->latchedLCDC = newLCDC.lcdControlMemory;
+					pGBc_display->latchedLCDCForDelay = ONE;
+					pGBc_peripherals->LCDC.lcdControlMemory = tempLCDC.lcdControlMemory;
+				}
+				else if ((ROM_TYPE == ROM::GAME_BOY))
+				{
+					const auto display_counter = pGBc_display->pixelRenderCounterPerScanLine;
+					const auto should_fetch_obj = pGBc_display->shouldFetchObjInsteadOfWinAndBgNow;
+
+					lcdControl_t oldLCDC = { RESET };
+					lcdControl_t newLCDC = { RESET };
+
+					oldLCDC.lcdControlMemory = pGBc_peripherals->LCDC.lcdControlMemory;
+					pGBc_display->latchedOldLCDC = oldLCDC.lcdControlMemory;
+
+					newLCDC.lcdControlMemory = data;
+
+					if (newLCDC.lcdControlFields.OBJ_ENABLE == RESET &&
+						(display_counter == ZERO || should_fetch_obj == YES))
+					{
+						oldLCDC.lcdControlFields.OBJ_ENABLE = RESET;
+					}
+
+					if (newLCDC.lcdControlFields.BG_WINDOW_LAYER_ENABLE)
+					{
+						oldLCDC.lcdControlFields.BG_WINDOW_LAYER_ENABLE = SET;
+					}
+
+					pGBc_peripherals->LCDC.lcdControlMemory = oldLCDC.lcdControlMemory;
+				}
+			}
+			RETURN;
+		}
+#endif
+
+		MASQ_UNUSED(order);
 	}
 
 public:
