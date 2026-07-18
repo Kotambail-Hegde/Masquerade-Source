@@ -2829,6 +2829,62 @@ private:
 	void apuTick();
 	MASQ_INLINE void speculativeCpuMemWrite(uint16_t address, BYTE data)
 	{
+#if (GB_GBC_ENABLE_BGP_OBP_MID_SCANLINE_GLITCH == YES)
+		if ((uint16_t)(address - BGP_ADDRESS) <= (uint16_t)(OBP1_ADDRESS - BGP_ADDRESS))
+		{
+			typedef typename std::remove_pointer<decltype(pGBc_peripherals)>::type PeripheralStructType;
+			static const size_t PALETTE_LUT[] = 
+			{
+				offsetof(PeripheralStructType, BGP),  // Index 0 maps to 0xFF47
+				offsetof(PeripheralStructType, OBP0), // Index 1 maps to 0xFF48
+				offsetof(PeripheralStructType, OBP1)  // Index 2 maps to 0xFF49
+			};
+
+			// Check if we are in the pixel transfer mode (Mode 3)
+			if (pGBc_display->currentLCDMode == LCD_MODES::MODE_LCD_DISPLAY_PIXELS)
+			{
+				BYTE* const target = (BYTE*)((char*)pGBc_peripherals + PALETTE_LUT[address - BGP_ADDRESS]);
+
+				if (ROM_TYPE == ROM::GAME_BOY_COLOR)
+				{
+					if (isCGBCompatibilityModeEnabled() == YES)
+					{
+						/*
+						* CGB Mid-Scanline Update (Time Travel)
+						*
+						* Hardware Behavior (Model E):
+						* Newer CGB revisions do not exhibit the DMG "OR-glitch".
+						* However, the write still takes effect immediately, meaning the
+						* previous pixel fetcher should retroactively use the new BGP/OBP0/OBP1 value.
+						*/
+
+						*target = data;
+					}
+				}
+				else
+				{
+					/*
+					* BGP/OBP0/OBP1 Mid-Scanline "OR-Glitch" (Time Travel)
+					*
+					* Hardware Behavior:
+					* On DMG consoles, writing to the BGP/OBP0/OBP1 register during MODE_3 (Pixel Transfer)
+					* causes a bus conflict. The PPU's pixel fetcher briefly reads the result of
+					* (current_BGP/OBP0/OBP1 | new_value) due to the register write cycle timing.
+					*
+					* Implementation (Time Travel):
+					* Since our PPU renders dots sequentially, a write at the current dot effectively
+					* impacts the preceding pixel's palette. We "time travel" by patching the
+					* previously rendered pixel in our frame buffer using the 'prevDMGPixelBGColor'
+					* state, retroactively applying the bitwise OR effect before the new register
+					* value is committed.
+					*/
+
+					*target |= data;
+				}
+			}
+			RETURN;
+		}
+#endif
 	}
 
 public:

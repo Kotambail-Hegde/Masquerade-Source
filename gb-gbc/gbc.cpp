@@ -1,5 +1,5 @@
 #pragma region GB_GBC_SPECIFIC_INCLUDES
-#include "gbc.h"
+// #include "gbc.h" is moved after macro definitions to avoid macro redefinition
 #pragma endregion GB_GBC_SPECIFIC_INCLUDES
 
 #pragma region GB_GBC_SPECIFIC_MACROS
@@ -150,6 +150,10 @@
 
 #define MBC7_EEPROM_WORD(addr)							(((uint16_t*)pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[0])[(addr) & 0x7F])
 #pragma endregion GB_GBC_SPECIFIC_MACROS
+
+#pragma region GB_GBC_SPECIFIC_INCLUDES
+#include "gbc.h" // This is added after macro definitions to avoid macro redefinition
+#pragma endregion GB_GBC_SPECIFIC_INCLUDES
 
 #pragma region CONDITIONAL_INCLUDES
 #pragma endregion CONDITIONAL_INCLUDES
@@ -13116,143 +13120,23 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 		// writing to BGP register
 		if (address == BGP_ADDRESS)
 		{
-#if (GB_GBC_ENABLE_BGP_OBP_MID_SCANLINE_GLITCH == YES)
-			// Check if we are in the pixel transfer mode (Mode 3)
-			if (pGBc_display->currentLCDMode == LCD_MODES::MODE_LCD_DISPLAY_PIXELS)
-			{
-				if (ROM_TYPE == ROM::GAME_BOY_COLOR && isCGBCompatibilityModeEnabled() == YES)
-				{
-					/*
-					* CGB Mid-Scanline Update (Time Travel)
-					*
-					* Hardware Behavior (Model E):
-					* Newer CGB revisions do not exhibit the DMG "OR-glitch".
-					* However, the write still takes effect immediately, meaning the
-					* previous pixel fetcher should retroactively use the new BGP value.
-					*/
-
-					int prev_dot = pGBc_display->pixelRenderCounterPerScanLine - 1;
-					if (prev_dot >= RESET && pGBc_display->prevCGBPixelIsBG)
-					{
-						// Calculate color index using the NEW data
-						BYTE colorNumber = getColorNumberFromColorIDForGB(data, pGBc_display->prevCGBPixelBGColor);
-
-						// Fetch the color from RAM using the previous palette index
-						uint16_t gbcColor = pGBc_instance->GBc_state.entireBackgroundPaletteRAM.paletteRAM
-							[pGBc_display->prevCGBPixelBGPalette][colorNumber].gbcColor;
-
-						// Resolve and patch the buffers
-						auto resolvedColor = getColorFromColorIDForGBC(gbcColor, pGBc_instance->GBc_state.gbc_palette == PALETTE_ID::PALETTE_2);
-
-						pGBc_display->gfxVisibleColorMap_BG_WINDOW_OBJ[pGBc_peripherals->LY][prev_dot] = gbcColor;
-						pGBc_display->gfxVisible_BG_WINDOW_OBJ[pGBc_peripherals->LY][prev_dot] = resolvedColor;
-						pGBc_display->imGuiBuffer.imGuiBuffer2D[pGBc_peripherals->LY][prev_dot] = resolvedColor.COLOR;
-					}
-
-					pGBc_peripherals->BGP = data;
-				}
-				else
-				{
-					/*
-					* BGP Mid-Scanline "OR-Glitch" (Time Travel)
-					*
-					* Hardware Behavior:
-					* On DMG consoles, writing to the BGP register during MODE_3 (Pixel Transfer)
-					* causes a bus conflict. The PPU's pixel fetcher briefly reads the result of
-					* (current_BGP | new_value) due to the register write cycle timing.
-					*
-					* Implementation (Time Travel):
-					* Since our PPU renders dots sequentially, a write at the current dot effectively
-					* impacts the preceding pixel's palette. We "time travel" by patching the
-					* previously rendered pixel in our frame buffer using the 'prevDMGPixelBGColor'
-					* state, retroactively applying the bitwise OR effect before the new register
-					* value is committed.
-					*/
-
-					// Due to hardware bus behavior, it sees (current | new).
-					BYTE glitched_value = pGBc_peripherals->BGP | data;
-
-					// Time Travel !!!
-					int prev_dot = pGBc_display->pixelRenderCounterPerScanLine - 1;
-
-					if (prev_dot >= RESET && pGBc_display->prevDMGPixelIsBG)
-					{
-						// Retroactively update the previous dot using the glitched palette
-						auto glitched_color = getColorFromColorIDForGB(glitched_value, pGBc_display->prevDMGPixelBGColor);
-
-						pGBc_display->gfxVisible_BG_WINDOW_OBJ[pGBc_peripherals->LY][prev_dot] = glitched_color;
-						pGBc_display->imGuiBuffer.imGuiBuffer2D[pGBc_peripherals->LY][prev_dot] = glitched_color.COLOR;
-					}
-
-					// Update the register to the final requested value
-					pGBc_peripherals->BGP = data;
-				}
-			}
-			else
-#endif
-			{
-				// Normal behavior: just write the new value
-				pGBc_peripherals->BGP = data;
-			}
+			pGBc_peripherals->BGP = data;
 
 			RETURN;
 		}
 
-		// writing to OBP0/OBP1 register
-		if (address == OBP0_ADDRESS || address == OBP1_ADDRESS)
+		// writing to OBP0 register
+		if (address == OBP0_ADDRESS)
 		{
-#if (GB_GBC_ENABLE_BGP_OBP_MID_SCANLINE_GLITCH == YES)
-			// Check if we are in the pixel transfer mode (Mode 3)
-			if (pGBc_display->currentLCDMode == LCD_MODES::MODE_LCD_DISPLAY_PIXELS)
-			{
-				int prev_dot = pGBc_display->pixelRenderCounterPerScanLine - 1;
-				if (prev_dot >= RESET)
-				{
-					// Calculate target palette (0 or 1) based on the register being written
-					BYTE targetPalette = (address == OBP1_ADDRESS) ? 1 : 0;
+			pGBc_peripherals->OBP0 = data;
 
-					if (ROM_TYPE == ROM::GAME_BOY_COLOR && isCGBCompatibilityModeEnabled() == YES)
-					{
-						/*
-						 * CGB Compatibility Mode: Delayed Update (Time Travel)
-						 * No OR-glitch, but we retroactively update the previous OBJ pixel
-						 * if it was rendered using the OBP register currently being written.
-						 */
-						if (pGBc_display->prevCGBPixelIsOBJ && pGBc_display->prevCGBPixelOBJPalette == targetPalette)
-						{
-							BYTE colorNumber = getColorNumberFromColorIDForGB(data, pGBc_display->prevCGBPixelOBJColor);
-							uint16_t gbcColor = pGBc_instance->GBc_state.entireObjectPaletteRAM.paletteRAM[pGBc_display->prevCGBPixelOBJPalette][colorNumber].gbcColor;
+			RETURN;
+		}
 
-							auto resolvedColor = getColorFromColorIDForGBC(gbcColor, pGBc_instance->GBc_state.gbc_palette == PALETTE_ID::PALETTE_2);
-
-							pGBc_display->gfxVisibleColorMap_BG_WINDOW_OBJ[pGBc_peripherals->LY][prev_dot] = gbcColor;
-							pGBc_display->gfxVisible_BG_WINDOW_OBJ[pGBc_peripherals->LY][prev_dot] = resolvedColor;
-							pGBc_display->imGuiBuffer.imGuiBuffer2D[pGBc_peripherals->LY][prev_dot] = resolvedColor.COLOR;
-						}
-					}
-					else
-					{
-						/*
-						 * DMG Mode: OR-Glitch (Time Travel)
-						 * The PPU read (current_OBP | new_value).
-						 */
-						if (pGBc_display->prevDMGPixelIsOBJ && pGBc_display->prevDMGPixelOBJPalette == targetPalette)
-						{
-							BYTE current_OBP = (address == OBP1_ADDRESS) ? pGBc_peripherals->OBP1 : pGBc_peripherals->OBP0;
-							BYTE glitched_value = current_OBP | data;
-
-							auto glitched_color = getColorFromColorIDForGB(glitched_value, pGBc_display->prevDMGPixelOBJColor);
-
-							pGBc_display->gfxVisible_BG_WINDOW_OBJ[pGBc_peripherals->LY][prev_dot] = glitched_color;
-							pGBc_display->imGuiBuffer.imGuiBuffer2D[pGBc_peripherals->LY][prev_dot] = glitched_color.COLOR;
-						}
-					}
-				}
-			}
-#endif
-			// Final register update
-			if (address == OBP0_ADDRESS) pGBc_peripherals->OBP0 = data;
-			else pGBc_peripherals->OBP1 = data;
+		// writing to OBP1 register
+		if (address == OBP1_ADDRESS)
+		{
+			pGBc_peripherals->OBP1 = data;
 
 			RETURN;
 		}
