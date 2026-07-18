@@ -109,6 +109,13 @@ private:
 		DUMMY
 	};
 
+	enum class SPECULATION_ORDER
+	{
+		NONE,
+		FIRST,
+		SECOND
+	};
+
 private:
 
 PACK_BEGIN
@@ -2807,7 +2814,16 @@ private:
 		// Encapsulated gating logic
 		if (isCGBDoubleSpeedEnabled() == NO || isDoubleSpeedTickHi() == onHI)
 		{
-			speculativeCpuMemWrite(specAddress, specData);
+#if (GB_GBC_ENABLE_HIGHER_ORDER_SPECULATION == YES)
+			if (onHI == YES)
+			{
+				speculativeCpuMemWrite(specAddress, specData, SPECULATION_ORDER::SECOND);
+			}
+			else
+#endif
+			{
+				speculativeCpuMemWrite(specAddress, specData, SPECULATION_ORDER::FIRST);
+			}
 			rtcTick();
 			ppuTick();
 			apuTick();
@@ -2849,7 +2865,7 @@ private:
 	}
 	void ppuTick();
 	void apuTick();
-	MASQ_INLINE void speculativeCpuMemWrite(uint16_t address, BYTE data)
+	MASQ_INLINE void speculativeCpuMemWrite(uint16_t address, BYTE data, SPECULATION_ORDER order = SPECULATION_ORDER::NONE)
 	{
 		const FLAG isMode3 = (pGBc_display->currentLCDMode == LCD_MODES::MODE_LCD_DISPLAY_PIXELS);
 

@@ -18,6 +18,7 @@
 #define GB_GBC_ENABLE_WIN_REACTIVATION_GLITCH			(YES)	// This is working
 #define GB_GBC_ENABLE_CGB_OBSCURE_TIMER_BEHAVIOUR		(NO)	// This is not working; Enabling this causes rapid_toggle.gb to fail in CGB mode
 #define GB_GBC_ENABLE_DMA_STAT_OAM_BOUNDARY_GLITCH		(YES)	// This is working; This is needed by docboy's "DMA check stat" tests 
+#define GB_GBC_ENABLE_HIGHER_ORDER_SPECULATION			(NO)	// As of now, there is no need to enable this
 #pragma endregion WIP
 
 #define GB_GBC_REFERENCE_CLOCK_HZ						(4194304.0f)
@@ -1307,6 +1308,9 @@ void GBc_t::syncOtherGBModuleTicks(int32_t specAddress, int32_t specData)
 		serialTick();
 		if (isDoubleSpeedTickHi() == YES)
 		{
+#if (GB_GBC_ENABLE_HIGHER_ORDER_SPECULATION == YES)
+			speculativeCpuMemWrite(specAddress, specData, SPECULATION_ORDER::SECOND);
+#endif
 			rtcTick();
 			ppuTick();
 			apuTick();
@@ -1316,6 +1320,9 @@ void GBc_t::syncOtherGBModuleTicks(int32_t specAddress, int32_t specData)
 		serialTick();
 		if (isDoubleSpeedTickHi() == NO)
 		{
+#if (GB_GBC_ENABLE_HIGHER_ORDER_SPECULATION == YES)
+			speculativeCpuMemWrite(specAddress, specData, SPECULATION_ORDER::SECOND);
+#endif
 			rtcTick();
 			ppuTick();
 			apuTick();
@@ -1325,7 +1332,7 @@ void GBc_t::syncOtherGBModuleTicks(int32_t specAddress, int32_t specData)
 		serialTick();
 		if (isDoubleSpeedTickHi() == YES)
 		{
-			speculativeCpuMemWrite(specAddress, specData);
+			speculativeCpuMemWrite(specAddress, specData, SPECULATION_ORDER::FIRST);
 			rtcTick();
 			ppuTick();
 			apuTick();
@@ -1335,7 +1342,7 @@ void GBc_t::syncOtherGBModuleTicks(int32_t specAddress, int32_t specData)
 		serialTick();
 		if (isDoubleSpeedTickHi() == NO)
 		{
-			speculativeCpuMemWrite(specAddress, specData);
+			speculativeCpuMemWrite(specAddress, specData, SPECULATION_ORDER::FIRST);
 			rtcTick();
 			ppuTick();
 			apuTick();
@@ -1362,13 +1369,16 @@ void GBc_t::syncOtherGBModuleTicks(int32_t specAddress, int32_t specData)
 		handleStopBasedHalt();
 		timerTick();
 		serialTick();
+#if (GB_GBC_ENABLE_HIGHER_ORDER_SPECULATION == YES)
+		speculativeCpuMemWrite(specAddress, specData, SPECULATION_ORDER::SECOND);
+#endif
 		rtcTick();
 		ppuTick();
 		apuTick();
 		handleStopBasedHalt();
 		timerTick();
 		serialTick();
-		speculativeCpuMemWrite(specAddress, specData);
+		speculativeCpuMemWrite(specAddress, specData, SPECULATION_ORDER::FIRST);
 		rtcTick();
 		ppuTick();
 		apuTick();
