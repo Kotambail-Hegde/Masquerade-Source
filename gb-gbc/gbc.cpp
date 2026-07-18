@@ -1201,7 +1201,7 @@ FLAG GBc_t::isCGBCompatibilityModeEnabled()
 	RETURN (static_cast<GBC_MODE>(pGBc_peripherals->KEY0.KEY0Fields.mode) != GBC_MODE::CGB);
 }
 
-void GBc_t::cpuTickM(CPU_TICK_TYPE type)
+void GBc_t::cpuTickM(int32_t specAddress, int32_t specData, CPU_TICK_TYPE type)
 {
 #if (ENABLE_SM83_SST == YES)
 	if (ROM_TYPE == ROM::TEST_SST)
@@ -1241,11 +1241,11 @@ void GBc_t::cpuTickM(CPU_TICK_TYPE type)
 
 		pGBc_instance->GBc_state.emulatorStatus.isNewTimerCycle = YES;
 
-		syncOtherGBModuleTicks();
+		syncOtherGBModuleTicks(specAddress, specData);
 	}
 }
 
-void GBc_t::gbCpuTick2T(FLAG isT2orT3)
+void GBc_t::gbCpuTick2T(FLAG isT2orT3, int32_t specAddress, int32_t specData)
 {
 	// STAT/DMA/Joypad (Gate to T2/T3)
 	if (!isT2orT3)
@@ -1275,11 +1275,11 @@ void GBc_t::gbCpuTick2T(FLAG isT2orT3)
 	}
 	timerTick();
 	serialTick();
-	tickDotClockModules(YES);
+	tickDotClockModules(YES, specAddress, specData);
 	handleStopBasedHalt();
 	timerTick();
 	serialTick();
-	tickDotClockModules(NO);
+	tickDotClockModules(NO, specAddress, specData);
 	handleStopBasedHalt();
 
 	if (isT2orT3 == YES && isCGBDoubleSpeedEnabled() == YES)
@@ -1288,7 +1288,7 @@ void GBc_t::gbCpuTick2T(FLAG isT2orT3)
 	}
 }
 
-void GBc_t::syncOtherGBModuleTicks()
+void GBc_t::syncOtherGBModuleTicks(int32_t specAddress, int32_t specData)
 {
 	// SOC Timing Sequence
 
@@ -1318,6 +1318,7 @@ void GBc_t::syncOtherGBModuleTicks()
 		serialTick();
 		if (isDoubleSpeedTickHi() == YES)
 		{
+			speculativeCpuMemWrite(specAddress, specData);
 			rtcTick();
 			ppuTick();
 			apuTick();
@@ -1327,6 +1328,7 @@ void GBc_t::syncOtherGBModuleTicks()
 		serialTick();
 		if (isDoubleSpeedTickHi() == NO)
 		{
+			speculativeCpuMemWrite(specAddress, specData);
 			rtcTick();
 			ppuTick();
 			apuTick();
@@ -1359,6 +1361,7 @@ void GBc_t::syncOtherGBModuleTicks()
 		handleStopBasedHalt();
 		timerTick();
 		serialTick();
+		speculativeCpuMemWrite(specAddress, specData);
 		rtcTick();
 		ppuTick();
 		apuTick();

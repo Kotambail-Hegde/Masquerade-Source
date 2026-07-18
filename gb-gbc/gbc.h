@@ -2784,9 +2784,9 @@ private:
 			}
 		}
 	}
-	void cpuTickM(CPU_TICK_TYPE type = CPU_TICK_TYPE::READ_WRITE);
-	void gbCpuTick2T(FLAG isT2orT3);
-	void syncOtherGBModuleTicks();
+	void cpuTickM(int32_t specAddress = INVALID, int32_t specData = INVALID, CPU_TICK_TYPE type = CPU_TICK_TYPE::READ_WRITE);
+	void gbCpuTick2T(FLAG isT2orT3, int32_t specAddress = INVALID, int32_t specData = INVALID);
+	void syncOtherGBModuleTicks(int32_t specAddress = INVALID, int32_t specData = INVALID);
 	MASQ_INLINE FLAG isDoubleSpeedTickHi() const
 	{
 		RETURN (pGBc_instance->GBc_state.emulatorStatus.ticks.isDoubleSpeedHi == YES);
@@ -2799,11 +2799,12 @@ private:
 	{
 		pGBc_instance->GBc_state.emulatorStatus.ticks.isDoubleSpeedHi = RESET_TICK;
 	}
-	MASQ_INLINE void tickDotClockModules(FLAG onHI)
+	MASQ_INLINE void tickDotClockModules(FLAG onHI, int32_t specAddress = INVALID, int32_t specData = INVALID)
 	{
 		// Encapsulated gating logic
 		if (isCGBDoubleSpeedEnabled() == NO || isDoubleSpeedTickHi() == onHI)
 		{
+			speculativeCpuMemWrite(specAddress, specData);
 			rtcTick();
 			ppuTick();
 			apuTick();
@@ -2826,6 +2827,9 @@ private:
 	}
 	void ppuTick();
 	void apuTick();
+	MASQ_INLINE void speculativeCpuMemWrite(uint16_t address, BYTE data)
+	{
+	}
 
 public:
 
