@@ -2915,7 +2915,7 @@ private:
 			// Check if we are in the pixel transfer mode (Mode 3)
 			if (isMode3)
 			{
-				if (ROM_TYPE == ROM::GAME_BOY)
+				if ((ROM_TYPE == ROM::GAME_BOY) || (ROM_TYPE == ROM::GAME_BOY_COLOR && isCGBDoubleSpeedEnabled() == YES))
 				{
 					pGBc_peripherals->SCX = data;
 				}
@@ -2929,7 +2929,7 @@ private:
 			// Check if we are in the pixel transfer mode (Mode 3)
 			if (isMode3)
 			{
-				if ((ROM_TYPE == ROM::GAME_BOY) || (ROM_TYPE == ROM::GAME_BOY_COLOR && isCGBDoubleSpeedEnabled() == YES))
+				if (ROM_TYPE == ROM::GAME_BOY)
 				{
 					pGBc_peripherals->SCY = data;
 				}
