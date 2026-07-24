@@ -1516,15 +1516,14 @@ private:
 		FLAG lcdJustEn;
 		FLAG skipMode2;
 		uint16_t latchedSCYForGBC;
-		uint16_t windowLineCounter;
+		int16_t windowLineCounter;
 		FLAG wasVblankJustTriggerred;
 		FLAG yConditionForWindowIsMetForCurrentFrame;
 		FLAG shouldFetchAndRenderWindowInsteadOfBG;
-		FLAG shouldIncrementWindowLineCounter;
+		FLAG delayedWindowActivationWX0;
 		FLAG cachedWinEnablePerFrame;
 		FLAG windowDisableGlitchPixel;
 		FLAG ignoreSCXLowBitsAfterWindow;
-		FLAG windowAlreadyActivatedThisScanline;
 		FLAG gfxOfCurrentScanLineUpdated;
 		FLAG isNewM3Scanline;
 		FLAG tileSelGlitch;       // 1-T-cycle pulse, set by CPU write, cleared after 1 PPU tick
@@ -1884,7 +1883,7 @@ private:
 					{
 						// Raw register view (A006-A035)
 						BYTE registers[48];
-						// Decoded 4�4 � 3-byte matrix
+						// Decoded 4x4x3-byte matrix
 						BYTE matrix[4][4][3];
 					};
 				};
@@ -2843,6 +2842,44 @@ private:
 
 		// Note that WINDOW_LAYER_ENABLE should not be checked here as mentioned in https ://discord.com/channels/465585922579103744/465586075830845475/757342004052099072
 		pGBc_display->yConditionForWindowIsMetForCurrentFrame |= (ly == pGBc_peripherals->WY);
+	}
+	MASQ_INLINE void activateWindow()
+	{
+#if (GB_GBC_ENABLE_WINDESYNC_GLITCH == YES)
+		pGBc_display->cachedWinEnablePerFrame = YES;
+#endif
+
+		// All conditions for window are met; use this flag to increment the window line counter as well.
+		pGBc_display->shouldFetchAndRenderWindowInsteadOfBG = YES;
+		pGBc_display->pixelFetcherState = PIXEL_FETCHER_STATES::WAIT_FOR_TILE;
+		pGBc_display->bgWinPixelFIFO.clearFIFO();
+		pGBc_display->tempBgWinPixelFIFO.clearFIFO();
+		pGBc_display->fetchDone = NO;
+		pGBc_display->pushDone = YES;
+
+		// Latch the WX-derived window origin at the moment of trigger.
+		pGBc_display->latchedWX = pGBc_peripherals->WX;
+		pGBc_display->latchedXWindow = (int16_t)((int16_t)pGBc_peripherals->WX - SEVEN);
+		pGBc_display->latchedWindowDiscardTarget = (pGBc_peripherals->WX < SEVEN) ? (BYTE)(SEVEN - pGBc_peripherals->WX) : ZERO;
+		
+		// Increment window line counter.
+		pGBc_display->windowLineCounter++;
+
+#if (GB_GBC_ENABLE_WIN_REACTIVATION_GLITCH == YES)
+		pGBc_display->noPixelRenderedSinceWindowTrigger = YES;
+#endif
+
+		pGBc_display->pixelFetcherCounterPerScanLine = pGBc_display->pixelRenderCounterPerScanLine;
+	}
+	MASQ_INLINE void deactivateWindow()
+	{
+		pGBc_display->shouldFetchAndRenderWindowInsteadOfBG = NO;
+		pGBc_display->pixelFetcherState = PIXEL_FETCHER_STATES::WAIT_FOR_TILE;
+		pGBc_display->bgWinPixelFIFO.clearFIFO();
+		pGBc_display->tempBgWinPixelFIFO.clearFIFO();
+		pGBc_display->fetchDone = NO;
+		pGBc_display->pushDone = YES;
+		pGBc_display->pixelFetcherCounterPerScanLine = pGBc_display->pixelRenderCounterPerScanLine;
 	}
 	MASQ_INLINE void processLCDCTransition(BYTE oldLCDC, BYTE newLCDC)
 	{

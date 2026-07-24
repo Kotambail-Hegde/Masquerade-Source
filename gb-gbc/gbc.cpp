@@ -2190,12 +2190,10 @@ void GBc_t::ppuTick()
 				pGBc_display->indexOfOBJToFetchFromVisibleSpritesArray = INVALID;
 				pGBc_display->visibleObjectsPerScanLine = NULL;
 
-				pGBc_display->shouldIncrementWindowLineCounter = CLEAR;
 				pGBc_display->shouldFetchAndRenderWindowInsteadOfBG = NO;
 
 #if (GB_GBC_ENABLE_WIN_EN_GLITCH == YES)
 				pGBc_display->ignoreSCXLowBitsAfterWindow = CLEAR;
-				pGBc_display->windowAlreadyActivatedThisScanline = CLEAR;
 #endif
 #if (GB_GBC_ENABLE_WIN_REACTIVATION_GLITCH == YES)
 				pGBc_display->noPixelRenderedSinceWindowTrigger = CLEAR;
@@ -2392,17 +2390,11 @@ void GBc_t::ppuTick()
 
 			if (pGBc_display->pixelRenderCounterPerScanLine == TO_UINT16(getScreenWidth()))
 			{
-				if (pGBc_display->shouldIncrementWindowLineCounter == YES)
-				{
-					pGBc_display->windowLineCounter++;
-				}
-
 				pGBc_display->shouldFetchObjInsteadOfWinAndBgNow = CLEAR;
 				pGBc_display->isThereAnyObjectCurrentlyGettingRendered = CLEAR;
 				pGBc_display->indexOfOBJToFetchFromVisibleSpritesArray = INVALID;
 				pGBc_display->visibleObjectsPerScanLine = NULL;
 
-				pGBc_display->shouldIncrementWindowLineCounter = CLEAR;
 				pGBc_display->shouldFetchAndRenderWindowInsteadOfBG = NO;
 
 				pGBc_display->pixelFetcherCounterPerScanLine = RESET;
@@ -2495,12 +2487,10 @@ void GBc_t::ppuTick()
 						pGBc_display->indexOfOBJToFetchFromVisibleSpritesArray = INVALID;
 						pGBc_display->visibleObjectsPerScanLine = NULL;
 
-						pGBc_display->shouldIncrementWindowLineCounter = CLEAR;
 						pGBc_display->shouldFetchAndRenderWindowInsteadOfBG = NO;
 
 #if (GB_GBC_ENABLE_WIN_EN_GLITCH == YES)
 						pGBc_display->ignoreSCXLowBitsAfterWindow = CLEAR;
-						pGBc_display->windowAlreadyActivatedThisScanline = CLEAR;
 #endif
 #if (GB_GBC_ENABLE_WIN_REACTIVATION_GLITCH == YES)
 						pGBc_display->noPixelRenderedSinceWindowTrigger = CLEAR;
@@ -2587,7 +2577,7 @@ void GBc_t::ppuTick()
 						pGBc_display->wasVblankJustTriggerred = YES;
 
 						// Reset the window line counter since we are in Vblank
-						pGBc_display->windowLineCounter = RESET;
+						pGBc_display->windowLineCounter = -ONE;
 
 						if (ROM_TYPE == ROM::GAME_BOY)
 						{
@@ -4335,7 +4325,6 @@ void GBc_t::processLCDEnable()
 	pGBc_display->isThereAnyObjectCurrentlyGettingRendered = CLEAR;
 	pGBc_display->indexOfOBJToFetchFromVisibleSpritesArray = INVALID;
 	pGBc_display->visibleObjectsPerScanLine = NULL;
-	pGBc_display->shouldIncrementWindowLineCounter = CLEAR;
 	pGBc_display->shouldFetchAndRenderWindowInsteadOfBG = NO;
 	pGBc_display->pixelFetcherCounterPerScanLine = RESET;
 	pGBc_display->pixelRenderCounterPerScanLine = -EIGHT;
@@ -4345,7 +4334,6 @@ void GBc_t::processLCDEnable()
 	pGBc_display->isNewM3Scanline = YES;
 #if (GB_GBC_ENABLE_WIN_EN_GLITCH == YES)
 	pGBc_display->ignoreSCXLowBitsAfterWindow = CLEAR;
-	pGBc_display->windowAlreadyActivatedThisScanline = CLEAR;
 #endif
 #if (GB_GBC_ENABLE_WIN_REACTIVATION_GLITCH == YES)
 	pGBc_display->noPixelRenderedSinceWindowTrigger = CLEAR;
@@ -4432,7 +4420,6 @@ void GBc_t::processLCDDisable()
 	pGBc_display->isThereAnyObjectCurrentlyGettingRendered = CLEAR;
 	pGBc_display->indexOfOBJToFetchFromVisibleSpritesArray = INVALID;
 	pGBc_display->visibleObjectsPerScanLine = NULL;
-	pGBc_display->shouldIncrementWindowLineCounter = CLEAR;
 	pGBc_display->shouldFetchAndRenderWindowInsteadOfBG = NO;
 	pGBc_display->pixelFetcherCounterPerScanLine = RESET;
 	pGBc_display->pixelRenderCounterPerScanLine = -EIGHT;
@@ -4442,7 +4429,6 @@ void GBc_t::processLCDDisable()
 	pGBc_display->isNewM3Scanline = YES;
 #if (GB_GBC_ENABLE_WIN_EN_GLITCH == YES)
 	pGBc_display->ignoreSCXLowBitsAfterWindow = CLEAR;
-	pGBc_display->windowAlreadyActivatedThisScanline = CLEAR;
 #endif
 #if (GB_GBC_ENABLE_WIN_REACTIVATION_GLITCH == YES)
 	pGBc_display->noPixelRenderedSinceWindowTrigger = CLEAR;
@@ -5911,6 +5897,7 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 							// LCDC.WINDOW_LAYER_ENABLE is set
 							if (pGBc_peripherals->LCDC.lcdControlFields.WINDOW_LAYER_ENABLE == SET)
 							{
+								FLAG shouldActivateWindow = NO;
 								/*
 								* Check whether "X" condition for Window Layer is passing (X == WX and not X >= WX as this is just a one time trigger!)
 								* Refer to "WX condition was triggered" of https://gbdev.io/pandocs/Scrolling.html#window
@@ -5924,46 +5911,21 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 								*/
 								if (pGBc_display->pixelRenderCounterPerScanLine + SEVEN == pGBc_peripherals->WX)
 								{
-#if (GB_GBC_ENABLE_WINDESYNC_GLITCH == YES)
-									pGBc_display->cachedWinEnablePerFrame = YES;
-#endif
+									shouldActivateWindow = YES;
+								}
+
+								if (shouldActivateWindow == YES)
+								{
 									if (pGBc_display->shouldFetchAndRenderWindowInsteadOfBG == NO)
 									{
-#if (GB_GBC_ENABLE_WIN_EN_GLITCH == YES)
-										// Refer : https://github.com/mattcurrie/mealybug-tearoom-tests/blob/master/the-comprehensive-game-boy-ppu-documentation.md#win_en-bit-5
-										// Spec point 3: if window already activated this scanline, re-trigger only allowed
-										// if WX targets an undrawn pixel (which the pixelRenderCounterPerScanLine check already ensures)
-										// Spec point 4: if re-activating (already activated once), draw NEXT row immediately
-										if (pGBc_display->windowAlreadyActivatedThisScanline == YES)
-										{
-											pGBc_display->windowLineCounter++;  // next row of window
-										}
-										pGBc_display->windowAlreadyActivatedThisScanline = YES;
-#endif
-										pGBc_display->shouldFetchAndRenderWindowInsteadOfBG = YES; //  All conditions for window is met; so we use this flag indirectly to increment the window line counter as well...
-										pGBc_display->pixelFetcherState = PIXEL_FETCHER_STATES::WAIT_FOR_TILE;
-										pGBc_display->bgWinPixelFIFO.clearFIFO();
-										pGBc_display->tempBgWinPixelFIFO.clearFIFO();
-										pGBc_display->fetchDone = NO;
-										pGBc_display->pushDone = YES;
-										pGBc_display->pixelFetcherCounterPerScanLine = pGBc_display->pixelRenderCounterPerScanLine;
-										pGBc_display->latchedWindowDiscardTarget = (pGBc_peripherals->WX < SEVEN) ? (BYTE)(SEVEN - pGBc_peripherals->WX) : ZERO;
-#if (GB_GBC_ENABLE_WIN_REACTIVATION_GLITCH == YES)
-										pGBc_display->noPixelRenderedSinceWindowTrigger = YES;
-#endif
-										// Latch the WX-derived window origin at the moment of trigger.
-										pGBc_display->latchedWX = pGBc_peripherals->WX;
-										pGBc_display->latchedXWindow = (int16_t)((int16_t)pGBc_peripherals->WX - SEVEN);
-										// We should increment WLY after the current scanline is renderred, 
-										// hence we just set a flag here, and in the next PPU mode, we increment the WLY based on this flag
-										pGBc_display->shouldIncrementWindowLineCounter = YES;
+										activateWindow();
 										RETURN;
 									}
 #if (GB_GBC_ENABLE_WIN_REACTIVATION_GLITCH == YES)
 									else if (ROM_TYPE == ROM::GAME_BOY)
-									{ 
-										if (pGBc_display->pixelFetcherState == PIXEL_FETCHER_STATES::WAIT_FOR_TILE && pGBc_display->bgWinPixelFIFO.numberOfEntities == EIGHT 
-											// TODO: The below condition helps in passing m3_wx_6_change with GB_GBC_ENABLE_WIN_REACTIVATION_GLITCH enabled
+									{
+										if (pGBc_display->pixelFetcherState == PIXEL_FETCHER_STATES::WAIT_FOR_TILE && pGBc_display->bgWinPixelFIFO.numberOfEntities == EIGHT
+											// The below condition helps in passing m3_wx_6_change with GB_GBC_ENABLE_WIN_REACTIVATION_GLITCH enabled
 											// When GB_GBC_ENABLE_WIN_REACTIVATION_GLITCH is disabled, m3_wx_6_change passes as is
 											// What this condition seems to do is basically avoid this reactivation immediately after a new window was just activated and not even a single pixel was rendered yet, which is not a glitch, but a normal behavior
 											&& (pGBc_display->noPixelRenderedSinceWindowTrigger == NO))
@@ -5984,17 +5946,10 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 									// Refer https://github.com/mattcurrie/mealybug-tearoom-tests/blob/master/the-comprehensive-game-boy-ppu-documentation.md#win_en-bit-5
 									// Wait until tile boundary (spec: disabling takes effect at end of current window tile)
 									// Guard against negative pixelRenderCounterPerScanLine giving wrong modulo result
-									if (pGBc_display->pixelRenderCounterPerScanLine >= ZERO
-										&& (pGBc_display->pixelRenderCounterPerScanLine & SEVEN) == SEVEN)
+									if (pGBc_display->pixelRenderCounterPerScanLine >= ZERO && (pGBc_display->pixelRenderCounterPerScanLine & SEVEN) == SEVEN)
 #endif
 									{
-										pGBc_display->shouldFetchAndRenderWindowInsteadOfBG = NO;
-										pGBc_display->pixelFetcherState = PIXEL_FETCHER_STATES::WAIT_FOR_TILE;
-										pGBc_display->bgWinPixelFIFO.clearFIFO();
-										pGBc_display->tempBgWinPixelFIFO.clearFIFO();
-										pGBc_display->fetchDone = NO;
-										pGBc_display->pushDone = YES;
-										pGBc_display->pixelFetcherCounterPerScanLine = pGBc_display->pixelRenderCounterPerScanLine;
+										deactivateWindow();
 										RETURN;
 									}
 								}
@@ -6054,7 +6009,6 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 						visibleObjects_t* le = pGBc_display->visibleObjectsPerScanLine;
 
 						// Loop over the non-processed visible sprites (after selection priority is applied)
-
 						while (le)
 						{
 							if (le->alreadyProcessed == YES)
@@ -6075,7 +6029,6 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 								pGBc_display->prevSpriteX = le->oamEntry.xPosition;
 
 								// Set the "alreadyProcessed" flag for this sprite to YES
-
 								pGBc_display->arrayOfVisibleObjectsPerScanLine[itt].alreadyProcessed = YES;
 								pGBc_display->indexOfOBJToFetchFromVisibleSpritesArray = itt;
 
@@ -6828,7 +6781,7 @@ void GBc_t::initializeGraphics()
 		}
 	}
 
-	pGBc_display->windowLineCounter = RESET; // Window Line Counter = 0
+	pGBc_display->windowLineCounter = -ONE;
 
 	pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerLY = ZERO;
 	pGBc_instance->GBc_state.emulatorStatus.ticks.ppuCounterPerMode = ZERO;
