@@ -6078,16 +6078,33 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 
 				if (ENABLED)
 				{
+					// SCX fine discard will happen irrespective of WINDOW is/or will be enabled or not. Hence, have moved this out of "if (pGBc_display->shouldFetchAndRenderWindowInsteadOfBG == YES)"
+					if (pGBc_display->discardedPixelCount < (pGBc_display->xBGPerPixel)) // < SCX % 8
+					{
+						if (pGBc_display->bgWinPixelFIFO.pop() == SUCCESS)
+						{
+							++pGBc_display->discardedPixelCount;
+#if (GB_GBC_ENABLE_WIN_REACTIVATION_GLITCH == YES)
+							pGBc_display->noPixelRenderedSinceWindowTrigger = NO;
+#endif
+							RETURN;
+						}
+						else
+						{
+							FATAL("bgWinPixelFIFO BG Pop Failure");
+						}
+					}
+
 					if (pGBc_display->shouldFetchAndRenderWindowInsteadOfBG == YES)
 					{
 						if (pGBc_display->latchedWindowDiscardTarget > ZERO)
 						{
-							if (pGBc_display->discardedPixelCount < pGBc_display->latchedWindowDiscardTarget)
+							if (pGBc_display->discardedPixelCountForWin < pGBc_display->latchedWindowDiscardTarget)
 							{
 								if (pGBc_display->bgWinPixelFIFO.pop() == SUCCESS)
 								{
-									++pGBc_display->discardedPixelCount;
-									pGBc_display->pixelRenderCounterPerScanLine += ONE;
+									++pGBc_display->discardedPixelCountForWin;
+									pGBc_display->pixelRenderCounterPerScanLine += ONE; // Render BG or OBJ until the offset window pixels are discarded
 #if (GB_GBC_ENABLE_WIN_REACTIVATION_GLITCH == YES)
 									pGBc_display->noPixelRenderedSinceWindowTrigger = NO;
 #endif
@@ -6097,24 +6114,6 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 								{
 									FATAL("bgWinPixelFIFO Window Pop Failure");
 								}
-							}
-						}
-					}
-					else
-					{
-						if (pGBc_display->discardedPixelCount < (pGBc_display->xBGPerPixel)) // < SCX % 8
-						{
-							if (pGBc_display->bgWinPixelFIFO.pop() == SUCCESS)
-							{
-								++pGBc_display->discardedPixelCount;
-#if (GB_GBC_ENABLE_WIN_REACTIVATION_GLITCH == YES)
-								pGBc_display->noPixelRenderedSinceWindowTrigger = NO;
-#endif
-								RETURN;
-							}
-							else
-							{
-								FATAL("bgWinPixelFIFO BG Pop Failure");
 							}
 						}
 					}
