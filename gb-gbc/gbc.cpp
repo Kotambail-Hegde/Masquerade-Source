@@ -18,7 +18,7 @@
 #define GB_GBC_ENABLE_WIN_REACTIVATION_GLITCH			(YES)	// This is working
 #define GB_GBC_ENABLE_CGB_OBSCURE_TIMER_BEHAVIOUR		(NO)	// This is not working; Enabling this causes rapid_toggle.gb to fail in CGB mode
 #define GB_GBC_ENABLE_DMA_STAT_OAM_BOUNDARY_GLITCH		(YES)	// This is working; This is needed by docboy's "DMA check stat" tests 
-#define GB_GBC_ENABLE_HIGHER_ORDER_SPECULATION			(NO)	// As of now, there is no need to enable this
+#define GB_GBC_ENABLE_HIGHER_ORDER_SPECULATION			(YES)
 #pragma endregion WIP
 
 #define GB_GBC_REFERENCE_CLOCK_HZ						(4194304.0f)
@@ -2191,6 +2191,7 @@ void GBc_t::ppuTick()
 				pGBc_display->visibleObjectsPerScanLine = NULL;
 
 				pGBc_display->shouldFetchAndRenderWindowInsteadOfBG = NO;
+				pGBc_display->delayedWindowActivationWX0 = NO;
 
 #if (GB_GBC_ENABLE_WIN_EN_GLITCH == YES)
 				pGBc_display->ignoreSCXLowBitsAfterWindow = CLEAR;
@@ -2214,6 +2215,7 @@ void GBc_t::ppuTick()
 
 				pGBc_display->bgToObjectPenalty = NO;
 				pGBc_display->discardedPixelCount = RESET;
+				pGBc_display->discardedPixelCountForWin = RESET;
 
 				pGBc_display->wasFetchingOBJ = NO;
 				pGBc_display->prevSpriteX = INVALID;
@@ -2396,6 +2398,7 @@ void GBc_t::ppuTick()
 				pGBc_display->visibleObjectsPerScanLine = NULL;
 
 				pGBc_display->shouldFetchAndRenderWindowInsteadOfBG = NO;
+				pGBc_display->delayedWindowActivationWX0 = NO;
 
 				pGBc_display->pixelFetcherCounterPerScanLine = RESET;
 				pGBc_display->pixelRenderCounterPerScanLine = -EIGHT;
@@ -2488,6 +2491,7 @@ void GBc_t::ppuTick()
 						pGBc_display->visibleObjectsPerScanLine = NULL;
 
 						pGBc_display->shouldFetchAndRenderWindowInsteadOfBG = NO;
+						pGBc_display->delayedWindowActivationWX0 = NO;
 
 #if (GB_GBC_ENABLE_WIN_EN_GLITCH == YES)
 						pGBc_display->ignoreSCXLowBitsAfterWindow = CLEAR;
@@ -2510,6 +2514,7 @@ void GBc_t::ppuTick()
 
 						pGBc_display->bgToObjectPenalty = NO;
 						pGBc_display->discardedPixelCount = RESET;
+						pGBc_display->discardedPixelCountForWin = RESET;
 
 						pGBc_display->wasFetchingOBJ = NO;
 						pGBc_display->prevSpriteX = INVALID;
@@ -4326,6 +4331,7 @@ void GBc_t::processLCDEnable()
 	pGBc_display->indexOfOBJToFetchFromVisibleSpritesArray = INVALID;
 	pGBc_display->visibleObjectsPerScanLine = NULL;
 	pGBc_display->shouldFetchAndRenderWindowInsteadOfBG = NO;
+	pGBc_display->delayedWindowActivationWX0 = NO;
 	pGBc_display->pixelFetcherCounterPerScanLine = RESET;
 	pGBc_display->pixelRenderCounterPerScanLine = -EIGHT;
 	pGBc_display->pixelFetcherDots = RESET;
@@ -4421,6 +4427,7 @@ void GBc_t::processLCDDisable()
 	pGBc_display->indexOfOBJToFetchFromVisibleSpritesArray = INVALID;
 	pGBc_display->visibleObjectsPerScanLine = NULL;
 	pGBc_display->shouldFetchAndRenderWindowInsteadOfBG = NO;
+	pGBc_display->delayedWindowActivationWX0 = NO;
 	pGBc_display->pixelFetcherCounterPerScanLine = RESET;
 	pGBc_display->pixelRenderCounterPerScanLine = -EIGHT;
 	pGBc_display->pixelFetcherDots = RESET;
@@ -4942,13 +4949,13 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 			int16_t xObjCoordinate = ZERO;
 			int16_t yObjCoordinate = ZERO;
 			FLAG is8x16 = pGBc_peripherals->LCDC.lcdControlFields.OBJ_SIZE == ONE;
-			uint8_t effectiveSCX = pGBc_peripherals->SCX;
+			pGBc_display->effectiveSCX = pGBc_peripherals->SCX;
 
 #if (GB_GBC_ENABLE_WIN_EN_GLITCH == YES)
 			// Refer to point 2 of https://github.com/mattcurrie/mealybug-tearoom-tests/blob/master/the-comprehensive-game-boy-ppu-documentation.md#win_en-bit-5
 			if (pGBc_display->ignoreSCXLowBitsAfterWindow == YES)
 			{
-				effectiveSCX &= 0xF8; // ignore lower 3 bits of SCX
+				pGBc_display->effectiveSCX &= 0xF8; // ignore lower 3 bits of SCX
 			}
 #endif
 
@@ -4957,15 +4964,17 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 			if (pGBc_display->isNewM3Scanline == YES)
 			{
 				pGBc_display->discardedPixelCount = RESET;
+				pGBc_display->discardedPixelCountForWin = RESET;
 				pGBc_display->xBGPerPixel = RESET;
 				pGBc_display->scxLatchedThisScanline = NO;
+				pGBc_display->latchedWindowDiscardTarget = RESET;
 				pGBc_display->isNewM3Scanline = CLEAR;
 			}
 
 			PPUTODO("SCX latching is currently done at WAIT_FOR_DATA_HIGH. This might be off by few cycles and we will need to re-handle this whenever any timing shift happens");
 			if (pGBc_display->scxLatchedThisScanline == NO && pGBc_display->pixelFetcherState == PIXEL_FETCHER_STATES::WAIT_FOR_DATA_HIGH)
 			{
-				pGBc_display->xBGPerPixel = (effectiveSCX & SEVEN);
+				pGBc_display->xBGPerPixel = (pGBc_display->effectiveSCX & SEVEN);
 				pGBc_display->scxLatchedThisScanline = YES;
 			}
 
@@ -5031,7 +5040,7 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 					// Refer :  https://gbdev.io/pandocs/Scrolling.html#scrolling
 					// But here, pGBc_peripherals->SCX divide by 8 masks our the last 3 bits and hence alls good!
 					// X
-					xTileCoordinate = (pGBc_display->pixelFetcherCounterPerScanLine + effectiveSCX) / EIGHT;
+					xTileCoordinate = (pGBc_display->pixelFetcherCounterPerScanLine + pGBc_display->effectiveSCX) / EIGHT;
 					xTileCoordinate &= 0x1F;
 					// Y
 					yWithinPixelCoordinate = (pGBc_peripherals->LY + pGBc_peripherals->SCY) & SEVEN;
@@ -5061,6 +5070,7 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 				if (pGBc_display->shouldFetchObjInsteadOfWinAndBgNow == YES)
 				{
 					pGBc_display->wasFetchingOBJ = YES;
+					abortObjectFetch();
 				}
 				else
 				{
@@ -5085,6 +5095,7 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 					pGBc_display->pixelFetcherContext.objTileID = tileIndex;
 
 					pGBc_display->wasFetchingOBJ = YES;
+					abortObjectFetch();
 				}
 				else
 				{
@@ -5117,6 +5128,7 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 					pGBc_display->addressInTileDataArea = TD0x8000_TD0x8FFF + (sizeOfEachTileData * tileIndex) + (TWO * relativeRowOfSprite);
 
 					pGBc_display->wasFetchingOBJ = YES;
+					abortObjectFetch();
 				}
 				else
 				{
@@ -5186,6 +5198,7 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 					}
 
 					pGBc_display->wasFetchingOBJ = YES;
+					abortObjectFetch();
 				}
 				else
 				{
@@ -5285,6 +5298,7 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 					pGBc_display->addressInTileDataArea = TD0x8000_TD0x8FFF + (sizeOfEachTileData * tileIndex) + (TWO * relativeRowOfSprite);
 
 					pGBc_display->wasFetchingOBJ = YES;
+					abortObjectFetch();
 				}
 				else
 				{
@@ -5425,6 +5439,7 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 					pGBc_display->pushDone = NO;
 
 					pGBc_display->wasFetchingOBJ = YES;
+					abortObjectFetch();
 				}
 				else
 				{

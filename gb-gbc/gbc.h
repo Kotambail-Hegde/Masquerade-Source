@@ -1540,10 +1540,12 @@ private:
 		struct pixelFIFO_t objPixelFIFO;
 		struct pixelFIFO_t tempBgWinPixelFIFO;
 		int16_t discardedPixelCount;
+		int16_t discardedPixelCountForWin;
 		BYTE xBGPerPixel;
 		FLAG scxLatchedThisScanline;
 		COUNTER8 cgbSCYDelayTCycles;
 		BYTE cgbLatchedSCY;
+		BYTE effectiveSCX;
 		COUNTER8 cgbLYCDelayTCycles;
 		BYTE cgbLatchedLYC;
 		BYTE wxDelayTCycles;
@@ -1581,6 +1583,7 @@ private:
 		int16_t prevSpriteX;
 		FLAG wasNotFirstSpriteInX;
 		FLAG wasX0Object;
+		FLAG abortObjectFetch;
 		uint16_t addressInTileMapArea;
 		uint16_t addressInTileDataArea;
 		COUNTER8 tileSelGlitchTCycles;
@@ -2902,12 +2905,26 @@ private:
 	}
 	void ppuTick();
 	void apuTick();
+	MASQ_INLINE void abortObjectFetch()
+	{
+		PPUTODO("The abortObjectFetch logic is currently disabled as this DOESN'T WORK and messes up mealybug tests");
+#if (DEACTIVATED)
+		//if (pGBc_display->abortObjectFetch == YES) MASQ_UNLIKELY
+		//{
+		//	pGBc_display->wasFetchingOBJ = NO;
+		//	pGBc_display->shouldFetchObjInsteadOfWinAndBgNow = NO;
+		//	pGBc_display->shouldFetchObjInsteadOfWinAndBgPostBGFetchIsDone = NO;
+		//	pGBc_display->isThereAnyObjectCurrentlyGettingRendered = NO;
+		//	pGBc_display->abortObjectFetch = NO;
+		//}
+#endif
+	}
 	MASQ_INLINE void speculativeCpuMemWrite(uint16_t address, BYTE data, SPECULATION_ORDER order = SPECULATION_ORDER::NONE)
 	{
 		const FLAG isMode3 = (pGBc_display->currentLCDMode == LCD_MODES::MODE_LCD_DISPLAY_PIXELS);
 
 #if (GB_GBC_ENABLE_BGP_OBP_MID_SCANLINE_GLITCH == YES)
-		if ((uint16_t)(address - BGP_ADDRESS) <= (uint16_t)(OBP1_ADDRESS - BGP_ADDRESS))
+		if (((uint16_t)(address - BGP_ADDRESS) <= (uint16_t)(OBP1_ADDRESS - BGP_ADDRESS)) && order == SPECULATION_ORDER::FIRST)
 		{
 			typedef typename std::remove_pointer<decltype(pGBc_peripherals)>::type PeripheralStructType;
 			static const size_t PALETTE_LUT[] = 
@@ -2963,7 +2980,7 @@ private:
 		}
 #endif
 #if (GB_GBC_ENABLE_SCX_MID_SCANLINE_GLITCH == YES)
-		if (address == SCX_ADDRESS)
+		if (address == SCX_ADDRESS && order == SPECULATION_ORDER::FIRST)
 		{
 			// Check if we are in the pixel transfer mode (Mode 3)
 			if (isMode3)
@@ -2977,7 +2994,7 @@ private:
 		}
 #endif
 #if (GB_GBC_ENABLE_SCY_MID_SCANLINE_GLITCH == YES)
-		if (address == SCY_ADDRESS)
+		if (address == SCY_ADDRESS && order == SPECULATION_ORDER::FIRST)
 		{
 			// Check if we are in the pixel transfer mode (Mode 3)
 			if (isMode3)
@@ -2991,7 +3008,7 @@ private:
 		}
 #endif
 #if (GB_GBC_ENABLE_LCDC_MID_SCANLINE_GLITCH == YES)
-		if (address == LCDC_ADDRESS)
+		if (address == LCDC_ADDRESS && order == SPECULATION_ORDER::FIRST)
 		{
 			// Check if we are in the pixel transfer mode (Mode 3)
 			if (isMode3)
@@ -3048,12 +3065,16 @@ private:
 						(display_counter == ZERO || should_fetch_obj == YES))
 					{
 						oldLCDC.lcdControlFields.OBJ_ENABLE = RESET;
+						pGBc_display->abortObjectFetch = YES;
 					}
 
+					PPUTODO("Sameboy implements the below condition but for this seems to break the mealybug test which sameboy is also failing! so deactivating out for now...");
+#if (DEACTIVATED)
 					if (newLCDC.lcdControlFields.BG_WINDOW_LAYER_ENABLE)
 					{
 						oldLCDC.lcdControlFields.BG_WINDOW_LAYER_ENABLE = SET;
 					}
+#endif
 
 					pGBc_peripherals->LCDC.lcdControlMemory = oldLCDC.lcdControlMemory;
 				}
