@@ -2702,6 +2702,10 @@ void GBc_t::ppuTick()
 #if (GB_GBC_ENABLE_WX_WRITE_DELAY == YES)
 	if (pGBc_display->wxDelayTCycles > RESET && --pGBc_display->wxDelayTCycles == RESET) pGBc_peripherals->WX = pGBc_display->latchedWXForDelay;
 #endif
+
+#ifndef __RPI_PICO__
+	debugSyncScreenIfNeeded();
+#endif
 }
 
 void GBc_t::apuTick()
@@ -6667,9 +6671,9 @@ void GBc_t::displayCompleteScreen()
 	GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter));
 	GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter));
 
-	// 1b. Ghost pass ï¿½ exponential decay blend of gameboy_texture into ghost_texture.
+	// 1b. Ghost pass – exponential decay blend of gameboy_texture into ghost_texture.
 	//     Runs at native GB/GBC resolution (160x144 or 160x144 GBC) before upscaling.
-	//     ghost_texture is NOT cleared between frames ï¿½ that persistence is the effect.
+	//     ghost_texture is NOT cleared between frames – that persistence is the effect.
 	if (ghost_decay > 0.0f)
 	{
 		uint32_t read = ghost_index;
@@ -6918,7 +6922,17 @@ FLAG GBc_t::runEmulationAtFixedRate(uint32_t currentFrame)
 
 FLAG GBc_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 {
+#ifndef __RPI_PICO__
+	if (gbcDebugger.ppu.paused == YES && gbcDebugger.ppu.stepRequested == NO)
+	{
+		RETURN YES;	// fully frozen -- don't advance emulation at all, don't even clear vblank flag
+	}
+	gbcDebugger.ppu.stepRequested = NO;
+#endif
+
 	pGBc_display->wasVblankJustTriggerred = CLEAR;
+
+	FLAG shouldYieldForSampleMode = NO;
 
 #if (ENABLE_SM83_SST == YES)
 	if (ROM_TYPE == ROM::TEST_SST)
@@ -7348,7 +7362,32 @@ FLAG GBc_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 		}
 	}
 
-	RETURN pGBc_display->wasVblankJustTriggerred;
+#ifndef __RPI_PICO__
+	// Screen refresh Per LY / Per Dot yields the loop early -- letting your normal, existing
+	// once-per-real-frame pipeline (which already calls displayCompleteScreen()) actually
+	// render at that finer granularity. Run-to-breakpoint always overrides this and runs at
+	// full raw speed regardless of this setting, exactly as you described.
+	if (gbcDebugger.ppu.enabled == YES && gbcDebugger.ppu.runToBreakpointArmed == NO && gbcDebugger.ppu.paused == NO)
+	{
+		if (gbcDebugger.ppu.pixelOutputSampleMode == GBC_DEBUG_PIXEL_SAMPLE_MODE::PER_DOT)
+		{
+			shouldYieldForSampleMode = YES;
+		}
+		else if (gbcDebugger.ppu.pixelOutputSampleMode == GBC_DEBUG_PIXEL_SAMPLE_MODE::PER_LY
+			&& pGBc_peripherals->LY != debugLastLYSeenByLoop)
+		{
+			shouldYieldForSampleMode = YES;
+			debugLastLYSeenByLoop = pGBc_peripherals->LY;
+		}
+	}
+#endif
+
+	RETURN(pGBc_display->wasVblankJustTriggerred
+#ifndef __RPI_PICO__
+		|| gbcDebugger.ppu.paused == YES
+		|| shouldYieldForSampleMode == YES
+#endif
+	);
 }
 
 FLAG GBc_t::onKeyEvent(EmuKey key, EmuKeyAction action)
@@ -8175,13 +8214,13 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 					e.isFlashForB = NO;
 					e.flashCmdState = 0;
 
-					// FLASH memory content ï¿½ erased state is 0xFF
+					// FLASH memory content — erased state is 0xFF
 					memset(
 						e.flash.raw,
 						0xFF,
 						sizeof(e.flash)); // 8 MBits
 
-					// FLASH Hidden memory content ï¿½ erased state is 0xFF
+					// FLASH Hidden memory content — erased state is 0xFF
 					memset(
 						e.flashHidden,
 						0xFF,
@@ -8213,7 +8252,7 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 					e.eepromArgBitsLeft = 0;
 					e.eepromReadBits = 0;
 
-					// EEPROM memory content ï¿½ erased state is 0xFF
+					// EEPROM memory content — erased state is 0xFF
 					memset(
 						pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[0],
 						0xFF,
@@ -8511,7 +8550,7 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 
 							uint64_t elapsed = (unixCTS > unixSTS) ? (unixCTS - unixSTS) : 0;
 
-							// Apply elapsed time to live counters ($10ï¿½$15) + rtcSeconds
+							// Apply elapsed time to live counters ($10–$15) + rtcSeconds
 							uint16_t minutes = ((uint16_t)rtc.rtcMem[0x10] << 8)
 								| ((uint16_t)rtc.rtcMem[0x11] << 4)
 								| rtc.rtcMem[0x12];
@@ -10325,14 +10364,14 @@ void GBc_t::executeHUC3ExtendedCommand()
 	auto& rtc = pGBc_emuStatus->huc3Rtc;
 	switch (rtc.argument)
 	{
-	case 0x0: // Copy live counters ($10ï¿½$15) -> staging ($00ï¿½$06)
+	case 0x0: // Copy live counters ($10–$15) -> staging ($00–$06)
 	{
 		for (int i = 0; i < 3; i++) rtc.rtcMem[i] = rtc.rtcMem[0x10 + i]; // minutes LSN-first
 		for (int i = 0; i < 3; i++) rtc.rtcMem[0x03 + i] = rtc.rtcMem[0x13 + i]; // days LSN-first
 		rtc.rtcMem[0x06] = rtc.rtcSeconds & 0x0F;
 		BREAK;
 	}
-	case 0x1: // Copy staging ($00ï¿½$06) -> live counters ($10ï¿½$15), adjust event time
+	case 0x1: // Copy staging ($00–$06) -> live counters ($10–$15), adjust event time
 	{
 		if (rtc.rtcMem[0x06] != 1 || (rtc.rtcMem[0x07] & 0x01))
 		{
@@ -10355,7 +10394,7 @@ void GBc_t::executeHUC3ExtendedCommand()
 		// Delta in total minutes
 		int32_t delta = ((int32_t)newDays * 1440 + newMinutes) - ((int32_t)oldDays * 1440 + oldMinutes);
 
-		// Adjust event time at $58ï¿½$5D by same delta (LSN at lower index)
+		// Adjust event time at $58–$5D by same delta (LSN at lower index)
 		uint16_t evtMin = ((uint16_t)rtc.rtcMem[0x5A] << 8) | ((uint16_t)rtc.rtcMem[0x59] << 4) | rtc.rtcMem[0x58];
 		uint16_t evtDays = ((uint16_t)rtc.rtcMem[0x5D] << 8) | ((uint16_t)rtc.rtcMem[0x5C] << 4) | rtc.rtcMem[0x5B];
 
@@ -10379,7 +10418,7 @@ void GBc_t::executeHUC3ExtendedCommand()
 		rtc.rtcSeconds = 0;
 		BREAK;
 	}
-	case 0x2: // Status ï¿½ must return $1 or games won't start
+	case 0x2: // Status — must return $1 or games won't start
 	{
 		rtc.result = 0x1;
 		BREAK;
@@ -10425,7 +10464,7 @@ void GBc_t::executeHUC3Command()
 		rtc.rtcMemIdx = (rtc.rtcMemIdx & 0x0F) | ((rtc.argument & 0x0F) << FOUR);
 		BREAK;
 
-	case 0x6: // Extended command ï¿½ argument selects sub-command
+	case 0x6: // Extended command — argument selects sub-command
 		executeHUC3ExtendedCommand();
 		BREAK;
 
@@ -10440,9 +10479,9 @@ void GBc_t::executeHUC3Command()
 // Refer https://gbdev.io/pandocs/MBC6.html#flash-commands
 //
 // Three separate protection flags:
-//   mbc6.flashEnable           : set by reg $0C00-$0FFF ($01) ï¿½ global gate for all flash writes
-//   mbc6.flashEnSec0AndHidden: set by reg $1000       ($01) ï¿½ additional gate for sector 0 and hidden region
-//   mbc6.flashProtSec0         : set by flash commands  ($20/$40) ï¿½ hardware protection for sector 0 erase
+//   mbc6.flashEnable           : set by reg $0C00-$0FFF ($01) — global gate for all flash writes
+//   mbc6.flashEnSec0AndHidden: set by reg $1000       ($01) — additional gate for sector 0 and hidden region
+//   mbc6.flashProtSec0         : set by flash commands  ($20/$40) — hardware protection for sector 0 erase
 //
 // Flash command state machine states:
 //  0  = IDLE
@@ -10480,7 +10519,7 @@ void GBc_t::processMBC6FlashWrite(uint16_t cpuAddr, BYTE data)
 		if (!mbc6.isFlashForA) RETURN;
 		flashAddr = (uint32_t)getROMBankNumber() * 0x2000 + (cpuAddr - 0x4000);
 	}
-	else // Bank B window (0x6000ï¿½0x7FFF)
+	else // Bank B window (0x6000–0x7FFF)
 	{
 		if (!mbc6.isFlashForB) RETURN;
 		flashAddr = (uint32_t)getROMBankNumberB() * 0x2000 + (cpuAddr - 0x6000);
@@ -10634,7 +10673,7 @@ void GBc_t::processMBC6FlashWrite(uint16_t cpuAddr, BYTE data)
 
 				if (isSector0 && (!mbc6.flashEnSec0AndHidden || mbc6.flashProtSec0))
 				{
-					// Sector 0: blocked ï¿½ either write-enable not set or hardware-protected
+					// Sector 0: blocked — either write-enable not set or hardware-protected
 				}
 				else
 				{
@@ -11143,7 +11182,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 					if (isPoke2in1()) MASQ_UNLIKELY
 					{
 						auto& p2 = pGBc_emuStatus->poke2in1;
-						// 0x0000ï¿½0x1FFF: RAM enable + bank0Change latch
+						// 0x0000–0x1FFF: RAM enable + bank0Change latch
 						((data & 0x0A) == 0x0A) ? enableRAMBank() : disableRAMBank();
 						p2.bank0Change = ((data & 0xC0) == 0xC0) ? YES : NO;
 						RETURN;
@@ -11282,7 +11321,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 					if (isPoke2in1()) MASQ_UNLIKELY
 					{
 						auto& p2 = pGBc_emuStatus->poke2in1;
-						// 0x0000ï¿½0x1FFF: RAM enable + bank0Change latch
+						// 0x0000–0x1FFF: RAM enable + bank0Change latch
 						byte bank = data & 0x7F;
 						if (bank == ZERO) bank = ONE;
 						bank += p2.MBChi;
@@ -11394,7 +11433,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 				if (isPoke2in1()) MASQ_UNLIKELY
 				{
 					auto& p2 = pGBc_emuStatus->poke2in1;
-					// 0x4000ï¿½0x5FFF: RAM bank (only if >8KB RAM)
+					// 0x4000–0x5FFF: RAM bank (only if >8KB RAM)
 					if (getNumberOfRAMBanksUsed() > ONE)
 					{
 						uint8_t ramBank = (data & 0x03) % getNumberOfRAMBanksUsed();
@@ -11527,7 +11566,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 				}
 				else if (isMMM01())
 				{
-					// Mode bit always writable when writeDisable is clear ï¿½ NOT gated by muxEnabled
+					// Mode bit always writable when writeDisable is clear — NOT gated by muxEnabled
 					if (pGBc_emuStatus->mmm01.writeDisable == RESET)
 					{
 						(data & 0x01) ? setAdvancedModeInMMM01() : setSimpleModeInMMM01();
@@ -11629,15 +11668,15 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 						// MBChi stays at current value (or 0 if first write)
 					}
 
-					// Remap the entire 0x0000ï¿½0x7FFF window to the new base
+					// Remap the entire 0x0000–0x7FFF window to the new base
 					const uint16_t base = p2.MBChi % getNumberOfROMBanksUsed();
 					setROMBankNumber((base + ONE) % getNumberOfROMBanksUsed());
-					// Bank 0 window remap: store base so readRawMemory can use it for 0x0000ï¿½0x3FFF
+					// Bank 0 window remap: store base so readRawMemory can use it for 0x0000–0x3FFF
 					// (handled in readRawMemory below)
 				}
 
 				// Always fall through to normal RAM write (if RAM enabled)
-				// so don't RETURN here ï¿½ let the generic path handle it
+				// so don't RETURN here — let the generic path handle it
 			}
 
 			if (isMBC6()) MASQ_UNLIKELY
@@ -11813,7 +11852,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 											MBC7_EEPROM_WORD(e.eepromCommand & 0x7F) = 0x0000;
 										}
 										e.eepromArgBitsLeft = 16;
-										// Don't clear command ï¿½ needed to identify WRITE vs WRAL below
+										// Don't clear command — needed to identify WRITE vs WRAL below
 										BREAK;
 									}
 									// ERASE (11 xAAAAAAA)

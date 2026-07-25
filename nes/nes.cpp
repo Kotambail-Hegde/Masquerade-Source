@@ -604,7 +604,7 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 		// https://forums.nesdev.org/viewtopic.php?p=243434#p243434
 		// for reasons to ignore palette RAM Read Access from only PPU but allow from CPU
 		// But below we ignore CPU as well because we handle the access via CPU in readCpuRawMemory
-		if (source == MEMORY_ACCESS_SOURCE::CPU)
+		if (source == MEMORY_ACCESS_SOURCE::CPU || source == MEMORY_ACCESS_SOURCE::DEBUG_PORT)
 		{
 			; // Don't do anything here!
 		}
@@ -620,7 +620,7 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 		}
 	}
 
-	if (source == MEMORY_ACCESS_SOURCE::PPU || source == MEMORY_ACCESS_SOURCE::CPU)
+	if (source == MEMORY_ACCESS_SOURCE::PPU || source == MEMORY_ACCESS_SOURCE::CPU || source == MEMORY_ACCESS_SOURCE::DEBUG_PORT)
 	{
 		switch (pNES_instance->NES_state.catridgeInfo.mapper)
 		{
@@ -10350,6 +10350,10 @@ void NES_t::ppuTick()
 	{
 		// Do nothing and wait...
 	}
+
+#ifndef __RPI_PICO__
+	debugSyncScreenIfNeeded();
+#endif
 }
 
 void NES_t::apuTick()
@@ -11244,7 +11248,17 @@ bool NES_t::runEmulationAtFixedRate(uint32_t currentFrame)
 
 bool NES_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 {
+#ifndef __RPI_PICO__
+	if (nesDebugger.ppu.paused == YES && nesDebugger.ppu.stepRequested == NO)
+	{
+		RETURN true;
+	}
+	nesDebugger.ppu.stepRequested = NO;
+#endif
+
 	pNES_instance->NES_state.display.wasVblankJustTriggerred = NO;
+
+	FLAG shouldYieldForSampleMode = NO;
 
 #if (ENABLE_R2A03_SST == YES)
 	if (ROM_TYPE == ROM::TEST_SST)
@@ -11534,17 +11548,46 @@ bool NES_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 			++opcode;
 		}
 	}
-	else
+else
 #endif
-	{
-		processSOC();
+{
+	processSOC();
 
 #if (DISABLED)
-		runDebugger();
+	runDebugger();
 #endif
 	}
 
-	RETURN pNES_instance->NES_state.display.wasVblankJustTriggerred;
+#ifndef __RPI_PICO__
+	if (nesDebugger.ppu.runToBreakpointArmed == YES
+		&& (int)pNES_instance->NES_state.display.currentScanline == nesDebugger.ppu.breakpointScanline
+		&& (int)pNES_instance->NES_state.emulatorStatus.ticks.ppuCounterPerLY == nesDebugger.ppu.breakpointDot)
+	{
+		nesDebugger.ppu.runToBreakpointArmed = NO;
+		nesDebugger.ppu.paused = YES;
+	}
+
+	if (nesDebugger.ppu.enabled == YES && nesDebugger.ppu.runToBreakpointArmed == NO && nesDebugger.ppu.paused == NO)
+	{
+		if (nesDebugger.ppu.pixelOutputSampleMode == NES_DEBUG_PIXEL_SAMPLE_MODE::PER_DOT)
+		{
+			shouldYieldForSampleMode = YES;
+		}
+		else if (nesDebugger.ppu.pixelOutputSampleMode == NES_DEBUG_PIXEL_SAMPLE_MODE::PER_LY
+			&& pNES_instance->NES_state.display.currentScanline != nesDebugger.ppu.debugLastScanlineSeenByLoop)
+		{
+			shouldYieldForSampleMode = YES;
+			nesDebugger.ppu.debugLastScanlineSeenByLoop = pNES_instance->NES_state.display.currentScanline;
+		}
+	}
+#endif
+
+	RETURN(pNES_instance->NES_state.display.wasVblankJustTriggerred
+#ifndef __RPI_PICO__
+		|| nesDebugger.ppu.paused == YES
+		|| shouldYieldForSampleMode == YES
+#endif
+	);
 }
 
 FLAG NES_t::onKeyEvent(EmuKey key, EmuKeyAction action)

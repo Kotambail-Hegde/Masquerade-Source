@@ -2024,6 +2024,142 @@ private:
 
 PACK_END
 
+#pragma region NES_DEBUGGER
+public:
+
+#ifndef __RPI_PICO__
+
+	enum class NES_DEBUG_PIXEL_SAMPLE_MODE : uint8_t {
+		PER_FRAME = 0, PER_LY, PER_DOT
+	};
+	enum class NES_PIXEL_SOURCE_TAG : uint8_t {
+		NONE = 0, BG, OBJ
+	};
+	enum class NES_DEBUG_TRACKED_REGISTER : uint8_t {
+		PPUCTRL = 0, PPUMASK, PPUSTATUS, OAMADDR, OAMDATA, PPUSCROLL, PPUADDR, PPUDATA, OAMDMA, COUNT
+	};
+
+	struct NESPPUEvent_t
+	{
+		uint32_t frameNumber = ZERO;
+		int16_t scanline = ZERO;
+		uint16_t dot = ZERO;
+		uint8_t registerIndex = ZERO;
+		uint8_t oldValue = ZERO;
+		uint8_t newValue = ZERO;
+		uint16_t pc = ZERO;
+	};
+
+	struct nesDebugger_t
+	{
+		FLAG windowOpen = NO;	// Emulation -> Debug -> NES
+
+		struct ppu_t
+		{
+			FLAG enabled = NO;
+			NES_DEBUG_PIXEL_SAMPLE_MODE pixelOutputSampleMode = NES_DEBUG_PIXEL_SAMPLE_MODE::PER_FRAME;
+
+			FLAG showRegisters = YES;
+			FLAG showPatternTables = YES;
+			FLAG showNametables = YES;
+			FLAG showOAMViewer = YES;
+			FLAG showPaletteViewer = YES;
+			FLAG showPatternTableGrid = YES;
+			FLAG showNametableGrid = YES;
+
+			FLAG paused = NO;
+			FLAG stepRequested = NO;
+			FLAG runToBreakpointArmed = NO;
+			int16_t breakpointScanline = ZERO;
+			uint16_t breakpointDot = ZERO;
+
+			FLAG gridColorWhite = YES;
+			FLAG fullscreen = NO;
+			FLAG dockLayoutBuilt = NO;
+
+			int selectedOAMEntry = 0;
+			FLAG oamUseGalleryView = YES;
+			FLAG patternTableUse8x16 = NO;
+			FLAG showAttributeOverlay = NO;
+			FLAG showCompositeViewport = YES;
+			FLAG compositeShowBG = YES;
+			FLAG compositeShowSprites = YES;
+			FLAG compositeShowGrid = YES;
+			int selectedNametableIndex = 0;
+			int selectedNametableTileX = 0;
+			int selectedNametableTileY = 0;
+			int selectedPatternTable = 0;
+			int selectedPatternTile = 0;
+			uint16_t debugLastScanlineSeenByLoop = 0xFFFF;
+			int debugFrozenScrollX = 0;
+			int debugFrozenScrollY = 0;
+			FLAG debugFrozenScrollValid = NO;
+		} ppu;
+
+		struct eventViewer_t
+		{
+			static const int CAPACITY = 4096;
+			FLAG enabled = NO;
+			FLAG snapshotValid = NO;
+			uint8_t lastValues[(int)NES_DEBUG_TRACKED_REGISTER::COUNT] = { ZERO };
+			FLAG showRegister[(int)NES_DEBUG_TRACKED_REGISTER::COUNT] = { YES, YES, YES, YES, YES, YES, YES, YES };
+			NESPPUEvent_t ring[CAPACITY];
+			int head = ZERO;
+			int count = ZERO;
+			uint32_t frameCounter = ZERO;
+			int lastScanline = -1;
+		} eventViewer;
+	} nesDebugger;
+
+	std::set<uint8_t> nesVisibleSpriteIndexPerLY;
+	std::set<uint8_t> nesVisibleSpriteIndexPerFrame;
+
+	GLuint debugPatternTableTexture[2] = { ZERO, ZERO };	// two 128x128 pattern tables
+	GLuint debugNametableTexture[4] = { ZERO, ZERO, ZERO, ZERO };
+	GLuint debugOAMSpriteTexture = ZERO;
+	GLuint debugMiniScreenTexture = ZERO;
+	FLAG debugTexturesInitialized = NO;
+	GLuint debugPatternTileDetailTexture = ZERO;
+
+	GLuint debugCompositeTexture = ZERO;
+	std::array<Pixel, 256 * 240> debugCompositePixels;
+	std::array<Pixel, 8 * 8> debugPatternTileDetailPixels;
+	std::array<Pixel, 128 * 128> debugPatternTablePixels[2];
+	std::array<Pixel, 256 * 240> debugNametablePixels[4];
+	std::array<Pixel, 8 * 16 * 64> debugOAMSpritePixels;	// 64 sprites, worst case 8x16
+
+	void renderNESDebuggerUI();
+	void debugSyncScreenIfNeeded();
+
+private:
+
+	MASQ_INLINE ImU32 nesDebugGridColor(FLAG white)
+	{
+		RETURN white ? IM_COL32(255, 255, 255, 70) : IM_COL32(0, 0, 0, 90);
+	}
+
+	void renderNESDebuggerPPUTab();
+	void renderNESDebuggerEventViewerTab();
+	void renderNESDebuggerRegistersPanel();
+	void renderNESDebuggerPatternTablesPanel();
+	void renderNESDebuggerNametablesPanel();
+	void renderNESDebuggerOAMPanel();
+	void renderNESDebuggerPalettePanel();
+	void debugEnsureTexturesCreated();
+	void debugRebuildPatternTablePixels(int table, int paletteIndex);
+	void debugRebuildNametablePixels(int nametableIndex);
+	void debugRebuildOAMSpritePixels();
+	void debugRebuildPatternTileDetailPixels(int table, int tileIdx, int paletteIndex);
+	void debugRebuildCompositePixels();
+	void renderNESDebuggerCompositePanel();
+	void debugEventViewerCheck();
+
+#endif // !__RPI_PICO__
+
+#pragma endregion NES_DEBUGGER
+
+private:
+
 private:
 
 	std::unordered_map<uint32_t, NES20DBEntry_t> m_nes20db;

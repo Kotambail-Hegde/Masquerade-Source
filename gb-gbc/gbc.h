@@ -2112,7 +2112,224 @@ private:
 	emulatorStatus_t* pGBc_emuStatus = nullptr;			// for readability
 	display_t* pGBc_display = nullptr;			// for readability
 
-PACK_END
+	PACK_END
+
+#pragma region GBC_DEBUGGER
+		// Deliberately OUTSIDE the PACK_BEGIN/PACK_END (GBc_state_t) region above, so none
+		// of this is ever save-stated / BESS-serialized. Pure UI + debug scratch state.
+public:
+
+#ifndef __RPI_PICO__
+
+	enum class GBC_DEBUG_PIXEL_SAMPLE_MODE : uint8_t
+	{
+		PER_FRAME = 0,	// default -- identical cost to a non-debug run (existing once-per-vblank upload)
+		PER_LY,			// screen texture refreshed once per scanline
+		PER_DOT			// screen texture refreshed every dot (slow; foundation for the future per-dot pixel viewer)
+	};
+
+	enum class PIXEL_SOURCE_TAG : uint8_t {
+		NONE = 0, BG, WINDOW, OBJ
+	};
+
+	// Extensible beyond PPU later -- CPU/APU registers can just be appended here.
+	enum class GBC_DEBUG_TRACKED_REGISTER : uint8_t {
+		LCDC = 0, STAT, SCX, SCY, LY, LYC, DMA, BGP, OBP0, OBP1, WX, WY, COUNT
+	};
+
+	struct PPUEvent_t
+	{
+		uint32_t frameNumber = ZERO;
+		BYTE scanline = ZERO;
+		uint16_t dot = ZERO;
+		uint8_t registerIndex = ZERO;
+		uint8_t oldValue = ZERO;
+		uint8_t newValue = ZERO;
+		uint16_t pc = ZERO;
+	};
+
+	enum class DEBUGGER_TAB
+	{
+		PPU,
+		CPU,
+		APU,
+		EVENT_VIEWER
+	};
+
+	struct gbcDebugger_t
+	{
+		FLAG windowOpen = NO;					// Emulation -> Debug -> GBC
+
+		struct ppu_t
+		{
+			FLAG enabled = NO;					// master switch. NO == zero extra cost, same as no debugger at all
+			GBC_DEBUG_PIXEL_SAMPLE_MODE pixelOutputSampleMode = GBC_DEBUG_PIXEL_SAMPLE_MODE::PER_FRAME;
+
+			FLAG showRegisters = YES;
+			FLAG showTileViewer = YES;
+			FLAG showBGMapViewer = YES;
+			FLAG showWindowMapViewer = YES;
+			FLAG showOAMViewer = YES;
+			FLAG showPaletteViewer = YES;
+
+			FLAG tileViewerUseBank1 = NO;			// CGB VRAM bank 0 or 1
+
+			FLAG viewportShowBG = YES;
+			FLAG viewportShowWindow = NO;
+			FLAG viewportShowSprites = NO;
+			FLAG viewportShowGrid = YES;
+			FLAG viewportShowViewportRect = YES;	// Complete Viewport tab only -- overlay the SCX/SCY rectangle on the 256x256 map, wrapping
+			FLAG tileViewerShowGrid = YES;
+			FLAG bgMapViewerShowGrid = YES;		// BG Map panel only
+			FLAG winMapViewerShowGrid = YES;		// Window Map panel only -- independent of the above
+
+			int selectedOAMEntry = 0;
+			FLAG oamUseGalleryView = YES;
+
+			int selectedTileIndex = 0;
+			int tileViewerPreviewPalette = ZERO;	// CGB only: which BG palette (0-7) to preview the selected tile through
+
+			FLAG dockLayoutBuilt = NO;				// one-shot: default panel arrangement built?
+
+			// ---- run / breakpoint state (see point 3 below) ----
+			FLAG paused = NO;						// when YES, emulation is completely frozen
+			FLAG stepRequested = NO;				// single-shot: advance exactly one processSOC() call, then re-pause
+			FLAG runToBreakpointArmed = NO;		// running at full, undecorated speed toward (breakpointLY, breakpointDot)
+			uint8_t breakpointLY = ZERO;
+			uint16_t breakpointDot = ZERO;
+
+			FLAG gridColorWhite = YES;	// applies to every grid overlay: Tiles, BG Map, Window Map, Complete Viewport
+			FLAG fullscreen = NO;
+
+			DEBUGGER_TAB activeTab = DEBUGGER_TAB::PPU;
+		} ppu;
+
+		struct eventViewer_t
+		{
+			static const int CAPACITY = 4096;
+
+			FLAG enabled = NO;
+			FLAG snapshotValid = NO;
+			uint8_t lastValues[(int)GBC_DEBUG_TRACKED_REGISTER::COUNT] = { ZERO };
+			FLAG showRegister[(int)GBC_DEBUG_TRACKED_REGISTER::COUNT] =
+			{ YES, YES, YES, YES, YES, YES, YES, YES, YES, YES, YES, YES };
+
+			// True ring buffer: once full, new writes overwrite the OLDEST entry (via head wrapping), rather than silently refusing to record anything further.
+			PPUEvent_t ring[CAPACITY];
+			int head = ZERO;	// next write slot (wraps)
+			int count = ZERO;	// valid entries, caps at CAPACITY
+
+			// STAT mode (0-3) captured every tick at (scanline, dot) -- independent of whether
+			// any tracked register actually changed, so the mode bands are continuous.
+			uint8_t modeTimeline[154][456] = { { ZERO } };
+
+			uint32_t frameCounter = ZERO;
+			int lastLY = -1;
+		} eventViewer;
+
+	} gbcDebugger;
+
+	// Debug-only GL resources (created lazily, first time the debugger window opens)
+	GLuint debugTileViewerTexture = ZERO;
+	GLuint debugBGMapTexture = ZERO;
+	GLuint debugWindowMapTexture = ZERO;
+	GLuint debugOAMSpriteTexture = ZERO;
+	GLuint debugMiniScreenTexture = ZERO;			// mirrors the live 160x144 screen, for the sprite-position preview
+	GLuint debugTileDetailTexture = ZERO;			// the selected tile, decoded through whichever palette is chosen in the detail panel
+	std::array<Pixel, 8 * 8> debugTileDetailPixels;
+	GLuint debugLiveBGTexture = ZERO;
+	GLuint debugLiveWindowTexture = ZERO;
+	GLuint debugViewportTexture = ZERO;
+	FLAG debugTexturesInitialized = NO;
+
+	// Live per-pixel capture: exactly what the BG/Window fetcher actually produced this frame,
+	// nothing more -- blank wherever that layer didn't contribute this frame.
+	std::array<Pixel, 160 * 144> debugLiveBGPixels;
+	std::array<Pixel, 160 * 144> debugLiveWindowPixels;
+
+	// Complete Viewport: the real composited frame, tagged per-pixel with which layer
+	// actually produced it -- captured in screen space (160x144), then translated into
+	// map space (256x256) for display, since that's where Window/OBJ actually need to
+	// land relative to a scrolling BG.
+	std::array<Pixel, 160 * 144> debugViewportPixels;
+	std::array<uint8_t, 160 * 144> debugViewportSource;	// holds PIXEL_SOURCE_TAG values
+	std::array<Pixel, 256 * 256> debugViewportMapPixels;	// the actual 256x256 canvas rendered by the panel
+
+	struct PixelDebugInfo_t
+	{
+		BYTE LY = ZERO;
+		uint16_t pixelRenderCounterPerScanLine = ZERO;
+		uint16_t ppuCounterPerLY = ZERO;
+		uint16_t ppuCounterPerMode = ZERO;
+		uint32_t ppuCounterPerFrame = ZERO;
+		int pixelFetcherState = ZERO;
+		BYTE capturedSCX = ZERO;	// SCX/SCY active AT THE MOMENT this pixel committed -- NOT
+		BYTE capturedSCY = ZERO;	// the same as "current" SCX/SCY for raster-split ROMs that
+		// change scroll mid-frame (see PPU_DEBUGGER.md for why this matters)
+		FLAG captured = NO;	// was this screen-space pixel actually rendered this frame?
+	};
+	std::array<PixelDebugInfo_t, 160 * 144> debugViewportPixelInfo;
+
+	// Click-selection, viewport tab only -- persists until clicked elsewhere or off-rect.
+	FLAG viewportPixelSelected = NO;
+	int viewportSelectedMapX = ZERO;
+	int viewportSelectedMapY = ZERO;
+	PixelDebugInfo_t viewportSelectedPixelInfo;
+
+	int debugLastCapturedLY = -1;
+	int debugLastPixelCounterCaptured = -1;
+	uint8_t debugLastLYSeenByLoop = 0xFF;	// sentinel so the very first LY encountered still yields once
+
+	// Debug-only CPU-side pixel scratch buffers -- kept completely separate from
+	// gfxVisible*/imGuiBuffer so the hot PPU path never touches or grows because of these.
+	std::array<Pixel, 128 * 192> debugTileViewerPixels;	// 16x24 tiles of 8x8px = all 384 tiles in one VRAM bank
+	std::array<Pixel, 256 * 256> debugBGMapPixels;			// 32x32 tiles of 8x8px
+	std::array<Pixel, 256 * 256> debugWindowMapPixels;
+	std::array<Pixel, 8 * 16 * 40> debugOAMSpritePixels;	// 40 sprites, worst case 8x16
+
+	GLuint debugBGMap9800Texture = ZERO;
+	GLuint debugBGMap9C00Texture = ZERO;
+	std::array<Pixel, 256 * 256> debugBGMap9800Pixels;
+	std::array<Pixel, 256 * 256> debugBGMap9C00Pixels;
+	int debugWindowPixelsCapturedThisFrame = ZERO;
+
+	void renderGBCDebuggerUI();
+
+	void debugSyncScreenIfNeeded();
+	void debugEventViewerCheck();
+	void renderGBCDebuggerEventViewerTab();
+
+private:
+
+	void renderGBCDebuggerPPUTab();
+	void renderGBCDebuggerRegistersPanel();
+	void renderGBCDebuggerTileViewerPanel();
+	void renderGBCDebuggerBGMapPanel();
+	void renderGBCDebuggerWindowMapPanel();
+	void debugRebuildSpecificBGMap(uint16_t mapBaseOffset, std::array<Pixel, 256 * 256>& outBuffer);
+	void renderGBCDebuggerViewportPanel();
+	void debugRebuildViewportBGMapPixels();
+	void renderGBCDebuggerOAMPanel();
+	void renderGBCDebuggerPalettePanel();
+	void debugEnsureTexturesCreated();
+	void debugRebuildTileViewerPixels();
+	MASQ_INLINE BYTE debugReadVRAM(uint8_t bank, uint16_t offsetWithinBank)
+	{
+		if (ROM_TYPE == ROM::GAME_BOY)
+		{
+			// DMG has no VRAM banking (bank is always conceptually 0) and its real storage is the
+			// flat memory-map union at the raw $8000+offset address, NOT entireVram -- that array
+			// is exclusively the CGB path and is simply never written to for a DMG ROM.
+			RETURN pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0x8000 + offsetWithinBank];
+		}
+		RETURN pGBc_instance->GBc_state.entireVram.vramMemoryBanks.mVRAMBanks[bank][offsetWithinBank];
+	}
+	void debugRebuildTileDetailPixels(int tileIdx, uint8_t bank, int paletteIdx);
+	void debugRebuildOAMSpritePixels();
+
+#endif // !__RPI_PICO__
+
+#pragma endregion GBC_DEBUGGER
 
 private:
 

@@ -2253,9 +2253,38 @@ public:
 										{
 											if (ImGui::BeginMenu("Debugger"))
 											{
-												if (ImGui::BeginMenu("CPU", NO)) ImGui::EndMenu();
-												if (ImGui::BeginMenu("PPU", NO)) ImGui::EndMenu();
-												if (ImGui::BeginMenu("APU", NO)) ImGui::EndMenu();
+												if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("Coming soon");
+												ImGui::MenuItem("GBA", NULL, NO, DISABLED);
+												if (current_instance->getEmulationID() == EMULATION_ID::GB_GBC_ID)
+												{
+													GBc_t* gbc = static_cast<GBc_t*>(current_instance);
+													if (ImGui::MenuItem("GB-GBC", NULL, gbc->gbcDebugger.windowOpen))
+														gbc->gbcDebugger.windowOpen = (gbc->gbcDebugger.windowOpen == NO) ? YES : NO;
+												}
+												else
+												{
+													ImGui::MenuItem("GB-GBC", NULL, NO, DISABLED);
+													if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+														ImGui::SetTooltip("Load a GB/GBC ROM first");
+												}
+												if (current_instance->getEmulationID() == EMULATION_ID::NES_ID)
+												{
+													NES_t* nes = static_cast<NES_t*>(current_instance);
+													if (ImGui::MenuItem("NES", NULL, nes->nesDebugger.windowOpen))
+														nes->nesDebugger.windowOpen = (nes->nesDebugger.windowOpen == NO) ? YES : NO;
+												}
+												else
+												{
+													ImGui::MenuItem("NES", NULL, NO, DISABLED);
+													if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) 
+														ImGui::SetTooltip("Load an NES ROM first");
+												}
+												ImGui::MenuItem("Pac-Man", NULL, NO, DISABLED);
+												if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("Coming soon");
+												ImGui::MenuItem("Space Invaders", NULL, NO, DISABLED);
+												if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("Coming soon");
+												ImGui::MenuItem("CHIP-8", NULL, NO, DISABLED);
+												if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("Coming soon");
 												ImGui::EndMenu();
 											}
 										}
@@ -2770,6 +2799,16 @@ public:
 									appLog.Draw();
 									ImGui::End();
 									ImGui::PopStyleColor();
+								}
+
+								// ---- PPU/CPU/APU/Event debugger ----------------
+								if (current_instance->getEmulationID() == EMULATION_ID::GB_GBC_ID)
+								{
+									static_cast<GBc_t*>(current_instance)->renderGBCDebuggerUI();
+								}
+								if (current_instance->getEmulationID() == EMULATION_ID::NES_ID)
+								{
+									static_cast<NES_t*>(current_instance)->renderNESDebuggerUI();
 								}
 
 								// ---- Cheat hub ------------------------------
