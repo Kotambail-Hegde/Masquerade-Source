@@ -1541,6 +1541,17 @@ private:
 		BYTE latchedWXForDelay;
 		BYTE latchedWindowDiscardTarget;
 		FLAG noPixelRenderedSinceWindowTrigger;
+		FLAG prevDMGPixelIsBG;
+		FLAG prevCGBPixelIsBG;
+		FLAG prevDMGPixelIsOBJ;
+		FLAG prevCGBPixelIsOBJ;
+		SBYTE prevDMGPixelBGColor;
+		SBYTE prevCGBPixelBGPalette;
+		SBYTE prevCGBPixelBGColor;
+		SBYTE prevDMGPixelOBJColor;
+		SBYTE prevDMGPixelOBJPalette;
+		SBYTE prevCGBPixelOBJColor;
+		SBYTE prevCGBPixelOBJPalette;
 		BYTE latchedWX;
 		int16_t latchedXWindow;
 		int16_t pixelFetcherDots;
