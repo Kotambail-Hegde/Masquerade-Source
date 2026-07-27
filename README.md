@@ -195,14 +195,13 @@ _Example: The PPU Debugger inspecting a Game Boy / Game Boy Color state._
   - unused_hwio-C.gb
   - boot_hwio-C.gb
   - boot_div-cgbABCDE.gb
-- Passes all Wilbert Pol's tests
-- Passes Daid's GBEmulatorShootout tests except:
-  - ppu_scanline_bgp.gb
+- Passes all of Wilbert Pol's tests
+- Passes all of Daid's GBEmulatorShootout tests
 - Passes PeachyHardwareAbuse tests including ctf.gb
 - Passes MMIO_exec_1.gb
 - Passes DMG Aging Cartridge test
 - Passes ax6's rtc3test suite
-- APU plays ISSOtm's smooth-player.gb
+- APU successfully plays ISSOtm's smooth-player.gb
 - Passes all Hacktix's tests except:
   - strikethrough.gb
 - Passes TurtleTests
@@ -211,14 +210,27 @@ _Example: The PPU Debugger inspecting a Game Boy / Game Boy Color state._
 - Fails some same-suite tests:
   - apu
   - sgb
+- Passes Mealybug-Tearoom tests except for the following:
+  - m3_lcdc_bg_en_change.gb
+  - m3_lcdc_bg_map_change.gb
+  - ​m3_lcdc_obj_en_change.gb
+  - m3_lcdc_obj_en_change_variant.gb
+  - m3_lcdc_obj_size_change.gb
+  - m3_lcdc_obj_size_change_scx.gb
+  - m3_lcdc_tile_sel_change.gb
+  - m3_lcdc_tile_sel_win_change.gb
+  - m3_lcdc_win_en_change_multiple.gb
+  - m3_lcdc_win_en_change_multiple_wx.gb
+  - m3_lcdc_win_en_change_multiple_wx.gb
+  - m3_scx_high_5_bits.gb
+  - ​m3_scy_change.gb
+  - m3_window_timing_wx_0.gb
 
 #### Known Issues (other than the ones mentioned above)
 - Fails cgb-acid-hell
-- Fails some age-test-roms
-- Fails some of the Mealybug Tearoom tests
-- Fails many docboy-test-suite's APU and CGB tests
+- Fails few age-test-roms
+- Fails docboy-test-suite's APU tests
 - Link Cable not supported
-- Multiple CGB-specific quirks remain unimplemented
 
 ---
 
