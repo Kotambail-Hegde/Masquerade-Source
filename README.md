@@ -312,6 +312,7 @@ _Example: The Event Debugger inspecting a Game Boy / Game Boy Color state._
   - Namco 175 / Namco 340 (210)
     - Namco 175
     - Namco 340
+  - iNES Mapper 232 (232)
 - Supports Game Genie cheats
 - Supports Zapper in Port 2 (mouse clicks)
 

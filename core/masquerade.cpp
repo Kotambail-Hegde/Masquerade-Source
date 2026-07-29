@@ -1843,7 +1843,7 @@ public:
 								ImGui::TextWrapped("It is highly recommended to dump and provide the path to the official BIOS files now.");
 
 								ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
-								ImGui::TextWrapped("WARNING: If you skip this step, Masquerade will use a less accurate built-in BIOS by default.");
+								ImGui::TextWrapped("WARNING: If you skip this step, consoles which require will not work!");
 								ImGui::PopStyleColor();
 								ImGui::Separator();
 

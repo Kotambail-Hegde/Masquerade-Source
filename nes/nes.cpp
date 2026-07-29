@@ -691,6 +691,7 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 		case MAPPER::UxROM_002:
 		case MAPPER::INES_MAPPER_180:
 		case MAPPER::AxROM:
+		case MAPPER::INES_MAPPER_232:
 		{
 			if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE0_END_ADDRESS))
 			{
@@ -3004,6 +3005,7 @@ void NES_t::writePpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 		case MAPPER::INES_MAPPER_158:
 		case MAPPER::MMC2:
 		case MAPPER::MMC4:
+		case MAPPER::INES_MAPPER_232:
 		{
 			// Pattern table writes only land when CHR-RAM (no CHR-ROM)
 			if (pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB == ZERO)
@@ -5345,6 +5347,49 @@ inline byte NES_t::readCpuRawMemoryInternal(uint16_t address, MEMORY_ACCESS_SOUR
 						RETURN pNES_catridgeMemory->maxCatridgePRGROM[prgIndex];
 					}
 
+					BREAK;
+				}
+				case MAPPER::INES_MAPPER_232:
+				{
+					// --- Cartridge RAM / WRAM Space ($6000 - $7FFF) ---
+					if (IF_ADDRESS_WITHIN(address, UNMAPPED_START_ADDRESS, CATRIDGE_RAM_END_ADDRESS))
+					{
+						RETURN pNES_cpuMemory->NESMemoryMap.catridgeMappedMemory[address - UNMAPPED_START_ADDRESS];
+					}
+
+					// --- PRG ROM Bank 0 ($8000 - $BFFF): 16KB Switchable ---
+					if (IF_ADDRESS_WITHIN(address, CATRIDGE_ROM_BANK0_START_ADDRESS, CATRIDGE_ROM_BANK0_END_ADDRESS))
+					{
+						index = (pNES_instance->NES_state.catridgeInfo.ines232.prgBank8000 * 0x4000) + (address - CATRIDGE_ROM_BANK0_START_ADDRESS);
+
+						if ((ceNES->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
+							&&
+							(!hasCompare || (BYTE)compareVal == pNES_catridgeMemory->maxCatridgePRGROM[index]))
+						{
+							RETURN TO_UINT8(modedData);
+						}
+						else
+						{
+							RETURN pNES_catridgeMemory->maxCatridgePRGROM[index];
+						}
+					}
+
+					// --- PRG ROM Bank 1 ($C000 - $FFFF): 16KB Switchable ---
+					if (IF_ADDRESS_WITHIN(address, CATRIDGE_ROM_BANK1_START_ADDRESS, UNMAPPED_END_ADDRESS))
+					{
+						index = (pNES_instance->NES_state.catridgeInfo.ines232.prgBankC000 * 0x4000) + (address - CATRIDGE_ROM_BANK1_START_ADDRESS);
+
+						if ((ceNES->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
+							&&
+							(!hasCompare || (BYTE)compareVal == pNES_catridgeMemory->maxCatridgePRGROM[index]))
+						{
+							RETURN TO_UINT8(modedData);
+						}
+						else
+						{
+							RETURN pNES_catridgeMemory->maxCatridgePRGROM[index];
+						}
+					}
 					BREAK;
 				}
 				default:
@@ -8459,6 +8504,38 @@ inline void NES_t::writeCpuRawMemoryInternal(uint16_t address, byte data, MEMORY
 						BREAK;
 					}
 
+					BREAK;
+				}
+				case MAPPER::INES_MAPPER_232:
+				{
+					if (address >= CATRIDGE_ROM_BANK0_START_ADDRESS)
+					{
+						auto& m232 = pNES_instance->NES_state.catridgeInfo.ines232;
+
+						if (address <= 0xBFFF)
+						{
+							// Outer Register: Bits 3 and 4 select 64 KiB outer PRG block
+							m232.outerBank = (data >> 3) & 0x03;
+						}
+						else // 0xC000 - 0xFFFF
+						{
+							// Inner Register: Bits 0 and 1 select 16 KiB inner bank for $8000-$BFFF
+							m232.innerBank = data & 0x03;
+						}
+
+						const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
+						const bool isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
+						const uint32_t totalPrg16kBanks = isNES2
+							? (hdr.sizeOfPrgRomIn16KB | (hdr.flags_8to15.nes2p0.flag9.fields.prgRomMSB << 8))
+							: hdr.sizeOfPrgRomIn16KB;
+
+						const uint32_t maxBanks = totalPrg16kBanks > ZERO ? totalPrg16kBanks : ONE;
+
+						// $8000-$BFFF points to selected 16 KiB page in block
+						m232.prgBank8000 = ((m232.outerBank * 4) + m232.innerBank) % maxBanks;
+						// $C000-$FFFF is hardwired to the last (3rd) 16 KiB page of the selected block
+						m232.prgBankC000 = ((m232.outerBank * 4) + 3) % maxBanks;
+					}
 					BREAK;
 				}
 				default:
@@ -13501,6 +13578,36 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 					// -----------------------------------------------------------
 					// CHR init: copy first 8KB if CHR-ROM present
 					// -----------------------------------------------------------
+					if (chrRomSizeBytes > ZERO)
+					{
+						const uint64_t copySize = (chrRomSizeBytes > 0x2000ULL) ? 0x2000ULL : chrRomSizeBytes;
+						memcpy_portable(ppuChr, copySize, chrRom, copySize);
+					}
+
+					BREAK;
+				}
+				case MAPPER::INES_MAPPER_232:
+				{
+					auto& m232 = pNES_instance->NES_state.catridgeInfo.ines232;
+					memset(&m232, 0, sizeof(m232));
+
+					// Power-on / Reset Defaults:
+					// Outer bank defaults to block 3 (last 64 KiB block), inner bank defaults to 0
+					m232.outerBank = THREE;
+					m232.innerBank = ZERO;
+
+					// Calculate initial 16 KiB PRG bank indices
+					// $8000-$BFFF: (outerBank * 4) + innerBank
+					// $C000-$FFFF: (outerBank * 4) + 3 (fixed to last bank of selected block)
+					const uint32_t totalBanks = prg16kBanks > ZERO ? prg16kBanks : ONE;
+					m232.prgBank8000 = ((m232.outerBank * 4) + m232.innerBank) % totalBanks;
+					m232.prgBankC000 = ((m232.outerBank * 4) + 3) % totalBanks;
+
+					// Map initial PRG banks to CPU cartridge view ($8000-$BFFF and $C000-$FFFF)
+					memcpy_portable(&(cpuCart[0x0000]), 0x4000, &(prgRom[m232.prgBank8000 * 0x4000]), 0x4000);
+					memcpy_portable(&(cpuCart[0x4000]), 0x4000, &(prgRom[m232.prgBankC000 * 0x4000]), 0x4000);
+
+					// Map initial 8 KiB CHR ROM/RAM pattern table
 					if (chrRomSizeBytes > ZERO)
 					{
 						const uint64_t copySize = (chrRomSizeBytes > 0x2000ULL) ? 0x2000ULL : chrRomSizeBytes;

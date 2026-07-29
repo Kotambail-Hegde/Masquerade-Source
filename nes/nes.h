@@ -734,7 +734,8 @@ private:
 		NANJING_FC001 = ONEHUNDREDSIXTYTHREE,
 		INES_MAPPER_180 = ONEEIGHTY,
 		INES_MAPPER_210 = TWOHUNDREDTEN,
-		INES_MAPPER_218 = TWOHUNDREDEIGHTEEN
+		INES_MAPPER_218 = TWOHUNDREDEIGHTEEN,
+		INES_MAPPER_232 = TWOHUNDREDTHIRTYTWO
 	};
 
 	enum SUB_MAPPER : int16_t
@@ -1465,6 +1466,13 @@ private:
 			// -----------------------------------------------------------------------
 			FLAG    hasBattery;         // from iNES flag 6 bit 1
 		} namco163;
+		struct
+		{
+			uint8_t outerBank; // 64 KiB block select (bits 3-4 written to $8000-$BFFF)
+			uint8_t innerBank; // 16 KiB page select (bits 0-1 written to $C000-$FFFF)
+			uint32_t prgBank8000;  // Calculated 16 KiB bank index for $8000-$BFFF
+			uint32_t prgBankC000;  // Calculated 16 KiB bank index for $C000-$FFFF
+		} ines232;
 		FLAG isBusConflictPresent;
 	} catridgeInfo_t;
 
