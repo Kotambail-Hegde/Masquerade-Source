@@ -2717,6 +2717,11 @@ void GBc_t::apuTick()
 
 	if (pGBc_instance->GBc_state.audio.wasDivAPUUpdated == YES)	// 512 Hz
 	{
+		// NOTE: Needed by the 5th test of 07-len sweep period sync.gb
+		// Additionally, for this test to pass, the reset of div_apu should happen only at the next DIV APU event
+		// Some more additional information about this is available in the following discord link
+		// https://discord.com/channels/465585922579103744/465586075830845475/1197986246841073664
+		// https://discord.com/channels/465585922579103744/465586075830845475/1197987848318632156
 		if (pGBc_instance->GBc_state.audio.wasPowerCycled == YES)
 		{
 			pGBc_instance->GBc_state.audio.div_apu = RESET;
@@ -12093,6 +12098,23 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 				RETURN;
 			}
 
+			// ------------------------------------------------------------
+			// DIV-APU event
+			//
+			// Writing DIV resets the internal divider to 0.
+			// If the watched divider bit transitions 1 -> 0, the APU frame
+			// sequencer must be clocked immediately.
+			// Normal speed : divider bit 12 (DIV MSB bit 4)
+			// Double speed : divider bit 13 (DIV MSB bit 5)
+			// 
+			// Needed by samesuite's div_write_trigger.gb
+			// ------------------------------------------------------------
+
+			if (GETBIT(((ROM_TYPE == ROM::GAME_BOY_COLOR && isCGBDoubleSpeedEnabled() == YES) ? FIVE : FOUR), getGBDividerMSB()) == ONE)
+			{
+				incrementDivAPU(ONE);
+			}
+
 			// NOTE: For emulation purpose, we maintain an internal DIV counter
 			// Now, when we reset the DIV register, this will ensure the incrmenting of DIV from 0 again
 			// During this reset, if we didn't reset the internal DIV counter, then the time taken by DIV register
@@ -12895,6 +12917,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 					pGBc_instance->GBc_state.audio.audioChannelInstance[AUDIO_CHANNELS::CHANNEL_4].lengthTimer = ZERO;
 				}
 
+				// NOTE: Needed by the 5th test of 07-len sweep period sync.gb
 				pGBc_instance->GBc_state.audio.wasPowerCycled = YES;
 
 				// NOTE: As we are resetting the frame sequencer, next half period WILL clock the length counter
