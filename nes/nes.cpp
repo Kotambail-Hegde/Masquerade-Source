@@ -372,7 +372,8 @@ void NES_t::clockMMC3IRQ(uint16_t address, MEMORY_ACCESS_SOURCE source, FLAG isW
 		&& mapper != MAPPER::INES_MAPPER_119
 		&& mapper != MAPPER::INES_MAPPER_118
 		&& mapper != MAPPER::RAMBO1
-		&& mapper != MAPPER::INES_MAPPER_158)
+		&& mapper != MAPPER::INES_MAPPER_158
+		&& mapper != MAPPER::INES_MAPPER_268)
 	{
 		RETURN;
 	}
@@ -597,7 +598,8 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 		|| pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::INES_MAPPER_119
 		|| pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::INES_MAPPER_118  // TxSROM
 		|| pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::RAMBO1
-		|| pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::INES_MAPPER_158)
+		|| pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::INES_MAPPER_158
+		|| pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::INES_MAPPER_268)
 	{
 		// Refer https://forums.nesdev.org/viewtopic.php?p=243424#p243424 AND
 		// https://forums.nesdev.org/viewtopic.php?p=243432#p243432 AND
@@ -1083,6 +1085,103 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[chrBase + index];
 				}
 				FATAL("Invalid CHR ROM/RAM address in MMC3");
+			}
+			BREAK;
+		}
+		case MAPPER::INES_MAPPER_268:
+		{
+			if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
+			{
+				const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
+				const bool isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
+				uint64_t chrRamSizeBytes = ZERO, chrNvRamSizeBytes = ZERO;
+				if (isNES2)
+				{
+					BYTE chrRamShift = hdr.flags_8to15.nes2p0.flag11.fields.chrVolRam;
+					BYTE chrNvRamShift = hdr.flags_8to15.nes2p0.flag11.fields.chrNonVolRam;
+					chrRamSizeBytes = (chrRamShift == ZERO) ? ZERO : (64ULL << chrRamShift);
+					chrNvRamSizeBytes = (chrNvRamShift == ZERO) ? ZERO : (64ULL << chrNvRamShift);
+				}
+				const uint64_t totalChrRam = chrRamSizeBytes + chrNvRamSizeBytes;
+				const bool hasChrRom = (hdr.sizeOfChrRomIn8KB != ZERO);
+				const bool isLargeChrRam = (!hasChrRom && totalChrRam > 0x2000);
+				const bool isSmallChrRam = (!hasChrRom && totalChrRam <= 0x2000);
+
+				if (isSmallChrRam)
+				{
+					RETURN pNES_ppuMemory->NESMemoryMap.patternTable.raw[address - PATTERN_TABLE0_START_ADDRESS];
+				}
+
+				const BIT chrA12Inversion = pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.bankRegisterSelect_even8k.fields.chrA12Inversion;
+
+				uint32_t startAddr1 = PATTERN_TABLE0_START_ADDRESS, endAddr1 = startAddr1 + 0x07FF;
+				uint32_t startAddr2 = endAddr1 + ONE, endAddr2 = startAddr2 + 0x07FF;
+				uint32_t startAddr3 = endAddr2 + ONE, endAddr3 = startAddr3 + 0x03FF;
+				uint32_t startAddr4 = endAddr3 + ONE, endAddr4 = startAddr4 + 0x03FF;
+				uint32_t startAddr5 = endAddr4 + ONE, endAddr5 = startAddr5 + 0x03FF;
+				uint32_t startAddr6 = endAddr5 + ONE, endAddr6 = startAddr6 + 0x03FF;
+
+				if (chrA12Inversion == SET)
+				{
+					endAddr1 = startAddr1 + 0x03FF;
+					startAddr2 = endAddr1 + ONE; endAddr2 = startAddr2 + 0x03FF;
+					startAddr3 = endAddr2 + ONE; endAddr3 = startAddr3 + 0x03FF;
+					startAddr4 = endAddr3 + ONE; endAddr4 = startAddr4 + 0x03FF;
+					startAddr5 = endAddr4 + ONE; endAddr5 = startAddr5 + 0x07FF;
+					startAddr6 = endAddr5 + ONE; endAddr6 = startAddr6 + 0x07FF;
+				}
+
+				BYTE nativeV1k = ZERO;
+				uint32_t pageBase = ZERO;
+				const auto& reg = pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters;
+
+				if (IF_ADDRESS_WITHIN(address, startAddr1, endAddr1))
+				{
+					pageBase = startAddr1;
+					nativeV1k = (chrA12Inversion == SET) ? reg.chrBank1a
+						: (BYTE)(reg.chrBank2a + (((address - startAddr1) >> 10) & 1));
+				}
+				else if (IF_ADDRESS_WITHIN(address, startAddr2, endAddr2))
+				{
+					pageBase = startAddr2;
+					nativeV1k = (chrA12Inversion == SET) ? reg.chrBank1b
+						: (BYTE)(reg.chrBank2b + (((address - startAddr2) >> 10) & 1));
+				}
+				else if (IF_ADDRESS_WITHIN(address, startAddr3, endAddr3))
+				{
+					pageBase = startAddr3;
+					nativeV1k = (chrA12Inversion == SET) ? reg.chrBank1c : reg.chrBank1a;
+				}
+				else if (IF_ADDRESS_WITHIN(address, startAddr4, endAddr4))
+				{
+					pageBase = startAddr4;
+					nativeV1k = (chrA12Inversion == SET) ? reg.chrBank1d : reg.chrBank1b;
+				}
+				else if (IF_ADDRESS_WITHIN(address, startAddr5, endAddr5))
+				{
+					pageBase = startAddr5;
+					nativeV1k = (chrA12Inversion == SET)
+						? (BYTE)(reg.chrBank2a + (((address - startAddr5) >> 10) & 1))
+						: reg.chrBank1c;
+				}
+				else
+				{
+					pageBase = startAddr6;
+					nativeV1k = (chrA12Inversion == SET)
+						? (BYTE)(reg.chrBank2b + (((address - startAddr6) >> 10) & 1))
+						: reg.chrBank1d;
+				}
+
+				const auto& outer = pNES_instance->NES_state.catridgeInfo.mmc3.ines268;
+				uint32_t page1k = mapper268ComputeChrPage(nativeV1k, (uint16_t)address, outer.reg);
+				uint32_t index = (page1k * 0x0400u) + ((address - pageBase) & 0x03FFu);
+
+				if (isLargeChrRam)
+				{
+					const uint32_t largeChrRamMask = (uint32_t)(totalChrRam - ONE);
+					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index & largeChrRamMask];
+				}
+				RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index % ((uint32_t)hdr.sizeOfChrRomIn8KB * 0x2000u)];
 			}
 			BREAK;
 		}
@@ -2382,7 +2481,8 @@ void NES_t::writePpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 		|| pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::INES_MAPPER_119
 		|| pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::INES_MAPPER_118  // TxSROM
 		|| pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::RAMBO1
-		|| pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::INES_MAPPER_158)
+		|| pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::INES_MAPPER_158
+		|| pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::INES_MAPPER_268)
 	{
 		// Refer https://forums.nesdev.org/viewtopic.php?p=243424#p243424 AND
 		// https://forums.nesdev.org/viewtopic.php?p=243432#p243432 AND
@@ -2690,312 +2790,100 @@ void NES_t::writePpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 		case MAPPER::INES_MAPPER_047:
 		case MAPPER::INES_MAPPER_118:
 		case MAPPER::INES_MAPPER_119:
+		case MAPPER::INES_MAPPER_268:
 		{
-			const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
-			const bool isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
-			uint64_t chrRamSizeBytes = ZERO;
-			uint64_t chrNvRamSizeBytes = ZERO;
-			uint64_t totalChrRam = ZERO;
-			if (isNES2)
-			{
-				BYTE chrRamShift = hdr.flags_8to15.nes2p0.flag11.fields.chrVolRam;
-				BYTE chrNvRamShift = hdr.flags_8to15.nes2p0.flag11.fields.chrNonVolRam;
-				chrRamSizeBytes = (chrRamShift == ZERO) ? ZERO : (64ULL << chrRamShift);
-				chrNvRamSizeBytes = (chrNvRamShift == ZERO) ? ZERO : (64ULL << chrNvRamShift);
-			}
-			totalChrRam = chrRamSizeBytes + chrNvRamSizeBytes;
-
-			// NOTE: Mapper 119 (TQROM) — bit 6 of CHR bank is chip select: 0=ROM, 1=RAM.
-			// TQROM CS=1 writes to patternTable.raw (8KB RAM on board).
-			// Refer https://www.nesdev.org/wiki/INES_Mapper_119
-			//
-			// For large pure CHR-RAM (>8KB, no CHR ROM): CS is forced to 1 and
-			// maxCatridgeCHRROM is reused as the backing store (safe since CHR ROM size is zero).
-			const bool isTQROM = (pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::INES_MAPPER_119);
-			const bool isLargeChrRam = (!isTQROM && pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB == ZERO && totalChrRam > 0x2000);
-
-			// Pure CHR-RAM, 8KB or less — write directly to patternTable.raw (unbanked)
-			if (!isTQROM && pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB == ZERO && totalChrRam <= 0x2000)
-			{
-				if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
-				{
-					pNES_ppuMemory->NESMemoryMap.patternTable.raw[address - PATTERN_TABLE0_START_ADDRESS] = data;
-					RETURN;
-				}
-			}
-
 			if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
 			{
-				// If it's standard MMC3, 037, 047, or 118 with CHR-ROM and no large CHR-RAM, writes are ignored
-				if (!isTQROM && !isLargeChrRam)
+				const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
+				const bool isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
+				uint64_t chrRamSizeBytes = ZERO, chrNvRamSizeBytes = ZERO;
+				if (isNES2)
 				{
-					RETURN;
+					BYTE chrRamShift = hdr.flags_8to15.nes2p0.flag11.fields.chrVolRam;
+					BYTE chrNvRamShift = hdr.flags_8to15.nes2p0.flag11.fields.chrNonVolRam;
+					chrRamSizeBytes = (chrRamShift == ZERO) ? ZERO : (64ULL << chrRamShift);
+					chrNvRamSizeBytes = (chrNvRamShift == ZERO) ? ZERO : (64ULL << chrNvRamShift);
+				}
+				const uint64_t totalChrRam = chrRamSizeBytes + chrNvRamSizeBytes;
+				const bool hasChrRom = (hdr.sizeOfChrRomIn8KB != ZERO);
+
+				if (hasChrRom)
+				{
+					BREAK; // CHR-ROM is read-only
 				}
 
-				// RAM address mask for large CHR-RAM: mask to full declared size so upper banks are reachable.
-				// Not used for TQROM (always 0x1FFF there).
-				const uint32_t largeChrRamMask = (uint32_t)(totalChrRam - ONE);
+				if (totalChrRam <= 0x2000)
+				{
+					pNES_ppuMemory->NESMemoryMap.patternTable.raw[address - PATTERN_TABLE0_START_ADDRESS] = data;
+					BREAK;
+				}
 
-				BIT currentBankCS = RESET;
+				const BIT chrA12Inversion = pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.bankRegisterSelect_even8k.fields.chrA12Inversion;
 
-				BIT chrA12Inversion = pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.bankRegisterSelect_even8k.fields.chrA12Inversion;
-
-				auto startAddr1 = PATTERN_TABLE0_START_ADDRESS;
-				auto endAddr1 = startAddr1 + 0x07FF; // 2KB
-				auto startAddr2 = endAddr1 + ONE;
-				auto endAddr2 = startAddr2 + 0x07FF; // 2KB
-				auto startAddr3 = endAddr2 + ONE;
-				auto endAddr3 = startAddr3 + 0x03FF; // 1KB
-				auto startAddr4 = endAddr3 + ONE;
-				auto endAddr4 = startAddr4 + 0x03FF; // 1KB
-				auto startAddr5 = endAddr4 + ONE;
-				auto endAddr5 = startAddr5 + 0x03FF; // 1KB
-				auto startAddr6 = endAddr5 + ONE;
-				auto endAddr6 = startAddr6 + 0x03FF; // 1KB
+				uint32_t startAddr1 = PATTERN_TABLE0_START_ADDRESS, endAddr1 = startAddr1 + 0x07FF;
+				uint32_t startAddr2 = endAddr1 + ONE, endAddr2 = startAddr2 + 0x07FF;
+				uint32_t startAddr3 = endAddr2 + ONE, endAddr3 = startAddr3 + 0x03FF;
+				uint32_t startAddr4 = endAddr3 + ONE, endAddr4 = startAddr4 + 0x03FF;
+				uint32_t startAddr5 = endAddr4 + ONE, endAddr5 = startAddr5 + 0x03FF;
+				uint32_t startAddr6 = endAddr5 + ONE, endAddr6 = startAddr6 + 0x03FF;
 
 				if (chrA12Inversion == SET)
 				{
-					startAddr1 = PATTERN_TABLE0_START_ADDRESS;
-					endAddr1 = startAddr1 + 0x03FF; // 1KB
-					startAddr2 = endAddr1 + ONE;
-					endAddr2 = startAddr2 + 0x03FF; // 1KB
-					startAddr3 = endAddr2 + ONE;
-					endAddr3 = startAddr3 + 0x03FF; // 1KB
-					startAddr4 = endAddr3 + ONE;
-					endAddr4 = startAddr4 + 0x03FF; // 1KB
-					startAddr5 = endAddr4 + ONE;
-					endAddr5 = startAddr5 + 0x07FF; // 2KB
-					startAddr6 = endAddr5 + ONE;
-					endAddr6 = startAddr6 + 0x07FF; // 2KB
+					endAddr1 = startAddr1 + 0x03FF;
+					startAddr2 = endAddr1 + ONE; endAddr2 = startAddr2 + 0x03FF;
+					startAddr3 = endAddr2 + ONE; endAddr3 = startAddr3 + 0x03FF;
+					startAddr4 = endAddr3 + ONE; endAddr4 = startAddr4 + 0x03FF;
+					startAddr5 = endAddr4 + ONE; endAddr5 = startAddr5 + 0x07FF;
+					startAddr6 = endAddr5 + ONE; endAddr6 = startAddr6 + 0x07FF;
 				}
+
+				BYTE nativeV1k = ZERO;
+				uint32_t pageBase = ZERO;
+				const auto& reg = pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters;
 
 				if (IF_ADDRESS_WITHIN(address, startAddr1, endAddr1))
 				{
-					auto wrapAround = 0x07FF;
-					auto index = pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank2a * 0x0400;
-					// Only read CS bits from ines119 registers for actual TQROM;
-					// for large CHR-RAM, CS is implicitly 1 (all banks are RAM).
-					if (isTQROM)
-					{
-						currentBankCS = pNES_instance->NES_state.catridgeInfo.mmc3.ines119.chrBank2aCS;
-					}
-					else if (isLargeChrRam)
-					{
-						currentBankCS = ONE;
-					}
-					if (chrA12Inversion == SET)
-					{
-						wrapAround = 0x03FF;
-						index = pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1a * 0x0400;
-						if (isTQROM)
-						{
-							currentBankCS = pNES_instance->NES_state.catridgeInfo.mmc3.ines119.chrBank1aCS;
-						}
-						else if (isLargeChrRam)
-						{
-							currentBankCS = ONE;
-						}
-					}
-					index += ((address - startAddr1) & wrapAround);
-					if (currentBankCS == ONE)
-					{
-						// TQROM: 8KB CHR RAM lives in patternTable.raw
-						if (isTQROM)
-						{
-							pNES_ppuMemory->NESMemoryMap.patternTable.raw[index & 0x1FFF] = data; RETURN;
-						}
-						// Large CHR-RAM: maxCatridgeCHRROM reused as backing store (CHR ROM size is zero)
-						pNES_catridgeMemory->maxCatridgeCHRROM[index & largeChrRamMask] = data;
-					}
-					RETURN;
+					pageBase = startAddr1;
+					nativeV1k = (chrA12Inversion == SET) ? reg.chrBank1a
+						: (BYTE)(reg.chrBank2a + (((address - startAddr1) >> 10) & 1));
 				}
-				if (IF_ADDRESS_WITHIN(address, startAddr2, endAddr2))
+				else if (IF_ADDRESS_WITHIN(address, startAddr2, endAddr2))
 				{
-					auto wrapAround = 0x07FF;
-					auto index = pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank2b * 0x0400;
-					if (isTQROM)
-					{
-						currentBankCS = pNES_instance->NES_state.catridgeInfo.mmc3.ines119.chrBank2bCS;
-					}
-					else if (isLargeChrRam)
-					{
-						currentBankCS = ONE;
-					}
-					if (chrA12Inversion == SET)
-					{
-						wrapAround = 0x03FF;
-						index = pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1b * 0x0400;
-						if (isTQROM)
-						{
-							currentBankCS = pNES_instance->NES_state.catridgeInfo.mmc3.ines119.chrBank1bCS;
-						}
-						else if (isLargeChrRam)
-						{
-							currentBankCS = ONE;
-						}
-					}
-					index += ((address - startAddr2) & wrapAround);
-					if (currentBankCS == ONE)
-					{
-						// TQROM: 8KB CHR RAM lives in patternTable.raw
-						if (isTQROM)
-						{
-							pNES_ppuMemory->NESMemoryMap.patternTable.raw[index & 0x1FFF] = data; RETURN;
-						}
-						// Large CHR-RAM: maxCatridgeCHRROM reused as backing store (CHR ROM size is zero)
-						pNES_catridgeMemory->maxCatridgeCHRROM[index & largeChrRamMask] = data;
-					}
-					RETURN;
+					pageBase = startAddr2;
+					nativeV1k = (chrA12Inversion == SET) ? reg.chrBank1b
+						: (BYTE)(reg.chrBank2b + (((address - startAddr2) >> 10) & 1));
 				}
-				if (IF_ADDRESS_WITHIN(address, startAddr3, endAddr3))
+				else if (IF_ADDRESS_WITHIN(address, startAddr3, endAddr3))
 				{
-					auto index = pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1a * 0x0400;
-					if (isTQROM)
-					{
-						currentBankCS = pNES_instance->NES_state.catridgeInfo.mmc3.ines119.chrBank1aCS;
-					}
-					else if (isLargeChrRam)
-					{
-						currentBankCS = ONE;
-					}
-					if (chrA12Inversion == SET)
-					{
-						index = pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1c * 0x0400;
-						if (isTQROM)
-						{
-							currentBankCS = pNES_instance->NES_state.catridgeInfo.mmc3.ines119.chrBank1cCS;
-						}
-						else if (isLargeChrRam)
-						{
-							currentBankCS = ONE;
-						}
-					}
-					index += ((address - startAddr3) & 0x3FF);
-					if (currentBankCS == ONE)
-					{
-						// TQROM: 8KB CHR RAM lives in patternTable.raw
-						if (isTQROM)
-						{
-							pNES_ppuMemory->NESMemoryMap.patternTable.raw[index & 0x1FFF] = data; RETURN;
-						}
-						// Large CHR-RAM: maxCatridgeCHRROM reused as backing store (CHR ROM size is zero)
-						pNES_catridgeMemory->maxCatridgeCHRROM[index & largeChrRamMask] = data;
-					}
-					RETURN;
+					pageBase = startAddr3;
+					nativeV1k = (chrA12Inversion == SET) ? reg.chrBank1c : reg.chrBank1a;
 				}
-				if (IF_ADDRESS_WITHIN(address, startAddr4, endAddr4))
+				else if (IF_ADDRESS_WITHIN(address, startAddr4, endAddr4))
 				{
-					auto index = pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1b * 0x0400;
-					if (isTQROM)
-					{
-						currentBankCS = pNES_instance->NES_state.catridgeInfo.mmc3.ines119.chrBank1bCS;
-					}
-					else if (isLargeChrRam)
-					{
-						currentBankCS = ONE;
-					}
-					if (chrA12Inversion == SET)
-					{
-						index = pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1d * 0x0400;
-						if (isTQROM)
-						{
-							currentBankCS = pNES_instance->NES_state.catridgeInfo.mmc3.ines119.chrBank1dCS;
-						}
-						else if (isLargeChrRam)
-						{
-							currentBankCS = ONE;
-						}
-					}
-					index += ((address - startAddr4) & 0x3FF);
-					if (currentBankCS == ONE)
-					{
-						// TQROM: 8KB CHR RAM lives in patternTable.raw
-						if (isTQROM)
-						{
-							pNES_ppuMemory->NESMemoryMap.patternTable.raw[index & 0x1FFF] = data; RETURN;
-						}
-						// Large CHR-RAM: maxCatridgeCHRROM reused as backing store (CHR ROM size is zero)
-						pNES_catridgeMemory->maxCatridgeCHRROM[index & largeChrRamMask] = data;
-					}
-					RETURN;
+					pageBase = startAddr4;
+					nativeV1k = (chrA12Inversion == SET) ? reg.chrBank1d : reg.chrBank1b;
 				}
-				if (IF_ADDRESS_WITHIN(address, startAddr5, endAddr5))
+				else if (IF_ADDRESS_WITHIN(address, startAddr5, endAddr5))
 				{
-					auto wrapAround = 0x03FF;
-					auto index = pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1c * 0x0400;
-					if (isTQROM)
-					{
-						currentBankCS = pNES_instance->NES_state.catridgeInfo.mmc3.ines119.chrBank1cCS;
-					}
-					else if (isLargeChrRam)
-					{
-						currentBankCS = ONE;
-					}
-					if (chrA12Inversion == SET)
-					{
-						wrapAround = 0x07FF;
-						index = pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank2a * 0x0400;
-						if (isTQROM)
-						{
-							currentBankCS = pNES_instance->NES_state.catridgeInfo.mmc3.ines119.chrBank2aCS;
-						}
-						else if (isLargeChrRam)
-						{
-							currentBankCS = ONE;
-						}
-					}
-					index += ((address - startAddr5) & wrapAround);
-					if (currentBankCS == ONE)
-					{
-						// TQROM: 8KB CHR RAM lives in patternTable.raw
-						if (isTQROM)
-						{
-							pNES_ppuMemory->NESMemoryMap.patternTable.raw[index & 0x1FFF] = data; RETURN;
-						}
-						// Large CHR-RAM: maxCatridgeCHRROM reused as backing store (CHR ROM size is zero)
-						pNES_catridgeMemory->maxCatridgeCHRROM[index & largeChrRamMask] = data;
-					}
-					RETURN;
+					pageBase = startAddr5;
+					nativeV1k = (chrA12Inversion == SET)
+						? (BYTE)(reg.chrBank2a + (((address - startAddr5) >> 10) & 1))
+						: reg.chrBank1c;
 				}
-				if (IF_ADDRESS_WITHIN(address, startAddr6, endAddr6))
+				else
 				{
-					auto wrapAround = 0x03FF;
-					auto index = pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1d * 0x0400;
-					if (isTQROM)
-					{
-						currentBankCS = pNES_instance->NES_state.catridgeInfo.mmc3.ines119.chrBank1dCS;
-					}
-					else if (isLargeChrRam)
-					{
-						currentBankCS = ONE;
-					}
-					if (chrA12Inversion == SET)
-					{
-						wrapAround = 0x07FF;
-						index = pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank2b * 0x0400;
-						if (isTQROM)
-						{
-							currentBankCS = pNES_instance->NES_state.catridgeInfo.mmc3.ines119.chrBank2bCS;
-						}
-						else if (isLargeChrRam)
-						{
-							currentBankCS = ONE;
-						}
-					}
-					index += ((address - startAddr6) & wrapAround);
-					if (currentBankCS == ONE)
-					{
-						// TQROM: 8KB CHR RAM lives in patternTable.raw
-						if (isTQROM)
-						{
-							pNES_ppuMemory->NESMemoryMap.patternTable.raw[index & 0x1FFF] = data; RETURN;
-						}
-						// Large CHR-RAM: maxCatridgeCHRROM reused as backing store (CHR ROM size is zero)
-						pNES_catridgeMemory->maxCatridgeCHRROM[index & largeChrRamMask] = data;
-					}
-					RETURN;
+					pageBase = startAddr6;
+					nativeV1k = (chrA12Inversion == SET)
+						? (BYTE)(reg.chrBank2b + (((address - startAddr6) >> 10) & 1))
+						: reg.chrBank1d;
 				}
-				FATAL("Invalid CHR ROM/RAM address in MMC3");
+
+				const auto& outer = pNES_instance->NES_state.catridgeInfo.mmc3.ines268;
+				uint32_t page1k = mapper268ComputeChrPage(nativeV1k, (uint16_t)address, outer.reg);
+				uint32_t index = (page1k * 0x0400u) + ((address - pageBase) & 0x03FFu);
+				const uint32_t largeChrRamMask = (uint32_t)(totalChrRam - ONE);
+
+				pNES_catridgeMemory->maxCatridgeCHRROM[index & largeChrRamMask] = data;
 			}
 			BREAK;
 		}
@@ -4194,6 +4082,98 @@ inline byte NES_t::readCpuRawMemoryInternal(uint16_t address, MEMORY_ACCESS_SOUR
 						{
 							RETURN pNES_catridgeMemory->maxCatridgePRGROM[index];
 						}
+					}
+					BREAK;
+				}
+				case MAPPER::INES_MAPPER_268:
+				{
+					const BYTE submapperRaw = (BYTE)pNES_instance->NES_state.catridgeInfo.subMapper;
+					const bool isMindkids = (submapperRaw & 0x01) != 0;
+
+					if (IF_ADDRESS_WITHIN(address, CATRIDGE_RAM_START_ADDRESS, CATRIDGE_RAM_END_ADDRESS))
+					{
+						const BYTE a001Raw = pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.prgRamProtect_oddAk.raw;
+						if (mapper268WramReadable(a001Raw))
+						{
+							RETURN pNES_cpuMemory->NESMemoryMap.catridgeMappedMemory[address - UNMAPPED_START_ADDRESS];
+						}
+						RETURN pNES_cpuRegisters->openbus;
+					}
+
+					if (isMindkids && IF_ADDRESS_WITHIN(address, 0x5000, 0x5FFF))
+					{
+						RETURN pNES_cpuRegisters->openbus; // write-only register window
+					}
+
+					if (IF_ADDRESS_WITHIN(address, CATRIDGE_ROM_BANK0_START_ADDRESS, UNMAPPED_END_ADDRESS))
+					{
+						const BIT prgRomBankMode = pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.bankRegisterSelect_even8k.fields.prgRomMode;
+
+						auto startAddr1 = CATRIDGE_ROM_BANK0_START_ADDRESS;
+						auto endAddr1 = startAddr1 + 0x1FFF;
+						auto startAddr2 = CATRIDGE_ROM_BANK1_START_ADDRESS;
+						auto endAddr2 = startAddr2 + 0x1FFF;
+
+						if (prgRomBankMode == SET)
+						{
+							startAddr1 = CATRIDGE_ROM_BANK1_START_ADDRESS;
+							endAddr1 = startAddr1 + 0x1FFF;
+							startAddr2 = CATRIDGE_ROM_BANK0_START_ADDRESS;
+							endAddr2 = startAddr2 + 0x1FFF;
+						}
+
+						uint16_t cpuWindowAddr = ZERO;
+						BYTE nativeV = ZERO;
+						uint32_t pageBase = ZERO;
+
+						if (IF_ADDRESS_WITHIN(address, startAddr1, endAddr1))
+						{
+							nativeV = pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.prgBank8a;
+							pageBase = startAddr1; cpuWindowAddr = 0x8000;
+						}
+						else if (IF_ADDRESS_WITHIN(address, 0xA000, 0xBFFF))
+						{
+							nativeV = pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.prgBank8b;
+							pageBase = 0xA000; cpuWindowAddr = 0xA000;
+						}
+						else if (IF_ADDRESS_WITHIN(address, startAddr2, endAddr2))
+						{
+							nativeV = 0xFE;
+							pageBase = startAddr2; cpuWindowAddr = 0xC000;
+						}
+						else if (IF_ADDRESS_WITHIN(address, 0xE000, 0xFFFF))
+						{
+							nativeV = 0xFF;
+							pageBase = 0xE000; cpuWindowAddr = 0xE000;
+						}
+						else
+						{
+							FATAL("Invalid PRG ROM address in Mapper 268");
+						}
+
+						const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
+						const bool isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
+						const uint32_t totalPrg16kBanks = isNES2
+							? (hdr.sizeOfPrgRomIn16KB | (hdr.flags_8to15.nes2p0.flag9.fields.prgRomMSB << 8))
+							: hdr.sizeOfPrgRomIn16KB;
+						const uint64_t totalPrgBytes = (uint64_t)totalPrg16kBanks * 0x4000ULL;
+						const bool supports64MiB = (totalPrgBytes > 0x2000000ULL);
+
+						const auto& outer = pNES_instance->NES_state.catridgeInfo.mmc3.ines268;
+						uint32_t page = mapper268ComputePrgPage(nativeV, cpuWindowAddr, outer.reg, submapperRaw, supports64MiB);
+						uint32_t index = (page * 0x2000u) + ((address - pageBase) & 0x1FFF);
+
+						if (totalPrgBytes > ZERO)
+						{
+							index = (uint32_t)(index % totalPrgBytes);
+						}
+
+						if ((ceNES->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
+							&& (!hasCompare || (BYTE)compareVal == pNES_catridgeMemory->maxCatridgePRGROM[index]))
+						{
+							RETURN TO_UINT8(modedData);
+						}
+						RETURN pNES_catridgeMemory->maxCatridgePRGROM[index];
 					}
 					BREAK;
 				}
@@ -6667,6 +6647,119 @@ inline void NES_t::writeCpuRawMemoryInternal(uint16_t address, byte data, MEMORY
 						{
 							FATAL("Invalid Address");
 						}
+						}
+					}
+					BREAK;
+				}
+				case MAPPER::INES_MAPPER_268:
+				{
+					const BYTE submapperRaw = (BYTE)pNES_instance->NES_state.catridgeInfo.subMapper;
+					const bool isMindkids = (submapperRaw & 0x01) != 0;
+					auto& outer = pNES_instance->NES_state.catridgeInfo.mmc3.ines268;
+					const BYTE a001Raw = pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.prgRamProtect_oddAk.raw;
+
+					if (IF_ADDRESS_WITHIN(address, CATRIDGE_RAM_START_ADDRESS, CATRIDGE_RAM_END_ADDRESS)) // $6000-$7FFF
+					{
+						if (!isMindkids)
+						{
+							// Coolboy: outer registers overlay the WHOLE $6000-$7FFF range.
+							if (mapper268WramWritable(a001Raw))
+							{
+								pNES_cpuMemory->NESMemoryMap.catridgeMappedMemory[address - UNMAPPED_START_ADDRESS] = data;
+							}
+							mapper268WriteReg(outer.reg, address, data, submapperRaw);
+						}
+						else if (mapper268WramWritable(a001Raw))
+						{
+							// Mindkids: this range is PURE WRAM. Registers never live here.
+							pNES_cpuMemory->NESMemoryMap.catridgeMappedMemory[address - UNMAPPED_START_ADDRESS] = data;
+						}
+					}
+					else if (isMindkids && IF_ADDRESS_WITHIN(address, 0x5000, 0x5FFF))
+					{
+						mapper268WriteReg(outer.reg, address, data, submapperRaw);
+					}
+
+					if (IF_ADDRESS_WITHIN(address, CATRIDGE_ROM_BANK0_START_ADDRESS, UNMAPPED_END_ADDRESS))
+					{
+						switch (address & 0xF000)
+						{
+						case 0x8000:
+						case 0x9000:
+						{
+							if (IS_EVEN(address))
+							{
+								pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.bankRegisterSelect_even8k.raw = data;
+							}
+							else
+							{
+								pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.bankData_odd8k = data;
+
+								// Bank numbers stored RAW/unmodulo'd — mapper268ComputePrgPage
+								// and mapper268ComputeChrPage do all size-relative masking;
+								// the only wrap happens once, at final indexing.
+								switch (pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.bankRegisterSelect_even8k.fields.bankRegSel)
+								{
+								case ZERO:  pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank2a = data & 0xFE; BREAK;
+								case ONE:   pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank2b = data & 0xFE; BREAK;
+								case TWO:   pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1a = data; BREAK;
+								case THREE: pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1b = data; BREAK;
+								case FOUR:  pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1c = data; BREAK;
+								case FIVE:  pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1d = data; BREAK;
+								case SIX:   pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.prgBank8a = data; BREAK;
+								case SEVEN: pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.prgBank8b = data; BREAK;
+								default: FATAL("Invalid MMC3 Bank Select"); BREAK;
+								}
+							}
+							BREAK;
+						}
+						case 0xA000:
+						case 0xB000:
+						{
+							if (IS_EVEN(address))
+							{
+								pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.mirroring_evenAk.raw = data;
+								pNES_instance->NES_state.catridgeInfo.nameTblMir = mapper268ResolveMirroring(data, outer.reg, submapperRaw);
+							}
+							else
+							{
+								pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.prgRamProtect_oddAk.raw = data;
+							}
+							BREAK;
+						}
+						case 0xC000:
+						case 0xD000:
+						{
+							if (IS_EVEN(address))
+							{
+								pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.irqReload_evenCk = data;
+							}
+							else
+							{
+								pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.irqReload_oddCk = data;
+								pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.currentMMC3IrqCounter = RESET;
+								pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.mmc3IrqCounterReloadEnabled = YES;
+							}
+							BREAK;
+						}
+						case 0xE000:
+						case 0xF000:
+						{
+							if (IS_EVEN(address))
+							{
+								pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.irqDisable_evenEk = data;
+								pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.mmc3IrqEnable = DISABLED;
+								pNES_instance->NES_state.interrupts.isIRQ.fields.IRQ_SRC_MMC3 = RESET;
+							}
+							else
+							{
+								pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.irqEnable_oddEk = data;
+								pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.mmc3IrqEnable = ENABLED;
+							}
+							BREAK;
+						}
+						default:
+							FATAL("Invalid Address");
 						}
 					}
 					BREAK;
@@ -12749,6 +12842,7 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 				case MAPPER::INES_MAPPER_047:
 				case MAPPER::INES_MAPPER_119:
 				case MAPPER::INES_MAPPER_118:
+				case MAPPER::INES_MAPPER_268:
 				{
 					memset(&(pNES_instance->NES_state.catridgeInfo.mmc3), 0,
 						sizeof(pNES_instance->NES_state.catridgeInfo.mmc3));

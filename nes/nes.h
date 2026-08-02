@@ -735,7 +735,8 @@ private:
 		INES_MAPPER_180 = ONEEIGHTY,
 		INES_MAPPER_210 = TWOHUNDREDTEN,
 		INES_MAPPER_218 = TWOHUNDREDEIGHTEEN,
-		INES_MAPPER_232 = TWOHUNDREDTHIRTYTWO
+		INES_MAPPER_232 = TWOHUNDREDTHIRTYTWO,
+		INES_MAPPER_268 = TWOHUNDREDSIXTYEIGHT
 	};
 
 	enum SUB_MAPPER : int16_t
@@ -1002,6 +1003,26 @@ private:
 				// into the *active* pattern table half ($0000-$0FFF).
 				BYTE ntPage[4];  // CIRAM page assigned to NT0-NT3
 			} txsrom;
+
+			struct ines268_t
+			{
+				// EXPREGS[0..6] — direct port of FCEUmm's src/boards/268.c naming.
+				// reg[6] is a "hidden" 8th register, only ever written indirectly
+				// (see mapper268WriteReg) on submapper 8/9 ("extra latch") boards.
+				BYTE reg[7];
+
+				// Latched from reg[3] bit 7. While set, writes to every register except
+				// reg[2] ($xxx2) are ignored — used by cart firmware to flip MMC3
+				// PRG-RAM enable on/off via $A001 without perturbing the other outer
+				// bits (see "WRAM usage" on the NESdev wiki page for mapper 268).
+				FLAG lockout;
+
+				// NOTE: only banking mode $00 ("normal oversize MMC3") is implemented.
+				// GNROM mode ($10), "weird" modes ($40/$50), submappers 2-11, and the
+				// 64 MiB variant are intentionally out of scope — see writeCpu/readCpu
+				// handlers below, both FATAL() if reg[3] bits 4/6 select anything else.
+			} ines268;
+
 			FLAG isRevA;
 		} mmc3;
 		struct
@@ -2330,6 +2351,153 @@ private:
 	void clockMMC3IRQ(uint16_t address, MEMORY_ACCESS_SOURCE source, FLAG isWriteOperation);
 	
 	void updateMMC5ChrA();
+
+	// ============================================================================
+	// Mapper 268 outer-bank math. Ported from FCEUmm's src/boards/268.c
+	// (NewRisingSun's reference implementation). Covers submappers 0/1 (default),
+	// 2/3, 4/5, 8/9, and the 64 MiB extension bit. Submapper 6/7's second-PRG-chip
+	// select and submapper 8/9's CHR-RAM write-protect toggle are not modeled.
+	// ============================================================================
+
+	static MASQ_INLINE uint32_t mapper268ComputePrgPage(BYTE nativeV, uint16_t cpuWindowAddr, const BYTE exReg[7], BYTE submapperRaw, bool supports64MiB)
+	{
+		const uint32_t prgMaskMMC3 =
+			((exReg[3] & 0x10) ? 0x00u : 0x0Fu)   // PRG A13-A16: GNROM mode disconnects these from MMC3 entirely
+			| ((exReg[0] & 0x40) ? 0x00u : 0x10u)   // PRG A17 (B): 0 = MMC3 passthrough
+			| ((exReg[1] & 0x80) ? 0x00u : 0x20u)   // PRG A18 (G): 0 = MMC3 passthrough
+			| ((exReg[1] & 0x40) ? 0x40u : 0x00u)   // PRG A19 (H): 1 = MMC3 passthrough
+			| ((exReg[1] & 0x20) ? 0x80u : 0x00u);  // PRG A20 (I): 1 = MMC3 passthrough
+
+		uint32_t prgMaskGNROM = ZERO;
+		uint32_t prgOffset = ZERO;
+
+		const BYTE family = (BYTE)(submapperRaw & (BYTE)~0x01);
+
+		switch (family)
+		{
+		case 2:
+			prgMaskGNROM = (exReg[3] & 0x10) ? ((exReg[1] & 0x10) ? 0x01u : 0x03u) : 0x00u;
+			prgOffset =
+				(exReg[3] & 0x00Eu)
+				| (((uint32_t)exReg[0] << 4) & 0x070u)
+				| (((uint32_t)exReg[1] << 4) & 0x080u)
+				| (((uint32_t)exReg[1] << 6) & 0x100u)
+				| (((uint32_t)exReg[1] << 8) & 0x200u)
+				| (((uint32_t)exReg[0] << 6) & 0xC00u);
+			BREAK;
+		case 4:
+			prgMaskGNROM = (exReg[3] & 0x10) ? ((exReg[1] & 0x02) ? 0x03u : 0x01u) : 0x00u;
+			prgOffset =
+				(exReg[3] & 0x00Eu)
+				| (((uint32_t)exReg[0] << 4) & 0x070u)
+				| (((uint32_t)exReg[0] << 3) & 0x180u);
+			BREAK;
+		case 6:
+			prgMaskGNROM = (exReg[3] & 0x10) ? ((exReg[1] & 0x02) ? 0x03u : 0x01u) : 0x00u;
+			prgOffset =
+				(exReg[3] & 0x00Eu)
+				| (((uint32_t)exReg[0] << 4) & 0x070u)
+				| (((uint32_t)exReg[1] << 3) & 0x080u)
+				| (((uint32_t)exReg[1] << 6) & 0x300u)
+				| (((uint32_t)exReg[0] << 6) & 0xC00u);
+			BREAK;
+		case 8:
+			prgMaskGNROM = (exReg[3] & 0x10) ? ((exReg[1] & 0x02) ? 0x03u : 0x01u) : 0x00u;
+			prgOffset =
+				(exReg[3] & 0x00Eu)
+				| (((uint32_t)exReg[0] << 4) & 0x070u)
+				| (((uint32_t)exReg[1] << 3) & 0x080u)
+				| (((uint32_t)exReg[6] << 8) & 0x300u)
+				| (((uint32_t)exReg[6] << 6) & 0xC00u);
+			BREAK;
+		default: // submappers 0/1 (and 10/11, which differ only in mirroring)
+			prgMaskGNROM = (exReg[3] & 0x10) ? ((exReg[1] & 0x02) ? 0x03u : 0x01u) : 0x00u;
+			prgOffset =
+				(exReg[3] & 0x00Eu)
+				| (((uint32_t)exReg[0] << 4) & 0x070u)
+				| (((uint32_t)exReg[1] << 3) & 0x080u)
+				| (((uint32_t)exReg[1] << 6) & 0x300u)
+				| (((uint32_t)exReg[0] << 6) & 0xC00u);
+
+			if (supports64MiB) // only a real address line on the YH2018A 64MiB variant
+			{
+				prgOffset |= ((~(uint32_t)exReg[1] << 12) & 0x1000u);
+			}
+			BREAK;
+		}
+
+		prgOffset &= ~(prgMaskMMC3 | prgMaskGNROM);
+		const uint32_t gnromBits = ((uint32_t)cpuWindowAddr >> 13) & prgMaskGNROM;
+
+		RETURN(uint32_t)(nativeV & prgMaskMMC3) | prgOffset | gnromBits;
+	}
+
+	static MASQ_INLINE uint32_t mapper268ComputeChrPage(BYTE nativeV, uint16_t ppuAddr, const BYTE exReg[7])
+	{
+		const uint32_t chrMaskMMC3 =
+			(exReg[3] & 0x10) ? 0x00u
+			: (exReg[0] & 0x80) ? 0x7Fu
+			: 0xFFu;
+
+		const uint32_t chrMaskGNROM = (exReg[3] & 0x10) ? 0x07u : 0x00u;
+
+		uint32_t chrOffset =
+			(((uint32_t)exReg[0] << 9) & 0xC00u)
+			| (((uint32_t)exReg[0] << 4) & 0x380u)
+			| (((uint32_t)exReg[2] << 3) & 0x078u);
+		chrOffset &= ~(chrMaskMMC3 | chrMaskGNROM);
+
+		const uint32_t gnromBits = ((uint32_t)ppuAddr >> 10) & chrMaskGNROM;
+
+		RETURN (uint32_t)(nativeV & chrMaskMMC3) | chrOffset | gnromBits;
+	}
+
+	static MASQ_INLINE FLAG mapper268WramReadable(BYTE a001Raw)
+	{
+		RETURN(a001Raw & 0xA0) != ZERO;
+	}
+	static MASQ_INLINE FLAG mapper268WramWritable(BYTE a001Raw)
+	{
+		RETURN (((a001Raw & 0x80) && !(a001Raw & 0x40)) || (a001Raw & 0x20));
+	}
+
+	static MASQ_INLINE void mapper268WriteReg(BYTE exReg[7], uint16_t address, BYTE data, BYTE submapperRaw)
+	{
+		const BYTE index = (BYTE)(address & 0x07);
+
+		if ((exReg[3] & 0x80) && index != TWO) // lockout: everything but reg[2] blocked
+		{
+			RETURN;
+		}
+
+		if (index == TWO)
+		{
+			if (exReg[2] & 0x80)
+			{
+				data = (BYTE)((data & 0x0F) | (exReg[2] & (BYTE)~0x0F));
+			}
+			data = (BYTE)(data & (BYTE)(~((exReg[2] >> 3) & 0x0E) | 0xF1));
+		}
+
+		if (((submapperRaw & (BYTE)~0x01) == 8) && index == ONE && (data & 0x04) && (data & 0x08))
+		{
+			exReg[6] = data;
+		}
+
+		if (index <= FIVE)
+		{
+			exReg[index] = data;
+		}
+	}
+
+	static MASQ_INLINE NAMETABLE_MIRROR mapper268ResolveMirroring(BYTE mirroringRegRaw, const BYTE exReg[7], BYTE submapperRaw)
+	{
+		if (((submapperRaw & (BYTE)~0x01) == 10) && !(exReg[0] & 0x20))
+		{
+			RETURN(exReg[0] & 0x10) ? NAMETABLE_MIRROR::ONESCREEN_HI_MIRROR : NAMETABLE_MIRROR::ONESCREEN_LO_MIRROR;
+		}
+		RETURN(mirroringRegRaw & 0x01) ? NAMETABLE_MIRROR::HORIZONTAL_MIRROR : NAMETABLE_MIRROR::VERTICAL_MIRROR;
+	}
 
 	byte readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source);
 

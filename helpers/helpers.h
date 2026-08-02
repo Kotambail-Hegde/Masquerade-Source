@@ -475,6 +475,7 @@ extern "C" {
 #define TWOFIFTYFIVE                                255
 #define TWOFIFTYSIX                                 256
 #define TWOFIFTYSEVEN                               257
+#define TWOHUNDREDSIXTYEIGHT                        268
 #define TWOHUNDREDEIGHTY                            280
 #define TWONINTYEIGHT                               298
 #define THREEHUNDREDFOUR                            304
