@@ -196,8 +196,7 @@ _Example: The Event Debugger inspecting a Game Boy / Game Boy Color state._
 
 #### Test Results
 - Completely passes Tom Harte's SingleStepTests (official and unofficial opcodes) for SM83
-- Passes all Blargg test suite except:
-  - oam_bug.gb
+- Passes all of Blargg test suite including OAM bug
 - Passes Moon Eye tests except:
   - unused_hwio-C.gb
   - boot_hwio-C.gb
@@ -209,12 +208,12 @@ _Example: The Event Debugger inspecting a Game Boy / Game Boy Color state._
 - Passes DMG Aging Cartridge test
 - Passes ax6's rtc3test suite
 - APU successfully plays ISSOtm's smooth-player.gb
-- Passes all Hacktix's tests except:
+- Passes all of Hacktix's tests except:
   - strikethrough.gb
 - Passes TurtleTests
 - Passes MagenTests
 - Passes mbc3-tester
-- Fails some same-suite tests:
+- Fails some of the same-suite tests:
   - apu
   - sgb
 - Passes Mealybug-Tearoom tests except for the following:

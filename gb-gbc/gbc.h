@@ -109,6 +109,12 @@ private:
 		DUMMY
 	};
 
+	enum class OAM_ACCESS_TYPE
+	{
+		READ,
+		WRITE
+	};
+
 	enum class SPECULATION_ORDER
 	{
 		NONE,
@@ -654,6 +660,7 @@ private:
 	{
 		OAMFields_t OAMFields;
 		uint8_t OAMMemory[sizeof(OAMFields_t)];
+		uint8_t OAMRows[20][8];
 	} OAMMemory_t;
 
 	typedef struct
@@ -2655,13 +2662,55 @@ private:
 	void executeHUC3Command();
 	void writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE source);
 
-	void stackPush(BYTE data);
-	BYTE stackPop();
-
-	void processZeroFlag
-	(
-		byte value
-	);
+	MASQ_INLINE void stackPush(BYTE data)
+	{
+		(pGBc_registers->sp)--;
+		bool wasBlocked = handleOAMCorruption(pGBc_registers->sp, OAM_ACCESS_TYPE::WRITE);
+		if (!wasBlocked) // TODO: Confirm this behaviour; Source : Sameboy
+		{
+			writeRawMemory(pGBc_registers->sp, data, MEMORY_ACCESS_SOURCE::CPU);
+		}
+	}
+	MASQ_INLINE BYTE stackPop(FLAG triggerOAMCorruption = NO)
+	{
+		handleOAMCorruption(pGBc_registers->sp, OAM_ACCESS_TYPE::READ);
+		BYTE popedData = readRawMemory(pGBc_registers->sp, MEMORY_ACCESS_SOURCE::CPU);
+		(pGBc_registers->sp)++;
+		if (triggerOAMCorruption == YES)
+		{
+			handleOAMCorruption(pGBc_registers->sp, OAM_ACCESS_TYPE::WRITE);
+		}
+		RETURN popedData;
+	}
+	MASQ_INLINE void processZeroFlag(byte value)
+	{
+		if ((value & 0xFF) == 0x00)
+		{
+			pGBc_flags->FZERO = ONE;
+		}
+		else
+		{
+			pGBc_flags->FZERO = ZERO;
+		}
+	}
+	MASQ_INLINE void processUnusedFlags(BYTE result)
+	{
+		pGBc_flags->ZEROTH = result;
+		pGBc_flags->FIRST = result;
+		pGBc_flags->SECOND = result;
+		pGBc_flags->THIRD = result;
+	}
+	MASQ_INLINE void processUnusedJoyPadBits(BYTE value)
+	{
+		pGBc_peripherals->P1_JOYP.joyPadFields.JP_SPARE_06 = value;
+		pGBc_peripherals->P1_JOYP.joyPadFields.JP_SPARE_07 = value;
+	}
+	MASQ_INLINE void processUnusedIFBits(BYTE value)
+	{
+		pGBc_peripherals->IF.interruptRequestFields.NO_INT05 = value;
+		pGBc_peripherals->IF.interruptRequestFields.NO_INT06 = value;
+		pGBc_peripherals->IF.interruptRequestFields.NO_INT07 = value;
+	}
 	void processFlagsForLogicalOperation
 	(
 		byte value,
@@ -2700,10 +2749,6 @@ private:
 		byte value1,
 		byte value2
 	);
-
-	void processUnusedFlags(BYTE result);
-	void processUnusedJoyPadBits(BYTE value);
-	void processUnusedIFBits(BYTE value);
 
 private:
 
@@ -2836,6 +2881,211 @@ private:
 	void timerTick();
 	void serialTick();
 	void rtcTick();
+	static MASQ_INLINE uint16_t readOAMWord(const BYTE* OAM, int byteOffset)
+	{
+		RETURN (uint16_t)OAM[byteOffset] | ((uint16_t)OAM[byteOffset + 1] << 8);
+	}
+	static MASQ_INLINE void writeOAMWord(BYTE* OAM, int byteOffset, uint16_t value)
+	{
+		OAM[byteOffset + 0] = (BYTE)(value & 0xFF);
+		OAM[byteOffset + 1] = (BYTE)(value >> 8);
+	}
+	MASQ_INLINE FLAG handleOAMCorruption(uint16_t value, OAM_ACCESS_TYPE type)
+	{
+		if ((value < 0xFE00 || value > 0xFEFF) || ROM_TYPE != ROM::GAME_BOY)
+		{
+			RETURN NO;
+		}
+
+		if (pGBc_display->currentLCDMode != LCD_MODES::MODE_LCD_SEARCHING_OAM)
+		{
+			RETURN NO;
+		}
+
+		auto* OAM = pGBc_memory->GBcMemoryMap.mOAM.OAMMemory;
+
+		/*
+		* 
+		*   OAM (160 bytes)
+		*
+		*	Row 0   FE00-FE07
+		*	+-------------------------------+
+		*	| Sprite 0 | Sprite 1 |
+		*	+-------------------------------+
+		*
+		*	Row 1   FE08-FE0F
+		*	+-------------------------------+
+		*	| Sprite 2 | Sprite 3 |
+		*	+-------------------------------+
+		*
+		*	Row 2   FE10-FE17
+		*	+-------------------------------+
+		*	| Sprite 4 | Sprite 5 |
+		*	+-------------------------------+
+		*
+		*	Row 3   FE18-FE1F
+		*	+-------------------------------+
+		*	| Sprite 6 | Sprite 7 |
+		*	+-------------------------------+
+		*
+		*	Row 4   FE20-FE27
+		*	+-------------------------------+
+		*	| Sprite 8 | Sprite 9 |
+		*	+-------------------------------+
+		*
+		*	...
+		*
+		*	Row 15  FE78-FE7F
+		*	+-------------------------------+
+		*	| Sprite 30 | Sprite 31 |
+		*	+-------------------------------+
+		*
+		*	Row 16  FE80-FE87
+		*	+-------------------------------+
+		*	| Sprite 32 | Sprite 33 |
+		*	+-------------------------------+
+		*
+		*	Row 17  FE88-FE8F
+		*	+-------------------------------+
+		*	| Sprite 34 | Sprite 35 |
+		*	+-------------------------------+
+		*
+		*	Row 18  FE90-FE97
+		*	+-------------------------------+
+		*	| Sprite 36 | Sprite 37 |
+		*	+-------------------------------+
+		*
+		*	Row 19  FE98-FE9F
+		*	+-------------------------------+
+		*	| Sprite 38 | Sprite 39 |
+		*	+-------------------------------+
+		* 
+		*/
+
+		const uint8_t currentRow = pGBc_display->oamSearchCount / 2;
+
+		if (currentRow == ZERO || pGBc_display->oamSearchCount >= FORTY)
+		{
+			RETURN NO;
+		}
+
+		const int cur = currentRow * EIGHT;
+		const int prev = cur - EIGHT;
+
+		if (type == OAM_ACCESS_TYPE::WRITE)
+		{
+			uint16_t a = readOAMWord(OAM, cur);
+			uint16_t b = readOAMWord(OAM, prev);
+			uint16_t c = readOAMWord(OAM, prev + 4);
+
+			uint16_t result = ((a ^ c) & (b ^ c)) ^ c;
+			writeOAMWord(OAM, cur, result);
+
+			for (uint8_t i = TWO; i < EIGHT; i++)
+			{
+				OAM[cur + i] = OAM[prev + i];
+			}
+			RETURN YES;
+		}
+
+		// ---- READ corruption: branches on which "quadrant" of 4 rows we're in ----
+		switch (cur & 0x18)
+		{
+		case 0x10: // "secondary" - reaches back 2 rows
+		{
+			const int prev2 = cur - 16;
+
+			uint16_t rPrev2 = readOAMWord(OAM, prev2);
+			uint16_t rPrev = readOAMWord(OAM, prev);
+			uint16_t rCur = readOAMWord(OAM, cur);
+			uint16_t rPrev4 = readOAMWord(OAM, prev + 4);
+
+			uint16_t result = (rPrev & (rPrev2 | rCur | rPrev4)) | (rPrev2 & rCur & rPrev4);
+			writeOAMWord(OAM, prev, result);
+
+			for (uint8_t i = 0; i < EIGHT; i++)
+			{
+				OAM[prev2 + i] = OAM[prev + i];
+			}
+			break;
+		}
+
+		case 0x00: // "tertiary"/"quaternary" - reaches back up to 4 rows
+		{
+			const int prev2 = cur - 16;
+			const int prev3 = cur - 32;
+
+			uint16_t rCur = readOAMWord(OAM, cur);
+			uint16_t rPrev4 = readOAMWord(OAM, prev + 4);
+			uint16_t rPrev = readOAMWord(OAM, prev);
+			uint16_t rPrev2 = readOAMWord(OAM, prev2);
+			uint16_t rPrev3 = readOAMWord(OAM, prev3);
+
+			uint16_t result;
+
+			if (cur == 0x40)
+			{
+				// Quaternary - DMG-revision formula.
+				uint16_t rowZero = readOAMWord(OAM, 0);
+				uint16_t rMid1 = readOAMWord(OAM, cur - 6);  // 2nd word of prev row
+				uint16_t rMid2 = readOAMWord(OAM, cur - 14); // 2nd word of prev2 row
+
+				result = (rPrev & (rPrev3 | rPrev2 | (~rMid1 & rMid2) | rPrev4 | rCur))
+					| (rPrev4 & rPrev2 & rPrev3);
+			}
+			else if (cur == 0x20)
+			{
+				result = (rPrev & (rCur | rPrev4 | rPrev2 | rPrev3)) | (rCur & rPrev4 & rPrev2 & rPrev3);
+			}
+			else if (cur == 0x60)
+			{
+				result = (rPrev & (rCur | rPrev4 | rPrev2 | rPrev3)) | (rPrev4 & rPrev2 & rPrev3);
+			}
+			else
+			{
+				result = rPrev | (rCur & rPrev4 & rPrev2 & rPrev3);
+			}
+
+			writeOAMWord(OAM, prev, result);
+
+			for (uint8_t i = 0; i < EIGHT; i++)
+			{
+				OAM[prev2 + i] = OAM[prev3 + i] = OAM[prev + i];
+			}
+			break;
+		}
+
+		default: // 0x08 / 0x18 - the plain case
+		{
+			uint16_t rCur = readOAMWord(OAM, cur);
+			uint16_t rPrev = readOAMWord(OAM, prev);
+			uint16_t rPrev4 = readOAMWord(OAM, prev + 4);
+
+			uint16_t result = rPrev | (rCur & rPrev4);
+			writeOAMWord(OAM, prev, result);
+			writeOAMWord(OAM, cur, result);
+			break;
+		}
+		}
+
+		// Unconditional for every read branch above: the accessed row
+		// fully becomes a copy of the (now-updated) previous row.
+		for (uint8_t i = 0; i < EIGHT; i++)
+		{
+			OAM[cur + i] = OAM[prev + i];
+		}
+
+		// Edge case: row 0x80 additionally clones itself back onto row 0.
+		if (cur == 0x80)
+		{
+			for (uint8_t i = 0; i < EIGHT; i++)
+			{
+				OAM[i] = OAM[cur + i];
+			}
+		}
+
+		RETURN YES;
+	}
 	MASQ_INLINE void checkWindowYTrigger(uint8_t ly)
 	{
 		// Check whether "Y" window layer is triggerred for current scanline

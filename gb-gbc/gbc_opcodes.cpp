@@ -1663,7 +1663,9 @@ void GBc_t::runCPUPipeline()
 	case 0x03:
 	{
 		cpuTickM();
-		operationResult = cpuReadRegister(REGISTER_TYPE::RT_BC) + ONE;
+		auto bc = cpuReadRegister(REGISTER_TYPE::RT_BC);
+		operationResult = bc + ONE;
+		handleOAMCorruption(bc, OAM_ACCESS_TYPE::WRITE);
 		cpuTickM();
 		cpuSetRegister(REGISTER_TYPE::RT_BC, operationResult);
 		DISASSEMBLY("%04X INC BC", originalPC);
@@ -1775,7 +1777,9 @@ void GBc_t::runCPUPipeline()
 	case 0x0B:
 	{
 		cpuTickM();
-		operationResult = cpuReadRegister(REGISTER_TYPE::RT_BC) - 1;
+		auto bc = cpuReadRegister(REGISTER_TYPE::RT_BC);
+		operationResult = bc - ONE;
+		handleOAMCorruption(bc, OAM_ACCESS_TYPE::WRITE);
 		cpuTickM();
 		cpuSetRegister(REGISTER_TYPE::RT_BC, operationResult);
 		DISASSEMBLY("%04X DEC BC", originalPC);
@@ -1967,7 +1971,9 @@ void GBc_t::runCPUPipeline()
 	case 0x13:
 	{
 		cpuTickM();
-		operationResult = cpuReadRegister(REGISTER_TYPE::RT_DE) + ONE;
+		auto de = cpuReadRegister(REGISTER_TYPE::RT_DE);
+		operationResult = de + ONE;
+		handleOAMCorruption(de, OAM_ACCESS_TYPE::WRITE);
 		cpuTickM();
 		cpuSetRegister(REGISTER_TYPE::RT_DE, operationResult);
 		DISASSEMBLY("%04X INC DE", originalPC);
@@ -2074,7 +2080,9 @@ void GBc_t::runCPUPipeline()
 	case 0x1B:
 	{
 		cpuTickM();
-		operationResult = cpuReadRegister(REGISTER_TYPE::RT_DE) - 1;
+		auto de = cpuReadRegister(REGISTER_TYPE::RT_DE);
+		operationResult = de - ONE;
+		handleOAMCorruption(de, OAM_ACCESS_TYPE::WRITE);
 		cpuTickM();
 		cpuSetRegister(REGISTER_TYPE::RT_DE, operationResult);
 		DISASSEMBLY("%04X DEC DE", originalPC);
@@ -2172,8 +2180,12 @@ void GBc_t::runCPUPipeline()
 	{
 		operationResult = cpuReadRegister(REGISTER_TYPE::RT_HL);
 		cpuSetRegister(REGISTER_TYPE::RT_HL, (operationResult + ONE));
+		FLAG wasBlocked = handleOAMCorruption(operationResult, OAM_ACCESS_TYPE::WRITE);
 		cpuTickM(operationResult, (BYTE)cpuReadRegister(REGISTER_TYPE::RT_A));
-		writeRawMemory(operationResult, (BYTE)cpuReadRegister(REGISTER_TYPE::RT_A), MEMORY_ACCESS_SOURCE::CPU);
+		if (!wasBlocked) // TODO: Confirm this behaviour; Source : Sameboy
+		{
+			writeRawMemory(operationResult, (BYTE)cpuReadRegister(REGISTER_TYPE::RT_A), MEMORY_ACCESS_SOURCE::CPU);
+		}
 		cpuTickM();
 		DISASSEMBLY("%04X LD (HL+), A", originalPC);
 		BREAK;
@@ -2181,7 +2193,9 @@ void GBc_t::runCPUPipeline()
 	case 0x23:
 	{
 		cpuTickM();
-		operationResult = cpuReadRegister(REGISTER_TYPE::RT_HL) + ONE;
+		auto hl = cpuReadRegister(REGISTER_TYPE::RT_HL);
+		operationResult = hl + ONE;
+		handleOAMCorruption(hl, OAM_ACCESS_TYPE::WRITE);
 		cpuTickM();
 		cpuSetRegister(REGISTER_TYPE::RT_HL, operationResult);
 		DISASSEMBLY("%04X INC HL", originalPC);
@@ -2296,9 +2310,11 @@ void GBc_t::runCPUPipeline()
 	case 0x2A:
 	{
 		cpuTickM();
-		dataFromMemory = cpuReadPointer(POINTER_TYPE::RT_M_HL);
+		auto hl = cpuReadRegister(REGISTER_TYPE::RT_HL);
+		handleOAMCorruption(hl, OAM_ACCESS_TYPE::READ);
+		dataFromMemory = readRawMemory(hl, MEMORY_ACCESS_SOURCE::CPU);
 		cpuTickM();
-		cpuSetRegister(REGISTER_TYPE::RT_HL, (cpuReadRegister(REGISTER_TYPE::RT_HL) + ONE));
+		cpuSetRegister(REGISTER_TYPE::RT_HL, (hl + ONE));
 		cpuSetRegister(REGISTER_TYPE::RT_A, dataFromMemory);
 		DISASSEMBLY("%04X LD A, (HL+)", originalPC);
 		BREAK;
@@ -2306,7 +2322,9 @@ void GBc_t::runCPUPipeline()
 	case 0x2B:
 	{
 		cpuTickM();
-		operationResult = cpuReadRegister(REGISTER_TYPE::RT_HL) - 1;
+		auto hl = cpuReadRegister(REGISTER_TYPE::RT_HL);
+		operationResult = hl - ONE;
+		handleOAMCorruption(hl, OAM_ACCESS_TYPE::WRITE);
 		cpuTickM();
 		cpuSetRegister(REGISTER_TYPE::RT_HL, operationResult);
 		DISASSEMBLY("%04X DEC HL", originalPC);
@@ -2395,8 +2413,12 @@ void GBc_t::runCPUPipeline()
 	{
 		operationResult = cpuReadRegister(REGISTER_TYPE::RT_HL);
 		cpuSetRegister(REGISTER_TYPE::RT_HL, (operationResult - 1));
+		FLAG wasBlocked = handleOAMCorruption(operationResult, OAM_ACCESS_TYPE::WRITE);
 		cpuTickM(operationResult, (BYTE)cpuReadRegister(REGISTER_TYPE::RT_A));
-		writeRawMemory(operationResult, (BYTE)cpuReadRegister(REGISTER_TYPE::RT_A), MEMORY_ACCESS_SOURCE::CPU);
+		if (!wasBlocked) // TODO: Confirm this behaviour; Source : Sameboy
+		{
+			writeRawMemory(operationResult, (BYTE)cpuReadRegister(REGISTER_TYPE::RT_A), MEMORY_ACCESS_SOURCE::CPU);
+		}
 		cpuTickM();
 		DISASSEMBLY("%04X LD (HL-), A", originalPC);
 		BREAK;
@@ -2404,7 +2426,9 @@ void GBc_t::runCPUPipeline()
 	case 0x33:
 	{
 		cpuTickM();
-		operationResult = cpuReadRegister(REGISTER_TYPE::RT_SP) + ONE;
+		auto sp = cpuReadRegister(REGISTER_TYPE::RT_SP);
+		operationResult = sp + ONE;
+		handleOAMCorruption(sp, OAM_ACCESS_TYPE::WRITE);
 		cpuTickM();
 		cpuSetRegister(REGISTER_TYPE::RT_SP, operationResult);
 		DISASSEMBLY("%04X INC SP", originalPC);
@@ -2500,9 +2524,11 @@ void GBc_t::runCPUPipeline()
 	case 0x3A:
 	{
 		cpuTickM();
-		dataFromMemory = cpuReadPointer(POINTER_TYPE::RT_M_HL);
+		auto hl = cpuReadRegister(REGISTER_TYPE::RT_HL);
+		handleOAMCorruption(hl, OAM_ACCESS_TYPE::READ);
+		dataFromMemory = readRawMemory(hl, MEMORY_ACCESS_SOURCE::CPU);
 		cpuTickM();
-		cpuSetRegister(REGISTER_TYPE::RT_HL, (cpuReadRegister(REGISTER_TYPE::RT_HL) - 1));
+		cpuSetRegister(REGISTER_TYPE::RT_HL, (hl - ONE));
 		cpuSetRegister(REGISTER_TYPE::RT_A, dataFromMemory);
 		DISASSEMBLY("%04X LD A, (HL-)", originalPC);
 		BREAK;
@@ -2510,7 +2536,9 @@ void GBc_t::runCPUPipeline()
 	case 0x3B:
 	{
 		cpuTickM();
-		operationResult = cpuReadRegister(REGISTER_TYPE::RT_SP) - 1;
+		auto sp = cpuReadRegister(REGISTER_TYPE::RT_SP);
+		operationResult = sp - 1;
+		handleOAMCorruption(sp, OAM_ACCESS_TYPE::WRITE);
 		cpuTickM();
 		cpuSetRegister(REGISTER_TYPE::RT_SP, operationResult);
 		DISASSEMBLY("%04X DEC SP", originalPC);
@@ -4100,7 +4128,7 @@ void GBc_t::runCPUPipeline()
 	case 0xC1:
 	{
 		cpuTickM();
-		BYTE lowerData = stackPop();
+		BYTE lowerData = stackPop(YES);
 		cpuTickM();
 		BYTE higherData = stackPop();
 		cpuTickM();
@@ -4160,6 +4188,7 @@ void GBc_t::runCPUPipeline()
 		{
 			BYTE higherData = (BYTE)(GET_PC() >> 8);
 			BYTE lowerData = (BYTE)GET_PC();
+			handleOAMCorruption(pGBc_registers->sp, OAM_ACCESS_TYPE::WRITE);
 			cpuTickM(pGBc_registers->sp - ONE, higherData, CPU_TICK_TYPE::DUMMY);
 			stackPush(higherData);
 			cpuTickM(pGBc_registers->sp - ONE, lowerData);
@@ -4177,6 +4206,7 @@ void GBc_t::runCPUPipeline()
 		operationResult = cpuReadRegister(REGISTER_TYPE::RT_BC);
 		BYTE higherData = (BYTE)(operationResult >> 8);
 		BYTE lowerData = (BYTE)operationResult;
+		handleOAMCorruption(pGBc_registers->sp, OAM_ACCESS_TYPE::WRITE);
 		cpuTickM(pGBc_registers->sp - ONE, higherData, CPU_TICK_TYPE::DUMMY);
 		stackPush(higherData);
 		cpuTickM(pGBc_registers->sp - ONE, lowerData);
@@ -4211,6 +4241,7 @@ void GBc_t::runCPUPipeline()
 
 		BYTE higherData = (BYTE)(GET_PC() >> 8);
 		BYTE lowerData = (BYTE)GET_PC();
+		handleOAMCorruption(pGBc_registers->sp, OAM_ACCESS_TYPE::WRITE);
 		cpuTickM(pGBc_registers->sp - ONE, higherData, CPU_TICK_TYPE::DUMMY);
 		stackPush(higherData);
 		cpuTickM(pGBc_registers->sp - ONE, lowerData);
@@ -4293,6 +4324,7 @@ void GBc_t::runCPUPipeline()
 		{
 			BYTE higherData = (BYTE)(GET_PC() >> 8);
 			BYTE lowerData = (BYTE)GET_PC();
+			handleOAMCorruption(pGBc_registers->sp, OAM_ACCESS_TYPE::WRITE);
 			cpuTickM(pGBc_registers->sp - ONE, higherData, CPU_TICK_TYPE::DUMMY);
 			stackPush(higherData);
 			cpuTickM(pGBc_registers->sp - ONE, lowerData);
@@ -4318,6 +4350,7 @@ void GBc_t::runCPUPipeline()
 		// 2) get the PC value pointing to next sequential data after the 16 bit address and push it to stack 
 		BYTE higherData = (BYTE)(GET_PC() >> 8);
 		BYTE lowerData = (BYTE)GET_PC();
+		handleOAMCorruption(pGBc_registers->sp, OAM_ACCESS_TYPE::WRITE);
 		cpuTickM(pGBc_registers->sp - ONE, higherData, CPU_TICK_TYPE::DUMMY);
 		stackPush(higherData);
 		cpuTickM(pGBc_registers->sp - ONE, lowerData);
@@ -4354,6 +4387,7 @@ void GBc_t::runCPUPipeline()
 
 		BYTE higherData = (BYTE)(GET_PC() >> 8);
 		BYTE lowerData = (BYTE)GET_PC();
+		handleOAMCorruption(pGBc_registers->sp, OAM_ACCESS_TYPE::WRITE);
 		cpuTickM(pGBc_registers->sp - ONE, higherData, CPU_TICK_TYPE::DUMMY);
 		stackPush(higherData);
 		cpuTickM(pGBc_registers->sp - ONE, lowerData);
@@ -4384,7 +4418,7 @@ void GBc_t::runCPUPipeline()
 	case 0xD1:
 	{
 		cpuTickM();
-		BYTE lowerData = stackPop();
+		BYTE lowerData = stackPop(YES);
 		cpuTickM();
 		BYTE higherData = stackPop();
 		cpuTickM();
@@ -4436,6 +4470,7 @@ void GBc_t::runCPUPipeline()
 		{
 			BYTE higherData = (BYTE)(GET_PC() >> 8);
 			BYTE lowerData = (BYTE)GET_PC();
+			handleOAMCorruption(pGBc_registers->sp, OAM_ACCESS_TYPE::WRITE);
 			cpuTickM(pGBc_registers->sp - ONE, higherData, CPU_TICK_TYPE::DUMMY);
 			stackPush(higherData);
 			cpuTickM(pGBc_registers->sp - ONE, lowerData);
@@ -4453,6 +4488,7 @@ void GBc_t::runCPUPipeline()
 		operationResult = cpuReadRegister(REGISTER_TYPE::RT_DE);
 		BYTE higherData = (BYTE)(operationResult >> 8);
 		BYTE lowerData = (BYTE)operationResult;
+		handleOAMCorruption(pGBc_registers->sp, OAM_ACCESS_TYPE::WRITE);
 		cpuTickM(pGBc_registers->sp - ONE, higherData, CPU_TICK_TYPE::DUMMY);
 		stackPush(higherData);
 		cpuTickM(pGBc_registers->sp - ONE, lowerData);
@@ -4487,6 +4523,7 @@ void GBc_t::runCPUPipeline()
 
 		BYTE higherData = (BYTE)(GET_PC() >> 8);
 		BYTE lowerData = (BYTE)GET_PC();
+		handleOAMCorruption(pGBc_registers->sp, OAM_ACCESS_TYPE::WRITE);
 		cpuTickM(pGBc_registers->sp - ONE, higherData, CPU_TICK_TYPE::DUMMY);
 		stackPush(higherData);
 		cpuTickM(pGBc_registers->sp - ONE, lowerData);
@@ -4573,6 +4610,7 @@ void GBc_t::runCPUPipeline()
 		{
 			BYTE higherData = (BYTE)(GET_PC() >> 8);
 			BYTE lowerData = (BYTE)GET_PC();
+			handleOAMCorruption(pGBc_registers->sp, OAM_ACCESS_TYPE::WRITE);
 			cpuTickM(pGBc_registers->sp - ONE, higherData, CPU_TICK_TYPE::DUMMY);
 			stackPush(higherData);
 			cpuTickM(pGBc_registers->sp - ONE, lowerData);
@@ -4618,6 +4656,7 @@ void GBc_t::runCPUPipeline()
 
 		BYTE higherData = (BYTE)(GET_PC() >> 8);
 		BYTE lowerData = (BYTE)GET_PC();
+		handleOAMCorruption(pGBc_registers->sp, OAM_ACCESS_TYPE::WRITE);
 		cpuTickM(pGBc_registers->sp - ONE, higherData, CPU_TICK_TYPE::DUMMY);
 		stackPush(higherData);
 		cpuTickM(pGBc_registers->sp - ONE, lowerData);
@@ -4642,7 +4681,7 @@ void GBc_t::runCPUPipeline()
 	case 0xE1:
 	{
 		cpuTickM();
-		BYTE lowerData = stackPop();
+		BYTE lowerData = stackPop(YES);
 		cpuTickM();
 		BYTE higherData = stackPop();
 		cpuTickM();
@@ -4679,6 +4718,7 @@ void GBc_t::runCPUPipeline()
 		operationResult = cpuReadRegister(REGISTER_TYPE::RT_HL);
 		BYTE higherData = (BYTE)(operationResult >> 8);
 		BYTE lowerData = (BYTE)operationResult;
+		handleOAMCorruption(pGBc_registers->sp, OAM_ACCESS_TYPE::WRITE);
 		cpuTickM(pGBc_registers->sp - ONE, higherData, CPU_TICK_TYPE::DUMMY);
 		stackPush(higherData);
 		cpuTickM(pGBc_registers->sp - ONE, lowerData);
@@ -4711,6 +4751,7 @@ void GBc_t::runCPUPipeline()
 
 		BYTE higherData = (BYTE)(GET_PC() >> 8);
 		BYTE lowerData = (BYTE)GET_PC();
+		handleOAMCorruption(pGBc_registers->sp, OAM_ACCESS_TYPE::WRITE);
 		cpuTickM(pGBc_registers->sp - ONE, higherData, CPU_TICK_TYPE::DUMMY);
 		stackPush(higherData);
 		cpuTickM(pGBc_registers->sp - ONE, lowerData);
@@ -4807,6 +4848,7 @@ void GBc_t::runCPUPipeline()
 
 		BYTE higherData = (BYTE)(GET_PC() >> 8);
 		BYTE lowerData = (BYTE)GET_PC();
+		handleOAMCorruption(pGBc_registers->sp, OAM_ACCESS_TYPE::WRITE);
 		cpuTickM(pGBc_registers->sp - ONE, higherData, CPU_TICK_TYPE::DUMMY);
 		stackPush(higherData);
 		cpuTickM(pGBc_registers->sp - ONE, lowerData);
@@ -4832,7 +4874,7 @@ void GBc_t::runCPUPipeline()
 	case 0xF1:
 	{
 		cpuTickM();
-		BYTE lowerData = stackPop();
+		BYTE lowerData = stackPop(YES);
 		cpuTickM();
 		BYTE higherData = stackPop();
 		cpuTickM();
@@ -4876,6 +4918,7 @@ void GBc_t::runCPUPipeline()
 		operationResult = cpuReadRegister(REGISTER_TYPE::RT_AF);
 		BYTE higherData = (BYTE)(operationResult >> 8);
 		BYTE lowerData = (BYTE)operationResult;
+		handleOAMCorruption(pGBc_registers->sp, OAM_ACCESS_TYPE::WRITE);
 		cpuTickM(pGBc_registers->sp - ONE, higherData, CPU_TICK_TYPE::DUMMY);
 		stackPush(higherData);
 		cpuTickM(pGBc_registers->sp - ONE, lowerData);
@@ -4908,6 +4951,7 @@ void GBc_t::runCPUPipeline()
 
 		BYTE higherData = (BYTE)(GET_PC() >> 8);
 		BYTE lowerData = (BYTE)GET_PC();
+		handleOAMCorruption(pGBc_registers->sp, OAM_ACCESS_TYPE::WRITE);
 		cpuTickM(pGBc_registers->sp - ONE, higherData, CPU_TICK_TYPE::DUMMY);
 		stackPush(higherData);
 		cpuTickM(pGBc_registers->sp - ONE, lowerData);
@@ -5007,6 +5051,7 @@ void GBc_t::runCPUPipeline()
 
 		BYTE higherData = (BYTE)(GET_PC() >> 8);
 		BYTE lowerData = (BYTE)GET_PC();
+		handleOAMCorruption(pGBc_registers->sp, OAM_ACCESS_TYPE::WRITE);
 		cpuTickM(pGBc_registers->sp - ONE, higherData, CPU_TICK_TYPE::DUMMY);
 		stackPush(higherData);
 		cpuTickM(pGBc_registers->sp - ONE, lowerData);

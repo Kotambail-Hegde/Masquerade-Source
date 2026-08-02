@@ -2931,9 +2931,9 @@ FLAG GBc_t::handleInterruptsIfApplicable(FLAG effectiveIME, FLAG effectiveInterr
 
 		INCREMENT_PC_BY_ONE();
 		cpuTickM(); // IDU PC- as per https://gist.github.com/SonoSooS/c0055300670d678b5ae8433e20bea595#isr-and-nmi
-		TODO("Cycle OAM BUG Here!"); // Source: Sameboy; Refer : https://github.com/LIJI32/SameBoy/blob/master/Core/sm83_cpu.c#L1666
 		DECREMENT_PC_BY_ONE();
-		TODO("Trigger OAM BUG Here!"); // Source: Sameboy; Refer : https://github.com/LIJI32/SameBoy/blob/master/Core/sm83_cpu.c#L1668
+		// Handle for OAM corruption before the stack push
+		handleOAMCorruption(pGBc_registers->sp, OAM_ACCESS_TYPE::WRITE);
 		cpuTickM(); // IDU SP- as per https://gist.github.com/SonoSooS/c0055300670d678b5ae8433e20bea595#isr-and-nmi
 		stackPush((BYTE)(GET_PC() >> EIGHT));
 		cpuTickM(); // [SP-] = PC.high as per https://gist.github.com/SonoSooS/c0055300670d678b5ae8433e20bea595#isr-and-nmi
@@ -4459,6 +4459,8 @@ void GBc_t::processLCDDisable()
 #if (GB_GBC_ENABLE_WINDESYNC_GLITCH == YES)
 	pGBc_display->cachedWinEnablePerFrame = CLEAR;
 #endif
+
+	pGBc_display->currentLCDMode = LCD_MODES::MODE_LCD_H_BLANK;
 
 	// Blank for 1 frame
 	pGBc_emuStatus->freezeLCDOneFrame = YES;
@@ -8920,24 +8922,24 @@ BYTE GBc_t::cpuReadPointer(POINTER_TYPE mrt)
 		// Memory pointed by Register access
 	case POINTER_TYPE::RT_M_HL:
 	{
-		RETURN(readRawMemory(pGBc_registers->hl.hl_u16memory, MEMORY_ACCESS_SOURCE::CPU) & 0x00FF); BREAK;
+		RETURN (readRawMemory(pGBc_registers->hl.hl_u16memory, MEMORY_ACCESS_SOURCE::CPU) & 0x00FF); BREAK;
 	}
 	case POINTER_TYPE::RT_M_DE:
 	{
-		RETURN(readRawMemory(pGBc_registers->de.de_u16memory, MEMORY_ACCESS_SOURCE::CPU) & 0x00FF); BREAK;
+		RETURN (readRawMemory(pGBc_registers->de.de_u16memory, MEMORY_ACCESS_SOURCE::CPU) & 0x00FF); BREAK;
 	}
 	case POINTER_TYPE::RT_M_BC:
 	{
-		RETURN(readRawMemory(pGBc_registers->bc.bc_u16memory, MEMORY_ACCESS_SOURCE::CPU) & 0x00FF); BREAK;
+		RETURN (readRawMemory(pGBc_registers->bc.bc_u16memory, MEMORY_ACCESS_SOURCE::CPU) & 0x00FF); BREAK;
 	}
 
 	case POINTER_TYPE::RT_M_NONE:
 	{
-		RETURN(BYTE)NULL;  BREAK;
+		RETURN (BYTE)NULL;  BREAK;
 	}
 	default:
 	{
-		RETURN(BYTE)NULL; BREAK;
+		RETURN (BYTE)NULL; BREAK;
 	}
 	}
 }
@@ -13536,34 +13538,6 @@ void GBc_t::bessIoSeq(uint8_t* mmr, uint8_t size)
 	writeRawMemory(IF_ADDRESS, mmr[IF_ADDRESS - GB_GBC_IO_MEMORY_START_ADDRESS], MEMORY_ACCESS_SOURCE::BESS);
 }
 
-void GBc_t::stackPush(BYTE data)
-{
-	(pGBc_registers->sp)--;
-	writeRawMemory(pGBc_registers->sp, data, MEMORY_ACCESS_SOURCE::CPU);
-}
-
-BYTE GBc_t::stackPop()
-{
-	BYTE popedData = readRawMemory(pGBc_registers->sp, MEMORY_ACCESS_SOURCE::CPU);
-	(pGBc_registers->sp)++;
-	RETURN popedData;
-}
-
-void GBc_t::processZeroFlag
-(
-	byte value
-)
-{
-	if ((value & 0xFF) == 0x00)
-	{
-		pGBc_flags->FZERO = ONE;
-	}
-	else
-	{
-		pGBc_flags->FZERO = ZERO;
-	}
-}
-
 void GBc_t::processFlagsForLogicalOperation
 (
 	byte value,
@@ -13995,27 +13969,6 @@ void GBc_t::processFlagFor0xE8And0xF8
 	{
 		pGBc_flags->FHALFCARRY = ZERO;
 	}
-}
-
-void GBc_t::processUnusedFlags(BYTE result)
-{
-	pGBc_flags->ZEROTH = result;
-	pGBc_flags->FIRST = result;
-	pGBc_flags->SECOND = result;
-	pGBc_flags->THIRD = result;
-}
-
-void GBc_t::processUnusedJoyPadBits(BYTE value)
-{
-	pGBc_peripherals->P1_JOYP.joyPadFields.JP_SPARE_06 = value;
-	pGBc_peripherals->P1_JOYP.joyPadFields.JP_SPARE_07 = value;
-}
-
-void GBc_t::processUnusedIFBits(BYTE value)
-{
-	pGBc_peripherals->IF.interruptRequestFields.NO_INT05 = value;
-	pGBc_peripherals->IF.interruptRequestFields.NO_INT06 = value;
-	pGBc_peripherals->IF.interruptRequestFields.NO_INT07 = value;
 }
 
 FLAG GBc_t::processSOC()
