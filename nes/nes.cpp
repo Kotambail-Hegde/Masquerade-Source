@@ -1541,6 +1541,14 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 			}
 			BREAK;
 		}
+		case MAPPER::INES_MAPPER_015:
+		{
+			if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
+			{
+				RETURN pNES_ppuMemory->NESMemoryMap.patternTable.raw[address - PATTERN_TABLE0_START_ADDRESS];
+			}
+			BREAK;
+		}
 		case MAPPER::INES_MAPPER_016:
 		{
 			if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS)) // $0000-$1FFF
@@ -2632,6 +2640,18 @@ void NES_t::writePpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 				}
 
 				pNES_catridgeMemory->maxCatridgeCHRROM[index] = data;
+			}
+			BREAK;
+		}
+		case MAPPER::INES_MAPPER_015:
+		{
+			if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
+			{
+				const auto& reg = pNES_instance->NES_state.catridgeInfo.ines015;
+				if ((reg.latchedAddr & 0x03) != THREE) // only mode 3 write-protects, per the compromise noted above
+				{
+					pNES_ppuMemory->NESMemoryMap.patternTable.raw[address - PATTERN_TABLE0_START_ADDRESS] = data;
+				}
 			}
 			BREAK;
 		}
@@ -4581,6 +4601,38 @@ inline byte NES_t::readCpuRawMemoryInternal(uint16_t address, MEMORY_ACCESS_SOUR
 						{
 							RETURN pNES_catridgeMemory->maxCatridgePRGROM[index];
 						}
+					}
+					BREAK;
+				}
+				case MAPPER::INES_MAPPER_015:
+				{
+					if (IF_ADDRESS_WITHIN(address, CATRIDGE_RAM_START_ADDRESS, CATRIDGE_RAM_END_ADDRESS))
+					{
+						// Real hardware has no PRG-RAM here -- see note above on why we
+						// provide it unconditionally anyway (mapper-hack compatibility).
+						RETURN pNES_cpuMemory->NESMemoryMap.catridgeMappedMemory[address - UNMAPPED_START_ADDRESS];
+					}
+
+					if (IF_ADDRESS_WITHIN(address, CATRIDGE_ROM_BANK0_START_ADDRESS, UNMAPPED_END_ADDRESS))
+					{
+						const auto& reg = pNES_instance->NES_state.catridgeInfo.ines015;
+						const BYTE slot = (BYTE)((address - CATRIDGE_ROM_BANK0_START_ADDRESS) >> 13); // 0-3
+
+						uint32_t index = (mapper015ComputePrgBank8k(reg.latchedData, reg.latchedAddr, slot) * 0x2000u) + (address & 0x1FFFu);
+
+						const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
+						const uint64_t totalPrgBytes = (uint64_t)hdr.sizeOfPrgRomIn16KB * 0x4000ULL;
+						if (totalPrgBytes > ZERO)
+						{
+							index = (uint32_t)(index % totalPrgBytes);
+						}
+
+						if ((ceNES->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
+							&& (!hasCompare || (BYTE)compareVal == pNES_catridgeMemory->maxCatridgePRGROM[index]))
+						{
+							RETURN TO_UINT8(modedData);
+						}
+						RETURN pNES_catridgeMemory->maxCatridgePRGROM[index];
 					}
 					BREAK;
 				}
@@ -7293,6 +7345,25 @@ inline void NES_t::writeCpuRawMemoryInternal(uint16_t address, byte data, MEMORY
 							data &= readCpuRawMemory(address, MEMORY_ACCESS_SOURCE::DEBUG_PORT);
 						}
 						pNES_instance->NES_state.catridgeInfo.cprom.chrBank = (data & 0x03);
+					}
+					BREAK;
+				}
+				case MAPPER::INES_MAPPER_015:
+				{
+					if (IF_ADDRESS_WITHIN(address, CATRIDGE_RAM_START_ADDRESS, CATRIDGE_RAM_END_ADDRESS))
+					{
+						pNES_cpuMemory->NESMemoryMap.catridgeMappedMemory[address - UNMAPPED_START_ADDRESS] = data;
+						BREAK;
+					}
+
+					if (IF_ADDRESS_WITHIN(address, CATRIDGE_ROM_BANK0_START_ADDRESS, UNMAPPED_END_ADDRESS))
+					{
+						auto& reg = pNES_instance->NES_state.catridgeInfo.ines015;
+						reg.latchedAddr = address;
+						reg.latchedData = data;
+
+						pNES_instance->NES_state.catridgeInfo.nameTblMir =
+							(data & 0x40) ? NAMETABLE_MIRROR::HORIZONTAL_MIRROR : NAMETABLE_MIRROR::VERTICAL_MIRROR;
 					}
 					BREAK;
 				}
@@ -13216,6 +13287,34 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 						const uint64_t copySize = (chrRomSizeBytes > 0x2000ULL) ? 0x2000ULL : chrRomSizeBytes;
 						memcpy_portable(ppuChr, copySize, chrRom, copySize);
 					}
+
+					BREAK;
+				}
+				case MAPPER::INES_MAPPER_015:
+				{
+					// Real K-1029/K-1030P hardware has no PRG-RAM and no header-declared
+					// CHR-RAM (CHR is a fixed 8KB unbanked chip on the board). But per the
+					// wiki's own note, almost every ROM claiming mapper 15 is actually a
+					// mapper-hack expecting 8KB of PRG-RAM at $6000-$7FFF to just exist --
+					// so force it on regardless of what the header says, matching every
+					// mainstream emulator's compromise here.
+
+					// Standard PRG/CHR-ROM setup -- same as every other mapper case above.
+					// (If your existing cases do this via a shared helper/memcpy rather than
+					// inline, call that here instead; this is just the minimal set mapper 15
+					// itself needs.)
+					memset(&pNES_instance->NES_state.catridgeInfo.ines015, 0, sizeof(pNES_instance->NES_state.catridgeInfo.ines015));
+
+					// Power-on / reset latch state: "all bits clear" per the wiki, i.e.
+					// mode SS=0 (NROM-256) and P=0. Using 0x8000 as the sentinel address
+					// (rather than a bare 0) just keeps `latchedAddr & 0x03` meaningful
+					// without needing a separate "has this ever been written" flag.
+					pNES_instance->NES_state.catridgeInfo.ines015.latchedAddr = 0x8000;
+					pNES_instance->NES_state.catridgeInfo.ines015.latchedData = ZERO;
+
+					// Mirroring reflects the power-on latch value too: M bit (data bit 6) is
+					// 0, so vertical.
+					pNES_instance->NES_state.catridgeInfo.nameTblMir = NAMETABLE_MIRROR::VERTICAL_MIRROR;
 
 					BREAK;
 				}

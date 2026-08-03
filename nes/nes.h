@@ -706,6 +706,7 @@ private:
 		MMC4 = TEN,
 		COLOR_DREAMS = ELEVEN,
 		CPROM = THIRTEEN,
+		INES_MAPPER_015 = FIFTEEN,
 		INES_MAPPER_016 = SIXTEEN,
 		INES_MAPPER_018 = EIGHTEEN,
 		INES_MAPPER_019 = NINETEEN,
@@ -1216,6 +1217,11 @@ private:
 		{
 			BYTE chrBank;
 		} cprom;
+		struct
+		{
+			BYTE latchedData;      // last byte written to $8000-$FFFF
+			uint16_t latchedAddr;  // last address written to $8000-$FFFF (only bits 0-1 matter)
+		} ines015;
 		struct
 		{
 			// PRG: three switchable 8KB banks + fixed last bank
@@ -2351,6 +2357,32 @@ private:
 	void clockMMC3IRQ(uint16_t address, MEMORY_ACCESS_SOURCE source, FLAG isWriteOperation);
 	
 	void updateMMC5ChrA();
+
+	// Returns the 8KB PRG bank number for `slot` (0-3, i.e. $8000/$A000/$C000/$E000)
+	// given the last-latched address/data pair. Verified against FCEUmm's
+	// src/boards/15.c Sync().
+	static uint32_t mapper015ComputePrgBank8k(BYTE data, uint16_t latchedAddr, BYTE slot)
+	{
+		const uint32_t bank = ((uint32_t)(data & 0x3F)) << 1; // P (6 bits, 16KB units) -> 8KB units
+
+		switch (latchedAddr & 0x03)
+		{
+		case 0: // NROM-256: entire 32KB switches as one unit
+			RETURN bank + slot;
+		case 2: // NROM-64: 8KB chip, PRG A13 = p (data bit 7), mirrored across all 4 slots
+			RETURN bank | ((data >> 7) & 0x01);
+		default: // case 1 (UNROM) or case 3 (NROM-128)
+			if (slot <= ONE)
+			{
+				RETURN bank + slot; // first 16KB: switchable
+			}
+			if ((latchedAddr & 0x02) == ZERO) // case 1 (UNROM): force A14-A16 high -> fixed "last" bank
+			{
+				RETURN(bank | 0x0E) + (slot - TWO);
+			}
+			RETURN bank + (slot - TWO); // case 3 (NROM-128): mirror of the first 16KB
+		}
+	}
 
 	// ============================================================================
 	// Mapper 268 outer-bank math. Ported from FCEUmm's src/boards/268.c

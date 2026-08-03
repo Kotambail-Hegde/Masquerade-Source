@@ -265,6 +265,7 @@ _Example: The Event Debugger inspecting a Game Boy / Game Boy Color state._
   - MMC4 (010)
   - Color Dreams (011)
   - CPROM (013)
+  - iNES Mapper 15 (015)
   - Bandai FCG (016)
     - LZ93D50 + 24C01 EEPROM
     - FCG-1 / FCG-2
