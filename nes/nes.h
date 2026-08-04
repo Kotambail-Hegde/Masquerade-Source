@@ -175,6 +175,15 @@ private:
 		ONESCREEN_HI_MIRROR,
 	};
 
+	enum class INES030_NT_MODE : BYTE
+	{
+		FIXED_VERTICAL,
+		FIXED_HORIZONTAL,
+		ONESCREEN_SWITCHABLE,
+		FOUR_SCREEN_CART_VRAM,       // see caveat at the end -- not wired up yet
+		SUBMAPPER3_HV_SWITCHABLE
+	};
+
 	enum class PPU_BG_FSM
 	{
 		RELOAD_SHIFTERS = ZERO,
@@ -718,6 +727,7 @@ private:
 		VRC2_VRC4_025 = TWENTYFIVE,
 		VRC6_026 = TWENTYSIX,
 		INES_MAPPER_029 = TWENTYNINE,
+		INES_MAPPER_030 = THIRTY,
 		INES_MAPPER_034 = THIRTYFOUR,
 		INES_MAPPER_037 = THIRTYSEVEN,
 		INES_MAPPER_047 = FORTYSEVEN,
@@ -1024,7 +1034,6 @@ private:
 				// 64 MiB variant are intentionally out of scope — see writeCpu/readCpu
 				// handlers below, both FATAL() if reg[3] bits 4/6 select anything else.
 			} ines268;
-
 			FLAG isRevA;
 		} mmc3;
 		struct
@@ -1322,6 +1331,14 @@ private:
 			BYTE prgBank16; // 3-bit PRG bank for $8000-$BFFF (P field)
 			BYTE chrBank8;  // 2-bit CHR-RAM bank for $0000-$1FFF (C field)
 		} ines029;
+		struct
+		{
+			BYTE prgBank16;         // bits 0-4 of the latch (P)
+			BYTE chrBank8;          // bits 5-6 of the latch (C)
+			BIT nametableBit;       // bit 7 of the latch (N)
+			BYTE ledReg;            // submapper 4 only -- stored, not acted on (see caveats)
+			INES030_NT_MODE ntMode; // resolved once at init from submapper + header bits
+		} ines030;
 		struct
 		{
 			BYTE prgBank32;
@@ -2373,6 +2390,25 @@ private:
 	
 	void updateMMC5ChrA();
 
+
+	static MASQ_INLINE FLAG mapper030MainRegAtC000Only(BYTE submapperRaw, FLAG batteryBitSet)
+	{
+		if (submapperRaw == TWO) RETURN false;
+		if (submapperRaw == ONE || submapperRaw == THREE || submapperRaw == FOUR) RETURN YES;
+		RETURN batteryBitSet; // submapper 0 (also covers plain iNES1 w/ no submapper info)
+	}
+
+	static MASQ_INLINE FLAG mapper030HasBusConflicts(BYTE submapperRaw, FLAG batteryBitSet)
+	{
+		switch (submapperRaw)
+		{
+		case ONE:   RETURN NO;
+		case TWO:   RETURN YES;
+		case THREE: RETURN NO;
+		case FOUR:  RETURN NO;
+		default:    RETURN !batteryBitSet; // submapper 0: battery bit set => flashable => no conflicts
+		}
+	}
 	// Bits per the wiki's supervisor register: bit4=mode (0:VRC2,1:MMC3),
 	// bit5=CHR A18 for $0000-$0FFF, bit6=CHR A18 for $1000-$17FF,
 	// bit7=CHR A18 for $1800-$1FFF. Applies identically regardless of which

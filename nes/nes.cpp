@@ -1755,6 +1755,16 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 			}
 			BREAK;
 		}
+		case MAPPER::INES_MAPPER_030:
+		{
+			if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
+			{
+				const uint32_t bank8 = pNES_instance->NES_state.catridgeInfo.ines030.chrBank8;
+				const uint32_t index = (bank8 * 0x2000u) + (address & 0x1FFFu);
+				RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index];
+			}
+			BREAK;
+		}
 		case MAPPER::INES_MAPPER_034:
 		{
 			if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
@@ -2477,6 +2487,56 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 				else
 					RETURN pNES_ppuMemory->NESMemoryMap.nameTable1[ntOffset];
 			}
+			else if (pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::INES_MAPPER_030
+				&& pNES_instance->NES_state.catridgeInfo.ines030.ntMode == INES030_NT_MODE::FOUR_SCREEN_CART_VRAM
+				&& IF_ADDRESS_WITHIN(address, NAME_TABLE0_START_ADDRESS, NAME_TABLE3_END_ADDRESS))
+			{
+				const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
+				const bool isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
+
+				uint64_t chrRamSizeBytes = ZERO;
+				uint64_t chrNvRamSizeBytes = ZERO;
+				uint64_t totalChrRam = ZERO;
+				if (isNES2)
+				{
+					BYTE chrRamShift = hdr.flags_8to15.nes2p0.flag11.fields.chrVolRam;
+					BYTE chrNvRamShift = hdr.flags_8to15.nes2p0.flag11.fields.chrNonVolRam;
+					chrRamSizeBytes = (chrRamShift == ZERO) ? ZERO : (64ULL << chrRamShift);
+					chrNvRamSizeBytes = (chrNvRamShift == ZERO) ? ZERO : (64ULL << chrNvRamShift);
+				}
+				totalChrRam = chrRamSizeBytes + chrNvRamSizeBytes;
+
+				// Plain iNES 1.0 (no NES 2.0 size fields) or a header that under-reports:
+				// wiki says default to 32KB for this board regardless.
+				if (totalChrRam < 0x2000)
+				{
+					totalChrRam = 0x8000ULL;
+				}
+
+				const uint32_t last8kBase = (uint32_t)(totalChrRam - 0x2000ULL);
+
+				uint16_t ntOffset = 0;
+				uint8_t  ntIndex = 0;
+				if (IF_ADDRESS_WITHIN(address, NAME_TABLE0_START_ADDRESS, NAME_TABLE0_END_ADDRESS))
+				{
+					ntIndex = 0; ntOffset = address - NAME_TABLE0_START_ADDRESS;
+				}
+				else if (IF_ADDRESS_WITHIN(address, NAME_TABLE1_START_ADDRESS, NAME_TABLE1_END_ADDRESS))
+				{
+					ntIndex = 1; ntOffset = address - NAME_TABLE1_START_ADDRESS;
+				}
+				else if (IF_ADDRESS_WITHIN(address, NAME_TABLE2_START_ADDRESS, NAME_TABLE2_END_ADDRESS))
+				{
+					ntIndex = 2; ntOffset = address - NAME_TABLE2_START_ADDRESS;
+				}
+				else
+				{
+					ntIndex = 3; ntOffset = address - NAME_TABLE3_START_ADDRESS;
+				}
+
+				const uint32_t index = last8kBase + (ntIndex * 0x0400u) + ntOffset;
+				RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index];
+			}
 
 			if (pNES_instance->NES_state.catridgeInfo.nameTblMir == NAMETABLE_MIRROR::HORIZONTAL_MIRROR)
 			{
@@ -3061,6 +3121,16 @@ void NES_t::writePpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 			}
 			BREAK;
 		}
+		case MAPPER::INES_MAPPER_030:
+		{
+			if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
+			{
+				const uint32_t bank8 = pNES_instance->NES_state.catridgeInfo.ines030.chrBank8;
+				const uint32_t index = (bank8 * 0x2000u) + (address & 0x1FFFu);
+				pNES_catridgeMemory->maxCatridgeCHRROM[index] = data;
+			}
+			BREAK;
+		}
 		default:
 		{
 			FATAL("Read performed for unsupported mapper");
@@ -3317,6 +3387,57 @@ void NES_t::writePpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 					else
 						pNES_ppuMemory->NESMemoryMap.nameTable1[ntOffset] = data;
 				}
+				RETURN;
+			}
+			else if (pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::INES_MAPPER_030
+				&& pNES_instance->NES_state.catridgeInfo.ines030.ntMode == INES030_NT_MODE::FOUR_SCREEN_CART_VRAM
+				&& IF_ADDRESS_WITHIN(address, NAME_TABLE0_START_ADDRESS, NAME_TABLE3_END_ADDRESS))
+			{
+				const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
+				const bool isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
+
+				uint64_t chrRamSizeBytes = ZERO;
+				uint64_t chrNvRamSizeBytes = ZERO;
+				uint64_t totalChrRam = ZERO;
+				if (isNES2)
+				{
+					BYTE chrRamShift = hdr.flags_8to15.nes2p0.flag11.fields.chrVolRam;
+					BYTE chrNvRamShift = hdr.flags_8to15.nes2p0.flag11.fields.chrNonVolRam;
+					chrRamSizeBytes = (chrRamShift == ZERO) ? ZERO : (64ULL << chrRamShift);
+					chrNvRamSizeBytes = (chrNvRamShift == ZERO) ? ZERO : (64ULL << chrNvRamShift);
+				}
+				totalChrRam = chrRamSizeBytes + chrNvRamSizeBytes;
+
+				// Plain iNES 1.0 (no NES 2.0 size fields) or a header that under-reports:
+				// wiki says default to 32KB for this board regardless.
+				if (totalChrRam < 0x2000)
+				{
+					totalChrRam = 0x8000ULL;
+				}
+
+				const uint32_t last8kBase = (uint32_t)(totalChrRam - 0x2000ULL);
+
+				uint16_t ntOffset = 0;
+				uint8_t  ntIndex = 0;
+				if (IF_ADDRESS_WITHIN(address, NAME_TABLE0_START_ADDRESS, NAME_TABLE0_END_ADDRESS))
+				{
+					ntIndex = 0; ntOffset = address - NAME_TABLE0_START_ADDRESS;
+				}
+				else if (IF_ADDRESS_WITHIN(address, NAME_TABLE1_START_ADDRESS, NAME_TABLE1_END_ADDRESS))
+				{
+					ntIndex = 1; ntOffset = address - NAME_TABLE1_START_ADDRESS;
+				}
+				else if (IF_ADDRESS_WITHIN(address, NAME_TABLE2_START_ADDRESS, NAME_TABLE2_END_ADDRESS))
+				{
+					ntIndex = 2; ntOffset = address - NAME_TABLE2_START_ADDRESS;
+				}
+				else
+				{
+					ntIndex = 3; ntOffset = address - NAME_TABLE3_START_ADDRESS;
+				}
+
+				const uint32_t index = last8kBase + (ntIndex * 0x0400u) + ntOffset;
+				pNES_catridgeMemory->maxCatridgeCHRROM[index] = data;
 				RETURN;
 			}
 
@@ -5306,6 +5427,41 @@ inline byte NES_t::readCpuRawMemoryInternal(uint16_t address, MEMORY_ACCESS_SOUR
 						RETURN TO_UINT8(modedData);
 					}
 					RETURN pNES_catridgeMemory->maxCatridgePRGROM[index];
+				}
+				case MAPPER::INES_MAPPER_030:
+				{
+					if (IF_ADDRESS_WITHIN(address, 0x8000, 0xFFFF))
+					{
+						const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
+						const bool isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
+						const uint32_t totalPrg16kBanks = isNES2
+							? (hdr.sizeOfPrgRomIn16KB | (hdr.flags_8to15.nes2p0.flag9.fields.prgRomMSB << 8))
+							: hdr.sizeOfPrgRomIn16KB;
+
+						uint32_t index = ZERO;
+
+						if (IF_ADDRESS_WITHIN(address, 0x8000, 0xBFFF))
+						{
+							const uint32_t bank16 = pNES_instance->NES_state.catridgeInfo.ines030.prgBank16 % totalPrg16kBanks;
+							index = (bank16 * 0x4000u) + (address & 0x3FFFu);
+						}
+						else // 0xC000-0xFFFF
+						{
+							index = ((totalPrg16kBanks - ONE) * 0x4000u) + (address & 0x3FFFu);
+						}
+
+						if ((ceNES->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
+							&& (!hasCompare || (BYTE)compareVal == pNES_catridgeMemory->maxCatridgePRGROM[index]))
+						{
+							RETURN TO_UINT8(modedData);
+						}
+						RETURN pNES_catridgeMemory->maxCatridgePRGROM[index];
+					}
+
+					// $6000-$7FFF and anything else this case doesn't own: mapper 030 has
+					// no PRG-RAM ("PRG RAM capacity: None" per the wiki), so this is
+					// genuinely unmapped -- open bus, not a crash.
+					RETURN pNES_cpuRegisters->openbus;
 				}
 				case MAPPER::INES_MAPPER_034:
 				{
@@ -8482,6 +8638,66 @@ inline void NES_t::writeCpuRawMemoryInternal(uint16_t address, byte data, MEMORY
 						auto& reg029 = pNES_instance->NES_state.catridgeInfo.ines029;
 						reg029.prgBank16 = (data >> 2) & 0x07;
 						reg029.chrBank8 = data & 0x03;
+					}
+					BREAK;
+				}
+				case MAPPER::INES_MAPPER_030:
+				{
+					auto& reg030 = pNES_instance->NES_state.catridgeInfo.ines030;
+					const BYTE submapperRaw = (BYTE)pNES_instance->NES_state.catridgeInfo.subMapper;
+
+					// TODO: confirm the actual field name for the iNES "battery present"
+					// bit (byte 6, bit 1) in your header struct -- placeholder below.
+					const bool batteryBitSet = (pINES->iNES_Fields.iNES_header.fields.flag6.raw & 0x02) != ZERO;
+
+					const bool mainRegAtC000Only = mapper030MainRegAtC000Only(submapperRaw, batteryBitSet);
+					const bool hasBusConflicts = mapper030HasBusConflicts(submapperRaw, batteryBitSet);
+
+					// $8000-$BFFF: only meaningful once the main register has moved to
+					// $C000-only (i.e. a flashable/battery config).
+					if (mainRegAtC000Only && IF_ADDRESS_WITHIN(address, 0x8000, 0xBFFF))
+					{
+						if (submapperRaw == FOUR)
+						{
+							reg030.ledReg = data; // cosmetic only -- see caveats
+						}
+						// Flash ROM self-reprogramming (submappers 0/1/4 with battery bit)
+						// is NOT implemented: it would require emulating the flash chip's
+						// command/erase sequence and persisting the rewritten PRG image.
+						// Writes here are silently dropped rather than corrupting anything.
+						BREAK;
+					}
+
+					if ((mainRegAtC000Only && IF_ADDRESS_WITHIN(address, 0xC000, 0xFFFF))
+						|| (!mainRegAtC000Only && IF_ADDRESS_WITHIN(address, 0x8000, 0xFFFF)))
+					{
+						if (hasBusConflicts)
+						{
+							data &= readCpuRawMemory(address, MEMORY_ACCESS_SOURCE::DEBUG_PORT);
+						}
+
+						const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
+						const bool isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
+						const uint32_t totalPrg16kBanks = isNES2
+							? (hdr.sizeOfPrgRomIn16KB | (hdr.flags_8to15.nes2p0.flag9.fields.prgRomMSB << 8))
+							: hdr.sizeOfPrgRomIn16KB;
+
+						reg030.prgBank16 = (BYTE)((data & 0x1F) % totalPrg16kBanks);
+						reg030.chrBank8 = (data >> 5) & 0x03;
+						reg030.nametableBit = (data >> 7) & 0x01;
+
+						if (reg030.ntMode == INES030_NT_MODE::ONESCREEN_SWITCHABLE)
+						{
+							pNES_instance->NES_state.catridgeInfo.nameTblMir =
+								reg030.nametableBit ? NAMETABLE_MIRROR::ONESCREEN_HI_MIRROR : NAMETABLE_MIRROR::ONESCREEN_LO_MIRROR;
+						}
+						else if (reg030.ntMode == INES030_NT_MODE::SUBMAPPER3_HV_SWITCHABLE)
+						{
+							pNES_instance->NES_state.catridgeInfo.nameTblMir =
+								reg030.nametableBit ? NAMETABLE_MIRROR::VERTICAL_MIRROR : NAMETABLE_MIRROR::HORIZONTAL_MIRROR;
+						}
+						// FIXED_VERTICAL / FIXED_HORIZONTAL / FOUR_SCREEN_CART_VRAM: N has
+						// no effect, nameTblMir was already latched once at init.
 					}
 					BREAK;
 				}
@@ -14085,6 +14301,45 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 					memset(&pNES_instance->NES_state.catridgeInfo.ines029, 0, sizeof(pNES_instance->NES_state.catridgeInfo.ines029));
 					pNES_instance->NES_state.catridgeInfo.nameTblMir = NAMETABLE_MIRROR::VERTICAL_MIRROR; // hardwired, no register bit controls this
 					pNES_instance->NES_state.catridgeInfo.isBusConflictPresent = NO;
+					BREAK;
+				}
+				case MAPPER::INES_MAPPER_030:
+				{
+					memset(&pNES_instance->NES_state.catridgeInfo.ines030, 0, sizeof(pNES_instance->NES_state.catridgeInfo.ines030));
+
+					const BYTE submapperRaw = (BYTE)pNES_instance->NES_state.catridgeInfo.subMapper;
+					auto& reg030 = pNES_instance->NES_state.catridgeInfo.ines030;
+
+					if (submapperRaw == THREE)
+					{
+						reg030.ntMode = INES030_NT_MODE::SUBMAPPER3_HV_SWITCHABLE;
+						pNES_instance->NES_state.catridgeInfo.nameTblMir = NAMETABLE_MIRROR::HORIZONTAL_MIRROR; // N=0 default
+					}
+					else
+					{
+						const BIT fourScreenBit = (pINES->iNES_Fields.iNES_header.fields.flag6.raw >> 3) & 0x01;
+						const BIT mirrorBit = pINES->iNES_Fields.iNES_header.fields.flag6.raw & 0x01;
+
+						if (fourScreenBit && mirrorBit)
+						{
+							reg030.ntMode = INES030_NT_MODE::FOUR_SCREEN_CART_VRAM;
+						}
+						else if (fourScreenBit)
+						{
+							reg030.ntMode = INES030_NT_MODE::ONESCREEN_SWITCHABLE;
+							pNES_instance->NES_state.catridgeInfo.nameTblMir = NAMETABLE_MIRROR::ONESCREEN_LO_MIRROR;
+						}
+						else if (mirrorBit) // bit0=1 -> VERTICAL mirroring (was wrongly HORIZONTAL)
+						{
+							reg030.ntMode = INES030_NT_MODE::FIXED_VERTICAL;
+							pNES_instance->NES_state.catridgeInfo.nameTblMir = NAMETABLE_MIRROR::VERTICAL_MIRROR;
+						}
+						else // bit0=0 -> HORIZONTAL mirroring (was wrongly VERTICAL)
+						{
+							reg030.ntMode = INES030_NT_MODE::FIXED_HORIZONTAL;
+							pNES_instance->NES_state.catridgeInfo.nameTblMir = NAMETABLE_MIRROR::HORIZONTAL_MIRROR;
+						}
+					}
 					BREAK;
 				}
 				case MAPPER::INES_MAPPER_034:
