@@ -2167,11 +2167,15 @@ public:
 										}
 										if (ImGui::BeginMenu("Reset"))
 										{
-											if (ImGui::MenuItem("Reserved", NULL, NO, NO))
+											if (ImGui::MenuItem("GB/GBC##Reset", NULL, NO, NO))
 											{
-												DO_NOTHING;
+												nesReset = YES;
 											}
 											if (ImGui::MenuItem("NES##Reset", NULL, NO, MASQ_ENABLE_NES))
+											{
+												nesReset = YES;
+											}
+											if (ImGui::MenuItem("GBA##Reset", NULL, NO, NO))
 											{
 												nesReset = YES;
 											}
@@ -3869,7 +3873,8 @@ void postPrimaryBootLoader()
 	BYTE bootType = BOOT;
 
 BOOT_AGAIN:
-	romsToRun.fill("");
+	if ((dynamicDragNDropAndMenuSelect.size() != ZERO) || (saveContextOnReboot == NO))
+		romsToRun.fill("");
 
 	if (bootType == BOOT)
 	{

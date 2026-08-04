@@ -2397,7 +2397,7 @@ MASQ_INLINE FLAG isCLI()
 #ifdef __RPI_PICO__
     RETURN NO; // Pico always runs in emulation mode
 #else
-    RETURN((ROM_TYPE == ROM::TEST_ROM_COM)
+    RETURN ((ROM_TYPE == ROM::TEST_ROM_COM)
         || (ROM_TYPE == ROM::TEST_ROM_CIM)
         || (ROM_TYPE == ROM::TEST_ROM_TAP)
         || (ROM_TYPE == ROM::TEST_ROM_BIN)
