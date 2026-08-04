@@ -1287,6 +1287,20 @@ inline void logger(const char* fmt, ...)
 // UTILITY FUNCTIONS
 // =========================================================
 
+template<typename T>
+MASQ_INLINE void saveStruct(BYTE* dst, const T& src)
+{
+    static_assert(std::is_trivially_copyable_v<T>);
+    memcpy(dst, &src, sizeof(T));
+}
+
+template<typename T>
+MASQ_INLINE void loadStruct(T& dst, const BYTE* src)
+{
+    static_assert(std::is_trivially_copyable_v<T>);
+    memcpy(&dst, src, sizeof(T));
+}
+
 // --- Timing ------------------------------------------
 // Desktop uses std::chrono; Pico uses Pico SDK sleep_ms()
 MASQ_INLINE void blocking_delay_ms(int ms)
@@ -2376,6 +2390,7 @@ extern ROM ROM_TYPE;
 
 // Needed by NES
 extern FLAG enableZapper;
+extern FLAG nesReset;
 
 MASQ_INLINE FLAG isCLI()
 {

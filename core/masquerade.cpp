@@ -301,6 +301,7 @@ PALETTE_ID    currEnGbcPalette = PALETTE_ID::PALETTE_1;
 
 // NES Zapper Support
 FLAG enableZapper = NO;
+FLAG nesReset = NO;
 
 #pragma endregion GLOBAL_INFRASTRUCTURE_DECLARATIONS
 
@@ -2161,6 +2162,18 @@ public:
 													enableZapper = (enableZapper == YES ? NO : YES);
 												}
 												ImGui::EndMenu();
+											}
+											ImGui::EndMenu();
+										}
+										if (ImGui::BeginMenu("Reset"))
+										{
+											if (ImGui::MenuItem("Reserved", NULL, NO, NO))
+											{
+												DO_NOTHING;
+											}
+											if (ImGui::MenuItem("NES##Reset", NULL, NO, MASQ_ENABLE_NES))
+											{
+												nesReset = YES;
 											}
 											ImGui::EndMenu();
 										}

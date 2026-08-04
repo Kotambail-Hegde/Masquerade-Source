@@ -1745,6 +1745,16 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 
 			BREAK;
 		}
+		case MAPPER::INES_MAPPER_028:
+		{
+			if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
+			{
+				const uint32_t bank8 = pNES_instance->NES_state.catridgeInfo.ines028.reg00_chrBank & 0x03;
+				const uint32_t index = (bank8 * 0x2000u) + (address & 0x1FFFu);
+				RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index];
+			}
+			BREAK;
+		}
 		case MAPPER::INES_MAPPER_029:
 		{
 			if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
@@ -3110,6 +3120,16 @@ void NES_t::writePpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 		case MAPPER::INES_MAPPER_078:
 		{
 			BREAK; // CHR-ROM only, no CHR-RAM on either board
+		}
+		case MAPPER::INES_MAPPER_028:
+		{
+			if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
+			{
+				const uint32_t bank8 = pNES_instance->NES_state.catridgeInfo.ines028.reg00_chrBank & 0x03;
+				const uint32_t index = (bank8 * 0x2000u) + (address & 0x1FFFu);
+				pNES_catridgeMemory->maxCatridgeCHRROM[index] = data;
+			}
+			BREAK;
 		}
 		case MAPPER::INES_MAPPER_029:
 		{
@@ -5390,6 +5410,33 @@ inline byte NES_t::readCpuRawMemoryInternal(uint16_t address, MEMORY_ACCESS_SOUR
 						}
 					}
 
+					BREAK;
+				}
+				case MAPPER::INES_MAPPER_028:
+				{
+					if (IF_ADDRESS_WITHIN(address, 0x8000, 0xFFFF))
+					{
+						const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
+						const bool isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
+						const uint32_t totalPrg16kBanks = isNES2
+							? (hdr.sizeOfPrgRomIn16KB | (hdr.flags_8to15.nes2p0.flag9.fields.prgRomMSB << 8))
+							: hdr.sizeOfPrgRomIn16KB;
+
+						const auto& reg028 = pNES_instance->NES_state.catridgeInfo.ines028;
+						const bool isC000Window = IF_ADDRESS_WITHIN(address, 0xC000, 0xFFFF);
+						const BYTE innerBits4 = reg028.reg01_innerBank & 0x0F;
+
+						uint32_t bank16 = action53ComputePrgBank16k(reg028.reg80_mode, reg028.reg81_outerBank, innerBits4, isC000Window);
+						bank16 %= totalPrg16kBanks;
+						const uint32_t index = (bank16 * 0x4000u) + (address & 0x3FFFu);
+
+						if ((ceNES->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
+							&& (!hasCompare || (BYTE)compareVal == pNES_catridgeMemory->maxCatridgePRGROM[index]))
+						{
+							RETURN TO_UINT8(modedData);
+						}
+						RETURN pNES_catridgeMemory->maxCatridgePRGROM[index];
+					}
 					BREAK;
 				}
 				case MAPPER::INES_MAPPER_029:
@@ -8622,6 +8669,56 @@ inline void NES_t::writeCpuRawMemoryInternal(uint16_t address, byte data, MEMORY
 						}
 						BREAK;
 					}
+					}
+					BREAK;
+				}
+				case MAPPER::INES_MAPPER_028:
+				{
+					if (IF_ADDRESS_WITHIN(address, 0x5000, 0x5FFF))
+					{
+						// "7654 3210 / S       R" -- only bit7 (supervisor select) and bit0
+						// (register within that bank) matter; this happens to exactly match
+						// the register's own name (0x00/0x01/0x80/0x81).
+						pNES_instance->NES_state.catridgeInfo.ines028.selectedReg = data & 0x81;
+						BREAK;
+					}
+
+					if (IF_ADDRESS_WITHIN(address, 0x8000, 0xFFFF))
+					{
+						auto& reg028 = pNES_instance->NES_state.catridgeInfo.ines028;
+
+						switch (reg028.selectedReg)
+						{
+						case 0x00: reg028.reg00_chrBank = data; BREAK;
+						case 0x01: reg028.reg01_innerBank = data; BREAK;
+						case 0x80: reg028.reg80_mode = data; BREAK;
+						case 0x81: reg028.reg81_outerBank = data; BREAK;
+						default: BREAK; // no register selected yet -- write has no effect
+						}
+
+						// Mirroring resolution -- shared by writes to any of the 4
+						// registers, since $80 can change the mode directly and $00/$01 can
+						// override bit 0 while in one of the 1-screen modes.
+						const BYTE mirrorModeBits = reg028.reg80_mode & 0x03;
+						if (mirrorModeBits == ZERO || mirrorModeBits == ONE)
+						{
+							BYTE bit0 = mirrorModeBits & 0x01;
+							if (reg028.selectedReg == 0x00 || reg028.selectedReg == 0x01)
+							{
+								bit0 = (data >> 4) & 0x01;
+								reg028.reg80_mode = (reg028.reg80_mode & (BYTE)~0x01) | bit0;
+							}
+							pNES_instance->NES_state.catridgeInfo.nameTblMir =
+								bit0 ? NAMETABLE_MIRROR::ONESCREEN_HI_MIRROR : NAMETABLE_MIRROR::ONESCREEN_LO_MIRROR;
+						}
+						else if (mirrorModeBits == TWO)
+						{
+							pNES_instance->NES_state.catridgeInfo.nameTblMir = NAMETABLE_MIRROR::VERTICAL_MIRROR;
+						}
+						else
+						{
+							pNES_instance->NES_state.catridgeInfo.nameTblMir = NAMETABLE_MIRROR::HORIZONTAL_MIRROR;
+						}
 					}
 					BREAK;
 				}
@@ -12440,14 +12537,26 @@ bool NES_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 			++opcode;
 		}
 	}
-else
+	else
 #endif
-{
+	{
 	processSOC();
 
 #if (DISABLED)
 	runDebugger();
 #endif
+	}
+
+	if (nesReset && pNES_instance->NES_state.display.wasVblankJustTriggerred)
+	{
+		pNES_instance->NES_state.display.wasVblankJustTriggerred = CLEAR;
+
+		pNES_cpuRegisters->pc = 0x0000;
+		pNES_cpuRegisters->sp = 0x00;
+		pNES_cpuRegisters->p.p = 0x00;
+		pNES_instance->NES_state.controller.keyID = INVALID;
+
+		loadRom(rom);
 	}
 
 #ifndef __RPI_PICO__
@@ -12474,7 +12583,7 @@ else
 	}
 #endif
 
-	RETURN(pNES_instance->NES_state.display.wasVblankJustTriggerred
+	RETURN (pNES_instance->NES_state.display.wasVblankJustTriggerred
 #ifndef __RPI_PICO__
 		|| nesDebugger.ppu.paused == YES
 		|| shouldYieldForSampleMode == YES
@@ -14294,6 +14403,27 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 						memcpy_portable(&(cpuCart[0x6000]), 0x2000, &(prgRom[(prg8kBanks - ONE) * 0x2000]), 0x2000);
 					}
 
+					BREAK;
+				}
+				case MAPPER::INES_MAPPER_028:
+				{
+					if (nesReset == NO)
+					{
+						memset(&pNES_instance->NES_state.catridgeInfo.ines028, 0, sizeof(pNES_instance->NES_state.catridgeInfo.ines028));
+
+						// Guarantee "$C000-$FFFF = last 16KB bank" without special-casing the
+						// read path: PP=3 (Fixed $C000), SS=0, outer=0xFF. The fixed-window
+						// formula gives (0xFF<<1)|1 = 0x1FF (max possible 16KB index); the
+						// read path's existing `% totalPrg16kBanks` wrap then naturally lands
+						// on the true last bank for any power-of-two ROM size.
+						pNES_instance->NES_state.catridgeInfo.ines028.reg80_mode = 0x0C;
+						pNES_instance->NES_state.catridgeInfo.ines028.reg81_outerBank = 0xFF;
+						memcpy_portable(&(cpuCart[0x4000]), 0x4000, &(prgRom[(prg16kBanks - ONE) * 0x4000]), 0x4000);
+
+						pNES_instance->NES_state.catridgeInfo.nameTblMir = NAMETABLE_MIRROR::HORIZONTAL_MIRROR; // arbitrary -- "rest of state is unspecified"
+					}
+
+					nesReset = CLEAR;
 					BREAK;
 				}
 				case MAPPER::INES_MAPPER_029:

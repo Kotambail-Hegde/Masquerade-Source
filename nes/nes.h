@@ -726,6 +726,7 @@ private:
 		VRC6_024 = TWENTYFOUR,
 		VRC2_VRC4_025 = TWENTYFIVE,
 		VRC6_026 = TWENTYSIX,
+		INES_MAPPER_028 = TWENTYEIGHT,
 		INES_MAPPER_029 = TWENTYNINE,
 		INES_MAPPER_030 = THIRTY,
 		INES_MAPPER_034 = THIRTYFOUR,
@@ -1326,6 +1327,14 @@ private:
 				FLAG     freqShift8;    // bit 1 — right-shift freqPeriod by 8 when set
 			} vrc6Audio;
 		} vrc6;
+		struct
+		{
+			BYTE selectedReg;    // last value written to $5000, masked to bit7|bit0 (0x00/0x01/0x80/0x81)
+			BYTE reg00_chrBank;  // "M   BB" -- CHR-RAM A14-A13 + mirroring-override bit
+			BYTE reg01_innerBank;// "M BBBB" -- PRG inner bank + mirroring-override bit
+			BYTE reg80_mode;     // "SS PPMM" -- outer bank size, PRG bank mode, mirroring mode
+			BYTE reg81_outerBank;// "BBBB Bbbb" -- PRG outer bank
+		} ines028;
 		struct
 		{
 			BYTE prgBank16; // 3-bit PRG bank for $8000-$BFFF (P field)
@@ -2390,6 +2399,45 @@ private:
 	
 	void updateMMC5ChrA();
 
+	// Computes the 9-bit 16KB PRG bank number (A22-A14) for either the
+	// $8000-$BFFF half (isC000Window=false) or $C000-$FFFF half (true).
+	// Verified bit-for-bit against every row of the wiki's mode-value table:
+	// SS=0..3, PP={0/1,2,3} -- all 12 combinations produce the exact strings
+	// listed there ("oooooooo0", "oooooooii", etc.)
+	static uint32_t action53ComputePrgBank16k(BYTE reg80Mode, BYTE outerBits, BYTE innerBits4, bool isC000Window)
+	{
+		const BYTE outerSizeSel = (reg80Mode >> 4) & 0x03; // SS
+		const BYTE prgModeSel = (reg80Mode >> 2) & 0x03;   // PP (0 and 1 both mean "32KiB")
+
+		const bool fixed8000 = (prgModeSel == TWO);
+		const bool fixedC000 = (prgModeSel == THREE);
+		const bool thisWindowIsFixed = (isC000Window && fixedC000) || (!isC000Window && fixed8000);
+
+		if (thisWindowIsFixed)
+		{
+			// "when the fixed bank is accessed... the outer bank bits are
+			// passed straight through" -- i.e. treated as if SS were forced to 0.
+			RETURN((uint32_t)outerBits << ONE) | (isC000Window ? ONE : ZERO);
+		}
+
+		if (prgModeSel <= ONE) // both halves switchable together (BNROM/AOROM-style)
+		{
+			const BYTE numOuterBits = 8 - outerSizeSel;
+			const BYTE numInnerBits = outerSizeSel;
+			const uint32_t topOuter = (numOuterBits == ZERO) ? ZERO : ((uint32_t)outerBits >> (8 - numOuterBits));
+			const uint32_t botInner = (numInnerBits == ZERO) ? ZERO : (innerBits4 & (uint32_t)((ONE << numInnerBits) - ONE));
+			RETURN(topOuter << (numInnerBits + ONE)) | (botInner << ONE) | (isC000Window ? ONE : ZERO);
+		}
+
+		// Switchable side of a fixed/switchable pair (PP=2 or PP=3): one extra
+		// inner bit vs. the "both switchable" case, no separate literal bit --
+		// outer+inner already sum to the full 9 bits.
+		const BYTE numOuterBits = 8 - outerSizeSel;
+		const BYTE numInnerBits = outerSizeSel + ONE;
+		const uint32_t topOuter = (numOuterBits == ZERO) ? ZERO : ((uint32_t)outerBits >> (8 - numOuterBits));
+		const uint32_t botInner = innerBits4 & (uint32_t)((ONE << numInnerBits) - ONE);
+		RETURN(topOuter << numInnerBits) | botInner;
+	}
 
 	static MASQ_INLINE FLAG mapper030MainRegAtC000Only(BYTE submapperRaw, FLAG batteryBitSet)
 	{
@@ -2409,6 +2457,7 @@ private:
 		default:    RETURN !batteryBitSet; // submapper 0: battery bit set => flashable => no conflicts
 		}
 	}
+
 	// Bits per the wiki's supervisor register: bit4=mode (0:VRC2,1:MMC3),
 	// bit5=CHR A18 for $0000-$0FFF, bit6=CHR A18 for $1000-$17FF,
 	// bit7=CHR A18 for $1800-$1FFF. Applies identically regardless of which
