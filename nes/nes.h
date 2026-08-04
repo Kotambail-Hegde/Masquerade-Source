@@ -717,6 +717,7 @@ private:
 		VRC6_024 = TWENTYFOUR,
 		VRC2_VRC4_025 = TWENTYFIVE,
 		VRC6_026 = TWENTYSIX,
+		INES_MAPPER_029 = TWENTYNINE,
 		INES_MAPPER_034 = THIRTYFOUR,
 		INES_MAPPER_037 = THIRTYSEVEN,
 		INES_MAPPER_047 = FORTYSEVEN,
@@ -726,6 +727,7 @@ private:
 		INES_MAPPER_068 = SIXTYEIGHT,
 		INES_MAPPER_069 = SIXTYNINE,
 		INES_MAPPER_070 = SEVENTY,
+		INES_MAPPER_078 = SEVENTYEIGHT,
 		J87 = EIGHTYSEVEN,
 		INES_MAPPER_105 = ONEHUNDREDFIVE,
 		INES_MAPPER_118 = ONEHUNDREDEIGHTEEN,
@@ -997,7 +999,6 @@ private:
 				// IRQ fire delay (in CPU cycles) counting down to assert
 				BYTE irqDelay;        // 0=idle, non-zero counting down
 			} rambo1;
-
 			struct txsrom_t
 			{
 				// Per-nametable override: four entries, each 0 or 1 (CIRAM page)
@@ -1005,7 +1006,6 @@ private:
 				// into the *active* pattern table half ($0000-$0FFF).
 				BYTE ntPage[4];  // CIRAM page assigned to NT0-NT3
 			} txsrom;
-
 			struct ines268_t
 			{
 				// EXPREGS[0..6] — direct port of FCEUmm's src/boards/268.c naming.
@@ -1319,6 +1319,11 @@ private:
 		} vrc6;
 		struct
 		{
+			BYTE prgBank16; // 3-bit PRG bank for $8000-$BFFF (P field)
+			BYTE chrBank8;  // 2-bit CHR-RAM bank for $0000-$1FFF (C field)
+		} ines029;
+		struct
+		{
 			BYTE prgBank32;
 			BYTE chrBank4Lo;
 			BYTE chrBank4Hi;
@@ -1357,6 +1362,11 @@ private:
 			FLAG prgRamEnable;
 			uint16_t irqCounter;
 		} ines069;
+		struct
+		{
+			BYTE prgBank16; // 3-bit PRG bank for $8000-$BFFF
+			BYTE chrBank8;  // 4-bit CHR bank for $0000-$1FFF
+		} ines078;
 		struct
 		{
 			// PRG/CHR registers
