@@ -653,35 +653,21 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 		{
 			if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
 			{
-				if (pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB == ZERO)
+				auto& mmc1 = pNES_instance->NES_state.catridgeInfo.mmc1;
+
+				// 8KB mode
+				if (mmc1.intfControlReg.fields1.c == RESET)
 				{
-					if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE0_END_ADDRESS))
-					{
-						RETURN pNES_ppuMemory->NESMemoryMap.patternTable.patternTable0[address - PATTERN_TABLE0_START_ADDRESS];
-					}
-					else if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE1_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
-					{
-						RETURN pNES_ppuMemory->NESMemoryMap.patternTable.patternTable1[address - PATTERN_TABLE1_START_ADDRESS];
-					}
+					const uint32_t index = (mmc1.chrBank8 << 12) | (address & 0x1FFF);
+					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index];
 				}
+				// 4KB mode
 				else
 				{
-					auto& mmc1 = pNES_instance->NES_state.catridgeInfo.mmc1;
-
-					// 8KB mode
-					if (mmc1.intfControlReg.fields1.c == RESET)
-					{
-						const uint32_t index = (mmc1.chrBank8 << 12) | (address & 0x1FFF);
-						RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index];
-					}
-					// 4KB mode
-					else
-					{
-						const uint32_t patternTable = (address >> 12) & 1;
-						const uint32_t bank = (patternTable == 0) ? mmc1.chrBank4Lo : mmc1.chrBank4Hi;
-						const uint32_t index = (bank << 12) | (address & 0x0FFF);
-						RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index];
-					}
+					const uint32_t patternTable = (address >> 12) & 1;
+					const uint32_t bank = (patternTable == 0) ? mmc1.chrBank4Lo : mmc1.chrBank4Hi;
+					const uint32_t index = (bank << 12) | (address & 0x0FFF);
+					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index];
 				}
 			}
 			BREAK;
@@ -2882,15 +2868,24 @@ void NES_t::writePpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 		{
 			if (pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB == ZERO)
 			{
-				if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE0_END_ADDRESS))
+				if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
 				{
-					pNES_ppuMemory->NESMemoryMap.patternTable.patternTable0[address - PATTERN_TABLE0_START_ADDRESS] = data;
-					RETURN;
-				}
-				else if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE1_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
-				{
-					pNES_ppuMemory->NESMemoryMap.patternTable.patternTable1[address - PATTERN_TABLE1_START_ADDRESS] = data;
-					RETURN;
+					auto& mmc1 = pNES_instance->NES_state.catridgeInfo.mmc1;
+
+					// 8KB mode
+					if (mmc1.intfControlReg.fields1.c == RESET)
+					{
+						const uint32_t index = (mmc1.chrBank8 << 12) | (address & 0x1FFF);
+						pNES_catridgeMemory->maxCatridgeCHRROM[index] = data;
+					}
+					// 4KB mode
+					else
+					{
+						const uint32_t patternTable = (address >> 12) & 1;
+						const uint32_t bank = (patternTable == 0) ? mmc1.chrBank4Lo : mmc1.chrBank4Hi;
+						const uint32_t index = (bank << 12) | (address & 0x0FFF);
+						pNES_catridgeMemory->maxCatridgeCHRROM[index] = data;
+					}
 				}
 			}
 			BREAK;
