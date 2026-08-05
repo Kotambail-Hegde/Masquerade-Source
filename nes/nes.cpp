@@ -13753,6 +13753,18 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 					pNES_instance->NES_state.catridgeInfo.mmc3
 						.exRegisters.prgRamProtect_oddAk.fields.prgRamEnable = hasPrgRam ? YES : NO;
 
+					// CHR Bank Registers (R0 - R5)
+					pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank2a = 0; // R0 (2KB bank at $0000)
+					pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank2b = 2; // R1 (2KB bank at $0800)
+					pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1a = 4; // R2 (1KB bank at $1000)
+					pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1b = 5; // R3 (1KB bank at $1100)
+					pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1c = 6; // R4 (1KB bank at $1200)
+					pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1d = 7; // R5 (1KB bank at $1300)
+
+					// PRG Bank Registers (R6 - R7)
+					pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.prgBank8a = 0; // R6 (8KB bank at $8000)
+					pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.prgBank8b = 1; // R7 (8KB bank at $A000)
+
 					if (ENABLED)
 					{
 						const bool hasTrainerDB = (pINES->completeROM[6] & 0x04) != 0;
