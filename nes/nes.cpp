@@ -580,11 +580,11 @@ void NES_t::clockNamco163IRQ()
 
 void NES_t::updateMMC5ChrA()
 {
-	auto& mmc5 = pNES_instance->NES_state.catridgeInfo.mmc5;
-	const bool largeSprites = (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUCTRL.ppuctrl.SPRITE_SIZE == SET);
-	if (!largeSprites) mmc5.lastChrReg = 0;
+    auto& mmc5 = pNES_instance->NES_state.catridgeInfo.mmc5;
+    const bool largeSprites = (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUCTRL.ppuctrl.SPRITE_SIZE == SET);
+    if (!largeSprites) mmc5.lastChrReg = 0; // 8x8 sprites reset the "last CHR register" selection.
 	mmc5.chrA = !largeSprites
-		|| (mmc5.splitTileNumber >= 32 && mmc5.splitTileNumber < 40)
+		|| (mmc5.ppuInFrame && mmc5.splitTileNumber >= 32 && mmc5.splitTileNumber < 40)
 		|| (!mmc5.ppuInFrame && mmc5.lastChrReg <= 0x5127);
 }
 
@@ -1297,7 +1297,7 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 					const uint32_t chrAddr = ((uint32_t)mmc5.verticalSplitBank << 12)
 						+ (((address & ~(uint16_t)0x07u) | (uint16_t)(vertScrollY & 0x07u)) & 0x0FFF);
 					const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
-					const bool     isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
+					const bool isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
 					const uint32_t totalChr8k = isNES2
 						? (hdr.sizeOfChrRomIn8KB | (hdr.flags_8to15.nes2p0.flag9.fields.chrRomMSB << 8))
 						: hdr.sizeOfChrRomIn8KB;
@@ -1314,8 +1314,7 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 				{
 					// Decrement first, then return — counter goes 2->1 (CHR low) then 1->0 (CHR high)
 					mmc5.exAttrFetchCounter--; 
-					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[
-						(uint32_t)mmc5.exAttrSelectedChrBank * 0x1000 + (address & 0x0FFF)];
+					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[(uint32_t)mmc5.exAttrSelectedChrBank * 0x1000 + (address & 0x0FFF)];
 				}
 
 				// --- Determine chrA (which set of CHR registers to use) ---
@@ -1384,7 +1383,13 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 				}
 				}
 
-				RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index];
+				const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
+				const FLAG isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
+				const uint32_t totalChr8k = isNES2
+					? (hdr.sizeOfChrRomIn8KB | (hdr.flags_8to15.nes2p0.flag9.fields.chrRomMSB << 8))
+					: hdr.sizeOfChrRomIn8KB;
+				const uint32_t chrRomBytes = (totalChr8k == 0) ? 0x2000u : (totalChr8k * 0x2000u);
+				RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index % chrRomBytes];
 			}
 			BREAK;
 		}
@@ -2133,7 +2138,8 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 				}
 
 				// --- Extended attribute mode ($5104 == 1) ---
-				if (mmc5.extendedRamMode == 1 && mmc5.ppuInFrame == YES)
+				if (mmc5.extendedRamMode == 1 && mmc5.ppuInFrame == YES
+					&& (mmc5.splitTileNumber < 32 || mmc5.splitTileNumber >= 40))
 				{
 					if (isNTFetch)
 					{
@@ -7624,21 +7630,21 @@ inline void NES_t::writeCpuRawMemoryInternal(uint16_t address, byte data, MEMORY
 							BREAK;
 						}
 						case 0x5130: mmc5.chrUpperBits = data & 0x03; BREAK;
-						case 0x5200: BREAK; // Vertical split mode
+						case 0x5200:
 						{
 							mmc5.verticalSplitEnabled = (data & 0x80) ? YES : NO;
 							mmc5.verticalSplitRightSide = (data & 0x40) ? YES : NO;
 							mmc5.verticalSplitDelimiterTile = (data & 0x1F);
 							BREAK;
 						}
-						case 0x5201: BREAK; // Vertical split scroll
+						case 0x5201: // Vertical split scroll
 						{
 							mmc5.verticalSplitScroll = data;
 							BREAK;
 						}
-						case 0x5202: BREAK; // Vertical split bank
+						case 0x5202: // Vertical split bank
 						{
-							mmc5.verticalSplitBank = data & 0x1F;
+							mmc5.verticalSplitBank = data;
 							BREAK;
 						}
 						case 0x5203: mmc5.irqCounterTarget = data; BREAK;
@@ -10895,8 +10901,8 @@ void NES_t::ppuTick()
 					case ONE:
 					{
 						// Refer to https://www.nesdev.org/wiki/PPU_rendering#Cycles_257-320
-						auto dummyNameTblAddr = NAME_TABLE0_START_ADDRESS | (pNES_ppuRegisters->ppuInternalRegisters.v.raw & 0x0FFF);
-						auto discard = readPpuRawMemory(pNES_instance->NES_state.display.bg.nameTblAddr, MEMORY_ACCESS_SOURCE::PPU);
+						const uint16_t dummyNameTblAddr = NAME_TABLE0_START_ADDRESS | (pNES_ppuRegisters->ppuInternalRegisters.v.raw & 0x0FFF);
+						const auto discard = readPpuRawMemory(dummyNameTblAddr, MEMORY_ACCESS_SOURCE::PPU);
 
 						pNES_instance->NES_state.display.obj.tileNumber
 							= pNES_ppuMemory->NESMemoryMap.secondaryOam.oamW[objIdx].tileID;
@@ -10911,11 +10917,11 @@ void NES_t::ppuTick()
 					case THREE:
 					{
 						// Refer to https://www.nesdev.org/wiki/PPU_rendering#Cycles_257-320
-						auto dummyNameTblAddr = (NAME_TABLE0_START_ADDRESS + 0x03C0)
+						const uint16_t dummyAttrTblAddr = (NAME_TABLE0_START_ADDRESS + 0x03C0)
 							| (pNES_ppuRegisters->ppuInternalRegisters.v.raw & 0x0C00)
 							| ((pNES_ppuRegisters->ppuInternalRegisters.v.raw >> FOUR) & 0x0038)
 							| ((pNES_ppuRegisters->ppuInternalRegisters.v.raw >> TWO) & 0x0007);
-						auto discard = readPpuRawMemory(pNES_instance->NES_state.display.bg.attrTblAddr, MEMORY_ACCESS_SOURCE::PPU);
+						const auto discard = readPpuRawMemory(dummyAttrTblAddr, MEMORY_ACCESS_SOURCE::PPU);
 
 						pNES_instance->NES_state.display.obj.spriteXCoordinate
 							= pNES_ppuMemory->NESMemoryMap.secondaryOam.oamW[objIdx].xPosition;
@@ -11187,7 +11193,8 @@ void NES_t::ppuTick()
 				}
 				case THREETHIRTYEIGHT:
 				{
-					auto discard = readPpuRawMemory(NAME_TABLE0_START_ADDRESS | (pNES_ppuRegisters->ppuInternalRegisters.v.raw & 0x0FFF), MEMORY_ACCESS_SOURCE::PPU);
+					const uint16_t dummyNameTblAddr = NAME_TABLE0_START_ADDRESS | (pNES_ppuRegisters->ppuInternalRegisters.v.raw & 0x0FFF);
+					const auto discard = readPpuRawMemory(dummyNameTblAddr, MEMORY_ACCESS_SOURCE::PPU);
 					BREAK;
 				}
 				case THREETHIRTYNINE:
@@ -11205,7 +11212,8 @@ void NES_t::ppuTick()
 				}
 				case THREEFORTY:
 				{
-					auto discard = readPpuRawMemory(NAME_TABLE0_START_ADDRESS | (pNES_ppuRegisters->ppuInternalRegisters.v.raw & 0x0FFF), MEMORY_ACCESS_SOURCE::PPU);
+					const uint16_t dummyNameTblAddr = NAME_TABLE0_START_ADDRESS | (pNES_ppuRegisters->ppuInternalRegisters.v.raw & 0x0FFF);
+					const auto discard = readPpuRawMemory(dummyNameTblAddr, MEMORY_ACCESS_SOURCE::PPU);
 					BREAK;
 				}
 				}

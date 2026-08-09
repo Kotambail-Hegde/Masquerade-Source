@@ -1110,7 +1110,8 @@ private:
 			// Used for: IRQ scanline counting, ExRAM mode 0/1 write gating, chrA switching
 			FLAG ppuInFrame;
 			FLAG needInFrame;
-			// Decremented each PPU tick; reset to 9 (~3 CPU cycles) on each PPU read
+			// Decremented each MMC5 clock.
+			// Reset to 3 (~3 CPU cycles / 9 PPU clocks) on each PPU read.
 			// When it hits 0: ppuInFrame is cleared
 			BYTE ppuIdleCounter;
 			uint16_t lastPpuReadAddr;
@@ -1142,7 +1143,7 @@ private:
 			// $5201: Vertical split scroll
 			BYTE  verticalSplitScroll;
 
-			// $5202: Vertical split CHR bank (4KB page index, 5 bits)
+			// $5202: Vertical split CHR bank (4KB page index)
 			BYTE  verticalSplitBank;
 
 			// Runtime: whether the current tile column is inside the split region
