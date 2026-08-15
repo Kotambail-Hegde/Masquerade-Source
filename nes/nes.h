@@ -1143,6 +1143,10 @@ private:
 			// $5201: Vertical split scroll
 			BYTE  verticalSplitScroll;
 
+			// Runtime: vertical split scanline counter.
+			// Low 3 bits provide CHR A0-A2 during split background fetches.
+			uint16_t verticalSplitScanlineCounter;
+
 			// $5202: Vertical split CHR bank (4KB page index)
 			BYTE  verticalSplitBank;
 

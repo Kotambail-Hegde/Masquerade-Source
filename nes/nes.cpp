@@ -1284,18 +1284,29 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 			{
 				auto& mmc5 = pNES_instance->NES_state.catridgeInfo.mmc5;
 
+				const FLAG isActualPpuFetch = (source == MEMORY_ACCESS_SOURCE::PPU);
+				const uint64_t ppuCycle = pNES_instance->NES_state.emulatorStatus.ticks.ppuCounterPerLY;
+				const FLAG isSpriteFetchWindow = isActualPpuFetch && ppuCycle >= TWOFIFTYSEVEN && ppuCycle <= THREETWENTY;
+				// MMC5 monitors all PPU VRAM reads to determine whether the PPU
+				// is still rendering. CHR/pattern-table reads must refresh the
+				// 3-CPU-cycle in-frame watchdog just like nametable/attribute reads.
+				if (isActualPpuFetch)
+				{
+					mmc5.ppuIdleCounter = 3;
+					mmc5.lastPpuReadAddr = address;
+				}
+
 				// --- Vertical split CHR override ---
-				if (mmc5.verticalSplitEnabled == YES
+				if (isActualPpuFetch
+					&& !isSpriteFetchWindow
+					&& mmc5.verticalSplitEnabled == YES
 					&& mmc5.ppuInFrame == YES
 					&& mmc5.splitInSplitRegion == YES
 					&& mmc5.extendedRamMode <= 1)
 				{
-					const uint8_t  scanline = (mmc5.splitTileNumber >= 41)
-						? (uint8_t)(mmc5.scanlineCounter + 1)
-						: (uint8_t)mmc5.scanlineCounter;
-					const uint32_t vertScrollY = ((uint32_t)scanline + mmc5.verticalSplitScroll) % 240;
 					const uint32_t chrAddr = ((uint32_t)mmc5.verticalSplitBank << 12)
-						+ (((address & ~(uint16_t)0x07u) | (uint16_t)(vertScrollY & 0x07u)) & 0x0FFF);
+						| ((uint32_t)address & 0x0FF8u)
+						| ((uint32_t)mmc5.verticalSplitScanlineCounter & 0x07u);
 					const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
 					const bool isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
 					const uint32_t totalChr8k = isNES2
@@ -1308,17 +1319,44 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 				// --- Extended attribute mode (extendedRamMode == 1) ---
 				// CHR tile fetches for BG tiles are overridden by ExRAM bank data.
 				// CHR low and high byte fetches for extended attribute mode
-				if (mmc5.extendedRamMode == 1 && mmc5.ppuInFrame == YES
+				// CHR substitution applies to background pattern fetches only.
+				if (isActualPpuFetch && !isSpriteFetchWindow
+					&& mmc5.extendedRamMode == 1 && mmc5.ppuInFrame == YES
 					&& (mmc5.splitTileNumber < 32 || mmc5.splitTileNumber >= 40)
 					&& mmc5.exAttrFetchCounter >= 1 && mmc5.exAttrFetchCounter <= 2)
 				{
-					// Decrement first, then return — counter goes 2->1 (CHR low) then 1->0 (CHR high)
-					mmc5.exAttrFetchCounter--; 
-					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[(uint32_t)mmc5.exAttrSelectedChrBank * 0x1000 + (address & 0x0FFF)];
+					// Decrement first, then return — counter goes 2->1 (CHR low)
+					// then 1->0 (CHR high).
+					mmc5.exAttrFetchCounter--;
+					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[(uint32_t)mmc5.exAttrSelectedChrBank * 0x1000+ (address & 0x0FFF)];
 				}
 
 				// --- Determine chrA (which set of CHR registers to use) ---
-				const bool chrA = mmc5.chrA;
+				// MMC5 CHR set selection.
+				//
+				// 8x8 sprites:
+				//     Set A is always active.
+				//
+				// 8x16 sprites while rendering:
+				//     Background fetches use Set B.
+				//     Sprite fetches use Set A.
+				//     MMC5 identifies the sprite-fetch window through its
+				//     internal tile counter (32..39).
+				//
+				// Outside rendering:
+				//     PPUDATA ($2007) uses whichever CHR register set
+				//     was written last.
+				const FLAG largeSprites = (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUCTRL.ppuctrl.SPRITE_SIZE == SET);
+
+				if (!largeSprites)
+				{
+					mmc5.lastChrReg = 0;
+				}
+				
+				const FLAG chrA = !largeSprites 
+					|| (mmc5.ppuInFrame && mmc5.splitTileNumber >= 32 && mmc5.splitTileNumber < 40)
+					|| (!mmc5.ppuInFrame && mmc5.lastChrReg <= 0x5127);
+
 				uint32_t index = 0;
 
 				switch (mmc5.chrMode)
@@ -2025,6 +2063,8 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 			{
 				auto& mmc5 = pNES_instance->NES_state.catridgeInfo.mmc5;
 
+				const bool isActualPpuFetch = (source == MEMORY_ACCESS_SOURCE::PPU);
+
 				uint8_t  ntIndex = 0;
 				uint16_t ntOffset = 0;
 				if (IF_ADDRESS_WITHIN(address, NAME_TABLE0_START_ADDRESS, NAME_TABLE0_END_ADDRESS))
@@ -2055,6 +2095,7 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 					{
 						mmc5.needInFrame = NO;
 						mmc5.ppuInFrame = YES;
+						mmc5.verticalSplitScanlineCounter = mmc5.verticalSplitScroll;
 					}
 					updateMMC5ChrA();
 				}
@@ -2064,12 +2105,16 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 				{
 					mmc5.ntReadCounter = 0;
 					mmc5.splitTileNumber = 0;
+					if (mmc5.ppuInFrame == YES)
+					{
+						mmc5.verticalSplitScanlineCounter = (mmc5.verticalSplitScanlineCounter + 1) & 0x00FF;
+					}
 					if (!mmc5.ppuInFrame && !mmc5.needInFrame)
 					{
 						mmc5.needInFrame = YES;
 						mmc5.scanlineCounter = 0;
 					}
-					else if (mmc5.ppuInFrame)
+					else
 					{
 						mmc5.scanlineCounter++;
 						if (mmc5.scanlineCounter == mmc5.irqCounterTarget)
@@ -2095,8 +2140,11 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 					mmc5.ntReadCounter = 0;
 
 				// STEP 3: idle counter and lastPpuReadAddr LAST
-				mmc5.ppuIdleCounter = 3;
-				mmc5.lastPpuReadAddr = address;
+				if (isActualPpuFetch)
+				{
+					mmc5.ppuIdleCounter = 3;
+					mmc5.lastPpuReadAddr = address;
+				}
 
 				// --- Vertical split mode ($5200) ---
 				if (mmc5.verticalSplitEnabled == YES
@@ -2165,9 +2213,14 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 				case 1: RETURN pNES_ppuMemory->NESMemoryMap.nameTable1[ntOffset];
 				case 2:
 				{
-					if (mmc5.extendedRamMode <= 2)
-						RETURN mmc5.exRam[ntOffset & 0x3FF];
-					RETURN 0; // mode 3: read-only zeros
+					if (mmc5.extendedRamMode <= 1)
+					{
+						// Modes 0/1: ExRAM is available to PPUDATA.
+						// Extended-attribute mode has already been intercepted above.
+						RETURN mmc5.exRam[ntOffset];
+					}
+					// Modes 2/3: ExRAM is not available as a PPU nametable.
+					RETURN 0;
 				}
 				case 3:
 				{
@@ -6083,6 +6136,36 @@ inline void NES_t::writeCpuRawMemoryInternal(uint16_t address, byte data, MEMORY
 				}
 				case PPU_MASK_ADDRESS:
 				{
+					// MMC5 listens only to the actual CPU $2001 address,
+					// not to the PPU register mirrors ($2009, $2011, ...).
+					//
+					// When both BG and sprite rendering are disabled,
+					// MMC5 immediately leaves "in frame" state and disables
+					// its PPU data substitutions.
+
+					if ((pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::MMC5) && (address == (PPU_MASK_ADDRESS - PPU_START_ADDRESS)) && ((data & 0x18) == 0x00))
+					{
+						auto& mmc5 = pNES_instance->NES_state.catridgeInfo.mmc5;
+
+						mmc5.ppuInFrame = NO;
+						mmc5.needInFrame = NO;
+						mmc5.ppuIdleCounter = ZERO;
+
+						mmc5.lastPpuReadAddr = RESET;
+						mmc5.ntReadCounter = ZERO;
+						mmc5.scanlineCounter = RESET;
+						mmc5.splitTileNumber = RESET;
+
+						mmc5.splitInSplitRegion = NO;
+						mmc5.exAttrFetchCounter = RESET;
+
+						mmc5.irqPending = NO;
+
+						pNES_instance->NES_state.interrupts.isIRQ.fields.IRQ_SRC_MMC5 = RESET;
+
+						updateMMC5ChrA();
+					}
+
 					refreshOpenBus(data);
 
 					BREAK;
@@ -10253,6 +10336,35 @@ void NES_t::ppuTick()
 		SCOUNTER64 cycle = pNES_instance->NES_state.emulatorStatus.ticks.ppuCounterPerLY;
 		SCOUNTER32 ly = pNES_instance->NES_state.display.currentScanline;
 
+		// MMC5: entering post-render scanline 240 immediately ends
+		// the "in-frame" state.
+		//
+		// IMPORTANT:
+		// This must be OUTSIDE the normal rendering block because
+		// NES_LAST_VISIBLE_PPU_SCANLINE == 239.
+		if ((pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::MMC5) && (ly == (NES_POST_RENDER_SCANLINE - ONE)) && (cycle == ONE))
+		{
+			auto& mmc5 = pNES_instance->NES_state.catridgeInfo.mmc5;
+
+			mmc5.ppuInFrame = NO;
+			mmc5.needInFrame = NO;
+			mmc5.ppuIdleCounter = ZERO;
+
+			mmc5.lastPpuReadAddr = RESET;
+			mmc5.ntReadCounter = ZERO;
+			mmc5.scanlineCounter = RESET;
+			mmc5.splitTileNumber = RESET;
+
+			mmc5.splitInSplitRegion = NO;
+			mmc5.exAttrFetchCounter = RESET;
+
+			mmc5.irqPending = NO;
+
+			pNES_instance->NES_state.interrupts.isIRQ.fields.IRQ_SRC_MMC5 = RESET;
+
+			updateMMC5ChrA();
+		}
+
 		if ((ly >= NES_PRE_RENDER_SCANLINE) && (ly <= NES_LAST_SCANLINE_PER_FRAME))
 		{
 			if ((ly == NES_PRE_RENDER_SCANLINE) && (cycle == ONE))
@@ -10353,7 +10465,7 @@ void NES_t::ppuTick()
 			// Refer "Tile and attribute fetching" in https://www.nesdev.org/wiki/PPU_scrolling#PPU_internal_registers
 			// NOTE: when "((cycle >= THREETWENTYONE) && (cycle <= THREETHIRTYSIX))" is triggerred, "Y" of v is already incremented
 			// So, we are fetching the first 2 tiles of the next scanline!
-			if (((cycle >= ONE) && (cycle <= TWOFIFTYSIX)) || ((cycle >= THREETWENTYONE) && (cycle <= THREETHIRTYSIX)))
+			if (checkIfRenderring() == YES && (((cycle >= ONE) && (cycle <= TWOFIFTYSIX)) || ((cycle >= THREETWENTYONE) && (cycle <= THREETHIRTYSIX))))
 			{
 				PPU_BG_FSM fsmState = (PPU_BG_FSM)((cycle - ONE) & SEVEN);	// ((cycle - 1) % 8)
 				switch (fsmState)
@@ -11205,8 +11317,13 @@ void NES_t::ppuTick()
 				}
 				case THREETHIRTYEIGHT:
 				{
-					const uint16_t dummyNameTblAddr = NAME_TABLE0_START_ADDRESS | (pNES_ppuRegisters->ppuInternalRegisters.v.raw & 0x0FFF);
-					const auto discard = readPpuRawMemory(dummyNameTblAddr, MEMORY_ACCESS_SOURCE::PPU);
+					// NT fetch only occurs while rendering is enabled.
+					if (checkIfRenderring() == YES)
+					{
+						const uint16_t dummyNameTblAddr = NAME_TABLE0_START_ADDRESS | (pNES_ppuRegisters->ppuInternalRegisters.v.raw & 0x0FFF);
+						const auto discard = readPpuRawMemory(dummyNameTblAddr, MEMORY_ACCESS_SOURCE::PPU);
+					}
+
 					BREAK;
 				}
 				case THREETHIRTYNINE:
@@ -11224,8 +11341,12 @@ void NES_t::ppuTick()
 				}
 				case THREEFORTY:
 				{
-					const uint16_t dummyNameTblAddr = NAME_TABLE0_START_ADDRESS | (pNES_ppuRegisters->ppuInternalRegisters.v.raw & 0x0FFF);
-					const auto discard = readPpuRawMemory(dummyNameTblAddr, MEMORY_ACCESS_SOURCE::PPU);
+					// NT fetch only occurs while rendering is enabled.
+					if (checkIfRenderring() == YES)
+					{
+						const uint16_t dummyNameTblAddr = NAME_TABLE0_START_ADDRESS | (pNES_ppuRegisters->ppuInternalRegisters.v.raw & 0x0FFF);
+						const auto discard = readPpuRawMemory(dummyNameTblAddr, MEMORY_ACCESS_SOURCE::PPU);
+					}
 					BREAK;
 				}
 				}
