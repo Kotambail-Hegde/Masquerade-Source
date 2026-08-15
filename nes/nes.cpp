@@ -3173,55 +3173,67 @@ void NES_t::writePpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 			{
 				auto& mmc5 = pNES_instance->NES_state.catridgeInfo.mmc5;
 
-				uint8_t  ntIndex = 0;
+				uint8_t ntIndex = 0;
 				uint16_t ntOffset = 0;
+
 				if (IF_ADDRESS_WITHIN(address, NAME_TABLE0_START_ADDRESS, NAME_TABLE0_END_ADDRESS))
 				{
-					ntIndex = 0; ntOffset = (uint16_t)(address - NAME_TABLE0_START_ADDRESS);
+					ntIndex = 0;
+					ntOffset = (uint16_t)(address - NAME_TABLE0_START_ADDRESS);
 				}
 				else if (IF_ADDRESS_WITHIN(address, NAME_TABLE1_START_ADDRESS, NAME_TABLE1_END_ADDRESS))
 				{
-					ntIndex = 1; ntOffset = (uint16_t)(address - NAME_TABLE1_START_ADDRESS);
+					ntIndex = 1;
+					ntOffset = (uint16_t)(address - NAME_TABLE1_START_ADDRESS);
 				}
 				else if (IF_ADDRESS_WITHIN(address, NAME_TABLE2_START_ADDRESS, NAME_TABLE2_END_ADDRESS))
 				{
-					ntIndex = 2; ntOffset = (uint16_t)(address - NAME_TABLE2_START_ADDRESS);
+					ntIndex = 2;
+					ntOffset = (uint16_t)(address - NAME_TABLE2_START_ADDRESS);
 				}
 				else if (IF_ADDRESS_WITHIN(address, NAME_TABLE3_START_ADDRESS, NAME_TABLE3_END_ADDRESS))
 				{
-					ntIndex = 3; ntOffset = (uint16_t)(address - NAME_TABLE3_START_ADDRESS);
+					ntIndex = 3;
+					ntOffset = (uint16_t)(address - NAME_TABLE3_START_ADDRESS);
 				}
 
-				const uint8_t ntSel = (mmc5.nametableMapping >> (ntIndex * 2)) & 0x03;
+				const uint8_t ntSel =
+					(mmc5.nametableMapping >> (ntIndex * 2)) & 0x03;
 
 				switch (ntSel)
 				{
 				case 0:
+					// $5105 = %00 : CIRAM / nametable 0
 					pNES_ppuMemory->NESMemoryMap.nameTable0[ntOffset] = data;
 					RETURN;
+
 				case 1:
+					// $5105 = %01 : CIRAM / nametable 1
 					pNES_ppuMemory->NESMemoryMap.nameTable1[ntOffset] = data;
 					RETURN;
-				case 2: // ExRAM
-				{
+
+				case 2:
+					// $5105 = %10 : ExRAM
+					//
+					// ExRAM is writable through the PPU nametable path
+					// when $5104 is 0 or 1.
+					//
+					// In mode 2, ExRAM is general-purpose CPU RAM and
+					// is not writable through the PPU nametable path.
+					//
+					// In mode 3, ExRAM is read-only and PPU writes are ignored.
 					if (mmc5.extendedRamMode <= 1)
 					{
-						// Mode 0/1: writable only during active PPU rendering
-						if (mmc5.ppuInFrame == YES)
-						{
-							mmc5.exRam[ntOffset & 0x3FF] = data;
-						}
+						mmc5.exRam[ntOffset] = data;
 					}
-					else if (mmc5.extendedRamMode == 2)
-					{
-						// Mode 2: general-purpose read/write
-						mmc5.exRam[ntOffset & 0x3FF] = data;
-					}
-					// Mode 3: read-only, ignore write
+
 					RETURN;
-				}
+
 				case 3:
-					// Fill mode: read-only, ignore write
+					// $5105 = %11 : Fill mode
+					//
+					// Fill-mode nametable is generated from $5106/$5107.
+					// PPU writes do not modify fillTile/fillColor.
 					RETURN;
 				}
 			}
