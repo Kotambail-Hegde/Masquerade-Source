@@ -27,6 +27,196 @@
 #pragma endregion MACROS
 
 #pragma region CORE
+class GBcPrinterEngine_t
+{
+public:
+
+	void reset();
+	void startPacket();
+	FLAG receiveBitFromGB(BIT bitReceived);
+	FLAG sendBitToGB(BIT* bitToSend);
+	void tick();
+
+private:
+
+	BYTE txByte = ZERO;
+	BYTE rxByte = ZERO;
+
+	uint8_t txBitCount = ZERO;
+	uint8_t rxBitCount = ZERO;
+
+	uint8_t compression = ZERO;
+
+	uint16_t packetLength = ZERO;
+	uint16_t packetIndex = ZERO;
+
+	uint16_t checksum = ZERO;
+	uint16_t receivedChecksum = ZERO;
+
+	BYTE status = ZERO;
+
+	std::vector<BYTE> imageBuffer;
+
+	// PRINT's own packet carries 4 argument bytes (sheets, margins, palette,
+	// exposure) through the same GB_PRINTER_DATA state as tile data -- these
+	// must NOT end up mixed into imageBuffer.
+	struct
+	{
+		BYTE numSheets = ZERO;
+		BYTE margins = ZERO;
+		BYTE palette = ZERO;
+		BYTE exposure = ZERO;
+	} printArgs;
+
+	// One entry per printed image this session, so multiple prints can be
+	// reviewed side by side instead of each replacing the last.
+
+	// A roll's content, in order. Gap blocks store no baked size -- their
+	// pixel height is always computed from the CURRENT cosmeticGapPx at
+	// composite time, so every gap in every roll stays uniform even if the
+	// slider changes mid-session (recompositeRoll() rebuilds everything).
+	struct RollBlock
+	{
+		bool isGap = false;
+		std::vector<BYTE> imageRgba; // only populated when isGap == false
+		int imageHeightPx = 0;       // only populated when isGap == false
+	};
+
+	struct PrintedImageWindow
+	{
+		uint64_t id = ZERO; // stable identity independent of vector index (index shifts on erase)
+		GLuint textureId = 0;
+		int width = 0;
+		int height = 0; // derived: recomputed by recompositeRoll(), not authoritative
+		std::string title;
+		bool open = true; // user can close the window == "tear off the paper"; entry gets pruned next frame
+		bool savedToDisk = false; // tracks whether "Save PNG" has been clicked, for button label/state
+		std::string savedPath; // absolute path, shown in the UI once saved
+		float displayScale = 1.0f; // per-window zoom; only ever changed uniformly via +/- buttons
+		std::vector<RollBlock> blocks; // source of truth for this roll's content
+		std::vector<BYTE> rgbaPixels; // composited cache, rebuilt by recompositeRoll()
+		uint32_t printCountInRoll = ZERO;
+		bool isJamSource = false; // true if THIS roll hitting its cap is what caused the current jam
+	};
+
+	// The roll currently "loaded in the printer," receiving new prints.
+	// -1 means no active roll -- the next PRINT starts a fresh one. Tracked
+	// by id (not vector index), since erase-on-close can shift indices.
+	int64_t activeRollId = -1;
+	uint64_t nextRollId = ZERO;
+
+	static constexpr int ROLL_WIDTH_PX = 160; // fixed paper width: 20 tiles * 8px, matches the printer's 20-tile buffer
+
+	// Nintendo's official paper spec: "up to 180 prints per roll." Real
+	// paper physically runs out; we mimic that by auto tearing off once hit
+	// so the next print starts a new roll instead of growing forever.
+	static constexpr uint32_t MAX_PRINTS_PER_ROLL = 180;
+
+	// NOT an authoritative hardware constant -- Pan Docs describes the
+	// margin byte's nibbles as "feed before/after" but doesn't document an
+	// exact pixel/line conversion I could confirm. Runtime-tunable (see the
+	// "GB Printer Settings" panel in drawImGuiWindows) so it can be dialed
+	// in against a real printer or a known-accurate emulator, rather than
+	// a compiled-in guess.
+	int marginPixelsPerUnit = 8;
+
+	// True once the current roll has hit MAX_PRINTS_PER_ROLL. Persists
+	// across INIT (real hardware can't materialize new paper just because
+	// the game re-initializes the link) -- only clears when the person
+	// closes the jammed roll's window, i.e. "changes the paper."
+	bool isPaperJammed = false;
+
+	std::vector<PrintedImageWindow> printedImageWindows;
+
+	// how many tick() calls remain before the current print job reports "done"
+	uint32_t printTicksRemaining = ZERO;
+	static constexpr uint32_t PRINT_DURATION_TICKS = 60; // ~1 second at 60 ticks/sec, tune to taste
+
+	// No documented mm/px-per-unit value exists for the margin nibbles, and
+	// real ROMs use them inconsistently (per shonumi's GBE+ writeup and
+	// Raphael-Boichot's ~110-game hardware-capture decoder project) -- so
+	// rather than fake pixel-accurate spacing from an unconfirmed number,
+	// margin-after != 0 is just treated as "this print ends a logical
+	// image." Gap SIZE below is a display preference, not a hardware value
+	// -- tunable purely for your own readability, same category as zoom.
+	// Read by recompositeRoll() every time a roll is rebuilt, so changing
+	// this always applies uniformly across the whole roll (see RollBlock).
+	int cosmeticGapPx = 8;
+
+	// Member variables for tracking RLE decompression state across incoming bytes
+	uint8_t runLength = 0;      // Remaining bytes to process in the active run
+	bool isCompressedRun = false; // true = repeated single byte; false = raw uncompressed stream
+
+	enum class GB_PRINTER_STATE
+	{
+		GB_PRINTER_NONE,
+		GB_PRINTER_MAGIC_88,
+		GB_PRINTER_MAGIC_33,
+		GB_PRINTER_COMMAND,
+		GB_PRINTER_COMPRESSION,
+		GB_PRINTER_LENGTH_LOW,
+		GB_PRINTER_LENGTH_HIGH,
+		GB_PRINTER_DATA,
+		GB_PRINTER_CHECKSUM_LOW,
+		GB_PRINTER_CHECKSUM_HIGH
+	};
+
+	enum GB_PRINTER_COMMAND : BYTE
+	{
+		INIT = 0x01,
+		PRINT = 0x02,
+		DATA = 0x04,
+		STATUS = 0x0F
+	};
+
+	enum GB_PRINTER_STATUS : BYTE
+	{
+		STATUS_CHECKSUM_ERROR = 0x01,
+		STATUS_PRINTING = 0x02,
+		STATUS_IMAGE_FULL = 0x04,
+		STATUS_UNPROCESSED = 0x08,
+		STATUS_PACKET_ERROR = 0x10,
+		STATUS_PAPER_JAM = 0x20,
+		STATUS_OTHER_ERROR = 0x40,
+		STATUS_LOW_BATTERY = 0x80
+	};
+
+	enum GB_PRINTER_RESPONSE : BYTE
+	{
+		STATUS_RESPONSE = 0x81
+	};
+
+	enum class GB_PRINTER_TX_STATE
+	{
+		GB_PRINTER_TX_NONE,
+		GB_PRINTER_TX_RESPONSE,
+		GB_PRINTER_TX_STATUS
+	};
+
+	GB_PRINTER_STATE state = GB_PRINTER_STATE::GB_PRINTER_NONE;
+	GB_PRINTER_COMMAND command = GB_PRINTER_COMMAND::INIT;
+	GB_PRINTER_TX_STATE txState = GB_PRINTER_TX_STATE::GB_PRINTER_TX_NONE;
+
+	void processReceivedByte(BYTE dataReceived);
+	void dispatchCommand();
+	std::vector<BYTE> decodeTilesToRgba(const std::vector<BYTE>& pixelData, uint32_t& outHeightPx);
+	void appendPrintToRoll(const std::vector<BYTE>& pixelData);
+	void appendBlankFeedToRoll();
+	void regenerateRollTexture(PrintedImageWindow& window);
+	void recompositeRoll(PrintedImageWindow& window);
+
+public:
+
+	// Call once per frame from your existing ImGui render pass (wherever
+	// your other debug/tool windows get drawn).
+	void drawImGuiWindows();
+
+private:
+
+	bool savePrintedImageAsPng(PrintedImageWindow& window);
+	PrintedImageWindow* findWindowById(uint64_t id);
+};
+
 class GBc_t : public abstractEmulation_t
 {
 #pragma region INFRASTRUCTURE_DECLARATIONS
@@ -372,6 +562,16 @@ public:
 		LCD_H_BLANK_MAX = 204,
 		LCD_TOTAL_CYCLES_PER_SCANLINE = 456,
 		LCD_V_BLANK = 4560,
+	};
+
+	enum class GB_SERIAL_DEVICE
+	{
+		GB_NONE,
+		GB_LINK_CABLE,
+		GB_PRINTER,
+		GB_BARCODE_BOY,
+		GB_MOBILE_ADAPTER,
+		GB_POCKET_SONAR
 	};
 
 private:
@@ -1847,6 +2047,9 @@ private:
 		uint16_t serialMaxClockPerTransfer;
 		uint16_t serialMasterByteShiftCount;
 		uint16_t serialSlaveByteShiftCount;
+		GB_SERIAL_DEVICE serialDevice;
+		uint64_t serialDetectionShiftRegister;
+		uint8_t serialDetectionBitCount;
 #ifndef __RPI_PICO__
 		struct
 		{
@@ -2350,6 +2553,12 @@ private:
 private:
 
 #ifndef __RPI_PICO__
+	GBcPrinterEngine_t gbPrinterEngine;
+#endif // !__RPI_PICO__
+
+private:
+
+#ifndef __RPI_PICO__
 	std::deque<GBc_state_t> gamePlay;
 #endif // !__RPI_PICO__
 
@@ -2779,6 +2988,9 @@ public:
 	void processSerialClockSpeedBit();
 	FLAG sendOverSerialLink(BIT bitToSend);
 	FLAG receiveOverSerialLink(BIT* bitReceived, FLAG* rxStatus, FLAG isBlocking = NO, INC32 timeoutInUs = ONE);
+	void detectSerialDevice(BIT bitToSend);
+	void resetSerialDeviceDetection();
+	GB_SERIAL_DEVICE getSerialDevice() const;
 
 public:
 

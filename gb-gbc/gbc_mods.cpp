@@ -4,6 +4,19 @@
 #include "imgui_internal.h"		// needed for ImGui::DockBuilder* (programmatic default dock layout)
 #endif
 
+#pragma region STB_INCLUDES
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
+#pragma endregion STB_INCLUDES
+
+#pragma region GB_GBC_SPECIFIC_MACROS
+// GB palette byte format (same encoding as BGP/OBP): 2 bits per shade,
+// bits [1:0] = shade for raw color index 0, [3:2] = index 1, [5:4] = index 2,
+// [7:6] = index 3. Maps a raw 2bpp tile pixel value through the palette to
+// get the actual displayed shade (0 = lightest, 3 = darkest).
+#define GET_GB_COLOR_NUMBER(palette, colorIndex) (static_cast<BYTE>(((palette) >> ((colorIndex) * 2)) & 0x03))
+#pragma endregion GB_GBC_SPECIFIC_MACROS
+
 bool GBc_t::saveState(uint8_t id)
 {
 	bool status = false;
@@ -1199,6 +1212,856 @@ bool GBc_t::bessLoadState(uint8_t id)
 }
 
 #ifndef __RPI_PICO__
+
+// =====================================================================================
+// GB/GBC Printer
+// =====================================================================================
+
+void GBcPrinterEngine_t::reset()
+{
+	state = GB_PRINTER_STATE::GB_PRINTER_NONE;
+
+	txByte = ZERO;
+	rxByte = ZERO;
+
+	txBitCount = ZERO;
+	rxBitCount = ZERO;
+
+	command = GB_PRINTER_COMMAND::INIT;
+	packetLength = ZERO;
+	packetIndex = ZERO;
+	checksum = ZERO;
+
+	txState = GB_PRINTER_TX_STATE::GB_PRINTER_TX_RESPONSE;
+}
+
+void GBcPrinterEngine_t::startPacket()
+{
+	reset();
+	state = GB_PRINTER_STATE::GB_PRINTER_COMMAND;
+}
+
+FLAG GBcPrinterEngine_t::sendBitToGB(BIT* bitToSend)
+{
+	*bitToSend = GETBIT(SEVEN - txBitCount, txByte);
+
+	txBitCount++;
+
+	if (txBitCount == EIGHT)
+	{
+		txBitCount = ZERO;
+
+		if (txState == GB_PRINTER_TX_STATE::GB_PRINTER_TX_RESPONSE)
+		{
+			// 0x81 has been sent.
+			// The next byte is the printer status.
+
+			txByte = status;
+
+			txState = GB_PRINTER_TX_STATE::GB_PRINTER_TX_STATUS;
+		}
+		else if (txState == GB_PRINTER_TX_STATE::GB_PRINTER_TX_STATUS)
+		{
+			// Status byte has been sent.
+
+			txByte = ZERO;
+
+			txState = GB_PRINTER_TX_STATE::GB_PRINTER_TX_NONE;
+		}
+	}
+
+	RETURN SUCCESS;
+}
+
+FLAG GBcPrinterEngine_t::receiveBitFromGB(BIT bitReceived)
+{
+	rxByte <<= ONE;
+
+	if (bitReceived == ONE)
+	{
+		SETBIT(rxByte, ZERO);
+	}
+
+	rxBitCount++;
+
+	if (rxBitCount == EIGHT)
+	{
+		processReceivedByte(rxByte);
+
+		rxByte = ZERO;
+		rxBitCount = ZERO;
+	}
+
+	RETURN SUCCESS;
+}
+
+void GBcPrinterEngine_t::dispatchCommand()
+{
+	switch (command)
+	{
+	case GB_PRINTER_COMMAND::INIT:
+	{
+		imageBuffer.clear();
+		printTicksRemaining = ZERO;
+
+		// INIT clears everything, including any pending error/printing bits
+		// -- EXCEPT a paper jam. Real hardware can't be talked out of an
+		// empty roll by the Game Boy re-initializing the link; the jam bit
+		// stays set until the person physically changes the paper (here:
+		// closes the jammed roll's window, see drawImGuiWindows).
+		status = ZERO;
+
+		if (isPaperJammed)
+		{
+			status |= STATUS_PAPER_JAM;
+		}
+
+		BREAK;
+	}
+
+	case GB_PRINTER_COMMAND::DATA:
+	{
+		// An empty DATA packet (length 0) is the "end of image" marker.
+		// Real hardware reports STATUS_UNPROCESSED once it has a full,
+		// unprinted image sitting in its buffer.
+		if (packetLength == ZERO && !imageBuffer.empty())
+		{
+			status |= STATUS_UNPROCESSED;
+		}
+
+		BREAK;
+	}
+
+	case GB_PRINTER_COMMAND::PRINT:
+	{
+		if (isPaperJammed)
+		{
+			// Out of paper. Refuse the print -- do NOT consume imageBuffer,
+			// so the game's retry (most driver code does retry on an error
+			// status) will actually have data to work with once the jam
+			// clears.
+			status |= STATUS_PAPER_JAM;
+			BREAK;
+		}
+
+		// Only start a print job if we actually have a completed image.
+		if (status & STATUS_UNPROCESSED)
+		{
+			status &= ~STATUS_UNPROCESSED;
+			status |= STATUS_PRINTING;
+
+			// numSheets == 0 means "line feed only": the head advances the
+			// paper by the margins but no image is burned. numSheets >= 1
+			// means N physical copies -- each one is a real sheet fed
+			// through the printer, so each counts against the roll's
+			// MAX_PRINTS_PER_ROLL cap (and can independently trip a jam
+			// mid-run if the roll runs out partway through).
+			if (printArgs.numSheets == ZERO)
+			{
+				appendBlankFeedToRoll();
+			}
+			else
+			{
+				for (uint32_t sheet = 0; sheet < printArgs.numSheets && !isPaperJammed; sheet++)
+				{
+					appendPrintToRoll(imageBuffer);
+				}
+			}
+
+			imageBuffer.clear();
+
+			// Real print time scales with number of sheets -- one sheet's
+			// worth of burn+feed time per copy, not a flat duration
+			// regardless of numSheets.
+			printTicksRemaining = PRINT_DURATION_TICKS *
+				std::max<uint32_t>(1, printArgs.numSheets);
+		}
+		else
+		{
+			status |= STATUS_OTHER_ERROR;
+		}
+
+		BREAK;
+	}
+
+	case GB_PRINTER_COMMAND::STATUS:
+	default:
+		// No state change; the response already reports current `status`.
+		BREAK;
+	}
+}
+
+void GBcPrinterEngine_t::tick()
+{
+	// Status/timing simulation only. The image itself was already committed
+	// (rendered/saved) synchronously in dispatchCommand()'s PRINT case --
+	// don't touch imageBuffer here.
+	if (status & STATUS_PRINTING)
+	{
+		if (printTicksRemaining > ZERO)
+		{
+			printTicksRemaining--;
+		}
+
+		if (printTicksRemaining == ZERO)
+		{
+			// Printing finished: swap PRINTING for IMAGE_FULL ("done, buffer
+			// still holds the last image") until the game clears it via a
+			// fresh INIT (or the 16 zero-byte buffer-clear some games send).
+			status &= ~STATUS_PRINTING;
+			status |= STATUS_IMAGE_FULL;
+		}
+	}
+}
+
+void GBcPrinterEngine_t::processReceivedByte(BYTE dataReceived)
+{
+	//INFO("GB Printer received byte: 0x%02X", dataReceived);
+
+	switch (state)
+	{
+	case GB_PRINTER_STATE::GB_PRINTER_NONE:
+	{
+		if (dataReceived == 0x88)
+		{
+			state = GB_PRINTER_STATE::GB_PRINTER_MAGIC_33;
+		}
+
+		BREAK;
+	}
+
+	case GB_PRINTER_STATE::GB_PRINTER_MAGIC_33:
+	{
+		if (dataReceived == 0x33)
+		{
+			state = GB_PRINTER_STATE::GB_PRINTER_COMMAND;
+		}
+		else
+		{
+			state = GB_PRINTER_STATE::GB_PRINTER_NONE;
+		}
+
+		BREAK;
+	}
+
+	case GB_PRINTER_STATE::GB_PRINTER_COMMAND:
+	{
+		command = static_cast<GB_PRINTER_COMMAND>(dataReceived);
+
+		checksum = dataReceived;
+
+		state = GB_PRINTER_STATE::GB_PRINTER_COMPRESSION;
+
+		BREAK;
+	}
+
+	case GB_PRINTER_STATE::GB_PRINTER_COMPRESSION:
+	{
+		compression = dataReceived;
+
+		checksum += dataReceived;
+
+		state = GB_PRINTER_STATE::GB_PRINTER_LENGTH_LOW;
+
+		BREAK;
+	}
+
+	case GB_PRINTER_STATE::GB_PRINTER_LENGTH_LOW:
+	{
+		packetLength = dataReceived;
+
+		checksum += dataReceived;
+
+		state = GB_PRINTER_STATE::GB_PRINTER_LENGTH_HIGH;
+
+		BREAK;
+	}
+
+	case GB_PRINTER_STATE::GB_PRINTER_LENGTH_HIGH:
+	{
+		packetLength |= static_cast<uint16_t>(dataReceived) << 8;
+
+		checksum += dataReceived;
+
+		packetIndex = ZERO;
+
+		if (packetLength != ZERO)
+		{
+			state = GB_PRINTER_STATE::GB_PRINTER_DATA;
+		}
+		else
+		{
+			state = GB_PRINTER_STATE::GB_PRINTER_CHECKSUM_LOW;
+		}
+
+		BREAK;
+	}
+
+	case GB_PRINTER_STATE::GB_PRINTER_DATA:
+	{
+		// GB_PRINTER_DATA is reused by both the DATA command (tile pixel
+		// data, goes to imageBuffer) and the PRINT command (4 fixed
+		// argument bytes: sheets/margins/palette/exposure). Route by
+		// `command` so PRINT's args don't get appended to the image.
+		if (command == GB_PRINTER_COMMAND::PRINT)
+		{
+			switch (packetIndex)
+			{
+			case 0: printArgs.numSheets = dataReceived; BREAK;
+			case 1: printArgs.margins = dataReceived; BREAK;
+			case 2: printArgs.palette = dataReceived; BREAK;
+			case 3: printArgs.exposure = dataReceived; BREAK;
+			default: BREAK; // spec caps this at 4 bytes; ignore anything past it
+			}
+		}
+		else if (command == GB_PRINTER_COMMAND::DATA)
+		{
+			if (compression == SET)
+			{
+				// State 1: We are expecting a new Run Control Header byte
+				if (runLength == 0)
+				{
+					// Bit 7 determines run type: 1 = Compressed, 0 = Uncompressed
+					isCompressedRun = (dataReceived & 0x80) != 0;
+
+					// Extract Bits 0-6 for length:
+					// Compressed runs offset by +2 (min length 2)
+					// Uncompressed runs offset by +1 (min length 1)
+					uint8_t count = dataReceived & 0x7F;
+					runLength = count + (isCompressedRun ? 2 : 1);
+				}
+				// State 2: Processing data bytes belonging to the current run
+				else
+				{
+					if (isCompressedRun)
+					{
+						// Repeat the received byte 'runLength' times into the buffer in one call
+						imageBuffer.insert(imageBuffer.end(), runLength, dataReceived);
+						runLength = 0; // Compressed run fully consumed in a single payload byte
+					}
+					else
+					{
+						// Pass-through raw byte verbatim and decrement remaining uncompressed count
+						imageBuffer.push_back(dataReceived);
+						runLength--;
+					}
+				}
+			}
+			else
+			{
+				// Compression flag unset: Direct verbatim transfer
+				imageBuffer.push_back(dataReceived);
+			}
+		}
+		else
+		{
+			// A command we don't expect to carry a data payload (INIT,
+			// STATUS) showed up with packetLength > 0. Not supposed to
+			// happen per spec -- flag it rather than silently dropping the
+			// bytes, since this is more likely a bug upstream (header
+			// parsing, a new/unhandled command) than something to ignore.
+			status |= STATUS_PACKET_ERROR;
+		}
+
+		checksum += dataReceived;
+
+		packetIndex++;
+
+		if (packetIndex >= packetLength)
+		{
+			state = GB_PRINTER_STATE::GB_PRINTER_CHECKSUM_LOW;
+		}
+
+		BREAK;
+	}
+
+	case GB_PRINTER_STATE::GB_PRINTER_CHECKSUM_LOW:
+	{
+		receivedChecksum = dataReceived;
+
+		state = GB_PRINTER_STATE::GB_PRINTER_CHECKSUM_HIGH;
+
+		BREAK;
+	}
+
+	case GB_PRINTER_STATE::GB_PRINTER_CHECKSUM_HIGH:
+	{
+		receivedChecksum |=
+			static_cast<uint16_t>(dataReceived) << 8;
+
+		if (checksum != receivedChecksum)
+		{
+			status |= STATUS_CHECKSUM_ERROR;
+		}
+		else
+		{
+			status &= ~STATUS_CHECKSUM_ERROR;
+
+			// Only act on the command if the packet actually checked out.
+			dispatchCommand();
+		}
+
+		// Prepare the FIRST response byte immediately.
+		txByte = STATUS_RESPONSE;
+		txBitCount = ZERO;
+		txState = GB_PRINTER_TX_STATE::GB_PRINTER_TX_RESPONSE;
+
+		state = GB_PRINTER_STATE::GB_PRINTER_NONE;
+
+		BREAK;
+	}
+
+	default:
+		state = GB_PRINTER_STATE::GB_PRINTER_NONE;
+		BREAK;
+	}
+}
+
+std::vector<BYTE> GBcPrinterEngine_t::decodeTilesToRgba(const std::vector<BYTE>& pixelData, uint32_t& outHeightPx)
+{
+	constexpr uint32_t TILE_WIDTH_PX = 8;
+	constexpr uint32_t TILE_HEIGHT_PX = 8;
+	constexpr uint32_t TILES_PER_ROW = 20; // ROLL_WIDTH_PX / TILE_WIDTH_PX
+	constexpr uint32_t BYTES_PER_TILE = 16;
+
+	outHeightPx = ZERO;
+
+	if (pixelData.empty())
+	{
+		RETURN{};
+	}
+
+	uint32_t tileCount = static_cast<uint32_t>(pixelData.size() / BYTES_PER_TILE);
+	if (tileCount == ZERO)
+	{
+		INFO("GB Printer: pixelData smaller than one tile (%zu bytes), skipping", pixelData.size());
+		RETURN{};
+	}
+
+	uint32_t rowCount = (tileCount + TILES_PER_ROW - 1) / TILES_PER_ROW;
+	uint32_t imgHeight = rowCount * TILE_HEIGHT_PX;
+	outHeightPx = imgHeight;
+
+	std::vector<BYTE> rgba(static_cast<size_t>(ROLL_WIDTH_PX) * imgHeight * 4, 255);
+
+	// Exposure (7-bit, default $40 per GB Camera) sets thermal head burn
+	// time -> print darkness. Manual: -25% darkness at $00, +25% at $7F,
+	// $40 = nominal (0%). No documented formula for values in between, so
+	// this linearly scales how much "ink" (i.e. how far from white) each
+	// shade gets, which matches the two documented endpoints and is roughly
+	// physically sensible for a thermal head. Treat as approximate.
+	float exposureAdjustment = (static_cast<float>(printArgs.exposure) - 64.0f) / 64.0f * 0.25f;
+	float darknessScale = 1.0f + exposureAdjustment; // ~0.75 .. ~1.246875
+
+	for (uint32_t tileIndex = 0; tileIndex < tileCount; tileIndex++)
+	{
+		uint32_t tileCol = tileIndex % TILES_PER_ROW;
+		uint32_t tileRow = tileIndex / TILES_PER_ROW;
+
+		const BYTE* tile = &pixelData[static_cast<size_t>(tileIndex) * BYTES_PER_TILE];
+
+		for (uint32_t py = 0; py < TILE_HEIGHT_PX; py++)
+		{
+			BYTE lo = tile[py * 2];
+			BYTE hi = tile[py * 2 + 1];
+
+			for (uint32_t px = 0; px < TILE_WIDTH_PX; px++)
+			{
+				BIT loBit = GETBIT(SEVEN - px, lo);
+				BIT hiBit = GETBIT(SEVEN - px, hi);
+				BYTE rawColorIndex = static_cast<BYTE>((hiBit << 1) | loBit);
+
+				BYTE colorNumber = GET_GB_COLOR_NUMBER(printArgs.palette, rawColorIndex);
+				BYTE baseGray = static_cast<BYTE>(255 - (colorNumber * 85));
+
+				// Scale "ink" (distance from white) by exposure, not the
+				// raw gray value directly -- keeps white (255) white
+				// regardless of exposure, since exposure is a burn-time
+				// setting, not a global brightness knob.
+				float ink = (255.0f - baseGray) * darknessScale;
+				BYTE gray = static_cast<BYTE>(255.0f - std::clamp(ink, 0.0f, 255.0f));
+
+				uint32_t x = tileCol * TILE_WIDTH_PX + px;
+				uint32_t y = tileRow * TILE_HEIGHT_PX + py;
+				size_t rgbaOffset = (static_cast<size_t>(y) * ROLL_WIDTH_PX + x) * 4;
+
+				rgba[rgbaOffset + 0] = gray;
+				rgba[rgbaOffset + 1] = gray;
+				rgba[rgbaOffset + 2] = gray;
+				rgba[rgbaOffset + 3] = 255;
+			}
+		}
+	}
+
+	RETURN rgba;
+}
+
+void GBcPrinterEngine_t::appendPrintToRoll(const std::vector<BYTE>& pixelData)
+{
+	PrintedImageWindow* roll = nullptr;
+
+	if (activeRollId >= 0)
+	{
+		roll = findWindowById(static_cast<uint64_t>(activeRollId));
+	}
+
+	if (roll == nullptr)
+	{
+		// No active roll (first print ever, or previous one was torn off /
+		// hit the paper-count cap) -- start a fresh one.
+		PrintedImageWindow newRoll;
+		newRoll.id = nextRollId++;
+		newRoll.title = "GB Print Roll #" + std::to_string(newRoll.id);
+		newRoll.width = ROLL_WIDTH_PX;
+		newRoll.height = 0;
+
+		printedImageWindows.push_back(std::move(newRoll));
+		roll = &printedImageWindows.back();
+
+		activeRollId = static_cast<int64_t>(roll->id);
+	}
+
+	// Presence, not magnitude: real ROMs use these nibbles inconsistently
+	// enough that only "was a margin sent at all" is meaningfully portable
+	// across games -- the exact nibble value isn't a reliable pixel count.
+	bool hasMarginBefore = ((printArgs.margins >> 4) & 0x0F) != 0;
+	bool hasMarginAfter = (printArgs.margins & 0x0F) != 0;
+
+	if (hasMarginBefore)
+	{
+		roll->blocks.push_back(RollBlock{ true, {}, 0 });
+	}
+
+	uint32_t thisPrintHeightPx = ZERO;
+	std::vector<BYTE> thisPrintRgba = decodeTilesToRgba(pixelData, thisPrintHeightPx);
+	roll->blocks.push_back(RollBlock{ false, std::move(thisPrintRgba), static_cast<int>(thisPrintHeightPx) });
+
+	if (hasMarginAfter)
+	{
+		roll->blocks.push_back(RollBlock{ true, {}, 0 });
+	}
+
+	roll->printCountInRoll++;
+	roll->savedToDisk = false; // roll's content changed since last save
+	roll->savedPath.clear();
+
+	recompositeRoll(*roll);
+
+	INFO("GB Printer: appended print #%u to roll '%s' (now %dpx tall)",
+		roll->printCountInRoll, roll->title.c_str(), roll->height);
+
+	if (roll->printCountInRoll >= MAX_PRINTS_PER_ROLL)
+	{
+		// Real paper roll is physically out (Nintendo's spec: up to 180
+		// prints per roll). This is a genuine hardware condition, not just
+		// bookkeeping -- report it to the game as a real jam, and stop
+		// accepting further prints until the person "changes the paper" by
+		// closing this window (see drawImGuiWindows).
+		INFO("GB Printer: roll '%s' hit %u prints (paper spec limit) -- reporting paper jam",
+			roll->title.c_str(), MAX_PRINTS_PER_ROLL);
+
+		roll->isJamSource = true;
+		isPaperJammed = true;
+		status |= STATUS_PAPER_JAM;
+		activeRollId = -1;
+	}
+}
+
+void GBcPrinterEngine_t::appendBlankFeedToRoll()
+{
+	PrintedImageWindow* roll = nullptr;
+
+	if (activeRollId >= 0)
+	{
+		roll = findWindowById(static_cast<uint64_t>(activeRollId));
+	}
+
+	if (roll == nullptr)
+	{
+		PrintedImageWindow newRoll;
+		newRoll.id = nextRollId++;
+		newRoll.title = "GB Print Roll #" + std::to_string(newRoll.id);
+		newRoll.width = ROLL_WIDTH_PX;
+		newRoll.height = 0;
+
+		printedImageWindows.push_back(std::move(newRoll));
+		roll = &printedImageWindows.back();
+
+		activeRollId = static_cast<int64_t>(roll->id);
+	}
+
+	// numSheets == 0 is a feed-only operation, not a print -- no image, and
+	// (unlike appendPrintToRoll) it deliberately does NOT touch
+	// printCountInRoll, since it isn't one of the roll's 180 rated prints.
+	bool hasAnyMargin = printArgs.margins != 0;
+
+	if (hasAnyMargin)
+	{
+		roll->blocks.push_back(RollBlock{ true, {}, 0 });
+	}
+
+	roll->savedToDisk = false;
+	roll->savedPath.clear();
+
+	recompositeRoll(*roll);
+}
+
+void GBcPrinterEngine_t::regenerateRollTexture(PrintedImageWindow& window)
+{
+	if (window.textureId != 0)
+	{
+		glDeleteTextures(1, &window.textureId);
+	}
+
+	glGenTextures(1, &window.textureId);
+	glBindTexture(GL_TEXTURE_2D, window.textureId);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, window.width, window.height,
+		0, GL_RGBA, GL_UNSIGNED_BYTE, window.rgbaPixels.data());
+	glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+void GBcPrinterEngine_t::recompositeRoll(PrintedImageWindow& window)
+{
+	window.rgbaPixels.clear();
+	window.height = 0;
+
+	for (const auto& block : window.blocks)
+	{
+		if (block.isGap)
+		{
+			uint32_t gapRows = static_cast<uint32_t>(std::max(0, cosmeticGapPx));
+			if (gapRows > 0)
+			{
+				window.rgbaPixels.insert(window.rgbaPixels.end(),
+					static_cast<size_t>(ROLL_WIDTH_PX) * gapRows * 4, static_cast<BYTE>(255));
+				window.height += static_cast<int>(gapRows);
+			}
+		}
+		else
+		{
+			window.rgbaPixels.insert(window.rgbaPixels.end(), block.imageRgba.begin(), block.imageRgba.end());
+			window.height += block.imageHeightPx;
+		}
+	}
+
+	window.width = ROLL_WIDTH_PX;
+
+	if (window.height > 0)
+	{
+		regenerateRollTexture(window);
+	}
+}
+
+GBcPrinterEngine_t::PrintedImageWindow* GBcPrinterEngine_t::findWindowById(uint64_t id)
+{
+	auto it = std::find_if(printedImageWindows.begin(), printedImageWindows.end(),
+		[id](const PrintedImageWindow& w) { RETURN w.id == id; });
+
+	RETURN(it != printedImageWindows.end()) ? &(*it) : nullptr;
+}
+
+void GBcPrinterEngine_t::drawImGuiWindows()
+{
+	// Force these to stay floating/undocked rather than snapping into
+	// whatever dockspace the rest of your UI uses -- these are printouts,
+	// not tool panels.
+	ImGuiWindowClass windowClass;
+	windowClass.DockNodeFlagsOverrideSet = ImGuiDockNodeFlags_NoDocking;
+
+	constexpr float MIN_DISPLAY_SCALE = 1.0f;
+	constexpr float MAX_DISPLAY_SCALE = 8.0f;
+
+	for (auto& window : printedImageWindows)
+	{
+		if (!window.open)
+		{
+			continue;
+		}
+
+		ImGui::SetNextWindowClass(&windowClass);
+
+		// AlwaysAutoResize removes the manual resize grip entirely, so the
+		// window can never be dragged into a non-uniform aspect ratio, and
+		// it always sizes exactly to its content (nothing gets clipped, so
+		// "Save PNG" is always visible without scrolling). Zoom is done
+		// deliberately via the buttons below instead, scaling width/height
+		// together every time.
+		if (ImGui::Begin(window.title.c_str(), &window.open,
+			ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_AlwaysAutoResize |
+			ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse |
+			ImGuiWindowFlags_MenuBar))
+		{
+			if (ImGui::BeginMenuBar())
+			{
+				if (ImGui::BeginMenu("Settings"))
+				{
+					if (ImGui::SliderInt("Print gap (px)", &cosmeticGapPx, 0, 32))
+					{
+						for (auto& w : printedImageWindows)
+						{
+							recompositeRoll(w);
+						}
+					}
+					ImGui::TextDisabled("Cosmetic spacing only -- not hardware-accurate.");
+					ImGui::TextDisabled("Applies to every gap, on every roll, immediately.");
+					ImGui::EndMenu();
+				}
+				ImGui::EndMenuBar();
+			}
+
+			ImGui::Image(
+				(ImTextureID)(intptr_t)window.textureId,
+				ImVec2(window.width * window.displayScale, window.height * window.displayScale));
+
+			ImGui::Spacing();
+
+			if (ImGui::SmallButton("-"))
+			{
+				window.displayScale = std::max(MIN_DISPLAY_SCALE, window.displayScale - 1.0f);
+			}
+			ImGui::SameLine();
+			ImGui::Text("%.0fx", window.displayScale);
+			ImGui::SameLine();
+			if (ImGui::SmallButton("+"))
+			{
+				window.displayScale = std::min(MAX_DISPLAY_SCALE, window.displayScale + 1.0f);
+			}
+
+			ImGui::SameLine();
+			ImGui::Dummy(ImVec2(20.0f, 0.0f)); // gap before the save controls
+			ImGui::SameLine();
+
+			if (window.savedToDisk)
+			{
+				// Disabled instead of hidden, so the button doesn't jump
+				// around / the window doesn't resize when this flips.
+				ImGui::BeginDisabled();
+				ImGui::Button("Saved");
+				ImGui::EndDisabled();
+			}
+			else if (ImGui::Button("Save PNG"))
+			{
+				window.savedToDisk = savePrintedImageAsPng(window);
+			}
+
+			if (window.savedToDisk && !window.savedPath.empty())
+			{
+				ImGui::TextDisabled("%s", window.savedPath.c_str());
+			}
+
+			if (window.isJamSource && isPaperJammed)
+			{
+				ImGui::Separator();
+				ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f),
+					"Paper jam: roll is full. Close this window to load fresh paper.");
+			}
+
+			// Only the roll currently receiving prints gets the tuning
+			// control -- adjusting it won't affect rolls that already
+			// finished/were torn off, so showing it there would be
+			// misleading clutter.
+		}
+		ImGui::End();
+	}
+
+	// If the window the printer is currently feeding got torn off (closed),
+	// stop feeding it -- next print starts a fresh roll. Checked here,
+	// before the erase below, since erase can shift/invalidate references.
+	if (activeRollId >= 0)
+	{
+		PrintedImageWindow* active = findWindowById(static_cast<uint64_t>(activeRollId));
+		if (active == nullptr || !active->open)
+		{
+			activeRollId = -1;
+		}
+	}
+
+	// Closing the roll that caused a jam is the emulated equivalent of the
+	// person opening the printer and loading a fresh roll -- that's the
+	// only thing that clears STATUS_PAPER_JAM (see the INIT/PRINT cases in
+	// dispatchCommand, which otherwise keep it sticky on purpose).
+	if (isPaperJammed)
+	{
+		for (const auto& window : printedImageWindows)
+		{
+			if (window.isJamSource && !window.open)
+			{
+				isPaperJammed = false;
+				status &= ~STATUS_PAPER_JAM;
+				INFO("GB Printer: jam cleared -- '%s' torn off, fresh paper loaded", window.title.c_str());
+				BREAK;
+			}
+		}
+	}
+
+	// Prune closed windows and free their GL textures. Done as a second pass
+	// so we're not mutating printedImageWindows while iterating it above.
+	printedImageWindows.erase(
+		std::remove_if(printedImageWindows.begin(), printedImageWindows.end(),
+			[](const PrintedImageWindow& w)
+			{
+				if (!w.open)
+				{
+					GLuint id = w.textureId;
+					glDeleteTextures(1, &id);
+				}
+				RETURN !w.open;
+			}),
+		printedImageWindows.end());
+}
+
+bool GBcPrinterEngine_t::savePrintedImageAsPng(PrintedImageWindow& window)
+{
+	if (window.rgbaPixels.empty())
+	{
+		INFO("GB Printer: no pixel data to save for '%s'", window.title.c_str());
+		RETURN FALSE;
+	}
+
+	// For now: a "gb_prints" folder next
+	// to wherever the process's current working directory is, created if
+	// it doesn't exist, so it's at least deterministic and discoverable
+	// rather than silently landing in whatever CWD happened to be.
+	std::filesystem::path outputDir = std::filesystem::current_path() / "gb_prints";
+
+	std::error_code ec;
+	std::filesystem::create_directories(outputDir, ec);
+	if (ec)
+	{
+		INFO("GB Printer: failed to create output directory %s (%s)",
+			outputDir.string().c_str(), ec.message().c_str());
+		RETURN FALSE;
+	}
+
+	static uint32_t saveSequenceNumber = ZERO;
+	char filename[64];
+	snprintf(filename, sizeof(filename), "gb_print_%03u.png", saveSequenceNumber++);
+
+	std::filesystem::path outputPath = outputDir / filename;
+
+	int result = stbi_write_png(
+		outputPath.string().c_str(),
+		window.width,
+		window.height,
+		4, // RGBA
+		window.rgbaPixels.data(),
+		window.width * 4); // stride in bytes
+
+	if (result == 0)
+	{
+		INFO("GB Printer: failed to write %s", outputPath.string().c_str());
+		RETURN FALSE;
+	}
+
+	window.savedPath = std::filesystem::absolute(outputPath).string();
+
+	INFO("GB Printer: saved '%s' to %s", window.title.c_str(), window.savedPath.c_str());
+	RETURN TRUE;
+}
 
 // =====================================================================================
 // GBC Debugger

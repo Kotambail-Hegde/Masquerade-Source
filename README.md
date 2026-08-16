@@ -149,6 +149,19 @@ _Example: The Event Debugger inspecting a Game Boy / Game Boy Color state._
 
 ---
 
+## Accessories & Peripherals
+
+Masquerade supports the following hardware accessories and peripherals used by several of the emulated systems.
+### Nintendo Entertainment System (NES)
+* **Zapper** — Supported through mouse input in Port 2.
+  * [NES Zapper support](https://github.com/Kotambail-Hegde/Masquerade-Emulator/issues/82)
+### Game Boy / Game Boy Color (GB / GBC)
+* **Game Boy Printer** — Support for emulating the Game Boy Printer.
+  * [Game Boy Printer support](https://github.com/Kotambail-Hegde/Masquerade-Emulator/issues/200)
+* **Accelerometer** — Support for cartridges and games using the Game Boy Color's accelerometer hardware, including *Kirby Tilt 'n' Tumble*.
+  * [Accelerometer support](https://github.com/Kotambail-Hegde/Masquerade-Emulator/issues/25)
+
+
 ## Detailed System Information
 
 ### Game Boy Advance (GBA)
@@ -207,6 +220,8 @@ _Example: The Event Debugger inspecting a Game Boy / Game Boy Color state._
   - HuC-3
   - MMM01
   - WISDOM TREE
+- Supports Game Boy Printer
+- Supports accelerometer-equipped Game Boy Color cartridges
 
 #### Test Results
 - Completely passes Tom Harte's SingleStepTests (official and unofficial opcodes) for SM83
@@ -335,7 +350,7 @@ _Example: The Event Debugger inspecting a Game Boy / Game Boy Color state._
   - iNES Mapper 232 (232)
   - iNES Mapper 268 (268)
 - Supports Game Genie cheats
-- Supports Zapper in Port 2 (mouse clicks)
+- Supports Zapper in Port 2
 
 #### Test Results
 - Passes Nestest (official and unofficial opcodes)
