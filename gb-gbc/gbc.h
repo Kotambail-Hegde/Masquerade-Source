@@ -109,6 +109,19 @@ private:
 		DUMMY
 	};
 
+	enum class OAM_ACCESS_TYPE
+	{
+		READ,
+		WRITE
+	};
+
+	enum class SPECULATION_ORDER
+	{
+		NONE,
+		FIRST,
+		SECOND
+	};
+
 private:
 
 PACK_BEGIN
@@ -647,6 +660,7 @@ private:
 	{
 		OAMFields_t OAMFields;
 		uint8_t OAMMemory[sizeof(OAMFields_t)];
+		uint8_t OAMRows[20][8];
 	} OAMMemory_t;
 
 	typedef struct
@@ -1509,18 +1523,21 @@ private:
 		FLAG lcdJustEn;
 		FLAG skipMode2;
 		uint16_t latchedSCYForGBC;
-		uint16_t windowLineCounter;
+		int16_t windowLineCounter;
 		FLAG wasVblankJustTriggerred;
 		FLAG yConditionForWindowIsMetForCurrentFrame;
 		FLAG shouldFetchAndRenderWindowInsteadOfBG;
-		FLAG shouldIncrementWindowLineCounter;
+		FLAG delayedWindowActivationWX0;
 		FLAG cachedWinEnablePerFrame;
+		FLAG windowDisableGlitchPixel;
 		FLAG ignoreSCXLowBitsAfterWindow;
-		FLAG windowAlreadyActivatedThisScanline;
 		FLAG gfxOfCurrentScanLineUpdated;
 		FLAG isNewM3Scanline;
 		FLAG tileSelGlitch;       // 1-T-cycle pulse, set by CPU write, cleared after 1 PPU tick
 		BYTE dataForSelGlitch;    // latched: updated after sprite render and end of mode 3
+		BYTE latchedOldLCDC;
+		BYTE latchedLCDC;
+		COUNTER8 latchedLCDCForDelay;
 		int16_t oamSearchCount;
 		int16_t spriteCountPerScanLine;
 		FLAG shouldSimulateBGScrollingPenaltyNow;
@@ -1530,15 +1547,29 @@ private:
 		struct pixelFIFO_t objPixelFIFO;
 		struct pixelFIFO_t tempBgWinPixelFIFO;
 		int16_t discardedPixelCount;
+		int16_t discardedPixelCountForWin;
 		BYTE xBGPerPixel;
 		FLAG scxLatchedThisScanline;
 		COUNTER8 cgbSCYDelayTCycles;
 		BYTE cgbLatchedSCY;
+		BYTE effectiveSCX;
 		COUNTER8 cgbLYCDelayTCycles;
 		BYTE cgbLatchedLYC;
 		BYTE wxDelayTCycles;
 		BYTE latchedWXForDelay;
 		BYTE latchedWindowDiscardTarget;
+		FLAG noPixelRenderedSinceWindowTrigger;
+		FLAG prevDMGPixelIsBG;
+		FLAG prevCGBPixelIsBG;
+		FLAG prevDMGPixelIsOBJ;
+		FLAG prevCGBPixelIsOBJ;
+		SBYTE prevDMGPixelBGColor;
+		SBYTE prevCGBPixelBGPalette;
+		SBYTE prevCGBPixelBGColor;
+		SBYTE prevDMGPixelOBJColor;
+		SBYTE prevDMGPixelOBJPalette;
+		SBYTE prevCGBPixelOBJColor;
+		SBYTE prevCGBPixelOBJPalette;
 		BYTE latchedWX;
 		int16_t latchedXWindow;
 		int16_t pixelFetcherDots;
@@ -1559,6 +1590,7 @@ private:
 		int16_t prevSpriteX;
 		FLAG wasNotFirstSpriteInX;
 		FLAG wasX0Object;
+		FLAG abortObjectFetch;
 		uint16_t addressInTileMapArea;
 		uint16_t addressInTileDataArea;
 		COUNTER8 tileSelGlitchTCycles;
@@ -1861,7 +1893,7 @@ private:
 					{
 						// Raw register view (A006-A035)
 						BYTE registers[48];
-						// Decoded 4×4 × 3-byte matrix
+						// Decoded 4x4x3-byte matrix
 						BYTE matrix[4][4][3];
 					};
 				};
@@ -2080,7 +2112,224 @@ private:
 	emulatorStatus_t* pGBc_emuStatus = nullptr;			// for readability
 	display_t* pGBc_display = nullptr;			// for readability
 
-PACK_END
+	PACK_END
+
+#pragma region GBC_DEBUGGER
+		// Deliberately OUTSIDE the PACK_BEGIN/PACK_END (GBc_state_t) region above, so none
+		// of this is ever save-stated / BESS-serialized. Pure UI + debug scratch state.
+public:
+
+#ifndef __RPI_PICO__
+
+	enum class GBC_DEBUG_PIXEL_SAMPLE_MODE : uint8_t
+	{
+		PER_FRAME = 0,	// default -- identical cost to a non-debug run (existing once-per-vblank upload)
+		PER_LY,			// screen texture refreshed once per scanline
+		PER_DOT			// screen texture refreshed every dot (slow; foundation for the future per-dot pixel viewer)
+	};
+
+	enum class PIXEL_SOURCE_TAG : uint8_t {
+		NONE = 0, BG, WINDOW, OBJ
+	};
+
+	// Extensible beyond PPU later -- CPU/APU registers can just be appended here.
+	enum class GBC_DEBUG_TRACKED_REGISTER : uint8_t {
+		LCDC = 0, STAT, SCX, SCY, LY, LYC, DMA, BGP, OBP0, OBP1, WX, WY, COUNT
+	};
+
+	struct PPUEvent_t
+	{
+		uint32_t frameNumber = ZERO;
+		BYTE scanline = ZERO;
+		uint16_t dot = ZERO;
+		uint8_t registerIndex = ZERO;
+		uint8_t oldValue = ZERO;
+		uint8_t newValue = ZERO;
+		uint16_t pc = ZERO;
+	};
+
+	enum class DEBUGGER_TAB
+	{
+		PPU,
+		CPU,
+		APU,
+		EVENT_VIEWER
+	};
+
+	struct gbcDebugger_t
+	{
+		FLAG windowOpen = NO;					// Emulation -> Debug -> GBC
+
+		struct ppu_t
+		{
+			FLAG enabled = NO;					// master switch. NO == zero extra cost, same as no debugger at all
+			GBC_DEBUG_PIXEL_SAMPLE_MODE pixelOutputSampleMode = GBC_DEBUG_PIXEL_SAMPLE_MODE::PER_FRAME;
+
+			FLAG showRegisters = YES;
+			FLAG showTileViewer = YES;
+			FLAG showBGMapViewer = YES;
+			FLAG showWindowMapViewer = YES;
+			FLAG showOAMViewer = YES;
+			FLAG showPaletteViewer = YES;
+
+			FLAG tileViewerUseBank1 = NO;			// CGB VRAM bank 0 or 1
+
+			FLAG viewportShowBG = YES;
+			FLAG viewportShowWindow = NO;
+			FLAG viewportShowSprites = NO;
+			FLAG viewportShowGrid = YES;
+			FLAG viewportShowViewportRect = YES;	// Complete Viewport tab only -- overlay the SCX/SCY rectangle on the 256x256 map, wrapping
+			FLAG tileViewerShowGrid = YES;
+			FLAG bgMapViewerShowGrid = YES;		// BG Map panel only
+			FLAG winMapViewerShowGrid = YES;		// Window Map panel only -- independent of the above
+
+			int selectedOAMEntry = 0;
+			FLAG oamUseGalleryView = YES;
+
+			int selectedTileIndex = 0;
+			int tileViewerPreviewPalette = ZERO;	// CGB only: which BG palette (0-7) to preview the selected tile through
+
+			FLAG dockLayoutBuilt = NO;				// one-shot: default panel arrangement built?
+
+			// ---- run / breakpoint state (see point 3 below) ----
+			FLAG paused = NO;						// when YES, emulation is completely frozen
+			FLAG stepRequested = NO;				// single-shot: advance exactly one processSOC() call, then re-pause
+			FLAG runToBreakpointArmed = NO;		// running at full, undecorated speed toward (breakpointLY, breakpointDot)
+			uint8_t breakpointLY = ZERO;
+			uint16_t breakpointDot = ZERO;
+
+			FLAG gridColorWhite = YES;	// applies to every grid overlay: Tiles, BG Map, Window Map, Complete Viewport
+			FLAG fullscreen = NO;
+
+			DEBUGGER_TAB activeTab = DEBUGGER_TAB::PPU;
+		} ppu;
+
+		struct eventViewer_t
+		{
+			static const int CAPACITY = 4096;
+
+			FLAG enabled = NO;
+			FLAG snapshotValid = NO;
+			uint8_t lastValues[(int)GBC_DEBUG_TRACKED_REGISTER::COUNT] = { ZERO };
+			FLAG showRegister[(int)GBC_DEBUG_TRACKED_REGISTER::COUNT] =
+			{ YES, YES, YES, YES, YES, YES, YES, YES, YES, YES, YES, YES };
+
+			// True ring buffer: once full, new writes overwrite the OLDEST entry (via head wrapping), rather than silently refusing to record anything further.
+			PPUEvent_t ring[CAPACITY];
+			int head = ZERO;	// next write slot (wraps)
+			int count = ZERO;	// valid entries, caps at CAPACITY
+
+			// STAT mode (0-3) captured every tick at (scanline, dot) -- independent of whether
+			// any tracked register actually changed, so the mode bands are continuous.
+			uint8_t modeTimeline[154][456] = { { ZERO } };
+
+			uint32_t frameCounter = ZERO;
+			int lastLY = -1;
+		} eventViewer;
+
+	} gbcDebugger;
+
+	// Debug-only GL resources (created lazily, first time the debugger window opens)
+	GLuint debugTileViewerTexture = ZERO;
+	GLuint debugBGMapTexture = ZERO;
+	GLuint debugWindowMapTexture = ZERO;
+	GLuint debugOAMSpriteTexture = ZERO;
+	GLuint debugMiniScreenTexture = ZERO;			// mirrors the live 160x144 screen, for the sprite-position preview
+	GLuint debugTileDetailTexture = ZERO;			// the selected tile, decoded through whichever palette is chosen in the detail panel
+	std::array<Pixel, 8 * 8> debugTileDetailPixels;
+	GLuint debugLiveBGTexture = ZERO;
+	GLuint debugLiveWindowTexture = ZERO;
+	GLuint debugViewportTexture = ZERO;
+	FLAG debugTexturesInitialized = NO;
+
+	// Live per-pixel capture: exactly what the BG/Window fetcher actually produced this frame,
+	// nothing more -- blank wherever that layer didn't contribute this frame.
+	std::array<Pixel, 160 * 144> debugLiveBGPixels;
+	std::array<Pixel, 160 * 144> debugLiveWindowPixels;
+
+	// Complete Viewport: the real composited frame, tagged per-pixel with which layer
+	// actually produced it -- captured in screen space (160x144), then translated into
+	// map space (256x256) for display, since that's where Window/OBJ actually need to
+	// land relative to a scrolling BG.
+	std::array<Pixel, 160 * 144> debugViewportPixels;
+	std::array<uint8_t, 160 * 144> debugViewportSource;	// holds PIXEL_SOURCE_TAG values
+	std::array<Pixel, 256 * 256> debugViewportMapPixels;	// the actual 256x256 canvas rendered by the panel
+
+	struct PixelDebugInfo_t
+	{
+		BYTE LY = ZERO;
+		uint16_t pixelRenderCounterPerScanLine = ZERO;
+		uint16_t ppuCounterPerLY = ZERO;
+		uint16_t ppuCounterPerMode = ZERO;
+		uint32_t ppuCounterPerFrame = ZERO;
+		int pixelFetcherState = ZERO;
+		BYTE capturedSCX = ZERO;	// SCX/SCY active AT THE MOMENT this pixel committed -- NOT
+		BYTE capturedSCY = ZERO;	// the same as "current" SCX/SCY for raster-split ROMs that
+		// change scroll mid-frame (see PPU_DEBUGGER.md for why this matters)
+		FLAG captured = NO;	// was this screen-space pixel actually rendered this frame?
+	};
+	std::array<PixelDebugInfo_t, 160 * 144> debugViewportPixelInfo;
+
+	// Click-selection, viewport tab only -- persists until clicked elsewhere or off-rect.
+	FLAG viewportPixelSelected = NO;
+	int viewportSelectedMapX = ZERO;
+	int viewportSelectedMapY = ZERO;
+	PixelDebugInfo_t viewportSelectedPixelInfo;
+
+	int debugLastCapturedLY = -1;
+	int debugLastPixelCounterCaptured = -1;
+	uint8_t debugLastLYSeenByLoop = 0xFF;	// sentinel so the very first LY encountered still yields once
+
+	// Debug-only CPU-side pixel scratch buffers -- kept completely separate from
+	// gfxVisible*/imGuiBuffer so the hot PPU path never touches or grows because of these.
+	std::array<Pixel, 128 * 192> debugTileViewerPixels;	// 16x24 tiles of 8x8px = all 384 tiles in one VRAM bank
+	std::array<Pixel, 256 * 256> debugBGMapPixels;			// 32x32 tiles of 8x8px
+	std::array<Pixel, 256 * 256> debugWindowMapPixels;
+	std::array<Pixel, 8 * 16 * 40> debugOAMSpritePixels;	// 40 sprites, worst case 8x16
+
+	GLuint debugBGMap9800Texture = ZERO;
+	GLuint debugBGMap9C00Texture = ZERO;
+	std::array<Pixel, 256 * 256> debugBGMap9800Pixels;
+	std::array<Pixel, 256 * 256> debugBGMap9C00Pixels;
+	int debugWindowPixelsCapturedThisFrame = ZERO;
+
+	void renderGBCDebuggerUI();
+
+	void debugSyncScreenIfNeeded();
+	void debugEventViewerCheck();
+	void renderGBCDebuggerEventViewerTab();
+
+private:
+
+	void renderGBCDebuggerPPUTab();
+	void renderGBCDebuggerRegistersPanel();
+	void renderGBCDebuggerTileViewerPanel();
+	void renderGBCDebuggerBGMapPanel();
+	void renderGBCDebuggerWindowMapPanel();
+	void debugRebuildSpecificBGMap(uint16_t mapBaseOffset, std::array<Pixel, 256 * 256>& outBuffer);
+	void renderGBCDebuggerViewportPanel();
+	void debugRebuildViewportBGMapPixels();
+	void renderGBCDebuggerOAMPanel();
+	void renderGBCDebuggerPalettePanel();
+	void debugEnsureTexturesCreated();
+	void debugRebuildTileViewerPixels();
+	MASQ_INLINE BYTE debugReadVRAM(uint8_t bank, uint16_t offsetWithinBank)
+	{
+		if (ROM_TYPE == ROM::GAME_BOY)
+		{
+			// DMG has no VRAM banking (bank is always conceptually 0) and its real storage is the
+			// flat memory-map union at the raw $8000+offset address, NOT entireVram -- that array
+			// is exclusively the CGB path and is simply never written to for a DMG ROM.
+			RETURN pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[0x8000 + offsetWithinBank];
+		}
+		RETURN pGBc_instance->GBc_state.entireVram.vramMemoryBanks.mVRAMBanks[bank][offsetWithinBank];
+	}
+	void debugRebuildTileDetailPixels(int tileIdx, uint8_t bank, int paletteIdx);
+	void debugRebuildOAMSpritePixels();
+
+#endif // !__RPI_PICO__
+
+#pragma endregion GBC_DEBUGGER
 
 private:
 
@@ -2630,13 +2879,55 @@ private:
 	void executeHUC3Command();
 	void writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE source);
 
-	void stackPush(BYTE data);
-	BYTE stackPop();
-
-	void processZeroFlag
-	(
-		byte value
-	);
+	MASQ_INLINE void stackPush(BYTE data)
+	{
+		(pGBc_registers->sp)--;
+		bool wasBlocked = handleOAMCorruption(pGBc_registers->sp, OAM_ACCESS_TYPE::WRITE);
+		if (!wasBlocked) // TODO: Confirm this behaviour; Source : Sameboy
+		{
+			writeRawMemory(pGBc_registers->sp, data, MEMORY_ACCESS_SOURCE::CPU);
+		}
+	}
+	MASQ_INLINE BYTE stackPop(FLAG triggerOAMCorruption = NO)
+	{
+		handleOAMCorruption(pGBc_registers->sp, OAM_ACCESS_TYPE::READ);
+		BYTE popedData = readRawMemory(pGBc_registers->sp, MEMORY_ACCESS_SOURCE::CPU);
+		(pGBc_registers->sp)++;
+		if (triggerOAMCorruption == YES)
+		{
+			handleOAMCorruption(pGBc_registers->sp, OAM_ACCESS_TYPE::WRITE);
+		}
+		RETURN popedData;
+	}
+	MASQ_INLINE void processZeroFlag(byte value)
+	{
+		if ((value & 0xFF) == 0x00)
+		{
+			pGBc_flags->FZERO = ONE;
+		}
+		else
+		{
+			pGBc_flags->FZERO = ZERO;
+		}
+	}
+	MASQ_INLINE void processUnusedFlags(BYTE result)
+	{
+		pGBc_flags->ZEROTH = result;
+		pGBc_flags->FIRST = result;
+		pGBc_flags->SECOND = result;
+		pGBc_flags->THIRD = result;
+	}
+	MASQ_INLINE void processUnusedJoyPadBits(BYTE value)
+	{
+		pGBc_peripherals->P1_JOYP.joyPadFields.JP_SPARE_06 = value;
+		pGBc_peripherals->P1_JOYP.joyPadFields.JP_SPARE_07 = value;
+	}
+	MASQ_INLINE void processUnusedIFBits(BYTE value)
+	{
+		pGBc_peripherals->IF.interruptRequestFields.NO_INT05 = value;
+		pGBc_peripherals->IF.interruptRequestFields.NO_INT06 = value;
+		pGBc_peripherals->IF.interruptRequestFields.NO_INT07 = value;
+	}
 	void processFlagsForLogicalOperation
 	(
 		byte value,
@@ -2675,10 +2966,6 @@ private:
 		byte value1,
 		byte value2
 	);
-
-	void processUnusedFlags(BYTE result);
-	void processUnusedJoyPadBits(BYTE value);
-	void processUnusedIFBits(BYTE value);
 
 private:
 
@@ -2771,9 +3058,9 @@ private:
 			}
 		}
 	}
-	void cpuTickM(CPU_TICK_TYPE type = CPU_TICK_TYPE::READ_WRITE);
-	void gbCpuTick2T(FLAG isT2orT3);
-	void syncOtherGBModuleTicks();
+	void cpuTickM(int32_t specAddress = INVALID, int32_t specData = INVALID, CPU_TICK_TYPE type = CPU_TICK_TYPE::READ_WRITE);
+	void gbCpuTick2T(FLAG isT2orT3, int32_t specAddress = INVALID, int32_t specData = INVALID);
+	void syncOtherGBModuleTicks(int32_t specAddress = INVALID, int32_t specData = INVALID);
 	MASQ_INLINE FLAG isDoubleSpeedTickHi() const
 	{
 		RETURN (pGBc_instance->GBc_state.emulatorStatus.ticks.isDoubleSpeedHi == YES);
@@ -2786,11 +3073,21 @@ private:
 	{
 		pGBc_instance->GBc_state.emulatorStatus.ticks.isDoubleSpeedHi = RESET_TICK;
 	}
-	MASQ_INLINE void tickDotClockModules(FLAG onHI)
+	MASQ_INLINE void tickDotClockModules(FLAG onHI, int32_t specAddress = INVALID, int32_t specData = INVALID)
 	{
 		// Encapsulated gating logic
 		if (isCGBDoubleSpeedEnabled() == NO || isDoubleSpeedTickHi() == onHI)
 		{
+#if (GB_GBC_ENABLE_HIGHER_ORDER_SPECULATION == YES)
+			if (onHI == YES)
+			{
+				speculativeCpuMemWrite(specAddress, specData, SPECULATION_ORDER::SECOND);
+			}
+			else
+#endif
+			{
+				speculativeCpuMemWrite(specAddress, specData, SPECULATION_ORDER::FIRST);
+			}
 			rtcTick();
 			ppuTick();
 			apuTick();
@@ -2801,6 +3098,211 @@ private:
 	void timerTick();
 	void serialTick();
 	void rtcTick();
+	static MASQ_INLINE uint16_t readOAMWord(const BYTE* OAM, int byteOffset)
+	{
+		RETURN (uint16_t)OAM[byteOffset] | ((uint16_t)OAM[byteOffset + 1] << 8);
+	}
+	static MASQ_INLINE void writeOAMWord(BYTE* OAM, int byteOffset, uint16_t value)
+	{
+		OAM[byteOffset + 0] = (BYTE)(value & 0xFF);
+		OAM[byteOffset + 1] = (BYTE)(value >> 8);
+	}
+	MASQ_INLINE FLAG handleOAMCorruption(uint16_t value, OAM_ACCESS_TYPE type)
+	{
+		if ((value < 0xFE00 || value > 0xFEFF) || ROM_TYPE != ROM::GAME_BOY)
+		{
+			RETURN NO;
+		}
+
+		if (pGBc_display->currentLCDMode != LCD_MODES::MODE_LCD_SEARCHING_OAM)
+		{
+			RETURN NO;
+		}
+
+		auto* OAM = pGBc_memory->GBcMemoryMap.mOAM.OAMMemory;
+
+		/*
+		* 
+		*   OAM (160 bytes)
+		*
+		*	Row 0   FE00-FE07
+		*	+-------------------------------+
+		*	| Sprite 0 | Sprite 1 |
+		*	+-------------------------------+
+		*
+		*	Row 1   FE08-FE0F
+		*	+-------------------------------+
+		*	| Sprite 2 | Sprite 3 |
+		*	+-------------------------------+
+		*
+		*	Row 2   FE10-FE17
+		*	+-------------------------------+
+		*	| Sprite 4 | Sprite 5 |
+		*	+-------------------------------+
+		*
+		*	Row 3   FE18-FE1F
+		*	+-------------------------------+
+		*	| Sprite 6 | Sprite 7 |
+		*	+-------------------------------+
+		*
+		*	Row 4   FE20-FE27
+		*	+-------------------------------+
+		*	| Sprite 8 | Sprite 9 |
+		*	+-------------------------------+
+		*
+		*	...
+		*
+		*	Row 15  FE78-FE7F
+		*	+-------------------------------+
+		*	| Sprite 30 | Sprite 31 |
+		*	+-------------------------------+
+		*
+		*	Row 16  FE80-FE87
+		*	+-------------------------------+
+		*	| Sprite 32 | Sprite 33 |
+		*	+-------------------------------+
+		*
+		*	Row 17  FE88-FE8F
+		*	+-------------------------------+
+		*	| Sprite 34 | Sprite 35 |
+		*	+-------------------------------+
+		*
+		*	Row 18  FE90-FE97
+		*	+-------------------------------+
+		*	| Sprite 36 | Sprite 37 |
+		*	+-------------------------------+
+		*
+		*	Row 19  FE98-FE9F
+		*	+-------------------------------+
+		*	| Sprite 38 | Sprite 39 |
+		*	+-------------------------------+
+		* 
+		*/
+
+		const uint8_t currentRow = pGBc_display->oamSearchCount / 2;
+
+		if (currentRow == ZERO || pGBc_display->oamSearchCount >= FORTY)
+		{
+			RETURN NO;
+		}
+
+		const int cur = currentRow * EIGHT;
+		const int prev = cur - EIGHT;
+
+		if (type == OAM_ACCESS_TYPE::WRITE)
+		{
+			uint16_t a = readOAMWord(OAM, cur);
+			uint16_t b = readOAMWord(OAM, prev);
+			uint16_t c = readOAMWord(OAM, prev + 4);
+
+			uint16_t result = ((a ^ c) & (b ^ c)) ^ c;
+			writeOAMWord(OAM, cur, result);
+
+			for (uint8_t i = TWO; i < EIGHT; i++)
+			{
+				OAM[cur + i] = OAM[prev + i];
+			}
+			RETURN YES;
+		}
+
+		// ---- READ corruption: branches on which "quadrant" of 4 rows we're in ----
+		switch (cur & 0x18)
+		{
+		case 0x10: // "secondary" - reaches back 2 rows
+		{
+			const int prev2 = cur - 16;
+
+			uint16_t rPrev2 = readOAMWord(OAM, prev2);
+			uint16_t rPrev = readOAMWord(OAM, prev);
+			uint16_t rCur = readOAMWord(OAM, cur);
+			uint16_t rPrev4 = readOAMWord(OAM, prev + 4);
+
+			uint16_t result = (rPrev & (rPrev2 | rCur | rPrev4)) | (rPrev2 & rCur & rPrev4);
+			writeOAMWord(OAM, prev, result);
+
+			for (uint8_t i = 0; i < EIGHT; i++)
+			{
+				OAM[prev2 + i] = OAM[prev + i];
+			}
+			break;
+		}
+
+		case 0x00: // "tertiary"/"quaternary" - reaches back up to 4 rows
+		{
+			const int prev2 = cur - 16;
+			const int prev3 = cur - 32;
+
+			uint16_t rCur = readOAMWord(OAM, cur);
+			uint16_t rPrev4 = readOAMWord(OAM, prev + 4);
+			uint16_t rPrev = readOAMWord(OAM, prev);
+			uint16_t rPrev2 = readOAMWord(OAM, prev2);
+			uint16_t rPrev3 = readOAMWord(OAM, prev3);
+
+			uint16_t result;
+
+			if (cur == 0x40)
+			{
+				// Quaternary - DMG-revision formula.
+				uint16_t rowZero = readOAMWord(OAM, 0);
+				uint16_t rMid1 = readOAMWord(OAM, cur - 6);  // 2nd word of prev row
+				uint16_t rMid2 = readOAMWord(OAM, cur - 14); // 2nd word of prev2 row
+
+				result = (rPrev & (rPrev3 | rPrev2 | (~rMid1 & rMid2) | rPrev4 | rCur))
+					| (rPrev4 & rPrev2 & rPrev3);
+			}
+			else if (cur == 0x20)
+			{
+				result = (rPrev & (rCur | rPrev4 | rPrev2 | rPrev3)) | (rCur & rPrev4 & rPrev2 & rPrev3);
+			}
+			else if (cur == 0x60)
+			{
+				result = (rPrev & (rCur | rPrev4 | rPrev2 | rPrev3)) | (rPrev4 & rPrev2 & rPrev3);
+			}
+			else
+			{
+				result = rPrev | (rCur & rPrev4 & rPrev2 & rPrev3);
+			}
+
+			writeOAMWord(OAM, prev, result);
+
+			for (uint8_t i = 0; i < EIGHT; i++)
+			{
+				OAM[prev2 + i] = OAM[prev3 + i] = OAM[prev + i];
+			}
+			break;
+		}
+
+		default: // 0x08 / 0x18 - the plain case
+		{
+			uint16_t rCur = readOAMWord(OAM, cur);
+			uint16_t rPrev = readOAMWord(OAM, prev);
+			uint16_t rPrev4 = readOAMWord(OAM, prev + 4);
+
+			uint16_t result = rPrev | (rCur & rPrev4);
+			writeOAMWord(OAM, prev, result);
+			writeOAMWord(OAM, cur, result);
+			break;
+		}
+		}
+
+		// Unconditional for every read branch above: the accessed row
+		// fully becomes a copy of the (now-updated) previous row.
+		for (uint8_t i = 0; i < EIGHT; i++)
+		{
+			OAM[cur + i] = OAM[prev + i];
+		}
+
+		// Edge case: row 0x80 additionally clones itself back onto row 0.
+		if (cur == 0x80)
+		{
+			for (uint8_t i = 0; i < EIGHT; i++)
+			{
+				OAM[i] = OAM[cur + i];
+			}
+		}
+
+		RETURN YES;
+	}
 	MASQ_INLINE void checkWindowYTrigger(uint8_t ly)
 	{
 		// Check whether "Y" window layer is triggerred for current scanline
@@ -2811,8 +3313,245 @@ private:
 		// Note that WINDOW_LAYER_ENABLE should not be checked here as mentioned in https ://discord.com/channels/465585922579103744/465586075830845475/757342004052099072
 		pGBc_display->yConditionForWindowIsMetForCurrentFrame |= (ly == pGBc_peripherals->WY);
 	}
+	MASQ_INLINE void activateWindow()
+	{
+#if (GB_GBC_ENABLE_WINDESYNC_GLITCH == YES)
+		pGBc_display->cachedWinEnablePerFrame = YES;
+#endif
+
+		// All conditions for window are met; use this flag to increment the window line counter as well.
+		pGBc_display->shouldFetchAndRenderWindowInsteadOfBG = YES;
+		pGBc_display->pixelFetcherState = PIXEL_FETCHER_STATES::WAIT_FOR_TILE;
+		pGBc_display->bgWinPixelFIFO.clearFIFO();
+		pGBc_display->tempBgWinPixelFIFO.clearFIFO();
+		pGBc_display->fetchDone = NO;
+		pGBc_display->pushDone = YES;
+
+		// Latch the WX-derived window origin at the moment of trigger.
+		pGBc_display->latchedWX = pGBc_peripherals->WX;
+		pGBc_display->latchedXWindow = (int16_t)((int16_t)pGBc_peripherals->WX - SEVEN);
+		pGBc_display->latchedWindowDiscardTarget = (pGBc_peripherals->WX < SEVEN) ? (BYTE)(SEVEN - pGBc_peripherals->WX) : ZERO;
+		
+		// Increment window line counter.
+		pGBc_display->windowLineCounter++;
+
+#if (GB_GBC_ENABLE_WIN_REACTIVATION_GLITCH == YES)
+		pGBc_display->noPixelRenderedSinceWindowTrigger = YES;
+#endif
+
+		pGBc_display->pixelFetcherCounterPerScanLine = pGBc_display->pixelRenderCounterPerScanLine;
+	}
+	MASQ_INLINE void deactivateWindow()
+	{
+		pGBc_display->shouldFetchAndRenderWindowInsteadOfBG = NO;
+		pGBc_display->pixelFetcherState = PIXEL_FETCHER_STATES::WAIT_FOR_TILE;
+		pGBc_display->bgWinPixelFIFO.clearFIFO();
+		pGBc_display->tempBgWinPixelFIFO.clearFIFO();
+		pGBc_display->fetchDone = NO;
+		pGBc_display->pushDone = YES;
+		pGBc_display->pixelFetcherCounterPerScanLine = pGBc_display->pixelRenderCounterPerScanLine;
+	}
+	MASQ_INLINE void processLCDCTransition(BYTE oldLCDC, BYTE newLCDC)
+	{
+		// LCD/PPU enabled
+		// https://www.reddit.com/r/Gameboy/comments/a1c8h0/what_happens_when_a_gameboy_screen_is_disabled/
+		// https://forums.nesdev.org/viewtopic.php?t=12990
+		if ((GETBIT(SEVEN, oldLCDC) == ZERO) && (GETBIT(SEVEN, newLCDC) == ONE))
+		{
+			// LCD cannot be enabled instantaneously
+			processLCDEnable();
+		}
+		// LCD/PPU disabled
+		// https://forums.nesdev.org/viewtopic.php?f=20&t=16434#p203762
+		// https://www.reddit.com/r/Gameboy/comments/a1c8h0/what_happens_when_a_gameboy_screen_is_disabled/
+		// https://forums.nesdev.org/viewtopic.php?t=12990
+		else if ((GETBIT(SEVEN, oldLCDC) == ONE) && (GETBIT(SEVEN, newLCDC) == ZERO))
+		{
+			processLCDDisable();
+		}
+	}
 	void ppuTick();
 	void apuTick();
+	MASQ_INLINE void abortObjectFetch()
+	{
+		PPUTODO("The abortObjectFetch logic is currently disabled as this DOESN'T WORK and messes up mealybug tests");
+#if (DEACTIVATED)
+		//if (pGBc_display->abortObjectFetch == YES) MASQ_UNLIKELY
+		//{
+		//	pGBc_display->wasFetchingOBJ = NO;
+		//	pGBc_display->shouldFetchObjInsteadOfWinAndBgNow = NO;
+		//	pGBc_display->shouldFetchObjInsteadOfWinAndBgPostBGFetchIsDone = NO;
+		//	pGBc_display->isThereAnyObjectCurrentlyGettingRendered = NO;
+		//	pGBc_display->abortObjectFetch = NO;
+		//}
+#endif
+	}
+	MASQ_INLINE void speculativeCpuMemWrite(uint16_t address, BYTE data, SPECULATION_ORDER order = SPECULATION_ORDER::NONE)
+	{
+		const FLAG isMode3 = (pGBc_display->currentLCDMode == LCD_MODES::MODE_LCD_DISPLAY_PIXELS);
+
+#if (GB_GBC_ENABLE_BGP_OBP_MID_SCANLINE_GLITCH == YES)
+		if (((uint16_t)(address - BGP_ADDRESS) <= (uint16_t)(OBP1_ADDRESS - BGP_ADDRESS)) && order == SPECULATION_ORDER::FIRST)
+		{
+			typedef typename std::remove_pointer<decltype(pGBc_peripherals)>::type PeripheralStructType;
+			static const size_t PALETTE_LUT[] = 
+			{
+				offsetof(PeripheralStructType, BGP),  // Index 0 maps to 0xFF47
+				offsetof(PeripheralStructType, OBP0), // Index 1 maps to 0xFF48
+				offsetof(PeripheralStructType, OBP1)  // Index 2 maps to 0xFF49
+			};
+
+			// Check if we are in the pixel transfer mode (Mode 3)
+			if (isMode3)
+			{
+				BYTE* const target = (BYTE*)((char*)pGBc_peripherals + PALETTE_LUT[address - BGP_ADDRESS]);
+
+				if (ROM_TYPE == ROM::GAME_BOY_COLOR)
+				{
+					if (isCGBCompatibilityModeEnabled() == YES)
+					{
+						/*
+						* CGB Mid-Scanline Update (Time Travel)
+						*
+						* Hardware Behavior (Model E):
+						* Newer CGB revisions do not exhibit the DMG "OR-glitch".
+						* However, the write still takes effect immediately, meaning the
+						* previous pixel fetcher should retroactively use the new BGP/OBP0/OBP1 value.
+						*/
+
+						*target = data;
+					}
+				}
+				else
+				{
+					/*
+					* BGP/OBP0/OBP1 Mid-Scanline "OR-Glitch" (Time Travel)
+					*
+					* Hardware Behavior:
+					* On DMG consoles, writing to the BGP/OBP0/OBP1 register during MODE_3 (Pixel Transfer)
+					* causes a bus conflict. The PPU's pixel fetcher briefly reads the result of
+					* (current_BGP/OBP0/OBP1 | new_value) due to the register write cycle timing.
+					*
+					* Implementation (Time Travel):
+					* Since our PPU renders dots sequentially, a write at the current dot effectively
+					* impacts the preceding pixel's palette. We "time travel" by patching the
+					* previously rendered pixel in our frame buffer using the 'prevDMGPixelBGColor'
+					* state, retroactively applying the bitwise OR effect before the new register
+					* value is committed.
+					*/
+
+					*target |= data;
+				}
+			}
+			RETURN;
+		}
+#endif
+#if (GB_GBC_ENABLE_SCX_MID_SCANLINE_GLITCH == YES)
+		if (address == SCX_ADDRESS && order == SPECULATION_ORDER::FIRST)
+		{
+			// Check if we are in the pixel transfer mode (Mode 3)
+			if (isMode3)
+			{
+				if ((ROM_TYPE == ROM::GAME_BOY) || (ROM_TYPE == ROM::GAME_BOY_COLOR && isCGBDoubleSpeedEnabled() == YES))
+				{
+					pGBc_peripherals->SCX = data;
+				}
+			}
+			RETURN;
+		}
+#endif
+#if (GB_GBC_ENABLE_SCY_MID_SCANLINE_GLITCH == YES)
+		if (address == SCY_ADDRESS && order == SPECULATION_ORDER::FIRST)
+		{
+			// Check if we are in the pixel transfer mode (Mode 3)
+			if (isMode3)
+			{
+				if (ROM_TYPE == ROM::GAME_BOY)
+				{
+					pGBc_peripherals->SCY = data;
+				}
+			}
+			RETURN;
+		}
+#endif
+#if (GB_GBC_ENABLE_LCDC_MID_SCANLINE_GLITCH == YES)
+		if (address == LCDC_ADDRESS && order == SPECULATION_ORDER::FIRST)
+		{
+			// Check if we are in the pixel transfer mode (Mode 3)
+			if (isMode3)
+			{
+				if (ROM_TYPE == ROM::GAME_BOY_COLOR && isCGBDoubleSpeedEnabled() == YES)
+				{
+					PPUTODO("For CGB doublespeed, the doublespeed HI and LO cycle handling for LCDC mode 3 glitch is not handled; timing is most likely not complete");
+					lcdControl_t oldLCDC = { RESET };
+					lcdControl_t newLCDC = { RESET };
+
+					oldLCDC.lcdControlMemory = pGBc_peripherals->LCDC.lcdControlMemory;
+					pGBc_display->latchedOldLCDC = oldLCDC.lcdControlMemory;
+
+					newLCDC.lcdControlMemory = data;
+
+#define LCDC_BG_EN_MASK      (1U << ZERO)
+#define LCDC_ENABLE_MASK     (1U << SEVEN)
+					lcdControl_t tempLCDC = newLCDC;
+					tempLCDC.lcdControlMemory =
+						(newLCDC.lcdControlMemory & ~(LCDC_BG_EN_MASK | LCDC_ENABLE_MASK)) |
+						(oldLCDC.lcdControlMemory & (LCDC_BG_EN_MASK | LCDC_ENABLE_MASK));
+#undef LCDC_BG_EN_MASK
+#undef LCDC_ENABLE_MASK
+
+#if (GB_GBC_ENABLE_TILE_SEL_GLITCH == YES)
+					BIT oldTileSel = GETBIT(FOUR, oldLCDC.lcdControlMemory);
+					BIT newTileSel = GETBIT(FOUR, newLCDC.lcdControlMemory);
+					FLAG triggerGlitch = (oldTileSel != newTileSel);	// 0->1 or 1->0
+					if (triggerGlitch == YES)
+					{
+						pGBc_display->tileSelGlitch = YES;
+						pGBc_display->tileSelGlitchTCycles = ONE;
+					}
+#endif
+
+					pGBc_display->latchedLCDC = newLCDC.lcdControlMemory;
+					pGBc_display->latchedLCDCForDelay = ONE;
+					pGBc_peripherals->LCDC.lcdControlMemory = tempLCDC.lcdControlMemory;
+				}
+				else if ((ROM_TYPE == ROM::GAME_BOY))
+				{
+					const auto display_counter = pGBc_display->pixelRenderCounterPerScanLine;
+					const auto should_fetch_obj = pGBc_display->shouldFetchObjInsteadOfWinAndBgNow;
+
+					lcdControl_t oldLCDC = { RESET };
+					lcdControl_t newLCDC = { RESET };
+
+					oldLCDC.lcdControlMemory = pGBc_peripherals->LCDC.lcdControlMemory;
+					pGBc_display->latchedOldLCDC = oldLCDC.lcdControlMemory;
+
+					newLCDC.lcdControlMemory = data;
+
+					if (newLCDC.lcdControlFields.OBJ_ENABLE == RESET &&
+						(display_counter == ZERO || should_fetch_obj == YES))
+					{
+						oldLCDC.lcdControlFields.OBJ_ENABLE = RESET;
+						pGBc_display->abortObjectFetch = YES;
+					}
+
+					PPUTODO("Sameboy implements the below condition but for this seems to break the mealybug test which sameboy is also failing! so deactivating out for now...");
+#if (DEACTIVATED)
+					if (newLCDC.lcdControlFields.BG_WINDOW_LAYER_ENABLE)
+					{
+						oldLCDC.lcdControlFields.BG_WINDOW_LAYER_ENABLE = SET;
+					}
+#endif
+
+					pGBc_peripherals->LCDC.lcdControlMemory = oldLCDC.lcdControlMemory;
+				}
+			}
+			RETURN;
+		}
+#endif
+
+		MASQ_UNUSED(order);
+	}
 
 public:
 

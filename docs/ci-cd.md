@@ -76,21 +76,23 @@ Masquerade-Emulator/
 │  └──────────────────────────────────────────────────┘   │
 │           │                                             │
 │           ▼                                             │
-│  ┌─────────────────────────────────────────────────┐    │
+│  ┌───────────────────────────────────────────────────┐  │
 │  │  build_windows  │  build_linux  │ build_emscripten│  │
-│  │  (parallel, independent)                         │   │
-│  └─────────────────────────────────────────────────┘    │
+│  │  (parallel, independent)                          │  │
+│  └───────────────────────────────────────────────────┘  │
 │           │                                             │
 │           ▼                                             │
 │  Upload artifacts (windows-build, linux-build,          │
 │                    emscripten-build)                    │
+│                                                         │
+│  Deploy to GitHub Pages (only on push to master)        │
 └─────────────────────────────────────────────────────────┘
 ```
 
 ### Build Matrix
 
 ```
-build_windows  → Visual Studio 17 2022, MSVC, x64
+build_windows  → Visual Studio 18 2026, MSVC, x64
                  Output: build/bin/Release/masquerade.exe + SDL3.dll + assets/
 
 build_linux    → Ninja, GCC
@@ -103,7 +105,7 @@ build_emscripten → Emscripten 3.1.66
 ### External Dependencies (cached)
 
 ```
-imgui, miniz, stb, rapidjson, boost (1.84.0), SDL3, nativefiledialog-extended
+imgui, miniz, stb, rapidjson, boost (1.89.0), SDL3, nativefiledialog-extended
 + emscripten-browser-file (Emscripten only)
 ```
 
@@ -152,16 +154,16 @@ Input: version=0.7009, release_windows=true, others=false
     ▼         ▼                  ▼
 ┌──────────┐ ┌──────────┐ ┌──────────────┐
 │  build_  │ │  build_  │ │    build_    │
-│ windows  │ │  linux   │ │ emscripten  │
-│          │ │          │ │             │
-│ Checks   │ │ Checks   │ │ Checks out  │
-│ out      │ │ out      │ │ release/    │
-│ release/ │ │ release/ │ │ 0.7009      │
-│ 0.7009   │ │ 0.7009   │ │             │
-│          │ │          │ │ Builds WASM │
-│ Builds   │ │ Builds   │ │ artifacts   │
-│ MSVC x64 │ │ Ninja    │ │             │
-└────┬─────┘ └────┬─────┘ └──────┬──────┘
+│ windows  │ │  linux   │ │ emscripten   │
+│          │ │          │ │              │
+│ Checks   │ │ Checks   │ │ Checks out   │
+│ out      │ │ out      │ │ release/     │
+│ release/ │ │ release/ │ │ 0.7009       │
+│ 0.7009   │ │ 0.7009   │ │              │
+│          │ │          │ │ Builds WASM  │
+│ Builds   │ │ Builds   │ │ artifacts    │
+│ MSVC x64 │ │ Ninja    │ │              │
+└────┬─────┘ └────┬─────┘ └──────┬───────┘
      │            │               │
      │   All three must PASS      │
      └────────────┬───────────────┘
@@ -317,7 +319,7 @@ release.yml triggers update-submodule.yml
 │  cd ../..                                               │
 │                                                         │
 │  git add src/                                           │
-│  git commit "chore: update src/ submodule to 0.7009"   │
+│  git commit "chore: update src/ submodule to 0.7009"    │
 │  git push origin release/0.7009                         │
 │                                                         │
 │  Set SUCCESS status on:                                 │

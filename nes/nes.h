@@ -175,6 +175,15 @@ private:
 		ONESCREEN_HI_MIRROR,
 	};
 
+	enum class INES030_NT_MODE : BYTE
+	{
+		FIXED_VERTICAL,
+		FIXED_HORIZONTAL,
+		ONESCREEN_SWITCHABLE,
+		FOUR_SCREEN_CART_VRAM,       // see caveat at the end -- not wired up yet
+		SUBMAPPER3_HV_SWITCHABLE
+	};
+
 	enum class PPU_BG_FSM
 	{
 		RELOAD_SHIFTERS = ZERO,
@@ -706,6 +715,8 @@ private:
 		MMC4 = TEN,
 		COLOR_DREAMS = ELEVEN,
 		CPROM = THIRTEEN,
+		INES_MAPPER_014 = FOURTEEN,
+		INES_MAPPER_015 = FIFTEEN,
 		INES_MAPPER_016 = SIXTEEN,
 		INES_MAPPER_018 = EIGHTEEN,
 		INES_MAPPER_019 = NINETEEN,
@@ -715,6 +726,9 @@ private:
 		VRC6_024 = TWENTYFOUR,
 		VRC2_VRC4_025 = TWENTYFIVE,
 		VRC6_026 = TWENTYSIX,
+		INES_MAPPER_028 = TWENTYEIGHT,
+		INES_MAPPER_029 = TWENTYNINE,
+		INES_MAPPER_030 = THIRTY,
 		INES_MAPPER_034 = THIRTYFOUR,
 		INES_MAPPER_037 = THIRTYSEVEN,
 		INES_MAPPER_047 = FORTYSEVEN,
@@ -724,6 +738,7 @@ private:
 		INES_MAPPER_068 = SIXTYEIGHT,
 		INES_MAPPER_069 = SIXTYNINE,
 		INES_MAPPER_070 = SEVENTY,
+		INES_MAPPER_078 = SEVENTYEIGHT,
 		J87 = EIGHTYSEVEN,
 		INES_MAPPER_105 = ONEHUNDREDFIVE,
 		INES_MAPPER_118 = ONEHUNDREDEIGHTEEN,
@@ -734,7 +749,9 @@ private:
 		NANJING_FC001 = ONEHUNDREDSIXTYTHREE,
 		INES_MAPPER_180 = ONEEIGHTY,
 		INES_MAPPER_210 = TWOHUNDREDTEN,
-		INES_MAPPER_218 = TWOHUNDREDEIGHTEEN
+		INES_MAPPER_218 = TWOHUNDREDEIGHTEEN,
+		INES_MAPPER_232 = TWOHUNDREDTHIRTYTWO,
+		INES_MAPPER_268 = TWOHUNDREDSIXTYEIGHT
 	};
 
 	enum SUB_MAPPER : int16_t
@@ -993,7 +1010,6 @@ private:
 				// IRQ fire delay (in CPU cycles) counting down to assert
 				BYTE irqDelay;        // 0=idle, non-zero counting down
 			} rambo1;
-
 			struct txsrom_t
 			{
 				// Per-nametable override: four entries, each 0 or 1 (CIRAM page)
@@ -1001,6 +1017,24 @@ private:
 				// into the *active* pattern table half ($0000-$0FFF).
 				BYTE ntPage[4];  // CIRAM page assigned to NT0-NT3
 			} txsrom;
+			struct ines268_t
+			{
+				// EXPREGS[0..6] — direct port of FCEUmm's src/boards/268.c naming.
+				// reg[6] is a "hidden" 8th register, only ever written indirectly
+				// (see mapper268WriteReg) on submapper 8/9 ("extra latch") boards.
+				BYTE reg[7];
+
+				// Latched from reg[3] bit 7. While set, writes to every register except
+				// reg[2] ($xxx2) are ignored — used by cart firmware to flip MMC3
+				// PRG-RAM enable on/off via $A001 without perturbing the other outer
+				// bits (see "WRAM usage" on the NESdev wiki page for mapper 268).
+				FLAG lockout;
+
+				// NOTE: only banking mode $00 ("normal oversize MMC3") is implemented.
+				// GNROM mode ($10), "weird" modes ($40/$50), submappers 2-11, and the
+				// 64 MiB variant are intentionally out of scope — see writeCpu/readCpu
+				// handlers below, both FATAL() if reg[3] bits 4/6 select anything else.
+			} ines268;
 			FLAG isRevA;
 		} mmc3;
 		struct
@@ -1076,7 +1110,8 @@ private:
 			// Used for: IRQ scanline counting, ExRAM mode 0/1 write gating, chrA switching
 			FLAG ppuInFrame;
 			FLAG needInFrame;
-			// Decremented each PPU tick; reset to 9 (~3 CPU cycles) on each PPU read
+			// Decremented each MMC5 clock.
+			// Reset to 3 (~3 CPU cycles / 9 PPU clocks) on each PPU read.
 			// When it hits 0: ppuInFrame is cleared
 			BYTE ppuIdleCounter;
 			uint16_t lastPpuReadAddr;
@@ -1108,7 +1143,11 @@ private:
 			// $5201: Vertical split scroll
 			BYTE  verticalSplitScroll;
 
-			// $5202: Vertical split CHR bank (4KB page index, 5 bits)
+			// Runtime: vertical split scanline counter.
+			// Low 3 bits provide CHR A0-A2 during split background fetches.
+			uint16_t verticalSplitScanlineCounter;
+
+			// $5202: Vertical split CHR bank (4KB page index)
 			BYTE  verticalSplitBank;
 
 			// Runtime: whether the current tile column is inside the split region
@@ -1194,6 +1233,15 @@ private:
 		{
 			BYTE chrBank;
 		} cprom;
+		struct
+		{
+			BYTE supervisorReg; // last byte written to $A131
+		} ines014;
+		struct
+		{
+			BYTE latchedData;      // last byte written to $8000-$FFFF
+			uint16_t latchedAddr;  // last address written to $8000-$FFFF (only bits 0-1 matter)
+		} ines015;
 		struct
 		{
 			// PRG: three switchable 8KB banks + fixed last bank
@@ -1286,6 +1334,27 @@ private:
 		} vrc6;
 		struct
 		{
+			BYTE selectedReg;    // last value written to $5000, masked to bit7|bit0 (0x00/0x01/0x80/0x81)
+			BYTE reg00_chrBank;  // "M   BB" -- CHR-RAM A14-A13 + mirroring-override bit
+			BYTE reg01_innerBank;// "M BBBB" -- PRG inner bank + mirroring-override bit
+			BYTE reg80_mode;     // "SS PPMM" -- outer bank size, PRG bank mode, mirroring mode
+			BYTE reg81_outerBank;// "BBBB Bbbb" -- PRG outer bank
+		} ines028;
+		struct
+		{
+			BYTE prgBank16; // 3-bit PRG bank for $8000-$BFFF (P field)
+			BYTE chrBank8;  // 2-bit CHR-RAM bank for $0000-$1FFF (C field)
+		} ines029;
+		struct
+		{
+			BYTE prgBank16;         // bits 0-4 of the latch (P)
+			BYTE chrBank8;          // bits 5-6 of the latch (C)
+			BIT nametableBit;       // bit 7 of the latch (N)
+			BYTE ledReg;            // submapper 4 only -- stored, not acted on (see caveats)
+			INES030_NT_MODE ntMode; // resolved once at init from submapper + header bits
+		} ines030;
+		struct
+		{
 			BYTE prgBank32;
 			BYTE chrBank4Lo;
 			BYTE chrBank4Hi;
@@ -1324,6 +1393,11 @@ private:
 			FLAG prgRamEnable;
 			uint16_t irqCounter;
 		} ines069;
+		struct
+		{
+			BYTE prgBank16; // 3-bit PRG bank for $8000-$BFFF
+			BYTE chrBank8;  // 4-bit CHR bank for $0000-$1FFF
+		} ines078;
 		struct
 		{
 			// PRG/CHR registers
@@ -1465,6 +1539,13 @@ private:
 			// -----------------------------------------------------------------------
 			FLAG    hasBattery;         // from iNES flag 6 bit 1
 		} namco163;
+		struct
+		{
+			uint8_t outerBank; // 64 KiB block select (bits 3-4 written to $8000-$BFFF)
+			uint8_t innerBank; // 16 KiB page select (bits 0-1 written to $C000-$FFFF)
+			uint32_t prgBank8000;  // Calculated 16 KiB bank index for $8000-$BFFF
+			uint32_t prgBankC000;  // Calculated 16 KiB bank index for $C000-$FFFF
+		} ines232;
 		FLAG isBusConflictPresent;
 	} catridgeInfo_t;
 
@@ -2016,6 +2097,142 @@ private:
 
 PACK_END
 
+#pragma region NES_DEBUGGER
+public:
+
+#ifndef __RPI_PICO__
+
+	enum class NES_DEBUG_PIXEL_SAMPLE_MODE : uint8_t {
+		PER_FRAME = 0, PER_LY, PER_DOT
+	};
+	enum class NES_PIXEL_SOURCE_TAG : uint8_t {
+		NONE = 0, BG, OBJ
+	};
+	enum class NES_DEBUG_TRACKED_REGISTER : uint8_t {
+		PPUCTRL = 0, PPUMASK, PPUSTATUS, OAMADDR, OAMDATA, PPUSCROLL, PPUADDR, PPUDATA, OAMDMA, COUNT
+	};
+
+	struct NESPPUEvent_t
+	{
+		uint32_t frameNumber = ZERO;
+		int16_t scanline = ZERO;
+		uint16_t dot = ZERO;
+		uint8_t registerIndex = ZERO;
+		uint8_t oldValue = ZERO;
+		uint8_t newValue = ZERO;
+		uint16_t pc = ZERO;
+	};
+
+	struct nesDebugger_t
+	{
+		FLAG windowOpen = NO;	// Emulation -> Debug -> NES
+
+		struct ppu_t
+		{
+			FLAG enabled = NO;
+			NES_DEBUG_PIXEL_SAMPLE_MODE pixelOutputSampleMode = NES_DEBUG_PIXEL_SAMPLE_MODE::PER_FRAME;
+
+			FLAG showRegisters = YES;
+			FLAG showPatternTables = YES;
+			FLAG showNametables = YES;
+			FLAG showOAMViewer = YES;
+			FLAG showPaletteViewer = YES;
+			FLAG showPatternTableGrid = YES;
+			FLAG showNametableGrid = YES;
+
+			FLAG paused = NO;
+			FLAG stepRequested = NO;
+			FLAG runToBreakpointArmed = NO;
+			int16_t breakpointScanline = ZERO;
+			uint16_t breakpointDot = ZERO;
+
+			FLAG gridColorWhite = YES;
+			FLAG fullscreen = NO;
+			FLAG dockLayoutBuilt = NO;
+
+			int selectedOAMEntry = 0;
+			FLAG oamUseGalleryView = YES;
+			FLAG patternTableUse8x16 = NO;
+			FLAG showAttributeOverlay = NO;
+			FLAG showCompositeViewport = YES;
+			FLAG compositeShowBG = YES;
+			FLAG compositeShowSprites = YES;
+			FLAG compositeShowGrid = YES;
+			int selectedNametableIndex = 0;
+			int selectedNametableTileX = 0;
+			int selectedNametableTileY = 0;
+			int selectedPatternTable = 0;
+			int selectedPatternTile = 0;
+			uint16_t debugLastScanlineSeenByLoop = 0xFFFF;
+			int debugFrozenScrollX = 0;
+			int debugFrozenScrollY = 0;
+			FLAG debugFrozenScrollValid = NO;
+		} ppu;
+
+		struct eventViewer_t
+		{
+			static const int CAPACITY = 4096;
+			FLAG enabled = NO;
+			FLAG snapshotValid = NO;
+			uint8_t lastValues[(int)NES_DEBUG_TRACKED_REGISTER::COUNT] = { ZERO };
+			FLAG showRegister[(int)NES_DEBUG_TRACKED_REGISTER::COUNT] = { YES, YES, YES, YES, YES, YES, YES, YES };
+			NESPPUEvent_t ring[CAPACITY];
+			int head = ZERO;
+			int count = ZERO;
+			uint32_t frameCounter = ZERO;
+			int lastScanline = -1;
+		} eventViewer;
+	} nesDebugger;
+
+	std::set<uint8_t> nesVisibleSpriteIndexPerLY;
+	std::set<uint8_t> nesVisibleSpriteIndexPerFrame;
+
+	GLuint debugPatternTableTexture[2] = { ZERO, ZERO };	// two 128x128 pattern tables
+	GLuint debugNametableTexture[4] = { ZERO, ZERO, ZERO, ZERO };
+	GLuint debugOAMSpriteTexture = ZERO;
+	GLuint debugMiniScreenTexture = ZERO;
+	FLAG debugTexturesInitialized = NO;
+	GLuint debugPatternTileDetailTexture = ZERO;
+
+	GLuint debugCompositeTexture = ZERO;
+	std::array<Pixel, 256 * 240> debugCompositePixels;
+	std::array<Pixel, 8 * 8> debugPatternTileDetailPixels;
+	std::array<Pixel, 128 * 128> debugPatternTablePixels[2];
+	std::array<Pixel, 256 * 240> debugNametablePixels[4];
+	std::array<Pixel, 8 * 16 * 64> debugOAMSpritePixels;	// 64 sprites, worst case 8x16
+
+	void renderNESDebuggerUI();
+	void debugSyncScreenIfNeeded();
+
+private:
+
+	MASQ_INLINE ImU32 nesDebugGridColor(FLAG white)
+	{
+		RETURN white ? IM_COL32(255, 255, 255, 70) : IM_COL32(0, 0, 0, 90);
+	}
+
+	void renderNESDebuggerPPUTab();
+	void renderNESDebuggerEventViewerTab();
+	void renderNESDebuggerRegistersPanel();
+	void renderNESDebuggerPatternTablesPanel();
+	void renderNESDebuggerNametablesPanel();
+	void renderNESDebuggerOAMPanel();
+	void renderNESDebuggerPalettePanel();
+	void debugEnsureTexturesCreated();
+	void debugRebuildPatternTablePixels(int table, int paletteIndex);
+	void debugRebuildNametablePixels(int nametableIndex);
+	void debugRebuildOAMSpritePixels();
+	void debugRebuildPatternTileDetailPixels(int table, int tileIdx, int paletteIndex);
+	void debugRebuildCompositePixels();
+	void renderNESDebuggerCompositePanel();
+	void debugEventViewerCheck();
+
+#endif // !__RPI_PICO__
+
+#pragma endregion NES_DEBUGGER
+
+private:
+
 private:
 
 	std::unordered_map<uint32_t, NES20DBEntry_t> m_nes20db;
@@ -2186,6 +2403,251 @@ private:
 	void clockMMC3IRQ(uint16_t address, MEMORY_ACCESS_SOURCE source, FLAG isWriteOperation);
 	
 	void updateMMC5ChrA();
+
+	// Computes the 9-bit 16KB PRG bank number (A22-A14) for either the
+	// $8000-$BFFF half (isC000Window=false) or $C000-$FFFF half (true).
+	// Verified bit-for-bit against every row of the wiki's mode-value table:
+	// SS=0..3, PP={0/1,2,3} -- all 12 combinations produce the exact strings
+	// listed there ("oooooooo0", "oooooooii", etc.)
+	static uint32_t action53ComputePrgBank16k(BYTE reg80Mode, BYTE outerBits, BYTE innerBits4, bool isC000Window)
+	{
+		const BYTE outerSizeSel = (reg80Mode >> 4) & 0x03; // SS
+		const BYTE prgModeSel = (reg80Mode >> 2) & 0x03;   // PP (0 and 1 both mean "32KiB")
+
+		const bool fixed8000 = (prgModeSel == TWO);
+		const bool fixedC000 = (prgModeSel == THREE);
+		const bool thisWindowIsFixed = (isC000Window && fixedC000) || (!isC000Window && fixed8000);
+
+		if (thisWindowIsFixed)
+		{
+			// "when the fixed bank is accessed... the outer bank bits are
+			// passed straight through" -- i.e. treated as if SS were forced to 0.
+			RETURN((uint32_t)outerBits << ONE) | (isC000Window ? ONE : ZERO);
+		}
+
+		if (prgModeSel <= ONE) // both halves switchable together (BNROM/AOROM-style)
+		{
+			const BYTE numOuterBits = 8 - outerSizeSel;
+			const BYTE numInnerBits = outerSizeSel;
+			const uint32_t topOuter = (numOuterBits == ZERO) ? ZERO : ((uint32_t)outerBits >> (8 - numOuterBits));
+			const uint32_t botInner = (numInnerBits == ZERO) ? ZERO : (innerBits4 & (uint32_t)((ONE << numInnerBits) - ONE));
+			RETURN(topOuter << (numInnerBits + ONE)) | (botInner << ONE) | (isC000Window ? ONE : ZERO);
+		}
+
+		// Switchable side of a fixed/switchable pair (PP=2 or PP=3): one extra
+		// inner bit vs. the "both switchable" case, no separate literal bit --
+		// outer+inner already sum to the full 9 bits.
+		const BYTE numOuterBits = 8 - outerSizeSel;
+		const BYTE numInnerBits = outerSizeSel + ONE;
+		const uint32_t topOuter = (numOuterBits == ZERO) ? ZERO : ((uint32_t)outerBits >> (8 - numOuterBits));
+		const uint32_t botInner = innerBits4 & (uint32_t)((ONE << numInnerBits) - ONE);
+		RETURN(topOuter << numInnerBits) | botInner;
+	}
+
+	static MASQ_INLINE FLAG mapper030MainRegAtC000Only(BYTE submapperRaw, FLAG batteryBitSet)
+	{
+		if (submapperRaw == TWO) RETURN false;
+		if (submapperRaw == ONE || submapperRaw == THREE || submapperRaw == FOUR) RETURN YES;
+		RETURN batteryBitSet; // submapper 0 (also covers plain iNES1 w/ no submapper info)
+	}
+
+	static MASQ_INLINE FLAG mapper030HasBusConflicts(BYTE submapperRaw, FLAG batteryBitSet)
+	{
+		switch (submapperRaw)
+		{
+		case ONE:   RETURN NO;
+		case TWO:   RETURN YES;
+		case THREE: RETURN NO;
+		case FOUR:  RETURN NO;
+		default:    RETURN !batteryBitSet; // submapper 0: battery bit set => flashable => no conflicts
+		}
+	}
+
+	// Bits per the wiki's supervisor register: bit4=mode (0:VRC2,1:MMC3),
+	// bit5=CHR A18 for $0000-$0FFF, bit6=CHR A18 for $1000-$17FF,
+	// bit7=CHR A18 for $1800-$1FFF. Applies identically regardless of which
+	// chip (VRC2 or MMC3) supplied the native <=256KB bank value.
+	static MASQ_INLINE uint32_t mapper014ChrA18Offset(BYTE supervisorReg, uint16_t ppuAddr)
+	{
+		BIT bit;
+		if (ppuAddr < 0x1000)      bit = (supervisorReg >> 5) & 0x01;
+		else if (ppuAddr < 0x1800) bit = (supervisorReg >> 6) & 0x01;
+		else                       bit = (supervisorReg >> 7) & 0x01;
+		RETURN bit ? 0x40000u : 0x00u; // 256 KiB
+	}
+
+	// Returns the 8KB PRG bank number for `slot` (0-3, i.e. $8000/$A000/$C000/$E000)
+	// given the last-latched address/data pair. Verified against FCEUmm's
+	// src/boards/15.c Sync().
+	static MASQ_INLINE uint32_t mapper015ComputePrgBank8k(BYTE data, uint16_t latchedAddr, BYTE slot)
+	{
+		const uint32_t bank = ((uint32_t)(data & 0x3F)) << 1; // P (6 bits, 16KB units) -> 8KB units
+
+		switch (latchedAddr & 0x03)
+		{
+		case 0: // NROM-256: entire 32KB switches as one unit
+			RETURN bank + slot;
+		case 2: // NROM-64: 8KB chip, PRG A13 = p (data bit 7), mirrored across all 4 slots
+			RETURN bank | ((data >> 7) & 0x01);
+		default: // case 1 (UNROM) or case 3 (NROM-128)
+			if (slot <= ONE)
+			{
+				RETURN bank + slot; // first 16KB: switchable
+			}
+			if ((latchedAddr & 0x02) == ZERO) // case 1 (UNROM): force A14-A16 high -> fixed "last" bank
+			{
+				RETURN(bank | 0x0E) + (slot - TWO);
+			}
+			RETURN bank + (slot - TWO); // case 3 (NROM-128): mirror of the first 16KB
+		}
+	}
+
+	// ============================================================================
+	// Mapper 268 outer-bank math. Ported from FCEUmm's src/boards/268.c
+	// (NewRisingSun's reference implementation). Covers submappers 0/1 (default),
+	// 2/3, 4/5, 8/9, and the 64 MiB extension bit. Submapper 6/7's second-PRG-chip
+	// select and submapper 8/9's CHR-RAM write-protect toggle are not modeled.
+	// ============================================================================
+
+	static MASQ_INLINE uint32_t mapper268ComputePrgPage(BYTE nativeV, uint16_t cpuWindowAddr, const BYTE exReg[7], BYTE submapperRaw, bool supports64MiB)
+	{
+		const uint32_t prgMaskMMC3 =
+			((exReg[3] & 0x10) ? 0x00u : 0x0Fu)   // PRG A13-A16: GNROM mode disconnects these from MMC3 entirely
+			| ((exReg[0] & 0x40) ? 0x00u : 0x10u)   // PRG A17 (B): 0 = MMC3 passthrough
+			| ((exReg[1] & 0x80) ? 0x00u : 0x20u)   // PRG A18 (G): 0 = MMC3 passthrough
+			| ((exReg[1] & 0x40) ? 0x40u : 0x00u)   // PRG A19 (H): 1 = MMC3 passthrough
+			| ((exReg[1] & 0x20) ? 0x80u : 0x00u);  // PRG A20 (I): 1 = MMC3 passthrough
+
+		uint32_t prgMaskGNROM = ZERO;
+		uint32_t prgOffset = ZERO;
+
+		const BYTE family = (BYTE)(submapperRaw & (BYTE)~0x01);
+
+		switch (family)
+		{
+		case 2:
+			prgMaskGNROM = (exReg[3] & 0x10) ? ((exReg[1] & 0x10) ? 0x01u : 0x03u) : 0x00u;
+			prgOffset =
+				(exReg[3] & 0x00Eu)
+				| (((uint32_t)exReg[0] << 4) & 0x070u)
+				| (((uint32_t)exReg[1] << 4) & 0x080u)
+				| (((uint32_t)exReg[1] << 6) & 0x100u)
+				| (((uint32_t)exReg[1] << 8) & 0x200u)
+				| (((uint32_t)exReg[0] << 6) & 0xC00u);
+			BREAK;
+		case 4:
+			prgMaskGNROM = (exReg[3] & 0x10) ? ((exReg[1] & 0x02) ? 0x03u : 0x01u) : 0x00u;
+			prgOffset =
+				(exReg[3] & 0x00Eu)
+				| (((uint32_t)exReg[0] << 4) & 0x070u)
+				| (((uint32_t)exReg[0] << 3) & 0x180u);
+			BREAK;
+		case 6:
+			prgMaskGNROM = (exReg[3] & 0x10) ? ((exReg[1] & 0x02) ? 0x03u : 0x01u) : 0x00u;
+			prgOffset =
+				(exReg[3] & 0x00Eu)
+				| (((uint32_t)exReg[0] << 4) & 0x070u)
+				| (((uint32_t)exReg[1] << 3) & 0x080u)
+				| (((uint32_t)exReg[1] << 6) & 0x300u)
+				| (((uint32_t)exReg[0] << 6) & 0xC00u);
+			BREAK;
+		case 8:
+			prgMaskGNROM = (exReg[3] & 0x10) ? ((exReg[1] & 0x02) ? 0x03u : 0x01u) : 0x00u;
+			prgOffset =
+				(exReg[3] & 0x00Eu)
+				| (((uint32_t)exReg[0] << 4) & 0x070u)
+				| (((uint32_t)exReg[1] << 3) & 0x080u)
+				| (((uint32_t)exReg[6] << 8) & 0x300u)
+				| (((uint32_t)exReg[6] << 6) & 0xC00u);
+			BREAK;
+		default: // submappers 0/1 (and 10/11, which differ only in mirroring)
+			prgMaskGNROM = (exReg[3] & 0x10) ? ((exReg[1] & 0x02) ? 0x03u : 0x01u) : 0x00u;
+			prgOffset =
+				(exReg[3] & 0x00Eu)
+				| (((uint32_t)exReg[0] << 4) & 0x070u)
+				| (((uint32_t)exReg[1] << 3) & 0x080u)
+				| (((uint32_t)exReg[1] << 6) & 0x300u)
+				| (((uint32_t)exReg[0] << 6) & 0xC00u);
+
+			if (supports64MiB) // only a real address line on the YH2018A 64MiB variant
+			{
+				prgOffset |= ((~(uint32_t)exReg[1] << 12) & 0x1000u);
+			}
+			BREAK;
+		}
+
+		prgOffset &= ~(prgMaskMMC3 | prgMaskGNROM);
+		const uint32_t gnromBits = ((uint32_t)cpuWindowAddr >> 13) & prgMaskGNROM;
+
+		RETURN(uint32_t)(nativeV & prgMaskMMC3) | prgOffset | gnromBits;
+	}
+
+	static MASQ_INLINE uint32_t mapper268ComputeChrPage(BYTE nativeV, uint16_t ppuAddr, const BYTE exReg[7])
+	{
+		const uint32_t chrMaskMMC3 =
+			(exReg[3] & 0x10) ? 0x00u
+			: (exReg[0] & 0x80) ? 0x7Fu
+			: 0xFFu;
+
+		const uint32_t chrMaskGNROM = (exReg[3] & 0x10) ? 0x07u : 0x00u;
+
+		uint32_t chrOffset =
+			(((uint32_t)exReg[0] << 9) & 0xC00u)
+			| (((uint32_t)exReg[0] << 4) & 0x380u)
+			| (((uint32_t)exReg[2] << 3) & 0x078u);
+		chrOffset &= ~(chrMaskMMC3 | chrMaskGNROM);
+
+		const uint32_t gnromBits = ((uint32_t)ppuAddr >> 10) & chrMaskGNROM;
+
+		RETURN (uint32_t)(nativeV & chrMaskMMC3) | chrOffset | gnromBits;
+	}
+
+	static MASQ_INLINE FLAG mapper268WramReadable(BYTE a001Raw)
+	{
+		RETURN(a001Raw & 0xA0) != ZERO;
+	}
+	static MASQ_INLINE FLAG mapper268WramWritable(BYTE a001Raw)
+	{
+		RETURN (((a001Raw & 0x80) && !(a001Raw & 0x40)) || (a001Raw & 0x20));
+	}
+
+	static MASQ_INLINE void mapper268WriteReg(BYTE exReg[7], uint16_t address, BYTE data, BYTE submapperRaw)
+	{
+		const BYTE index = (BYTE)(address & 0x07);
+
+		if ((exReg[3] & 0x80) && index != TWO) // lockout: everything but reg[2] blocked
+		{
+			RETURN;
+		}
+
+		if (index == TWO)
+		{
+			if (exReg[2] & 0x80)
+			{
+				data = (BYTE)((data & 0x0F) | (exReg[2] & (BYTE)~0x0F));
+			}
+			data = (BYTE)(data & (BYTE)(~((exReg[2] >> 3) & 0x0E) | 0xF1));
+		}
+
+		if (((submapperRaw & (BYTE)~0x01) == 8) && index == ONE && (data & 0x04) && (data & 0x08))
+		{
+			exReg[6] = data;
+		}
+
+		if (index <= FIVE)
+		{
+			exReg[index] = data;
+		}
+	}
+
+	static MASQ_INLINE NAMETABLE_MIRROR mapper268ResolveMirroring(BYTE mirroringRegRaw, const BYTE exReg[7], BYTE submapperRaw)
+	{
+		if (((submapperRaw & (BYTE)~0x01) == 10) && !(exReg[0] & 0x20))
+		{
+			RETURN(exReg[0] & 0x10) ? NAMETABLE_MIRROR::ONESCREEN_HI_MIRROR : NAMETABLE_MIRROR::ONESCREEN_LO_MIRROR;
+		}
+		RETURN(mirroringRegRaw & 0x01) ? NAMETABLE_MIRROR::HORIZONTAL_MIRROR : NAMETABLE_MIRROR::VERTICAL_MIRROR;
+	}
 
 	byte readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source);
 

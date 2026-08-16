@@ -44,6 +44,7 @@ extern "C" {
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stddef.h>
 #include <math.h>
 #include <memory>
 #include <array>
@@ -474,6 +475,7 @@ extern "C" {
 #define TWOFIFTYFIVE                                255
 #define TWOFIFTYSIX                                 256
 #define TWOFIFTYSEVEN                               257
+#define TWOHUNDREDSIXTYEIGHT                        268
 #define TWOHUNDREDEIGHTY                            280
 #define TWONINTYEIGHT                               298
 #define THREEHUNDREDFOUR                            304
@@ -1284,6 +1286,20 @@ inline void logger(const char* fmt, ...)
 // =========================================================
 // UTILITY FUNCTIONS
 // =========================================================
+
+template<typename T>
+MASQ_INLINE void saveStruct(BYTE* dst, const T& src)
+{
+    static_assert(std::is_trivially_copyable_v<T>);
+    memcpy(dst, &src, sizeof(T));
+}
+
+template<typename T>
+MASQ_INLINE void loadStruct(T& dst, const BYTE* src)
+{
+    static_assert(std::is_trivially_copyable_v<T>);
+    memcpy(&dst, src, sizeof(T));
+}
 
 // --- Timing ------------------------------------------
 // Desktop uses std::chrono; Pico uses Pico SDK sleep_ms()
@@ -2374,13 +2390,14 @@ extern ROM ROM_TYPE;
 
 // Needed by NES
 extern FLAG enableZapper;
+extern FLAG nesReset;
 
 MASQ_INLINE FLAG isCLI()
 {
 #ifdef __RPI_PICO__
     RETURN NO; // Pico always runs in emulation mode
 #else
-    RETURN((ROM_TYPE == ROM::TEST_ROM_COM)
+    RETURN ((ROM_TYPE == ROM::TEST_ROM_COM)
         || (ROM_TYPE == ROM::TEST_ROM_CIM)
         || (ROM_TYPE == ROM::TEST_ROM_TAP)
         || (ROM_TYPE == ROM::TEST_ROM_BIN)
