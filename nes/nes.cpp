@@ -1904,42 +1904,36 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 			// --- PATTERN TABLES ($0000 - $1FFF) ---
 			if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
 			{
-				if (pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB == ZERO)
+				const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
+
+				// NES 2.0 identification: bits 2-3 of flag 7 must equal 2
+				const bool isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
+
+				// Calculate total 8KB banks, accounting for NES 2.0 MSB nibble if applicable
+				const uint32_t totalChr8kBanks = isNES2
+					? (hdr.sizeOfChrRomIn8KB | ((hdr.flags_8to15.nes2p0.flag9.fields.chrRomMSB & 0x0F) << EIGHT))
+					: hdr.sizeOfChrRomIn8KB;
+
+				const uint32_t totalChr1kBanks = totalChr8kBanks << THREE;
+
+				// Calculate the 1KB bank index (0 to 7) based on the current PPU address
+				// Mapper 69 allows independent mapping of eight 1KB banks
+				const uint32_t bank = address >> 10;
+				const uint32_t offset = address & 0x03FF;
+
+				// Fetch the physical bank selected by the mapper registers, scale to bytes, and add offset
+				uint32_t index = (pNES_instance->NES_state.catridgeInfo.ines069.chrBank[bank] * 0x0400) + offset;
+
+				if (hdr.sizeOfChrRomIn8KB == ZERO)
 				{
-					if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE0_END_ADDRESS))
-					{
-						RETURN pNES_ppuMemory->NESMemoryMap.patternTable.patternTable0[address - PATTERN_TABLE0_START_ADDRESS];
-					}
-					else if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE1_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
-					{
-						RETURN pNES_ppuMemory->NESMemoryMap.patternTable.patternTable1[address - PATTERN_TABLE1_START_ADDRESS];
-					}
+					// 8KB CHR-RAM
+					index &= 0x1FFF;
+					RETURN pNES_ppuMemory->NESMemoryMap.patternTable.raw[index];
 				}
 				else
 				{
-					const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
-
-					// NES 2.0 identification: bits 2-3 of flag 7 must equal 2
-					const bool isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
-
-					// Calculate total 8KB banks, accounting for NES 2.0 MSB nibble if applicable
-					const uint32_t totalChr8kBanks = isNES2
-						? (hdr.sizeOfChrRomIn8KB | ((hdr.flags_8to15.nes2p0.flag9.fields.chrRomMSB & 0x0F) << EIGHT))
-						: hdr.sizeOfChrRomIn8KB;
-
-					const uint32_t totalChr1kBanks = totalChr8kBanks << THREE;
-
-					// Calculate the 1KB bank index (0 to 7) based on the current PPU address
-					// Mapper 69 allows independent mapping of eight 1KB banks
-					const uint32_t bank = address >> 10;
-					const uint32_t offset = address & 0x03FF;
-
-					// Fetch the physical bank selected by the mapper registers, scale to bytes, and add offset
-					uint32_t index = (pNES_instance->NES_state.catridgeInfo.ines069.chrBank[bank] * 0x0400) + offset;
-
-					// Mirroring guard: Wrap around if the mapper selects a bank higher than what exists
+					// CHR-ROM bank wrapping
 					index %= (totalChr1kBanks * 0x0400);
-
 					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index];
 				}
 			}
@@ -2749,7 +2743,6 @@ void NES_t::writePpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 		case MAPPER::INES_MAPPER_034:
 		case MAPPER::INES_MAPPER_067:
 		case MAPPER::INES_MAPPER_068:
-		case MAPPER::INES_MAPPER_069:
 		case MAPPER::INES_MAPPER_070:
 		case MAPPER::INES_MAPPER_152:
 		case MAPPER::MMC5:
@@ -2764,6 +2757,29 @@ void NES_t::writePpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 				else if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE1_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
 				{
 					pNES_ppuMemory->NESMemoryMap.patternTable.patternTable1[address - PATTERN_TABLE1_START_ADDRESS] = data;
+				}
+			}
+			BREAK;
+		}
+		case MAPPER::INES_MAPPER_069:
+		{
+			if (pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB == ZERO)
+			{
+				if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
+				{
+					const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
+
+					// Calculate the 1KB bank index (0 to 7) based on the current PPU address
+					// Mapper 69 allows independent mapping of eight 1KB banks
+					const uint32_t bank = address >> 10;
+					const uint32_t offset = address & 0x03FF;
+
+					// Fetch the physical bank selected by the mapper registers, scale to bytes, and add offset
+					uint32_t index = (pNES_instance->NES_state.catridgeInfo.ines069.chrBank[bank] * 0x0400) + offset;
+
+					// 8KB CHR-RAM
+					index &= 0x1FFF;
+					pNES_ppuMemory->NESMemoryMap.patternTable.raw[index] = data;
 				}
 			}
 			BREAK;
@@ -14762,7 +14778,17 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 					}
 					else
 					{
-						WARN("Mapper 069 requires CHR-ROM, but size is 0");
+						// CHR-RAM powers on as whatever your normal RAM initialization
+						// establishes. Mapper 69 bank registers are already zeroed above.
+						memset(
+							pNES_ppuMemory->NESMemoryMap.patternTable.patternTable0,
+							0,
+							sizeof(pNES_ppuMemory->NESMemoryMap.patternTable.patternTable0));
+
+						memset(
+							pNES_ppuMemory->NESMemoryMap.patternTable.patternTable1,
+							0,
+							sizeof(pNES_ppuMemory->NESMemoryMap.patternTable.patternTable1));
 					}
 
 					BREAK;
