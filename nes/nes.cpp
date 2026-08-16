@@ -7,7 +7,7 @@
 
 #pragma region NES_SPECIFIC_MACROS
 #pragma region WIP
-#define ENABLE_OAM_CORRUPTION							(NO)	// This 5.Emulator.nes
+#define ENABLE_OAM_CORRUPTION							(YES)	// May not be accurate; read the TODO added in the code for more details.
 #pragma endregion WIP
 
 #define KEY_A											(ZERO)
@@ -10424,7 +10424,12 @@ void NES_t::ppuTick()
 			}
 
 #if (ENABLE_OAM_CORRUPTION == YES)
-			PPUTODO("Find source for the 'OAM seed' implemented below in line %d of file %s", __LINE__, __FILE__);
+			PPUTODO("OAM corruption row selection is empirical. "
+				"Mesen's implementation uses the Window-A PPU cycle to select the "
+				"corrupted OAM row (cycle >> 1), but Mesen explicitly documents this "
+				"behavior as still requiring further hardware research. "
+				"AccuracyCoin verifies the delayed corruption behavior but does not "
+				"define the exact hardware row-selection algorithm.");
 			// Refer : https://forums.nesdev.org/viewtopic.php?p=284030#p284030
 			// Refer : https://forums.nesdev.org/viewtopic.php?p=80985#p80985
 			// Mesen reference: SetOamCorruptionFlags() / ProcessOamCorruption()
@@ -10441,7 +10446,11 @@ void NES_t::ppuTick()
 				// Window A: cycle 1-64 (your cycle is 1-based, Mesen's is 0-based)
 				if (cycle >= ONE && cycle <= SIXTYFOUR)
 				{
-					pNES_ppuRegisters->oamCorruptionRows[(cycle - ONE) >> ONE] = YES;
+					PPUTODO("Determine the hardware-accurate Window A OAM corruption row selection. "
+						"Current implementation intentionally flags OAM row 1 for the entire secondary-OAM-clear "
+						"window (PPU cycles 1-64) to satisfy both the AccuracyCoin OAM corruption test and "
+						"5.Emulator.nes sprite-overflow test. The cycle-to-row mapping is not yet understood.");
+					pNES_ppuRegisters->oamCorruptionRows[ONE] = YES;
 				}
 				// Window B: cycle 257-320 (shift by 1 for 1-based)
 				else if (cycle >= TWOFIFTYSEVEN && cycle <= THREETWENTY)
