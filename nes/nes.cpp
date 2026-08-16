@@ -12343,6 +12343,10 @@ void NES_t::initializeAudio()
 
 	// Refer to https://forums.nesdev.org/viewtopic.php?p=163287#p163287
 	pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)].dmc.bitsInOutputUnit = ONE;
+
+	// Needed by DmcPowerOnBuzz.nes
+	pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)].dmc.dmcSampleAddress = 0xC000;
+	pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)].dmc.dmcSampleLength = ONE;
 }
 
 // TODO: Below function is not used for now...
