@@ -782,10 +782,10 @@ jobs:
           }
 
           # ── Hosting — only replace masquerade files, keep index.html etc. ──
-          cp ../artifacts/emscripten/masquerade.data  hosting/
-          cp ../artifacts/emscripten/masquerade.html  hosting/
-          cp ../artifacts/emscripten/masquerade.js    hosting/
-          cp ../artifacts/emscripten/masquerade.wasm  hosting/
+          cp ../artifacts/emscripten/masquerade.data  hosting/wasm/
+          cp ../artifacts/emscripten/masquerade.html  hosting/wasm/
+          cp ../artifacts/emscripten/masquerade.js    hosting/wasm/
+          cp ../artifacts/emscripten/masquerade.wasm  hosting/wasm/
           echo "✅ Hosting placed"
 
           # ── LICENSE.md → Emulator repo root ──────────────────────────────

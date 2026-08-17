@@ -801,7 +801,7 @@ uint8_t GBc_t::getRTCRegisterNumber()
 	else
 	{
 		FATAL("RTC is disabled");
-		RETURN(uint8_t)INVALID;
+		RETURN (uint8_t)INVALID;
 	}
 }
 
@@ -843,15 +843,15 @@ int GBc_t::readFromRTCRegisterIfApplicable()
 	{
 		if (getRTCRegisterNumber() == 0x08)
 		{
-			RETURN(pGBc_instance->GBc_state.rtcLatched.rtcFields.rtc_S & 0x3F);
+			RETURN (pGBc_instance->GBc_state.rtcLatched.rtcFields.rtc_S & 0x3F);
 		}
 		else if (getRTCRegisterNumber() == 0x09)
 		{
-			RETURN(pGBc_instance->GBc_state.rtcLatched.rtcFields.rtc_M & 0x3F);
+			RETURN (pGBc_instance->GBc_state.rtcLatched.rtcFields.rtc_M & 0x3F);
 		}
 		else if (getRTCRegisterNumber() == 0x0A)
 		{
-			RETURN(pGBc_instance->GBc_state.rtcLatched.rtcFields.rtc_H & 0x1F);
+			RETURN (pGBc_instance->GBc_state.rtcLatched.rtcFields.rtc_H & 0x1F);
 		}
 		else if (getRTCRegisterNumber() == 0x0B)
 		{
@@ -859,7 +859,7 @@ int GBc_t::readFromRTCRegisterIfApplicable()
 		}
 		else if (getRTCRegisterNumber() == 0x0C)
 		{
-			RETURN(pGBc_instance->GBc_state.rtcLatched.rtcFields.rtc_DH.rtcDHMemory & 0xC1);
+			RETURN (pGBc_instance->GBc_state.rtcLatched.rtcFields.rtc_DH.rtcDHMemory & 0xC1);
 		}
 	}
 
@@ -973,7 +973,7 @@ void GBc_t::setROMBankNumber(uint16_t romBankNumber)
 
 uint16_t GBc_t::getROMBankNumber()
 {
-	RETURN((pGBc_emuStatus->currentROMBankNumber.raw) % (getNumberOfROMBanksUsed()));
+	RETURN ((pGBc_emuStatus->currentROMBankNumber.raw) % (getNumberOfROMBanksUsed()));
 }
 
 #ifndef __RPI_PICO__
@@ -985,7 +985,7 @@ void GBc_t::setROMBankNumberB(uint16_t romBankNumber)
 
 uint16_t GBc_t::getROMBankNumberB()
 {
-	RETURN((pGBc_emuStatus->currentROMBankNumberB) % (getNumberOfROMBanksUsed()));
+	RETURN ((pGBc_emuStatus->currentROMBankNumberB) % (getNumberOfROMBanksUsed()));
 }
 
 uint16_t GBc_t::getNumberOfROMBanksUsed()
@@ -3049,7 +3049,7 @@ SIGNAL GBc_t::getTIMASignalForGB()
 		pGBc_instance->GBc_state.emulatorStatus.instantTimerIF = NO;
 	}
 
-	RETURN(((FLAG)pGBc_peripherals->TAC.timerControlFields.TIMER_ENABLE) && ((FLAG)getDIVSpecialBitStatus(getWhichGBTimerToUse())));
+	RETURN (((FLAG)pGBc_peripherals->TAC.timerControlFields.TIMER_ENABLE) && ((FLAG)getDIVSpecialBitStatus(getWhichGBTimerToUse())));
 }
 
 BYTE GBc_t::getGBTimer()
@@ -4328,12 +4328,12 @@ void GBc_t::setPPULCDMode(LCD_MODES lcdMode)
 
 GBc_t::LCD_MODES GBc_t::getPPULCDMode()
 {
-	RETURN(LCD_MODES)pGBc_peripherals->STAT.lcdStatusFields.MODE;
+	RETURN (LCD_MODES)pGBc_peripherals->STAT.lcdStatusFields.MODE;
 }
 
 FLAG GBc_t::isPPULCDEnabled()
 {
-	RETURN(pGBc_peripherals->LCDC.lcdControlFields.LCD_PPU_ENABLE == ONE);
+	RETURN (pGBc_peripherals->LCDC.lcdControlFields.LCD_PPU_ENABLE == ONE);
 }
 
 void GBc_t::compareLYToLYC(ID LY)
@@ -7445,7 +7445,7 @@ FLAG GBc_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 	}
 #endif
 
-	RETURN(pGBc_display->wasVblankJustTriggerred
+	RETURN (pGBc_display->wasVblankJustTriggerred
 #ifndef __RPI_PICO__
 		|| gbcDebugger.ppu.paused == YES
 		|| shouldYieldForSampleMode == YES
@@ -8926,70 +8926,70 @@ uint16_t GBc_t::cpuReadRegister(REGISTER_TYPE rt)
 		// Normal Register access
 	case REGISTER_TYPE::RT_A:
 	{
-		RETURN(pGBc_registers->af.aAndFRegisters.a & 0x00FF); BREAK;
+		RETURN (pGBc_registers->af.aAndFRegisters.a & 0x00FF); BREAK;
 	}
 	case REGISTER_TYPE::RT_F:
 	{
-		RETURN(pGBc_registers->af.aAndFRegisters.f.flagMemory & 0x00FF); BREAK;
+		RETURN (pGBc_registers->af.aAndFRegisters.f.flagMemory & 0x00FF); BREAK;
 	}
 	case REGISTER_TYPE::RT_B:
 	{
-		RETURN(pGBc_registers->bc.bAndCRegisters.b & 0x00FF); BREAK;
+		RETURN (pGBc_registers->bc.bAndCRegisters.b & 0x00FF); BREAK;
 	}
 	case REGISTER_TYPE::RT_C:
 	{
-		RETURN(pGBc_registers->bc.bAndCRegisters.c & 0x00FF); BREAK;
+		RETURN (pGBc_registers->bc.bAndCRegisters.c & 0x00FF); BREAK;
 	}
 	case REGISTER_TYPE::RT_D:
 	{
-		RETURN(pGBc_registers->de.dAndERegisters.d & 0x00FF); BREAK;
+		RETURN (pGBc_registers->de.dAndERegisters.d & 0x00FF); BREAK;
 	}
 	case REGISTER_TYPE::RT_E:
 	{
-		RETURN(pGBc_registers->de.dAndERegisters.e & 0x00FF); BREAK;
+		RETURN (pGBc_registers->de.dAndERegisters.e & 0x00FF); BREAK;
 	}
 	case REGISTER_TYPE::RT_H:
 	{
-		RETURN(pGBc_registers->hl.hAndLRegisters.h & 0x00FF); BREAK;
+		RETURN (pGBc_registers->hl.hAndLRegisters.h & 0x00FF); BREAK;
 	}
 	case REGISTER_TYPE::RT_L:
 	{
-		RETURN(pGBc_registers->hl.hAndLRegisters.l & 0x00FF); BREAK;
+		RETURN (pGBc_registers->hl.hAndLRegisters.l & 0x00FF); BREAK;
 	}
 
 	case REGISTER_TYPE::RT_PC:
 	{
-		RETURN(GET_PC() & 0xFFFF); BREAK;
+		RETURN (GET_PC() & 0xFFFF); BREAK;
 	}
 	case REGISTER_TYPE::RT_SP:
 	{
-		RETURN(pGBc_registers->sp & 0xFFFF); BREAK;
+		RETURN (pGBc_registers->sp & 0xFFFF); BREAK;
 	}
 
 	case REGISTER_TYPE::RT_AF:
 	{
-		RETURN(pGBc_registers->af.af_u16memory & 0xFFFF); BREAK;
+		RETURN (pGBc_registers->af.af_u16memory & 0xFFFF); BREAK;
 	}
 	case REGISTER_TYPE::RT_BC:
 	{
-		RETURN(pGBc_registers->bc.bc_u16memory & 0xFFFF); BREAK;
+		RETURN (pGBc_registers->bc.bc_u16memory & 0xFFFF); BREAK;
 	}
 	case REGISTER_TYPE::RT_DE:
 	{
-		RETURN(pGBc_registers->de.de_u16memory & 0xFFFF); BREAK;
+		RETURN (pGBc_registers->de.de_u16memory & 0xFFFF); BREAK;
 	}
 	case REGISTER_TYPE::RT_HL:
 	{
-		RETURN(pGBc_registers->hl.hl_u16memory & 0xFFFF); BREAK;
+		RETURN (pGBc_registers->hl.hl_u16memory & 0xFFFF); BREAK;
 	}
 
 	case REGISTER_TYPE::RT_NONE:
 	{
-		RETURN(uint16_t)NULL;  BREAK;
+		RETURN (uint16_t)NULL;  BREAK;
 	}
 	default:
 	{
-		RETURN(uint16_t)NULL; BREAK;
+		RETURN (uint16_t)NULL; BREAK;
 	}
 	}
 }
@@ -9331,7 +9331,7 @@ byte GBc_t::readRawMemory(uint16_t address
 						}
 						else
 						{
-							RETURN(flashAddr < sizeof(pGBc_emuStatus->mbc6.flash)) ? pGBc_emuStatus->mbc6.flash.raw[flashAddr] : 0xFF;
+							RETURN (flashAddr < sizeof(pGBc_emuStatus->mbc6.flash)) ? pGBc_emuStatus->mbc6.flash.raw[flashAddr] : 0xFF;
 						}
 					}
 					else
@@ -9371,7 +9371,7 @@ byte GBc_t::readRawMemory(uint16_t address
 						}
 						else
 						{
-							RETURN(flashAddr < sizeof(pGBc_emuStatus->mbc6.flash)) ? pGBc_emuStatus->mbc6.flash.raw[flashAddr] : 0xFF;
+							RETURN (flashAddr < sizeof(pGBc_emuStatus->mbc6.flash)) ? pGBc_emuStatus->mbc6.flash.raw[flashAddr] : 0xFF;
 						}
 					}
 					else
@@ -9520,7 +9520,7 @@ byte GBc_t::readRawMemory(uint16_t address
 				{
 					if (readFromRTCRegisterIfApplicable() != INVALID)
 					{
-						RETURN(BYTE)readFromRTCRegisterIfApplicable();
+						RETURN (BYTE)readFromRTCRegisterIfApplicable();
 					}
 					else
 					{
@@ -9561,7 +9561,7 @@ byte GBc_t::readRawMemory(uint16_t address
 				}
 				case 0xA080:
 				{
-					RETURN(uint8_t)(
+					RETURN (uint8_t)(
 						((e.eepromDO ? 1u : 0u)) |  // bit 0: DO
 						((e.eepromDI ? 1u : 0u) << 1) |  // bit 1: DI (echoed back)
 						((e.eepromCLK ? 1u : 0u) << 6) |  // bit 6: CLK (echoed back)
@@ -9720,7 +9720,7 @@ byte GBc_t::readRawMemory(uint16_t address
 
 				// Extract high nibble of lower byte and duplicate it
 				BYTE highNibble = (address >> 4) & 0x0F;
-				RETURN(highNibble << 4) | highNibble;
+				RETURN (highNibble << 4) | highNibble;
 			}
 			else if (ROM_TYPE == ROM::GAME_BOY)
 			{
@@ -10002,7 +10002,7 @@ byte GBc_t::readRawMemory(uint16_t address
 		// reading LY; only 0 - 6 bits are valid
 		if (address == LY_ADDRESS)
 		{
-			RETURN(isPPULCDEnabled()) ? pGBc_peripherals->LY : ZERO;
+			RETURN (isPPULCDEnabled()) ? pGBc_peripherals->LY : ZERO;
 		}
 
 		// reading from KEY0
@@ -10352,7 +10352,7 @@ byte GBc_t::readRawMemory(uint16_t address
 						* pGBc_instance->GBc_state.audio.audioChannelInstance[AUDIO_CHANNELS::CHANNEL_2].currentVolume;
 				}
 
-				RETURN(ch2_pcm << FOUR) | (ch1_pcm & 0x0F);
+				RETURN (ch2_pcm << FOUR) | (ch1_pcm & 0x0F);
 			}
 			else if (ROM_TYPE == ROM::GAME_BOY)
 			{
@@ -10386,7 +10386,7 @@ byte GBc_t::readRawMemory(uint16_t address
 						* pGBc_instance->GBc_state.audio.audioChannelInstance[AUDIO_CHANNELS::CHANNEL_4].currentVolume;
 				}
 
-				RETURN(ch4_pcm << 4) | (ch3_pcm & 0x0F);
+				RETURN (ch4_pcm << 4) | (ch3_pcm & 0x0F);
 			}
 			else if (ROM_TYPE == ROM::GAME_BOY)
 			{
@@ -10419,7 +10419,7 @@ byte GBc_t::readRawMemory(uint16_t address
 		else
 		{
 			FATAL("GB-GBC memory buffer overflow");
-			RETURN(byte)INVALID;
+			RETURN (byte)INVALID;
 		}
 	}
 }
@@ -13210,7 +13210,6 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 			// Refer : https://github.com/Gekkio/mooneye-test-suite/blob/main/acceptance/oam_dma_start.s
 
 			pGBc_peripherals->DMA = data;
-			//SETBIT(ENABLE_LOGS, LOG_VERBOSITY_DISASSEMBLY);
 
 			if (source == MEMORY_ACCESS_SOURCE::BESS)
 			{

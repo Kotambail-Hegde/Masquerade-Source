@@ -1373,8 +1373,7 @@ void GBcPrinterEngine_t::dispatchCommand()
 			// Real print time scales with number of sheets -- one sheet's
 			// worth of burn+feed time per copy, not a flat duration
 			// regardless of numSheets.
-			printTicksRemaining = PRINT_DURATION_TICKS *
-				std::max<uint32_t>(1, printArgs.numSheets);
+			printTicksRemaining = PRINT_DURATION_TICKS * std::max<uint32_t>(1, printArgs.numSheets);
 		}
 		else
 		{

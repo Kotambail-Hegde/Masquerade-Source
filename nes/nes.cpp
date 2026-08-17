@@ -13958,7 +13958,7 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 							pINES->completeROM + offset,
 							pAbsolute_NES_instance->absolute_NES_state.aboutRom.codeRomSize - offset);
 
-						if (crc_db == 0xF312D1DEu)
+						if ((crc_db == 0xF312D1DEu) || (crc_db == 0x633AFe6Fu))
 						{
 							pNES_instance->NES_state.catridgeInfo.mmc3.isRevA = YES;
 						}
