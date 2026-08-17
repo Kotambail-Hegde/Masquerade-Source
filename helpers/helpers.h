@@ -144,6 +144,7 @@ extern "C" {
 
 // ---- Emscripten / ImGui / GLAD / SDL / NFD -----------
 #ifndef ENABLE_OTA_EXECUTABLE
+#ifndef ENABLE_SERVER_EXECUTABLE
 #pragma region EMSCRIPTEN_INCLUDES
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -170,6 +171,7 @@ extern "C" {
 #include <glad/glad.h>
 #endif
 #pragma endregion GLAD_INCLUDES
+#endif // !ENABLE_OTA_EXECUTABLE 
 
 #pragma region SDL_INCLUDES
 #include <SDL3/SDL.h>
@@ -179,6 +181,9 @@ extern "C" {
 #include <SDL3/SDL_opengl.h>
 #endif
 #include <SDL3/SDL_version.h>
+#ifndef __EMSCRIPTEN__
+#include <SDL3_net/SDL_net.h>
+#endif
 #pragma endregion SDL_INCLUDES
 
 #pragma region NFD_INCLUDES
@@ -1163,7 +1168,7 @@ inline void logger(const char* fmt, ...)
 #else // !__RPI_PICO__ — full desktop logger with ImGui sink
 
 // --- Desktop helpers ----------------------------------
-#ifndef ENABLE_OTA_EXECUTABLE
+#if !defined(ENABLE_OTA_EXECUTABLE) && !defined(ENABLE_SERVER_EXECUTABLE)
 
 template<typename... T>
 MASQ_INLINE void dummy(T...) 
@@ -1267,7 +1272,7 @@ inline void logger(const char* fmt, ...)
     va_list args;
     va_start(args, fmt);
 
-#ifndef ENABLE_OTA_EXECUTABLE
+#if !defined(ENABLE_OTA_EXECUTABLE) && !defined(ENABLE_SERVER_EXECUTABLE)
     if (isAppLoggingEnabled == YES)
     {
         va_list args_copy;
@@ -1787,7 +1792,7 @@ MASQ_INLINE int extract_all_to_persistent_dir(const char* zip_path,
 #endif // __EMSCRIPTEN__
 #endif // !__RPI_PICO__
 
-#ifndef ENABLE_OTA_EXECUTABLE
+#if !defined(ENABLE_OTA_EXECUTABLE) && !defined(ENABLE_SERVER_EXECUTABLE)
 // --- File list helpers (desktop only) ----------------
 #ifndef __RPI_PICO__
 MASQ_INLINE void writeDequeToFile(const std::deque<std::string>& myDeque,
@@ -2266,19 +2271,6 @@ const uint8_t parityLUT[0x100] = {
 1,0,0,1,0,1,1,0,0,1,1,0,1,0,0,1,0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0,
 0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0,1,0,0,1,0,1,1,0,0,1,1,0,1,0,0,1
 };
-
-// --- Network serial types (desktop only) -------------
-#ifndef __RPI_PICO__
-enum class serialMsg : uint32_t
-{
-    Server_GetStatus, Server_GetPing,
-    Client_Accepted, Client_AssignID, Client_RegisterWithServer, Client_UnregisterWithServer,
-    Game_SendBit, Game_ReceiveBit, Game_HeartBeat,
-};
-typedef struct {
-    uint32_t ID; BIT data; SIGNAL heartBeat; uint16_t pad0;
-} gameSerialData;
-#endif // !__RPI_PICO__
 
 // =========================================================
 // CRC-32 — used on all platforms for save-state IDs
@@ -3002,3 +2994,64 @@ private:
 #endif // !__RPI_PICO__ (shader section)
 
 #endif // !ENABLE_OTA_EXECUTABLE
+
+// --- Network serial types (desktop only) -------------
+#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__)
+enum class LinkMsg : uint32_t
+{
+    CLIENT_HELLO,
+    SERVER_ASSIGN_SLOT,
+    SERVER_ROSTER, 
+    SERIAL_BYTE_REQUEST,
+    SERIAL_BYTE_REPLY,
+    HEARTBEAT,
+    TEST_PACKET
+};
+
+// Purely a client-side routing hint -- the server treats this as opaque
+// payload, same as serialByte. It exists so the LEADER's own local GB
+// core (tickSerialLink/tickSerialLinkAsSlave, servicing its OWN game ROM's
+// direct serial exchange) never accidentally consumes bytes that were
+// actually meant for its adapter-emulation module, and vice versa.
+// Followers set this too, purely so a byte they send is unambiguous about
+// which "conversation" it belongs to once it reaches the leader.
+enum class LinkChannel : uint32_t
+{
+    DIRECT_LINK, // ordinary 2-GB link exchange -- tickSerialLink()/tickSerialLinkAsSlave() only
+    ADAPTER,     // leader<->follower DMG-07 emulation traffic -- adapter module only, NEVER the direct-link path
+};
+
+struct LinkMessage_t
+{
+    LinkMsg  type;
+    uint32_t slotID;
+    BYTE     serialByte;
+    uint32_t sequence;
+    // Valid only when type == SERVER_ROSTER. Bit N set = slot N currently
+    // connected. Every client recomputes its role from this single fact
+    // every time it changes -- never from "what I've seen happen so far."
+    uint32_t connectedSlotBitmask;
+    LinkChannel channel;
+};
+
+enum class LinkConnectionState
+{
+    DISCONNECTED,
+    CONNECTING,
+    CONNECTED,
+    LINK_READY
+};
+
+struct NetworkUIState_t
+{
+    char hostAddress[256] = "127.0.0.1";
+    char portText[16] = "7777";
+
+    FLAG showConnectPopup = NO;
+    FLAG showTestConsole = NO;
+
+    char testByteText[3] = "00";
+
+    std::vector<BYTE> receivedTestBytes;
+};
+#endif // !__RPI_PICO__ && !__EMSCRIPTEN__

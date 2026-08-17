@@ -41,7 +41,6 @@
 #if MASQ_ENABLE_GBA
 #include "gba.h"
 #endif
-#pragma endregion INCLUDES
 
 // =========================================================
 // DESKTOP-ONLY INCLUDES  (SDL / ImGui / STB / DWM)
@@ -62,6 +61,7 @@
 #pragma endregion WINDOWS_INCLUDES
 
 #endif // !__RPI_PICO__
+#pragma endregion INCLUDES
 
 // =========================================================
 // GLOBAL INFRASTRUCTURE DECLARATIONS
@@ -444,8 +444,6 @@ FLAG     _ENABLE_DISASSEMBLER = NO;
 uint32_t _XSCALE = ONE;
 FLAG     _ENABLE_FRAME_LIMIT = NO;
 uint32_t _XFPS = ONE;
-FLAG     _ENABLE_NETWORK = NO;
-int32_t  _NETWORK_TIMEOUT_LIMIT = ONE;
 FLAG     _ENABLE_QUICK_SAVE = YES;
 FLAG     _ENABLE_BESS_FORMAT = NO;
 FLAG     _ENABLE_REWIND = NO;
@@ -656,7 +654,7 @@ FLAG LoadImageTextureFromMemory(const void* data, size_t data_size, GLuint* out_
 
 	unsigned char* image_data = stbi_load_from_memory((const unsigned char*)data, (int)data_size, &image_width, &image_height, NULL, 4);
 	if (image_data == NULL)
-		return false;
+		RETURN false;
 
 	GLuint image_texture;
 	GL_CALL(glGenTextures(1, &image_texture));
@@ -670,7 +668,7 @@ FLAG LoadImageTextureFromMemory(const void* data, size_t data_size, GLuint* out_
 	*out_texture = image_texture;
 	*out_width = image_width;
 	*out_height = image_height;
-	return true;
+	RETURN true;
 }
 
 // Open and read a file, then forward to LoadImageTextureFromMemory()
@@ -690,13 +688,405 @@ FLAG LoadTextureFromFile(const char* file_name, GLuint* out_texture, int* out_wi
 
 	FLAG ret = LoadImageTextureFromMemory(file_data, file_size, out_texture, out_width, out_height);
 	IM_FREE(file_data);
-	return ret;
+	RETURN ret;
 }
 
 #pragma endregion STB
 #endif // !__RPI_PICO__
 
 #pragma endregion GLOBAL_INFRASTRUCTURE_DEFINITION
+
+#ifndef __EMSCRIPTEN__
+#pragma region NETWORK_HELPERS
+FLAG abstractEmulationLinkSession_t::connect(const char* hostAddress, uint16_t port)
+{
+	connectionState = LinkConnectionState::CONNECTING;
+
+	lastError.clear();
+
+	NET_Address* address = NET_ResolveHostname(hostAddress);
+	if (address == nullptr)
+	{
+		lastError = "Failed to resolve host: ";
+		lastError += hostAddress;
+
+		INFO("LinkSession: failed to resolve %s", hostAddress);
+		connectionState = LinkConnectionState::DISCONNECTED;
+		RETURN FAILURE;
+	}
+
+	// One-time blocking wait, acceptable here (see class comment) --
+	// this is a user clicking "Connect," not a per-frame call.
+	NET_WaitUntilResolved(address, 2000);
+
+	socket = NET_CreateClient(address, port, 0);
+	NET_UnrefAddress(address);
+
+	if (socket == nullptr)
+	{
+		lastError = SDL_GetError();
+
+		INFO("LinkSession: NET_CreateClient failed: %s", SDL_GetError());
+		connectionState = LinkConnectionState::DISCONNECTED;
+		RETURN FAILURE;
+	}
+
+	if (!NET_WaitUntilConnected(socket, 2000))
+	{
+		lastError = "Connection timed out";
+
+		INFO("LinkSession: connection to %s:%u timed out", hostAddress, port);
+		NET_DestroyStreamSocket(socket);
+		socket = nullptr;
+		connectionState = LinkConnectionState::DISCONNECTED;
+		RETURN FAILURE;
+	}
+
+	connectionState = LinkConnectionState::CONNECTED;
+
+	LinkMessage_t hello{};
+	hello.type = LinkMsg::CLIENT_HELLO;
+	hello.slotID = ZERO; // not yet assigned
+	hello.serialByte = ZERO;
+	hello.sequence = txSequenceCounter++;
+
+	NET_WriteToStreamSocket(socket, &hello, sizeof(hello));
+
+	RETURN SUCCESS;
+}
+
+void abstractEmulationLinkSession_t::disconnect()
+{
+	if (socket != nullptr)
+	{
+		NET_DestroyStreamSocket(socket);
+		socket = nullptr;
+	}
+
+	connectionState = LinkConnectionState::DISCONNECTED;
+	assignedSlot = ZERO;
+	peerCount = ZERO;
+	rxAccumulator.clear();
+	transferPending = NO;
+	hasReply = NO;
+	pendingSlaveBytes.clear();
+	hasUnclaimedTestPacket = NO;
+	lastReceivedTestPacket = ZERO;
+	lastError.clear();
+}
+
+void abstractEmulationLinkSession_t::update()
+{
+	if (socket == nullptr)
+	{
+		RETURN;
+	}
+
+	// Self-throttled: callers may invoke this far more often than any
+	// real socket read is useful -- see the member comment on
+	// lastNetworkPollMs. Safe to call from multiple independent places
+	// (serialTick(), the ImGui frame loop) at once; whichever calls it
+	// first in a given ~1ms window does the real work, the rest are
+	// cheap early-returns.
+	uint64_t nowMs = SDL_GetTicks();
+	if (nowMs - lastNetworkPollMs < NETWORK_POLL_INTERVAL_MS)
+	{
+		RETURN;
+	}
+	lastNetworkPollMs = nowMs;
+
+	// Non-blocking: read whatever's available right now, however much
+	// (or little) that is.
+	BYTE readScratch[256];
+	int bytesRead = NET_ReadFromStreamSocket(socket, readScratch, sizeof(readScratch));
+
+	if (bytesRead > 0)
+	{
+		rxAccumulator.insert(rxAccumulator.end(), readScratch, readScratch + bytesRead);
+		processAccumulatedMessages();
+	}
+	else if (bytesRead < 0)
+	{
+		INFO("LinkSession: read error, disconnecting: %s", SDL_GetError());
+		disconnect();
+	}
+	// bytesRead == 0: nothing available right now, nothing to do.
+}
+
+void abstractEmulationLinkSession_t::setLocalReplyByte(BYTE replyByte)
+{
+	localReplyByte = replyByte;
+}
+
+void abstractEmulationLinkSession_t::processAccumulatedMessages()
+{
+	// Loop in case multiple full messages arrived in a single read.
+	while (rxAccumulator.size() >= sizeof(LinkMessage_t))
+	{
+		LinkMessage_t message;
+		memcpy(&message, rxAccumulator.data(), sizeof(LinkMessage_t));
+
+		handleMessage(message);
+
+		rxAccumulator.erase(rxAccumulator.begin(), rxAccumulator.begin() + sizeof(LinkMessage_t));
+	}
+}
+
+void abstractEmulationLinkSession_t::handleMessage(const LinkMessage_t& message)
+{
+	switch (message.type)
+	{
+	case LinkMsg::SERVER_ASSIGN_SLOT:
+	{
+		assignedSlot = message.slotID;
+		connectionState = LinkConnectionState::LINK_READY;
+		INFO("[%llu] LinkSession: assigned slot %u", (unsigned long long)SDL_GetTicks(), assignedSlot);
+		BREAK;
+	}
+	case LinkMsg::SERIAL_BYTE_REQUEST:
+	{
+		if (message.channel == LinkChannel::ADAPTER)
+		{
+			// Leader<->follower adapter traffic. Does NOT go through
+			// pendingSlaveBytes -- that queue belongs exclusively to
+			// tickSerialLinkAsSlave(), which services the LOCAL GB core's
+			// own direct-link exchange. Nothing about a follower's raw
+			// byte here should ever reach that path, or the leader's own
+			// game ROM would receive a peer's adapter byte as if it were
+			// its own serial partner's reply -- exactly the corruption
+			// you flagged. Reply-sending and queuing are TODO, owned by
+			// the (not yet built) adapter module, not this generic layer.
+			// TODO: hand off to the adapter module once it exists:
+			//   adapterModule.onFollowerByteReceived(message.slotID, message.serialByte);
+			BREAK;
+		}
+
+		// The peer is acting as master for this exchange -- reply
+		// IMMEDIATELY, with whatever localReplyByte currently holds
+		// (see setLocalReplyByte()), regardless of our own local
+		// CLOCK_SELECT/TRANSFER_ENABLE state. This is what breaks the
+		// deadlock: we must not wait for our own local slave branch to
+		// get around to answering.
+		if (socket != nullptr)
+		{
+			LinkMessage_t reply{};
+			reply.type = LinkMsg::SERIAL_BYTE_REPLY;
+			reply.slotID = assignedSlot;
+			reply.serialByte = localReplyByte;
+			reply.sequence = message.sequence; // echo their sequence back, not ours
+			NET_WriteToStreamSocket(socket, &reply, sizeof(reply));
+		}
+
+		// Queue the byte THEY sent -- that's what our local SB receives,
+		// same as real hardware (master's outgoing byte = slave's
+		// incoming byte). tickSerialLinkAsSlave() picks this up.
+		pendingSlaveBytes.push_back(message.serialByte);
+		BREAK;
+	}
+	case LinkMsg::SERIAL_BYTE_REPLY:
+	{
+		if (message.channel == LinkChannel::ADAPTER)
+		{
+			// A follower receiving the leader's adapter-computed reply.
+			// Deliberately NOT touching hasReply/transferPending/replyByte
+			// -- those belong to THIS instance's own direct-link master
+			// role, if it has one. Mixing the two would let an adapter
+			// reply get misread as the answer to an unrelated direct-link
+			// request this same instance happened to have in flight.
+			// TODO: hand off to the follower-side adapter plumbing once built:
+			//   adapterModule.onLeaderReplyReceived(message.serialByte);
+			BREAK;
+		}
+
+		// Only accept as OUR reply if we actually have a request
+		// outstanding AND this reply's sequence matches it. Without
+		// this check, a request WE received (and are about to answer
+		// as slave) could get misread as the answer to our OWN
+		// pending request -- that mix-up was the master/master race.
+		if (transferPending == YES && message.sequence == pendingSequence)
+		{
+			replyByte = message.serialByte;
+			hasReply = YES;
+		}
+		BREAK;
+	}
+	case LinkMsg::TEST_PACKET:
+	{
+		lastReceivedTestPacket = message.serialByte;
+		hasUnclaimedTestPacket = YES;
+		BREAK;
+	}
+	case LinkMsg::SERVER_ROSTER:
+	{
+		connectedSlotBitmask = message.connectedSlotBitmask;
+		BREAK;
+	}
+	case LinkMsg::CLIENT_HELLO:
+	case LinkMsg::HEARTBEAT:
+	default:
+		// TODO: fill in once the packet layer/server side is designed --
+		// not needed for the serial-byte path to work end to end.
+		BREAK;
+	}
+}
+
+FLAG abstractEmulationLinkSession_t::beginByteTransfer(BYTE byteToSend, LinkChannel channel)
+{
+	if (socket == nullptr || connectionState != LinkConnectionState::LINK_READY)
+	{
+		RETURN FAILURE;
+	}
+
+	if (transferPending == YES)
+	{
+		WARN("beginByteTransfer REFUSED (already pending, seq=%u) -- byte=0x%02X DROPPED", pendingSequence, byteToSend);
+		RETURN FAILURE;
+	}
+
+	LinkMessage_t message{};
+	message.type = LinkMsg::SERIAL_BYTE_REQUEST;
+	message.slotID = assignedSlot;
+	message.serialByte = byteToSend;
+	message.sequence = txSequenceCounter++;
+	message.channel = channel;
+
+	pendingSequence = message.sequence;
+	transferPending = YES;
+	hasReply = NO;
+
+	NET_WriteToStreamSocket(socket, &message, sizeof(message));
+
+	RETURN SUCCESS;
+}
+
+LinkConnectionState abstractEmulationLinkSession_t::getConnectionState() const
+{
+	RETURN connectionState;
+}
+
+uint32_t abstractEmulationLinkSession_t::getAssignedSlot() const
+{
+	RETURN assignedSlot;
+}
+
+uint32_t abstractEmulationLinkSession_t::getPeerCount() const
+{
+	RETURN peerCount;
+}
+
+FLAG abstractEmulationLinkSession_t::isTransferPending() const
+{
+	RETURN transferPending;
+}
+
+FLAG abstractEmulationLinkSession_t::hasReceivedByte() const
+{
+	RETURN hasReply;
+}
+
+BYTE abstractEmulationLinkSession_t::getLastReceivedByte() const
+{
+	RETURN replyByte;
+}
+
+void abstractEmulationLinkSession_t::clearUnclaimedReceivedByte()
+{
+	hasReply = NO;
+}
+
+void abstractEmulationLinkSession_t::clearTransferPending()
+{
+	transferPending = NO;
+}
+
+NET_StreamSocket* abstractEmulationLinkSession_t::getSocket() const
+{
+	RETURN socket;
+}
+
+FLAG abstractEmulationLinkSession_t::hasPendingSlaveByte() const
+{
+	RETURN !pendingSlaveBytes.empty();
+}
+
+BYTE abstractEmulationLinkSession_t::popPendingSlaveByte()
+{
+	BYTE byteReceived = pendingSlaveBytes.front();
+	pendingSlaveBytes.pop_front();
+	RETURN byteReceived;
+}
+
+FLAG abstractEmulationLinkSession_t::isFourPlayerAdapterActive() const
+{
+	FLAG slot0Present = (connectedSlotBitmask & 0x1u) ? YES : NO;
+
+	uint32_t connectedCount = ZERO;
+	for (uint32_t bit = 0; bit < 32; bit++)
+	{
+		if (connectedSlotBitmask & (1u << bit))
+		{
+			connectedCount++;
+		}
+	}
+
+	RETURN (slot0Present == YES && connectedCount >= 3) ? YES : NO;
+}
+
+FLAG abstractEmulationLinkSession_t::isAdapterLeader() const
+{
+	RETURN (isFourPlayerAdapterActive() == YES && assignedSlot == ZERO) ? YES : NO;
+}
+
+// Testing utility to simulate a received serial byte without network traffic.
+FLAG abstractEmulationLinkSession_t::sendTestPacket(BYTE byteToSend)
+{
+	if (socket == nullptr || connectionState != LinkConnectionState::LINK_READY)
+	{
+		lastError = "Not connected or link is not ready";
+		RETURN FAILURE;
+	}
+
+	LinkMessage_t message{};
+	message.type = LinkMsg::TEST_PACKET;
+	message.slotID = assignedSlot;
+	message.serialByte = byteToSend;
+	message.sequence = txSequenceCounter++;
+
+	if (NET_WriteToStreamSocket(socket, &message, sizeof(message)) == NO)
+	{
+		lastError = SDL_GetError();
+		RETURN FAILURE;
+	}
+
+	RETURN SUCCESS;
+}
+
+FLAG abstractEmulationLinkSession_t::hasReceivedTestPacket() const
+{
+	RETURN hasUnclaimedTestPacket;
+}
+
+BYTE abstractEmulationLinkSession_t::getLastReceivedTestPacket() const
+{
+	RETURN lastReceivedTestPacket;
+}
+
+void abstractEmulationLinkSession_t::clearReceivedTestPacket()
+{
+	hasUnclaimedTestPacket = NO;
+}
+
+const char* abstractEmulationLinkSession_t::getLastError() const
+{
+	RETURN lastError.c_str();
+}
+
+void abstractEmulationLinkSession_t::clearLastError()
+{
+	lastError.clear();
+}
+#pragma endregion NETWORK_HELPERS
+#endif
 
 // =========================================================
 // CORE — Emulation_t class
@@ -751,6 +1141,12 @@ private:
 private:
 
 	KeyBindings keyBindings;
+
+#ifndef __EMSCRIPTEN__
+private:
+
+	NetworkUIState_t networkUI;
+#endif // !__EMSCRIPTEN__
 
 	// ---- Constructor / Destructor ---------------------------
 public:
@@ -826,12 +1222,6 @@ private:
 				_ENABLE_FRAME_LIMIT = to_bool(config.get<std::string>("mods._ENABLE_FRAME_LIMIT", _ENABLE_FRAME_LIMIT ? "true" : "false"));
 				_ENABLE_QUICK_SAVE = to_bool(config.get<std::string>("mods._ENABLE_QUICK_SAVE", _ENABLE_QUICK_SAVE ? "true" : "false"));
 				_ENABLE_BESS_FORMAT = to_bool(config.get<std::string>("mods._ENABLE_BESS_FORMAT", _ENABLE_BESS_FORMAT ? "true" : "false"));
-				_ENABLE_NETWORK = to_bool(config.get<std::string>("mods._ENABLE_NETWORK", _ENABLE_NETWORK ? "true" : "false"));
-
-				if (_ENABLE_NETWORK == YES)
-					_NETWORK_TIMEOUT_LIMIT = config.get<std::uint32_t>("mods._NETWORK_TIMEOUT_LIMIT", _NETWORK_TIMEOUT_LIMIT);
-				else
-					_NETWORK_TIMEOUT_LIMIT = ONE;
 
 				_ENABLE_REWIND = to_bool(config.get<std::string>("mods._ENABLE_REWIND", _ENABLE_REWIND ? "true" : "false"));
 				if (_ENABLE_REWIND == YES)
@@ -971,13 +1361,6 @@ private:
 		if (current1hzFrame >= current_instance->getEmulationFPS())
 		{
 			current1hzFrame = RESET;
-
-			if (_ENABLE_NETWORK == YES)
-			{
-#if DISABLED
-				// Network heartbeat (not yet implemented)
-#endif
-			}
 		}
 		RETURN status;
 	}
@@ -1171,7 +1554,7 @@ private:
 		// Emscripten's IDBFS has issues with uppercase letters and spaces in filenames.
 		std::string sanitized_filename = filename;
 		std::transform(sanitized_filename.begin(), sanitized_filename.end(), sanitized_filename.begin(),
-			[](unsigned char c) { return std::tolower(c); });
+			[](unsigned char c) { RETURN std::tolower(c); });
 		std::replace(sanitized_filename.begin(), sanitized_filename.end(), ' ', '_');
 
 		if (sanitized_filename != filename)
@@ -1189,7 +1572,7 @@ private:
 		INFO("Filename length: %zu", sanitized_filename.length());
 		INFO("Has spaces: %s", (sanitized_filename.find(' ') != std::string::npos) ? "YES" : "NO");
 		INFO("Has uppercase: %s", (std::any_of(sanitized_filename.begin(), sanitized_filename.end(),
-			[](unsigned char c) { return std::isupper(c); })) ? "YES" : "NO");
+			[](unsigned char c) { RETURN std::isupper(c); })) ? "YES" : "NO");
 
 		INFO("=== Contents of /persistent BEFORE write ===");
 		try
@@ -1593,7 +1976,7 @@ public:
 			uint8_t* palette = customSEpalettes;
 
 			auto applyPaletteEntry = [&](int idx, auto&&... targets) {
-				if (!palette[idx * 4 + 3]) return;
+				if (!palette[idx * 4 + 3]) RETURN;
 				float r = palette[idx * 4 + 0] / 255.0f, g = palette[idx * 4 + 1] / 255.0f,
 					b = palette[idx * 4 + 2] / 255.0f, a = palette[idx * 4 + 3] / 255.0f;
 				(void)std::initializer_list<int>{ ((targets = ImVec4(r, g, b, a)), 0)... };
@@ -1757,8 +2140,20 @@ public:
 			if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD))
 			{
 				FATAL("Error: SDL_Init(): %s", SDL_GetError());
-				RETURN - ONE;
+				RETURN INVALID;
 			}
+
+#ifndef __EMSCRIPTEN__
+			// ---- SDL_net init -------------------------------------
+			if (!NET_Init())
+			{
+				SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "NET_Init failed: %s", SDL_GetError());
+				SDL_Quit();
+				RETURN INVALID;
+			}
+
+			abstractEmulationLinkSession_t& linkSession = abstractEmulation_t::getLinkSession();
+#endif
 
 			// ---- GLSL / context version selection -------------------
 #if defined(IMGUI_IMPL_OPENGL_ES2)
@@ -2560,7 +2955,59 @@ public:
 										ImGui::Separator();
 										ImGui::MenuItem("Logger Configuration##LoggerConfiguration", NULL, NO, NO);
 										if (ImGui::MenuItem("Logger Console##LoggerConsole", NULL, showLoggerWin))
+										{
 											showLoggerWin = (showLoggerWin == NO) ? YES : NO;
+										}
+										ImGui::Separator();
+#ifndef __EMSCRIPTEN__
+										FLAG isNetworkOptionEnabled = YES;
+#else
+										FLAG isNetworkOptionEnabled = NO;
+#endif
+										if (ImGui::BeginMenu("Network", isNetworkOptionEnabled))
+										{
+#ifndef __EMSCRIPTEN__
+											const LinkConnectionState connectionState = linkSession.getConnectionState();
+											const FLAG connected = connectionState == LinkConnectionState::CONNECTED || connectionState == LinkConnectionState::LINK_READY;
+											const FLAG linkReady = connectionState == LinkConnectionState::LINK_READY;
+											if (ImGui::MenuItem("Connect...", nullptr, false, !connected))
+											{
+												networkUI.showConnectPopup = YES;
+											}
+											if (ImGui::MenuItem("Disconnect", nullptr, false, connected))
+											{
+												linkSession.disconnect();
+												networkUI.showTestConsole = NO;
+											}
+											ImGui::Separator();
+											switch (connectionState)
+											{
+											case LinkConnectionState::DISCONNECTED:
+												ImGui::TextDisabled("Status: Disconnected");
+												BREAK;
+											case LinkConnectionState::CONNECTING:
+												ImGui::Text("Status: Connecting...");
+												BREAK;
+											case LinkConnectionState::CONNECTED:
+												ImGui::Text("Status: Connected");
+												BREAK;
+											case LinkConnectionState::LINK_READY:
+												ImGui::Text("Status: Link Ready");
+												BREAK;
+											}
+											if (connected)
+											{
+												ImGui::Text("Slot: %u", linkSession.getAssignedSlot());
+												ImGui::Text("Peers: %u", linkSession.getPeerCount());
+											}
+											ImGui::Separator();
+											if (ImGui::MenuItem("Test Console...", nullptr, false, linkReady))
+											{
+												networkUI.showTestConsole = YES;
+											}
+#endif
+											ImGui::EndMenu();
+										}
 										ImGui::Separator();
 										if (ImGui::BeginMenu("Theme"))
 										{
@@ -3384,24 +3831,132 @@ public:
 										}
 #endif
 									}
+
+#ifndef __EMSCRIPTEN__
+									linkSession.update();
+
+									while (linkSession.hasReceivedTestPacket() == YES)
+									{
+										networkUI.receivedTestBytes.push_back(linkSession.getLastReceivedTestPacket());
+										linkSession.clearReceivedTestPacket();
+									}
+#endif
 								}
+
+#ifndef __EMSCRIPTEN__
+								if (networkUI.showConnectPopup)
+								{
+									ImGui::OpenPopup("Connect to Link Server");
+									networkUI.showConnectPopup = false;
+								}
+
+								if (ImGui::BeginPopupModal("Connect to Link Server", nullptr,ImGuiWindowFlags_AlwaysAutoResize))
+								{
+									ImGui::InputText("Host", networkUI.hostAddress, sizeof(networkUI.hostAddress));
+									ImGui::InputText("Port", networkUI.portText, sizeof(networkUI.portText), ImGuiInputTextFlags_CharsDecimal);
+									ImGui::Separator();
+									if (ImGui::Button("Connect"))
+									{
+										char* endPointer = nullptr;
+										const unsigned long port = std::strtoul(networkUI.portText, &endPointer, 10);
+										if (endPointer == networkUI.portText || *endPointer != '\0' || port > UINT16_MAX)
+										{
+											// Set an appropriate UI error here if you want a dedicated
+											// validation message.
+										}
+										else
+										{
+											if (linkSession.connect( networkUI.hostAddress, static_cast<uint16_t>(port)) == SUCCESS)
+											{
+												ImGui::CloseCurrentPopup();
+											}
+										}
+									}
+									ImGui::SameLine();
+									if (ImGui::Button("Cancel"))
+									{
+										ImGui::CloseCurrentPopup();
+									}
+									const char* error = linkSession.getLastError();
+									if (error != nullptr && error[0] != '\0')
+									{
+										ImGui::Separator();
+										ImGui::TextWrapped("Error: %s", error);
+									}
+									ImGui::EndPopup();
+								}
+
+								if (networkUI.showTestConsole)
+								{
+									ImGui::SetNextWindowSize(ImVec2(500.0f, 400.0f), ImGuiCond_FirstUseEver);
+									if (ImGui::Begin("Network Test Console", &networkUI.showTestConsole))
+									{
+										if (linkSession.getConnectionState() != LinkConnectionState::LINK_READY)
+										{
+											ImGui::TextDisabled("Network link is not ready.");
+										}
+										else
+										{
+											ImGui::Text( "Connected - Slot %u - %u peer(s)", linkSession.getAssignedSlot(), linkSession.getPeerCount());
+											ImGui::Separator();
+											ImGui::Text("Send byte:");
+											ImGui::SetNextItemWidth(100.0f);
+											ImGui::InputText( "##TestByte", networkUI.testByteText, sizeof(networkUI.testByteText), ImGuiInputTextFlags_CharsHexadecimal | ImGuiInputTextFlags_CharsUppercase);
+											ImGui::SameLine();
+											if (ImGui::Button("Send"))
+											{
+												char* endPointer = nullptr;
+												const unsigned long value = std::strtoul(networkUI.testByteText, &endPointer, 16);
+												if (endPointer != networkUI.testByteText && *endPointer == '\0' && value <= 0xFF)
+												{
+													linkSession.sendTestPacket( static_cast<BYTE>(value));
+												}
+											}
+											ImGui::Separator();
+											ImGui::Text("Received:");
+											if (ImGui::Button("Clear"))
+											{
+												networkUI.receivedTestBytes.clear();
+											}
+											ImGui::BeginChild( "TestPacketLog", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders);
+											for (BYTE byte : networkUI.receivedTestBytes)
+											{
+												ImGui::Text("0x%02X", byte);
+											}
+											ImGui::EndChild();
+										}
+									}
+									ImGui::End();
+								}
+#endif
 							}
 							else // initScreen == YES
 							{
-								if (ImGui::IsMouseDown(ImGuiMouseButton_Left) || ImGui::IsMouseDown(ImGuiMouseButton_Middle) || ImGui::IsMouseDown(ImGuiMouseButton_Right))
+								if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) || ImGui::IsMouseClicked(ImGuiMouseButton_Middle) || ImGui::IsMouseClicked(ImGuiMouseButton_Right))
 								{
 									initScreen = NO;
 								}
 								else
 								{
+									if (currentEmuTheme == SE_THEME_BLACK)
+									{
+										ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.14f, 0.14f, 0.14f, 1.00f));
+									}
+
 									ImGui::Begin(emuWindow.c_str(), &showEmuWin,
 										ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse |
 										ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_AlwaysAutoResize);
+
 									ImVec2 image_size = ImVec2((float)clickWinWidth, (float)clickWinHeight);
 									ImGui::SetCursorPosX((ImGui::GetWindowSize().x - image_size.x) * 0.5f);
 									ImGui::SetCursorPosY((ImGui::GetWindowSize().y - image_size.y) * 0.5f);
 									ImGui::Image((ImTextureID)(uintptr_t)clickWinTexture, image_size);
 									ImGui::End();
+
+									if (currentEmuTheme == SE_THEME_BLACK)
+									{
+										ImGui::PopStyleColor();
+									}
 								}
 							}
 
@@ -3555,6 +4110,9 @@ public:
 			}
 
 			NFD_Quit();
+#ifndef __EMSCRIPTEN__
+			NET_Quit();
+#endif
 			ImGui_ImplOpenGL3_Shutdown();
 			ImGui_ImplSDL3_Shutdown();
 			ImGui::DestroyContext();
@@ -3587,7 +4145,7 @@ void arrangeRoms(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM>& romsToRu
 {
 	const size_t numberOfInputs =
 		std::count_if(romsToRun.begin(), romsToRun.end(),
-			[](const std::string& s) { return !s.empty(); });
+			[](const std::string& s) { RETURN !s.empty(); });
 
 	static constexpr std::array siExts = { ".e",".f",".g",".h" };
 	static constexpr std::array pmExts = { "6e","6f","6h","6j","7f","4a","5e","5f","1m","3m" };

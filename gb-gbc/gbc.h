@@ -217,6 +217,15 @@ private:
 	PrintedImageWindow* findWindowById(uint64_t id);
 };
 
+class GBc4PlayerAdapterEngine_t
+{
+public:
+	GBc4PlayerAdapterEngine_t();
+	~GBc4PlayerAdapterEngine_t();
+	void reset();
+	void tick();
+};
+
 class GBc_t : public abstractEmulation_t
 {
 #pragma region INFRASTRUCTURE_DECLARATIONS
@@ -566,12 +575,12 @@ public:
 
 	enum class GB_SERIAL_DEVICE
 	{
-		GB_NONE,
-		GB_LINK_CABLE,
 		GB_PRINTER,
+		GB_LINK_CABLE,
+		GB_4_PLAYER_ADAPTER,
 		GB_BARCODE_BOY,
+		GB_POCKET_SONAR,
 		GB_MOBILE_ADAPTER,
-		GB_POCKET_SONAR
 	};
 
 private:
@@ -2534,6 +2543,16 @@ private:
 
 #pragma endregion GBC_DEBUGGER
 
+#pragma region GBC_SERIAL_LINK
+#ifndef __RPI_PICO__
+public:
+
+	FLAG isSerialLinkConnected();
+	FLAG tickSerialLink(BYTE outgoingByte, BYTE* outReceivedByte);
+	FLAG tickSerialLinkAsSlave(BYTE outgoingByte, BYTE* outReceivedByte);
+#endif // !__RPI_PICO__
+#pragma endregion GBC_SERIAL_LINK
+
 private:
 
 	IInputBackend* pInputBackend = nullptr;
@@ -2987,7 +3006,6 @@ public:
 
 	void processSerialClockSpeedBit();
 	FLAG sendOverSerialLink(BIT bitToSend);
-	FLAG receiveOverSerialLink(BIT* bitReceived, FLAG* rxStatus, FLAG isBlocking = NO, INC32 timeoutInUs = ONE);
 	void detectSerialDevice(BIT bitToSend);
 	void resetSerialDeviceDetection();
 	GB_SERIAL_DEVICE getSerialDevice() const;

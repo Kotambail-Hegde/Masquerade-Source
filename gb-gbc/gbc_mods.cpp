@@ -2063,6 +2063,90 @@ bool GBcPrinterEngine_t::savePrintedImageAsPng(PrintedImageWindow& window)
 }
 
 // =====================================================================================
+// GBC Serial Link
+// =====================================================================================
+
+FLAG GBc_t::isSerialLinkConnected()
+{
+#ifndef __EMSCRIPTEN__
+	RETURN linkSession.getConnectionState() == LinkConnectionState::CONNECTED ? YES : NO;
+#endif
+	RETURN NO;
+}
+
+FLAG GBc_t::tickSerialLink(BYTE outgoingByte, BYTE* outReceivedByte)
+{
+#ifndef __EMSCRIPTEN__
+	if (isSerialLinkConnected() == NO)
+	{
+		RETURN YES;
+	}
+
+	if (linkSession.isTransferPending() == YES)
+	{
+		if (linkSession.hasReceivedByte() == YES)
+		{
+			// This is the reply to OUR OWN beginByteTransfer() below.
+			*outReceivedByte = linkSession.getLastReceivedByte();
+			linkSession.clearUnclaimedReceivedByte();
+			linkSession.clearTransferPending();
+			RETURN YES;
+		}
+
+		RETURN NO; // still waiting on the network round trip
+	}
+
+	// Nothing in flight -- this is a fresh transfer. Grab SB whole,
+	// once, rather than reconstructing it bit-by-bit: SB deliberately
+	// never shifts tick-to-tick while a network transfer is pending (see
+	// serialTick()'s integration comment), so sampling one bit per tick
+	// would just read the same unchanged bit repeatedly.
+	linkSession.beginByteTransfer(outgoingByte);
+
+	RETURN NO;
+#else
+	RETURN YES;
+#endif
+}
+
+FLAG GBc_t::tickSerialLinkAsSlave(BYTE outgoingByte, BYTE* outReceivedByte)
+{
+#ifndef __EMSCRIPTEN__
+	if (isSerialLinkConnected() == NO)
+	{
+		RETURN YES;
+	}
+
+	// outgoingByte is no longer sent from here -- the reply to whatever
+	// request this consumes was ALREADY transmitted proactively, inside
+	// handleMessage()'s SERIAL_BYTE_REQUEST case, at the moment the
+	// request arrived (using the freshest SB available at THAT instant,
+	// passed through update()'s currentLocalSB). Sending it again here,
+	// gated behind this local slave branch actually running, is exactly
+	// the delayed-reply pattern that caused the original deadlock --
+	// don't reintroduce it. Parameter kept only so serialTick()'s
+	// existing call site doesn't need to change.
+	(void)outgoingByte;
+
+	if (linkSession.getSocket() == nullptr)
+	{
+		RETURN NO;
+	}
+
+	if (linkSession.hasPendingSlaveByte() == NO)
+	{
+		RETURN NO; // nothing from the (remote) master yet
+	}
+
+	*outReceivedByte = linkSession.popPendingSlaveByte();
+
+	RETURN YES;
+#else
+	RETURN YES;
+#endif
+}
+
+// =====================================================================================
 // GBC Debugger
 // =====================================================================================
 

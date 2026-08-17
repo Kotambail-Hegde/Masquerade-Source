@@ -158,6 +158,7 @@ jobs:
             external/rapidjson
             external/boost
             external/SDL
+            external/SDL_net
             external/nativefiledialog-extended
           key: windows-external-all-v16-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: |
@@ -202,6 +203,10 @@ jobs:
 
           if (-not (Test-Path "SDL")) {
               git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL
+          }
+
+          if (-not (Test-Path "SDL_net")) {
+              git clone https://github.com/libsdl-org/SDL_net.git --depth 1 SDL_net
           }
 
           if (-not (Test-Path "nativefiledialog-extended")) {
@@ -323,6 +328,18 @@ jobs:
           cmake --build . --config Release --parallel
           cmake --build . --config Release --target install
 
+      - name: Build SDL3_net
+        shell: pwsh
+        run: |
+          cd external/SDL_net
+          if (-not (Test-Path "build")) {
+              New-Item -ItemType Directory -Path "build" | Out-Null
+          }
+          cd build
+          cmake .. -G "Visual Studio 18 2026" -A x64 -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$($PWD.Path)" -DSDL3_DIR="$env:GITHUB_WORKSPACE\external\SDL\build\lib\cmake\SDL3"
+          cmake --build . --config Release --parallel
+          cmake --build . --config Release --target install
+
       - name: Build NFD
         shell: pwsh
         run: |
@@ -343,6 +360,7 @@ jobs:
           echo "BOOST_ROOT=$env:GITHUB_WORKSPACE\external\boost"                       >> $env:GITHUB_ENV
           echo "SDL3_ROOT=$env:GITHUB_WORKSPACE\external\SDL\build"                    >> $env:GITHUB_ENV
           echo "NFD_ROOT=$env:GITHUB_WORKSPACE\external\nativefiledialog-extended"     >> $env:GITHUB_ENV
+          echo "SDL3_NET_ROOT=$env:GITHUB_WORKSPACE\external\SDL_net\build"            >> $env:GITHUB_ENV
 
       - name: Configure CMake
         run: |
@@ -355,6 +373,7 @@ jobs:
                 -DRAPID_JSON_ROOT=%RAPID_JSON_ROOT% ^
                 -DBOOST_ROOT=%BOOST_ROOT% ^
                 -DSDL3_ROOT=%SDL3_ROOT% ^
+                -DSDL3_net_ROOT=%SDL3_NET_ROOT% ^
                 -DNFD_ROOT=%NFD_ROOT% ^
                 -S . -B build
         shell: cmd
@@ -405,6 +424,7 @@ jobs:
             external/rapidjson
             external/boost
             external/SDL
+            external/SDL_net
             external/nativefiledialog-extended
           key: linux-external-all-v3-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: |
@@ -426,6 +446,7 @@ jobs:
           [ ! -d "stb/stb" ]    && git clone --depth 1 https://github.com/nothings/stb.git stb/stb
           [ ! -d "rapidjson" ]  && git clone --depth 1 https://github.com/Tencent/rapidjson.git rapidjson
           [ ! -d "SDL" ]        && git clone --depth 1 https://github.com/libsdl-org/SDL.git SDL
+          [ ! -d "SDL_net" ]    && git clone --depth 1 https://github.com/libsdl-org/SDL_net.git SDL_net
 
           if [ ! -d "boost" ]; then
             git clone https://github.com/boostorg/boost.git --branch boost-1.89.0 --depth 1
@@ -450,6 +471,13 @@ jobs:
           cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PWD -DSDL_SHARED=ON -DSDL_STATIC=ON
           ninja -j$(nproc) && ninja install
 
+      - name: Build SDL3_net
+        run: |
+          cd external/SDL_net && mkdir -p build && cd build
+          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$PWD -DSDL3_DIR=$GITHUB_WORKSPACE/external/SDL/build/lib/cmake/SDL3
+          ninja -j$(nproc)
+          ninja install
+
       - name: Build NFD
         run: |
           cd external/nativefiledialog-extended && mkdir -p build && cd build
@@ -464,6 +492,7 @@ jobs:
           echo "RAPID_JSON_ROOT=$GITHUB_WORKSPACE/external/rapidjson"              >> $GITHUB_ENV
           echo "BOOST_ROOT=$GITHUB_WORKSPACE/external/boost"                       >> $GITHUB_ENV
           echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL/build"                    >> $GITHUB_ENV
+          echo "SDL3_NET_ROOT=$GITHUB_WORKSPACE/external/SDL_net/build"             >> $GITHUB_ENV
           echo "NFD_ROOT=$GITHUB_WORKSPACE/external/nativefiledialog-extended"     >> $GITHUB_ENV
 
       - name: Configure CMake
@@ -471,12 +500,14 @@ jobs:
           cmake -G Ninja \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DGIT_COMMIT_HASH=$GIT_COMMIT_HASH \
+                -DCMAKE_PREFIX_PATH="$SDL3_ROOT;$SDL3_NET_ROOT" \
                 -DIMGUI_ROOT=$IMGUI_ROOT \
                 -DMINIZ_ROOT=$MINIZ_ROOT \
                 -DSTB_ROOT=$STB_ROOT \
                 -DRAPID_JSON_ROOT=$RAPID_JSON_ROOT \
                 -DBOOST_ROOT=$BOOST_ROOT \
                 -DSDL3_ROOT=$SDL3_ROOT \
+                -DSDL3_net_ROOT=$SDL3_NET_ROOT \
                 -DNFD_ROOT=$NFD_ROOT \
                 -S . -B build
 
@@ -514,6 +545,7 @@ jobs:
             external/miniz
             external/stb
             external/SDL
+            external/SDL_net
             external/emscripten-browser-file
             external/boost
             external/rapidjson
@@ -531,6 +563,17 @@ jobs:
           key: sdl3-emscripten-v3-${{ hashFiles('external/SDL/**') }}
           restore-keys: |
             sdl3-emscripten-v3-
+
+      - name: Cache SDL3_net Emscripten
+        id: cache-sdl-net-emscripten
+        uses: actions/cache@v4
+        with:
+          path: |
+            external/SDL_net-build/emscripten
+            external/SDL_net-install/emscripten
+          key: sdl3-net-emscripten-v1-${{ hashFiles('external/SDL_net/**') }}
+          restore-keys: |
+            sdl3-net-emscripten-v1-
 
       - name: Clone dependencies
         if: steps.cache-external.outputs.cache-hit != 'true'
@@ -553,6 +596,7 @@ jobs:
           [ ! -d "stb/stb" ]   && git clone --depth 1 https://github.com/nothings/stb.git stb/stb
           [ ! -d "rapidjson" ] && git clone --depth 1 https://github.com/Tencent/rapidjson.git rapidjson
           [ ! -d "SDL" ]       && git clone --depth 1 https://github.com/libsdl-org/SDL.git SDL
+          [ ! -d "SDL_net" ]   && git clone --depth 1 clone https://github.com/libsdl-org/SDL_net.git SDL_net
 
           if [ ! -d "emscripten-browser-file" ]; then
             git clone https://github.com/Armchair-Software/emscripten-browser-file.git --depth 1
@@ -567,6 +611,7 @@ jobs:
           echo "EFB_ROOT=$GITHUB_WORKSPACE/external/emscripten-browser-file"       >> $GITHUB_ENV
           echo "BOOST_ROOT=$GITHUB_WORKSPACE/external/boost"                       >> $GITHUB_ENV
           echo "SDL3_ROOT=$GITHUB_WORKSPACE/external/SDL-install/emscripten"       >> $GITHUB_ENV
+          echo "SDL3_NET_ROOT=$GITHUB_WORKSPACE/external/SDL_net-install/emscripten" >> $GITHUB_ENV
 
       - name: Setup Emscripten
         uses: mymindstorm/setup-emsdk@v15
@@ -597,12 +642,32 @@ jobs:
             -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST=OFF -DSDL_TESTS=OFF
           ninja -j$(nproc) && ninja install
 
+      - name: Build SDL3_net (Emscripten)
+        run: |
+          if [ -f external/SDL_net-install/emscripten/lib/libSDL3_net.a ]; then
+            echo "SDL3_net Emscripten already built, skipping"; exit 0
+          fi
+
+          mkdir -p external/SDL_net-build/emscripten
+          mkdir -p external/SDL_net-install/emscripten
+
+          cd external/SDL_net-build/emscripten
+
+          emcmake cmake $GITHUB_WORKSPACE/external/SDL_net -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/external/SDL_net-install/emscripten \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DSDL3_DIR=$GITHUB_WORKSPACE/external/SDL-install/emscripten/build/lib/cmake/SDL3
+
+          ninja -j$(nproc) && ninja install
+
       - name: Configure CMake
         run: |
           emcmake cmake -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DGIT_COMMIT_HASH=$GIT_COMMIT_HASH \
             -DSDL3_ROOT=$SDL3_ROOT \
+            -DSDL3_net_ROOT=$SDL3_NET_ROOT \
             -DIMGUI_ROOT=$IMGUI_ROOT \
             -DMINIZ_ROOT=$MINIZ_ROOT \
             -DSTB_ROOT=$STB_ROOT \

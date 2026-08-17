@@ -44,8 +44,6 @@ extern FLAG _ENABLE_AUDIO;
 extern FLAG _MUTE_AUDIO;
 extern FLAG _RUN_DISASSEMBLER;
 extern FLAG _ENABLE_FRAME_LIMIT;
-extern FLAG _ENABLE_NETWORK;
-extern int32_t _NETWORK_TIMEOUT_LIMIT;
 extern FLAG _ENABLE_QUICK_SAVE;
 extern FLAG _ENABLE_BESS_FORMAT;
 extern FLAG _ENABLE_REWIND;
@@ -69,6 +67,181 @@ using InputHintCallback = std::function<void()>;
 #endif // !__RPI_PICO__
 
 #pragma endregion GLOBAL_INFRASTRUCTURE_DECLARATIONS
+
+#ifndef __EMSCRIPTEN__
+#pragma region NETWORK
+class abstractEmulationLinkSession_t
+{
+public:
+
+	// Resolves + connects to hostAddress:port. This DOES block briefly
+	// (NET_WaitUntilResolved / NET_WaitUntilConnected with a short
+	// timeout) -- acceptable here because connect() is a rare,
+	// user-initiated action (clicking "Connect"), not something called
+	// from the serialTick hot path. Never call this from serialTick().
+	FLAG connect(const char* hostAddress, uint16_t port);
+	void disconnect();
+
+	// Pumps socket I/O. Fully generic -- no knowledge of GB/NES/anything
+	// else, so it's safe to call from serialTick(), the ImGui per-frame
+	// loop, a future NES core, or with nothing running at all (test
+	// mode). Call this as OFTEN AS CONVENIENT from every context that
+	// might care about connection state -- this is the fix for the
+	// deadlock class of bug: an inbound request from the peer must get
+	// drained and answered even while THIS side is idle, mid-negotiation,
+	// or has its own request outstanding. Self-throttled internally to
+	// real socket reads at most once per NETWORK_POLL_INTERVAL_MS, so
+	// calling this from multiple places/every tick is cheap, not
+	// redundant work -- more callers just means less worst-case latency
+	// before something gets noticed and processed.
+	void update();
+
+	// Cheap setter: whichever system is currently driving a byte-oriented
+	// serial exchange (GB's serialTick(), eventually NES) calls this with
+	// its current outgoing byte whenever it has one fresh. update() reads
+	// it (via localReplyByte) ONLY when it needs to auto-reply to an
+	// inbound SERIAL_BYTE_REQUEST -- see handleMessage(). If nothing ever
+	// calls this (e.g. test mode, no ROM loaded), it stays at its
+	// idle-line default and that's fine: nothing GB-shaped should be
+	// sending SERIAL_BYTE_REQUEST in that state anyway.
+	void setLocalReplyByte(BYTE replyByte);
+
+	LinkConnectionState getConnectionState() const;
+	uint32_t getAssignedSlot() const;
+	uint32_t getPeerCount() const;
+
+	// MASTER-side. Call once per tick from serialTick()'s master branch
+	// (throttled, TRANSFER_ENABLE-gated, as today). Does NOT call
+	// update() itself anymore -- update() runs unconditionally elsewhere
+	// now, so this only needs to check whether a matching reply has
+	// already arrived.
+	FLAG tickSerialLink(BYTE outgoingByte, BYTE* outReceivedByte);
+
+	// SLAVE-side. Call once per tick from serialTick()'s slave branch.
+	// No longer takes an outgoingByte parameter -- any reply to an
+	// inbound request was already sent proactively from update() using
+	// the freshest SB available at the moment the request arrived. This
+	// only reports whether such an exchange completed, and what byte the
+	// peer's request carried (which becomes OUR received SB value, same
+	// as real hardware: the master's outgoing byte is what the slave
+	// receives).
+	FLAG tickSerialLinkAsSlave(BYTE* outReceivedByte);
+
+	void processAccumulatedMessages();
+	void handleMessage(const LinkMessage_t& message);
+
+	// channel defaults to DIRECT_LINK -- every EXISTING call site
+	// (tickSerialLink()) is a direct-link exchange and needs no changes.
+	// Only the future adapter module needs to explicitly pass ADAPTER.
+	FLAG beginByteTransfer(BYTE byteToSend, LinkChannel channel = LinkChannel::DIRECT_LINK);
+
+	// Few additional public getters and setters
+	FLAG isTransferPending() const;
+	FLAG hasReceivedByte() const;
+	BYTE getLastReceivedByte() const;
+	void clearUnclaimedReceivedByte();
+	void clearTransferPending();
+
+	// Slave-role queue: incoming requests from a peer acting as master.
+	// The reply to each of these was ALREADY sent proactively inside
+	// handleMessage()'s SERIAL_BYTE_REQUEST case, the instant it arrived
+	// -- that immediacy is load-bearing (see the class-level comment on
+	// update()). These accessors are pure consumption, nothing more; if
+	// you find yourself wanting to send anything from the call site that
+	// drains these, that's a sign the reply-on-arrival design is being
+	// bypassed again.
+	FLAG hasPendingSlaveByte() const;
+	BYTE popPendingSlaveByte();
+
+	NET_StreamSocket* getSocket() const;
+
+	// Per the HW-accurate rule we settled on: the DMG-07 is powered
+	// entirely through Player 1's cable (slot 0). No slot 0 present means
+	// no adapter, full stop -- not "someone else takes over." So this
+	// deliberately checks bit 0 explicitly, not just a raw peer count,
+	// even though in practice bit 0 being set already implies it's the
+	// lowest possible bit.
+	FLAG isFourPlayerAdapterActive() const;
+
+	// True only for the slot 0 instance, and only while the adapter is
+	// actually active per the above. Every OTHER connected slot's local
+	// copy of this same check correctly evaluates to NO for itself --
+	// there's no election, no negotiation, just each client checking
+	// "is my own assignedSlot 0" against the one shared roster fact.
+	FLAG isAdapterLeader() const;
+
+	// Testing and debugging
+	FLAG sendTestPacket(BYTE byteToSend);
+
+	FLAG hasReceivedTestPacket() const;
+	BYTE getLastReceivedTestPacket() const;
+	void clearReceivedTestPacket();
+
+	const char* getLastError() const;
+	void clearLastError();
+
+protected:
+
+	NET_StreamSocket* socket = nullptr;
+	LinkConnectionState connectionState = LinkConnectionState::DISCONNECTED;
+	uint32_t assignedSlot = ZERO;
+	uint32_t peerCount = ZERO;
+
+	// TCP gives no message-boundary guarantee: one NET_ReadFromStreamSocket
+	// call might return half a LinkMessage_t, or three and a half of them.
+	// This buffer accumulates raw bytes across calls; processAccumulatedMessages()
+	// only consumes/dispatches once at least sizeof(LinkMessage_t) bytes are
+	// present, looping in case multiple messages arrived in one read.
+	std::vector<BYTE> rxAccumulator;
+
+	// update() can be called from tickSerialLink()/tickSerialLinkAsSlave()
+	// at raw CPU clock rate (up to 4.19MHz for the slave path, since it
+	// isn't gated by serialTick()'s master-only throttle). A real socket
+	// syscall on every one of those calls would be enormous, needless
+	// overhead -- real network RTT is milliseconds at best, so polling
+	// more often than ~1ms buys nothing. Wall-clock-based (not tick-count
+	// based) so this stays correct regardless of GB normal/double-speed
+	// mode.
+	uint64_t lastNetworkPollMs = ZERO;
+	static constexpr uint64_t NETWORK_POLL_INTERVAL_MS = 1;
+
+	FLAG transferPending = NO;
+	uint32_t pendingSequence = ZERO;
+	FLAG hasReply = NO;
+	BYTE replyByte = ZERO;
+
+	// Idle-line default (0xFF), same convention as the old
+	// receiveOverSerialLink()'s *bitReceived = ONE. Only meaningful once
+	// something calls setLocalReplyByte() -- in test mode with no ROM
+	// loaded, this just never gets touched, which is correct: nothing
+	// should be sending us a SERIAL_BYTE_REQUEST in that state to begin
+	// with.
+	BYTE localReplyByte = 0xFF;
+
+	// --- Slave-role state: peer requests we've already auto-replied to,
+	// waiting for the LOCAL slave branch to pick them up. A real queue,
+	// not a single slot -- more than one inbound request CAN arrive
+	// before serialTick's slave branch next runs (that single-slot
+	// overwrite was bug #2), so this must not silently drop any.
+	std::deque<BYTE> pendingSlaveBytes;
+
+	uint32_t txSequenceCounter = ZERO;
+
+	// Updated only when a SERVER_ROSTER message arrives -- see
+	// handleMessage(). Both the master and slave branches of serialTick()
+	// query the SAME cached value here; this is one fact read from two
+	// call sites, not two independently-computed answers that could
+	// disagree.
+	uint32_t connectedSlotBitmask = ZERO;
+
+	// For testing/debugging only: a single-byte packet that can be sent
+	BYTE lastReceivedTestPacket = ZERO;
+	FLAG hasUnclaimedTestPacket = NO;
+
+	std::string lastError;
+};
+#pragma endregion NETWORK
+#endif
 
 #pragma region CORE
 class abstractEmulation_t
@@ -226,6 +399,16 @@ public:
 	}
 protected:
 	InputHintCallback inputHintCallback = nullptr;
+#endif // !__RPI_PICO__
+
+#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__)
+public:
+	static abstractEmulationLinkSession_t& getLinkSession()
+	{
+		RETURN linkSession;
+	}
+protected:
+	inline static abstractEmulationLinkSession_t linkSession;
 #endif // !__RPI_PICO__
 
 #pragma endregion EMULATOR_DEFINITIONS

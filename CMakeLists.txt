@@ -62,7 +62,7 @@ if (RPI_PICO)
 
 else()
     # Standard desktop / Emscripten / RPI5 project — C+CXX only
-    project(masquerade)
+    project(masquerade C CXX)
 endif()
 
 # =========================================================
@@ -255,29 +255,35 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if (RPI_PICO)
     message(STATUS "RPI_PICO -> FULL STRIP MODE — no SDL/ImGui/Boost/STB/NFD/miniz")
     # All set to empty so no accidental linkage
-    set(SDL3_INCLUDE_DIR        "")
-    set(NFD_INCLUDE_DIR         "")
-    set(BOOST_INCLUDE_DIR       "")
-    set(STB_INCLUDE_DIR         "")
-    set(RAPID_JSON_INCLUDE_DIR  "")
-    set(IMGUI_DIR               "")
-    set(IMGUI_BACKENDS_DIR      "")
-    set(IMGUI_MISC_CPP_DIR      "")
-    set(IMGUI_EXAMPLES_LIBS_DIR "")
+    set(SDL3_INCLUDE_DIR            "")
+    set(SDL3_NET_INCLUDE_DIR        "")
+    set(NFD_INCLUDE_DIR             "")
+    set(BOOST_INCLUDE_DIR           "")
+    set(STB_INCLUDE_DIR             "")
+    set(RAPID_JSON_INCLUDE_DIR      "")
+    set(IMGUI_DIR                   "")
+    set(IMGUI_BACKENDS_DIR          "")
+    set(IMGUI_MISC_CPP_DIR          "")
+    set(IMGUI_EXAMPLES_LIBS_DIR     "")
 
 elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows" AND NOT IS_GITHUB_ACTIONS)
     message(STATUS "Building on Windows")
     include(${CMAKE_SOURCE_DIR}/Paths_win.cmake)
     set(BOOST_INCLUDE_DIR "${BOOST_ROOT}")
-    set(SDL3_CMAKE_PATH   "${SDL3_ROOT}/cmake")
-    set(SDL3_LIB_PATH     "${SDL3_ROOT}/lib/libSDL3.a")
-    set(SDL3_INCLUDE_DIR  "${SDL3_ROOT}/include")
-    set(CMAKE_PREFIX_PATH "${SDL3_CMAKE_PATH}")
-    set(NFD_CMAKE_PATH    "${NFD_ROOT}/build/lib/cmake/nfd")
-    set(nfd_DIR           "${NFD_ROOT}/build/lib/cmake/nfd")
-    set(NFD_INCLUDE_DIR   "${NFD_ROOT}")
+    set(SDL3_INCLUDE_DIR "${SDL3_ROOT}/include")
+    set(SDL3_NET_INCLUDE_DIR "${SDL3_NET_ROOT}/include")
+    set(NFD_INCLUDE_DIR "${NFD_ROOT}")
     set(NFD_SRC_INCLUDE_DIR "${NFD_ROOT}/src/include")
-    set(CMAKE_PREFIX_PATH "${NFD_CMAKE_PATH}")
+
+    list(APPEND CMAKE_PREFIX_PATH
+        "${SDL3_ROOT}"
+        "${SDL3_NET_ROOT}"
+        "${BOOST_ROOT}"
+        "${NFD_ROOT}"
+        "${NFD_ROOT}/build/lib/cmake/nfd"
+    )
+    list(APPEND CMAKE_INCLUDE_PATH "${SDL3_ROOT}/include" "${SDL3_NET_ROOT}/include")
+    list(APPEND CMAKE_LIBRARY_PATH "${SDL3_ROOT}/lib" "${SDL3_NET_ROOT}/lib")
 
 elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux" AND NOT IS_GITHUB_ACTIONS)
     message(STATUS "Building on Linux")
@@ -291,28 +297,35 @@ elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows" AND IS_GITHUB_ACTIONS)
     file(TO_CMAKE_PATH "${STB_ROOT}"        STB_ROOT)
     file(TO_CMAKE_PATH "${RAPID_JSON_ROOT}" RAPID_JSON_ROOT)
     file(TO_CMAKE_PATH "${SDL3_ROOT}"       SDL3_ROOT)
+    file(TO_CMAKE_PATH "${SDL3_NET_ROOT}"   SDL3_NET_ROOT)
     file(TO_CMAKE_PATH "${NFD_ROOT}"        NFD_ROOT)
-    set(BOOST_INCLUDE_DIR   "${BOOST_ROOT}")
-    set(SDL3_DIR            "${SDL3_ROOT}/build/lib/cmake/SDL3")
-    set(SDL3_LIB_PATH       "${SDL3_ROOT}/build/lib/libSDL3.a")
-    set(SDL3_INCLUDE_DIR    "${SDL3_ROOT}/build/include")
-    list(APPEND CMAKE_PREFIX_PATH "${SDL3_DIR}")
-    set(NFD_CMAKE_PATH      "${NFD_ROOT}/build/lib/cmake/nfd")
-    set(nfd_DIR             "${NFD_ROOT}/build/lib/cmake/nfd")
-    set(NFD_INCLUDE_DIR     "${NFD_ROOT}")
+    set(BOOST_INCLUDE_DIR "${BOOST_ROOT}")
+    set(SDL3_DIR "${SDL3_ROOT}/build/lib/cmake/SDL3")
+    set(SDL3_LIB_PATH "${SDL3_ROOT}/build/lib/libSDL3.a")
+    set(SDL3_INCLUDE_DIR "${SDL3_ROOT}/build/include")
+    set(SDL3_net_DIR "${SDL3_NET_ROOT}/build/lib/cmake/SDL3_net")
+    set(SDL3_NET_LIB_PATH "${SDL3_NET_ROOT}/build/lib/libSDL3_net.a")
+    set(SDL3_NET_INCLUDE_DIR "${SDL3_NET_ROOT}/build/include")
+    list(APPEND CMAKE_PREFIX_PATH "${SDL3_DIR}" "${SDL3_net_DIR}")
+    set(NFD_CMAKE_PATH "${NFD_ROOT}/build/lib/cmake/nfd")
+    set(nfd_DIR "${NFD_ROOT}/build/lib/cmake/nfd")
+    set(NFD_INCLUDE_DIR "${NFD_ROOT}")
     set(NFD_SRC_INCLUDE_DIR "${NFD_ROOT}/src/include")
     list(APPEND CMAKE_PREFIX_PATH "${nfd_DIR}")
 
 elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux" AND IS_GITHUB_ACTIONS)
     message(STATUS "CI build (Linux)")
-    set(BOOST_INCLUDE_DIR   "${BOOST_ROOT}")
-    set(SDL3_DIR            "${SDL3_ROOT}/build/lib/cmake/SDL3")
-    set(SDL3_LIB_PATH       "${SDL3_ROOT}/build/lib/libSDL3.a")
-    set(SDL3_INCLUDE_DIR    "${SDL3_ROOT}/build/include")
-    list(APPEND CMAKE_PREFIX_PATH "${SDL3_DIR}")
-    set(NFD_CMAKE_PATH      "${NFD_ROOT}/build/lib/cmake/nfd")
-    set(nfd_DIR             "${NFD_ROOT}/build/lib/cmake/nfd")
-    set(NFD_INCLUDE_DIR     "${NFD_ROOT}")
+    set(BOOST_INCLUDE_DIR "${BOOST_ROOT}")
+    set(SDL3_DIR "${SDL3_ROOT}/build/lib/cmake/SDL3")
+    set(SDL3_LIB_PATH "${SDL3_ROOT}/build/lib/libSDL3.a")
+    set(SDL3_INCLUDE_DIR "${SDL3_ROOT}/build/include")
+    set(SDL3_net_DIR "${SDL3_NET_ROOT}/build/lib/cmake/SDL3_net")
+    set(SDL3_NET_LIB_PATH "${SDL3_NET_ROOT}/build/lib/libSDL3_net.a")
+    set(SDL3_NET_INCLUDE_DIR "${SDL3_NET_ROOT}/build/include")
+    list(APPEND CMAKE_PREFIX_PATH "${SDL3_DIR}" "${SDL3_net_DIR}")
+    set(NFD_CMAKE_PATH "${NFD_ROOT}/build/lib/cmake/nfd")
+    set(nfd_DIR "${NFD_ROOT}/build/lib/cmake/nfd")
+    set(NFD_INCLUDE_DIR "${NFD_ROOT}")
     set(NFD_SRC_INCLUDE_DIR "${NFD_ROOT}/src/include")
     list(APPEND CMAKE_PREFIX_PATH "${nfd_DIR}")
 
@@ -352,6 +365,7 @@ if(NOT RPI_PICO)
     if(NOT EMSCRIPTEN)
         find_package(nfd   REQUIRED)
         find_package(SDL3  REQUIRED)
+        find_package(SDL3_net  REQUIRED)
     endif()
 
     add_compile_definitions("IMGUI_USER_CONFIG=\"${CMAKE_SOURCE_DIR}/ui/imgui_custom_config.h\"")
@@ -516,6 +530,9 @@ if (NOT RPI_PICO)
     if (NOT EMSCRIPTEN)
         if(NOT (CMAKE_SYSTEM_PROCESSOR MATCHES "arm" OR CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64"))
             list(APPEND GLAD_SOURCES ui/glad.c)
+            if (CMAKE_C_COMPILER_ID STREQUAL "GNU" OR CMAKE_C_COMPILER_ID STREQUAL "Clang")
+                set_source_files_properties(ui/glad.c PROPERTIES COMPILE_FLAGS "-Wno-pedantic")
+            endif()
         endif()
     endif()
 
@@ -726,6 +743,7 @@ if (NOT RPI_PICO)
         "${STB_INCLUDE_DIR}"
         "${RAPID_JSON_INCLUDE_DIR}"
         "${SDL3_INCLUDE_DIR}"
+        "${SDL3_NET_INCLUDE_DIR}"
         "${MINIZ_DIR}"
     )
     if(EMSCRIPTEN)
@@ -806,7 +824,23 @@ elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     if (EMSCRIPTEN)
         message(STATUS "Using Emscripten (Clang-based)")
         set_target_properties(${PROJECT_NAME} PROPERTIES SUFFIX ".html")
-        target_link_libraries(${PROJECT_NAME} PRIVATE "${SDL3_LIB_PATH}")
+
+        # Prioritize local Wasm install paths, fallback to GitHub Actions runner paths
+        if (EXISTS "${SDL3_WASM_LIB}")
+            target_link_libraries(${PROJECT_NAME} PRIVATE "${SDL3_WASM_LIB}")
+        else()
+            target_link_libraries(${PROJECT_NAME} PRIVATE "${SDL3_LIB_PATH}")
+        endif()
+
+        if (EXISTS "${SDL3_NET_WASM_LIB}")
+            target_link_libraries(${PROJECT_NAME} PRIVATE "${SDL3_NET_WASM_LIB}")
+        else()
+            target_link_libraries(${PROJECT_NAME} PRIVATE "${SDL3_NET_LIB_PATH}")
+        endif()
+
+        # Link Emscripten network backend
+        target_link_libraries(${PROJECT_NAME} PRIVATE sockets)
+
         target_link_options(${PROJECT_NAME} PRIVATE
             "-std=c++23" "-sUSE_SDL=3" "-sFORCE_FILESYSTEM=1" "-lidbfs.js"
             "-sWASM=1" "-sUSE_WEBGL2=1" "-sMIN_WEBGL_VERSION=2"
@@ -823,7 +857,7 @@ elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         )
     else()
         message(STATUS "Using native Clang")
-        target_link_libraries(${PROJECT_NAME} PRIVATE nfd::nfd SDL3::SDL3)
+        target_link_libraries(${PROJECT_NAME} PRIVATE nfd::nfd SDL3::SDL3 SDL3_net::SDL3_net)
     endif()
 
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -831,22 +865,32 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         message(STATUS "Linking Windows libraries")
         target_link_libraries(${PROJECT_NAME} PRIVATE
-            nfd::nfd ${SDL3_IMPLIB}
-            ws2_32 winmm user32 gdi32 opengl32 gdiplus Shlwapi dwmapi stdc++fs
+            nfd::nfd
+            SDL3::SDL3
+            SDL3_net::SDL3_net
+            ws2_32 
+            winmm 
+            user32 
+            gdi32 
+            opengl32 
+            gdiplus 
+            Shlwapi 
+            dwmapi 
+            stdc++fs
         )
     elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         if (RPI_5)
             message(STATUS "RPI_5 -> GLES (EGL backend)")
             target_link_libraries(${PROJECT_NAME} PRIVATE
-                nfd::nfd SDL3::SDL3 OpenGL::GLES3 EGL pthread dl m)
+                nfd::nfd SDL3::SDL3 SDL3_net::SDL3_net OpenGL::GLES3 EGL pthread dl m)
         elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "arm" OR CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
             message(STATUS "ARM -> GLES fallback")
             target_link_libraries(${PROJECT_NAME} PRIVATE
-                nfd::nfd SDL3::SDL3 OpenGL::GLES3 EGL pthread dl m)
+                nfd::nfd SDL3::SDL3 SDL3_net::SDL3_net OpenGL::GLES3 EGL pthread dl m)
         else()
             message(STATUS "Desktop Linux -> OpenGL")
             target_link_libraries(${PROJECT_NAME} PRIVATE
-                nfd::nfd SDL3::SDL3 GL pthread dl m)
+                nfd::nfd SDL3::SDL3 SDL3_net::SDL3_net GL pthread dl m)
         endif()
     endif()
     target_compile_definitions(${PROJECT_NAME} PRIVATE SDL_MAIN_HANDLED __STDC_FORMAT_MACROS)
@@ -857,7 +901,7 @@ elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
 
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     message(STATUS "MSVC")
-    target_link_libraries(${PROJECT_NAME} PRIVATE nfd::nfd SDL3::SDL3)
+    target_link_libraries(${PROJECT_NAME} PRIVATE nfd::nfd SDL3::SDL3 SDL3_net::SDL3_net)
     target_link_options(${PROJECT_NAME} PRIVATE
         $<$<CONFIG:Release>:/INCREMENTAL:NO>
         $<$<CONFIG:Release>:/LTCG:PGOPTIMIZE>
@@ -903,6 +947,9 @@ if (NOT EMSCRIPTEN AND NOT RPI_PICO)
             TARGET ${PROJECT_NAME} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 $<TARGET_FILE:SDL3::SDL3>
+                $<TARGET_FILE_DIR:${PROJECT_NAME}>
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:SDL3_net::SDL3_net>
                 $<TARGET_FILE_DIR:${PROJECT_NAME}>
         )
     endif()

@@ -156,11 +156,12 @@ Masquerade supports the following hardware accessories and peripherals used by s
 * **Zapper** — Supported through mouse input in Port 2.
   * [NES Zapper support](https://github.com/Kotambail-Hegde/Masquerade-Emulator/issues/82)
 ### Game Boy / Game Boy Color (GB / GBC)
-* **Game Boy Printer** — Support for emulating the Game Boy Printer.
-  * [Game Boy Printer support](https://github.com/Kotambail-Hegde/Masquerade-Emulator/issues/200)
 * **Accelerometer** — Support for cartridges and games using the Game Boy Color's accelerometer hardware, including *Kirby Tilt 'n' Tumble*.
   * [Accelerometer support](https://github.com/Kotambail-Hegde/Masquerade-Emulator/issues/25)
-
+* **Game Boy Printer** — Support for emulating the Game Boy Printer.
+  * [Game Boy Printer support](https://github.com/Kotambail-Hegde/Masquerade-Emulator/issues/200)
+* **Game Boy Link Cable** — Support for emulating the Game Boy Serial Link Cable.
+  * [Game Boy Link Cable](https://github.com/Kotambail-Hegde/Masquerade-Emulator/issues/199)
 
 ## Detailed System Information
 
@@ -221,6 +222,8 @@ Masquerade supports the following hardware accessories and peripherals used by s
   - MMM01
   - WISDOM TREE
 - Supports Game Boy Printer
+- Supports Game Boy Camera
+- Supports Link Cable for multiplayer mode (Work In Progress)
 - Supports accelerometer-equipped Game Boy Color cartridges
 
 #### Test Results
@@ -540,6 +543,7 @@ correctness.
 - [Antonio's Technical Documentation](https://github.com/AntonioND/giibiiadvance/blob/master/docs/TCAGBD.pdf) - Game Boy Advance technical guide
 - [GBDEV Game Boy Printer](https://gbdev.gg8.se/wiki/articles/Gameboy_Printer) - Game Boy Printer technical guide 
 - [Shonumi's Game Boy Printer's RLE compression](https://shonumi.github.io/articles/art2.html) - Game Boy Printer Compression Mode technical guide
+- [Shonumi's Game Boy 4-Player Adapter](https://shonumi.github.io/articles/art9.html) - Game Boy 4-Player Adapter technical guide
 
 #### Game Boy Advance
 - [GBATEK](http://problemkaputt.de/gbatek-gba-reference.htm) - Comprehensive GBA reference

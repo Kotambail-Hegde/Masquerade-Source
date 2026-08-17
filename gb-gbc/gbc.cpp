@@ -1539,21 +1539,62 @@ void GBc_t::serialTick()
 	*	16384Hz		-	2KB/s	- Bit 1 cleared, Double Speed Mode
 	*	262144Hz	-	32KB/s	- Bit 1 set,     Normal
 	*	524288Hz	-	64KB/s	- Bit 1 set,     Double Speed Mode
-	*/
-
-	// NOTE: Don't handle for cgb double speed here as this is already taken care by the caller of "serialTick" i.e. "syncOtherGBModuleTicks"
-
-	/*
-	* For 8192Hz rate, we need to transfer 1 KBYTE every 8192 clocks
-	* Now, we are comming to this function at 4194304 clocks
-	* So, 4194304 / 8192 = 512
-	* Hence, at every 512th entry to this function, we should transfer 1 byte out of the serial interface
+	*
+	*	NOTE: Don't handle for cgb double speed here as this is already taken care by the caller of "serialTick" i.e. "syncOtherGBModuleTicks"
+	*
+	*	For 8192Hz rate, we need to transfer 1 KBYTE every 8192 clocks
+	*	Now, we are comming to this function at 4194304 clocks
+	*	So, 4194304 / 8192 = 512
+	*	Hence, at every 512th entry to this function, we should transfer 1 byte out of the serial interface
 	*/
 
 	pGBc_instance->GBc_state.emulatorStatus.ticks.serialCounter++;
 
 	if (pGBc_instance->GBc_state.emulatorStatus.ticks.serialCounter >= pGBc_instance->GBc_state.emulatorStatus.serialMaxClockPerTransfer)
 	{
+		// Pumped every raw tick, unconditionally -- regardless of local
+		// CLOCK_SELECT/TRANSFER_ENABLE state. An inbound request from the
+		// peer must get drained and answered even while THIS side is idle
+		// or mid-negotiation; gating this behind the master/slave branches
+		// below (as an earlier version did) meant a peer's request could sit
+		// unread in the socket buffer for as long as this side stayed idle
+		// -- a real deadlock if the peer was waiting on us. update() is
+		// self-throttled internally (see NETWORK_POLL_INTERVAL_MS), so
+		// calling it at raw tick rate costs a cheap early-return, not a
+		// syscall, on most calls. setLocalReplyByte() keeps whatever a
+		// same-tick inbound SERIAL_BYTE_REQUEST gets answered with fresh --
+		// this is GB's own concern (its SB register), not the session's,
+		// which is why update() itself no longer takes this as a parameter.
+		if (pGBc_instance->GBc_state.emulatorStatus.serialDevice == GB_SERIAL_DEVICE::GB_LINK_CABLE && isSerialLinkConnected() == YES)
+		{
+			// Neither of these two calls sends anything over the network --
+			// worth being explicit about that, since they look like they
+			// might given how often this line runs.
+			//
+			// setLocalReplyByte() is a plain local variable write (no
+			// socket touched at all). It just keeps localReplyByte fresh so
+			// that IF a SERIAL_BYTE_REQUEST happens to arrive from the peer
+			// on this exact tick, the auto-reply sent back from
+			// handleMessage() carries the CURRENT SB value, not a stale one
+			// from several ticks ago. Calling it every tick costs nothing
+			// more than an assignment.
+			//
+			// update() only ever READS from the socket -- it never sends.
+			// It's also self-throttled internally (see
+			// NETWORK_POLL_INTERVAL_MS): calling it every raw tick doesn't
+			// mean hammering the socket at raw tick rate, it means "the
+			// first tick after ~1ms has actually passed does one cheap
+			// read; every other call in between is an early-return." The
+			// only thing that ever SENDS a request is beginByteTransfer(),
+			// reachable only from tickSerialLink() in the master branch
+			// below, gated behind TRANSFER_ENABLE==1 and internally
+			// guarded against double-sending while one's already pending.
+#ifndef __EMSCRIPTEN__
+			abstractEmulation_t::getLinkSession().setLocalReplyByte(pGBc_peripherals->SB);
+			abstractEmulation_t::getLinkSession().update();
+#endif
+		}
+
 		pGBc_instance->GBc_state.emulatorStatus.ticks.serialCounter -= pGBc_instance->GBc_state.emulatorStatus.serialMaxClockPerTransfer;
 
 		// Case where we are the Serial Master
@@ -1565,23 +1606,51 @@ void GBc_t::serialTick()
 			// extract the "bitToBeSent" over serial interface
 			BIT bitToBeSent = GETBIT(SEVEN, pGBc_peripherals->SB);
 
+			// GB_LINK_CABLE (real network multiplayer) is handled entirely
+			// separately from GB_PRINTER below. The printer always
+			// completes a byte transfer within the same 8 ticks that
+			// shift it -- true for our instant local device. A network
+			// peer can't promise that: a transfer may need to stay pending
+			// across many ticks (many frames, even) while waiting on the
+			// round trip. So on any tick where the transfer hasn't
+			// completed, we deliberately do NOT touch SB or
+			// serialMasterByteShiftCount, and leave TRANSFER_ENABLE set --
+			// from the ROM's perspective this looks exactly like talking
+			// to a real, slower-than-instant link peer, not a bug. CPU/
+			// PPU/APU all keep running normally regardless; only this one
+			// serial transfer is "slow." This replaces the old busy-wait
+			// sendOverSerialLink()/receiveOverSerialLink() pair entirely --
+			// those blocked the whole emulator thread for the RTT
+			// duration, which is exactly what this redesign exists to fix.
+			if (pGBc_instance->GBc_state.emulatorStatus.serialDevice == GB_SERIAL_DEVICE::GB_LINK_CABLE && isSerialLinkConnected() == YES)
+			{
+				BYTE receivedByte = ZERO;
+
+#ifndef __EMSCRIPTEN__
+				if (abstractEmulation_t::getLinkSession().isAdapterLeader() == YES)
+				{
+					// TODO: this instance owns the DMG-07 emulation for this session --
+					// generate/interpret ping and transmission-phase bytes here instead
+					// of passing SB straight through.
+				}
+#endif
+
+				if (tickSerialLink(pGBc_peripherals->SB, &receivedByte))
+				{
+					pGBc_peripherals->SB = receivedByte;
+
+					pGBc_instance->GBc_state.emulatorStatus.serialMasterByteShiftCount = RESET;
+					pGBc_peripherals->SC.scFields.TRANSFER_ENABLE = RESET;
+					requestInterrupts(INTERRUPTS::SERIAL_INTERRUPT);
+				}
+
+				RETURN;
+			}
+
 			FLAG rxStatus = FALSE;
 			BIT bitReceived = ZERO;
 
-			if (pGBc_instance->GBc_state.emulatorStatus.serialDevice == GB_SERIAL_DEVICE::GB_LINK_CABLE)
-			{
-				// Real link-cable round trip: send first, then wait for the reply.
-				while (!sendOverSerialLink(bitToBeSent))
-				{
-					;
-				}
-
-				while (!receiveOverSerialLink(&bitReceived, &rxStatus, YES, _NETWORK_TIMEOUT_LIMIT))
-				{
-					;
-				}
-			}
-			else if (pGBc_instance->GBc_state.emulatorStatus.serialDevice == GB_SERIAL_DEVICE::GB_PRINTER)
+			if (pGBc_instance->GBc_state.emulatorStatus.serialDevice == GB_SERIAL_DEVICE::GB_PRINTER)
 			{
 				// GB serial is synchronous full-duplex: the printer's outgoing bit for THIS
 				// clock edge was already latched from the *previous* tick's state, so sample
@@ -1638,50 +1707,38 @@ void GBc_t::serialTick()
 	{
 		pGBc_instance->GBc_state.emulatorStatus.serialMasterByteShiftCount = ZERO;
 
-		// check if we received any data over serial link
-		FLAG rxStatus = NO;
-		BIT bitReceived = ZERO;
-		if (pGBc_instance->GBc_state.emulatorStatus.serialDevice == GB_SERIAL_DEVICE::GB_LINK_CABLE)
+		// GB_LINK_CABLE (network multiplayer): a slave has no clock of
+		// its own -- it purely reacts to whatever byte the remote peer
+		// (master for this exchange) sends. No TRANSFER_ENABLE polling
+		// loop needed here; just check every tick whether an unsolicited
+		// byte has arrived, and if so, complete in one shot (echoing our
+		// own current SB back, same as real hardware's simultaneous
+		// full-duplex exchange on a single clock edge).
+		if (pGBc_instance->GBc_state.emulatorStatus.serialDevice == GB_SERIAL_DEVICE::GB_LINK_CABLE && isSerialLinkConnected() == YES)
 		{
-			receiveOverSerialLink(&bitReceived, &rxStatus, NO);
-		}
+			BYTE receivedByte = ZERO;
 
-		// if we received data... set the LSB of SB register to the value present in received data
-		if (rxStatus == YES)
-		{
-			// extract the "bitToBeSent" over serial interface
-			BIT bitToBeSent = GETBIT(SEVEN, pGBc_peripherals->SB);
-
-			// send the "bitToBeSent" over serial interface
-			if (pGBc_instance->GBc_state.emulatorStatus.serialDevice == GB_SERIAL_DEVICE::GB_LINK_CABLE)
+#ifndef __EMSCRIPTEN__
+			// Slave branch, same idea, symmetric check:
+			if (abstractEmulation_t::getLinkSession().isFourPlayerAdapterActive() == YES
+				&& abstractEmulation_t::getLinkSession().isAdapterLeader() == NO)
 			{
-				while (!sendOverSerialLink(bitToBeSent))
-				{
-					;
-				}
+				// TODO: this instance is a follower -- relay through, same as
+				// existing tickSerialLinkAsSlave() plumbing, once adapter-mode
+				// interpretation is built.
 			}
+#endif
 
-			// update the SB (after the MSB was transferred out and LSB was transferred in)
-			pGBc_peripherals->SB = (pGBc_peripherals->SB << ONE) | bitReceived;
-
-			// increment the shift counter
-			pGBc_instance->GBc_state.emulatorStatus.serialSlaveByteShiftCount++;
-
-			// if all eight bits are shifted out...
-			if (pGBc_instance->GBc_state.emulatorStatus.serialSlaveByteShiftCount == EIGHT)
+			if (tickSerialLinkAsSlave(pGBc_peripherals->SB, &receivedByte))
 			{
-				// reset the shift counter
+				pGBc_peripherals->SB = receivedByte;
+
 				pGBc_instance->GBc_state.emulatorStatus.serialSlaveByteShiftCount = RESET;
-
-				// transfer is complete, so set bit 7 of SC to zero
 				pGBc_peripherals->SC.scFields.TRANSFER_ENABLE = RESET;
-
-				// request for serial interrupt
 				requestInterrupts(INTERRUPTS::SERIAL_INTERRUPT);
-
-				// go back to serial slave mode (let game request again to be in master mode if necessary)
-				// pGBc_peripherals->SC.scFields.CLOCK_SELECT = SERIAL_SLAVE;
 			}
+
+			RETURN;
 		}
 	}
 #endif // !__RPI_PICO__
@@ -3353,74 +3410,16 @@ void GBc_t::processSerialClockSpeedBit()
 
 FLAG GBc_t::sendOverSerialLink(BIT bitToSend)
 {
-	FLAG status = FAILURE;
-
-	if (_ENABLE_NETWORK == YES)
-	{
-#if DISABLED
-		olc::net::message<serialMsg> msg;
-		gameSerialData toBeSent;
-		toBeSent.ID = nEmulationInstanceID;
-		toBeSent.data = bitToSend;
-		msg << toBeSent;
-		msg.header.id = serialMsg::Game_SendBit;
-		GBcNetworkEngine->Send(msg);
-		LOG("[Client] Bit sent from Client ID %u is %u", nEmulationInstanceID, bitToSend);
-#endif
-		status = SUCCESS;
-	}
-	else
-	{
-		status = SUCCESS;
-	}
+	FLAG status = SUCCESS;
 
 	RETURN status;
-}
-
-FLAG GBc_t::receiveOverSerialLink(BIT* bitReceived, FLAG* rxStatus, FLAG isBlocking, INC32 timeoutInUs)
-{
-	*bitReceived = ONE;
-	*rxStatus = NO;
-
-	if (_ENABLE_NETWORK == NO)
-	{
-		RETURN SUCCESS;
-	}
-
-#if DISABLED
-	// Check once without busy-waiting
-	if (!GBcNetworkEngine->Incoming().empty())
-	{
-		auto msg = GBcNetworkEngine->Incoming().pop_front().msg;
-		if (msg.header.id == serialMsg::Game_ReceiveBit)
-		{
-			msg >> *bitReceived;
-			*rxStatus = YES;
-		}
-		RETURN SUCCESS;
-	}
-
-	// Non-blocking case: just return
-	if (isBlocking == NO)
-	{
-		RETURN SUCCESS;
-	}
-
-	// Blocking case: use a condition variable or sleep briefly
-	// instead of busy-waiting
-	std::this_thread::sleep_for(std::chrono::microseconds(timeoutInUs));
-	RETURN SUCCESS;
-#else
-	// Network code is disabled, just return immediately
-	RETURN SUCCESS;
-#endif
 }
 
 void GBc_t::detectSerialDevice(BIT bitToSend)
 {
 	auto& serialStatus = pGBc_instance->GBc_state.emulatorStatus;
 
-	if (serialStatus.serialDevice != GB_SERIAL_DEVICE::GB_NONE)
+	if (serialStatus.serialDevice != GB_SERIAL_DEVICE::GB_LINK_CABLE)
 	{
 		RETURN;
 	}
@@ -3453,7 +3452,7 @@ void GBc_t::resetSerialDeviceDetection()
 {
 	auto& serialStatus = pGBc_instance->GBc_state.emulatorStatus;
 
-	serialStatus.serialDevice = GB_SERIAL_DEVICE::GB_NONE;
+	serialStatus.serialDevice = GB_SERIAL_DEVICE::GB_LINK_CABLE;
 	serialStatus.serialDetectionShiftRegister = 0;
 	serialStatus.serialDetectionBitCount = 0;
 }
@@ -6719,9 +6718,9 @@ void GBc_t::displayCompleteScreen()
 	GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter));
 	GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter));
 
-	// 1b. Ghost pass ï¿½ exponential decay blend of gameboy_texture into ghost_texture.
+	// 1b. Ghost pass – exponential decay blend of gameboy_texture into ghost_texture.
 	//     Runs at native GB/GBC resolution (160x144 or 160x144 GBC) before upscaling.
-	//     ghost_texture is NOT cleared between frames ï¿½ that persistence is the effect.
+	//     ghost_texture is NOT cleared between frames – that persistence is the effect.
 	if (ghost_decay > 0.0f)
 	{
 		uint32_t read = ghost_index;
@@ -7499,7 +7498,7 @@ FLAG GBc_t::initializeEmulator()
 	pGBc_instance->GBc_state.emulatorStatus.clocksAfterTIMAOverflow = INVALID;
 
 	// Serial initialization
-	pGBc_instance->GBc_state.emulatorStatus.serialDevice = GB_SERIAL_DEVICE::GB_NONE;
+	pGBc_instance->GBc_state.emulatorStatus.serialDevice = GB_SERIAL_DEVICE::GB_LINK_CABLE;
 	pGBc_instance->GBc_state.emulatorStatus.serialDetectionShiftRegister = RESET;
 	pGBc_instance->GBc_state.emulatorStatus.serialDetectionBitCount = RESET;
 	initializeSerialClockSpeed();
@@ -8280,13 +8279,13 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 					e.isFlashForB = NO;
 					e.flashCmdState = 0;
 
-					// FLASH memory content ï¿½ erased state is 0xFF
+					// FLASH memory content — erased state is 0xFF
 					memset(
 						e.flash.raw,
 						0xFF,
 						sizeof(e.flash)); // 8 MBits
 
-					// FLASH Hidden memory content ï¿½ erased state is 0xFF
+					// FLASH Hidden memory content — erased state is 0xFF
 					memset(
 						e.flashHidden,
 						0xFF,
@@ -8318,7 +8317,7 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 					e.eepromArgBitsLeft = 0;
 					e.eepromReadBits = 0;
 
-					// EEPROM memory content ï¿½ erased state is 0xFF
+					// EEPROM memory content — erased state is 0xFF
 					memset(
 						pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[0],
 						0xFF,
@@ -8616,7 +8615,7 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 
 							uint64_t elapsed = (unixCTS > unixSTS) ? (unixCTS - unixSTS) : 0;
 
-							// Apply elapsed time to live counters ($10ï¿½$15) + rtcSeconds
+							// Apply elapsed time to live counters ($10–$15) + rtcSeconds
 							uint16_t minutes = ((uint16_t)rtc.rtcMem[0x10] << 8)
 								| ((uint16_t)rtc.rtcMem[0x11] << 4)
 								| rtc.rtcMem[0x12];
@@ -10430,14 +10429,14 @@ void GBc_t::executeHUC3ExtendedCommand()
 	auto& rtc = pGBc_emuStatus->huc3Rtc;
 	switch (rtc.argument)
 	{
-	case 0x0: // Copy live counters ($10ï¿½$15) -> staging ($00ï¿½$06)
+	case 0x0: // Copy live counters ($10–$15) -> staging ($00–$06)
 	{
 		for (int i = 0; i < 3; i++) rtc.rtcMem[i] = rtc.rtcMem[0x10 + i]; // minutes LSN-first
 		for (int i = 0; i < 3; i++) rtc.rtcMem[0x03 + i] = rtc.rtcMem[0x13 + i]; // days LSN-first
 		rtc.rtcMem[0x06] = rtc.rtcSeconds & 0x0F;
 		BREAK;
 	}
-	case 0x1: // Copy staging ($00ï¿½$06) -> live counters ($10ï¿½$15), adjust event time
+	case 0x1: // Copy staging ($00–$06) -> live counters ($10–$15), adjust event time
 	{
 		if (rtc.rtcMem[0x06] != 1 || (rtc.rtcMem[0x07] & 0x01))
 		{
@@ -10460,7 +10459,7 @@ void GBc_t::executeHUC3ExtendedCommand()
 		// Delta in total minutes
 		int32_t delta = ((int32_t)newDays * 1440 + newMinutes) - ((int32_t)oldDays * 1440 + oldMinutes);
 
-		// Adjust event time at $58ï¿½$5D by same delta (LSN at lower index)
+		// Adjust event time at $58–$5D by same delta (LSN at lower index)
 		uint16_t evtMin = ((uint16_t)rtc.rtcMem[0x5A] << 8) | ((uint16_t)rtc.rtcMem[0x59] << 4) | rtc.rtcMem[0x58];
 		uint16_t evtDays = ((uint16_t)rtc.rtcMem[0x5D] << 8) | ((uint16_t)rtc.rtcMem[0x5C] << 4) | rtc.rtcMem[0x5B];
 
@@ -10484,7 +10483,7 @@ void GBc_t::executeHUC3ExtendedCommand()
 		rtc.rtcSeconds = 0;
 		BREAK;
 	}
-	case 0x2: // Status ï¿½ must return $1 or games won't start
+	case 0x2: // Status — must return $1 or games won't start
 	{
 		rtc.result = 0x1;
 		BREAK;
@@ -10530,7 +10529,7 @@ void GBc_t::executeHUC3Command()
 		rtc.rtcMemIdx = (rtc.rtcMemIdx & 0x0F) | ((rtc.argument & 0x0F) << FOUR);
 		BREAK;
 
-	case 0x6: // Extended command ï¿½ argument selects sub-command
+	case 0x6: // Extended command — argument selects sub-command
 		executeHUC3ExtendedCommand();
 		BREAK;
 
@@ -10545,9 +10544,9 @@ void GBc_t::executeHUC3Command()
 // Refer https://gbdev.io/pandocs/MBC6.html#flash-commands
 //
 // Three separate protection flags:
-//   mbc6.flashEnable           : set by reg $0C00-$0FFF ($01) ï¿½ global gate for all flash writes
-//   mbc6.flashEnSec0AndHidden: set by reg $1000       ($01) ï¿½ additional gate for sector 0 and hidden region
-//   mbc6.flashProtSec0         : set by flash commands  ($20/$40) ï¿½ hardware protection for sector 0 erase
+//   mbc6.flashEnable           : set by reg $0C00-$0FFF ($01) — global gate for all flash writes
+//   mbc6.flashEnSec0AndHidden: set by reg $1000       ($01) — additional gate for sector 0 and hidden region
+//   mbc6.flashProtSec0         : set by flash commands  ($20/$40) — hardware protection for sector 0 erase
 //
 // Flash command state machine states:
 //  0  = IDLE
@@ -10585,7 +10584,7 @@ void GBc_t::processMBC6FlashWrite(uint16_t cpuAddr, BYTE data)
 		if (!mbc6.isFlashForA) RETURN;
 		flashAddr = (uint32_t)getROMBankNumber() * 0x2000 + (cpuAddr - 0x4000);
 	}
-	else // Bank B window (0x6000ï¿½0x7FFF)
+	else // Bank B window (0x6000–0x7FFF)
 	{
 		if (!mbc6.isFlashForB) RETURN;
 		flashAddr = (uint32_t)getROMBankNumberB() * 0x2000 + (cpuAddr - 0x6000);
@@ -10739,7 +10738,7 @@ void GBc_t::processMBC6FlashWrite(uint16_t cpuAddr, BYTE data)
 
 				if (isSector0 && (!mbc6.flashEnSec0AndHidden || mbc6.flashProtSec0))
 				{
-					// Sector 0: blocked ï¿½ either write-enable not set or hardware-protected
+					// Sector 0: blocked — either write-enable not set or hardware-protected
 				}
 				else
 				{
@@ -11248,7 +11247,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 					if (isPoke2in1()) MASQ_UNLIKELY
 					{
 						auto& p2 = pGBc_emuStatus->poke2in1;
-						// 0x0000ï¿½0x1FFF: RAM enable + bank0Change latch
+						// 0x0000–0x1FFF: RAM enable + bank0Change latch
 						((data & 0x0A) == 0x0A) ? enableRAMBank() : disableRAMBank();
 						p2.bank0Change = ((data & 0xC0) == 0xC0) ? YES : NO;
 						RETURN;
@@ -11387,7 +11386,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 					if (isPoke2in1()) MASQ_UNLIKELY
 					{
 						auto& p2 = pGBc_emuStatus->poke2in1;
-						// 0x0000ï¿½0x1FFF: RAM enable + bank0Change latch
+						// 0x0000–0x1FFF: RAM enable + bank0Change latch
 						byte bank = data & 0x7F;
 						if (bank == ZERO) bank = ONE;
 						bank += p2.MBChi;
@@ -11499,7 +11498,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 				if (isPoke2in1()) MASQ_UNLIKELY
 				{
 					auto& p2 = pGBc_emuStatus->poke2in1;
-					// 0x4000ï¿½0x5FFF: RAM bank (only if >8KB RAM)
+					// 0x4000–0x5FFF: RAM bank (only if >8KB RAM)
 					if (getNumberOfRAMBanksUsed() > ONE)
 					{
 						uint8_t ramBank = (data & 0x03) % getNumberOfRAMBanksUsed();
@@ -11632,7 +11631,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 				}
 				else if (isMMM01())
 				{
-					// Mode bit always writable when writeDisable is clear ï¿½ NOT gated by muxEnabled
+					// Mode bit always writable when writeDisable is clear — NOT gated by muxEnabled
 					if (pGBc_emuStatus->mmm01.writeDisable == RESET)
 					{
 						(data & 0x01) ? setAdvancedModeInMMM01() : setSimpleModeInMMM01();
@@ -11734,15 +11733,15 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 						// MBChi stays at current value (or 0 if first write)
 					}
 
-					// Remap the entire 0x0000ï¿½0x7FFF window to the new base
+					// Remap the entire 0x0000–0x7FFF window to the new base
 					const uint16_t base = p2.MBChi % getNumberOfROMBanksUsed();
 					setROMBankNumber((base + ONE) % getNumberOfROMBanksUsed());
-					// Bank 0 window remap: store base so readRawMemory can use it for 0x0000ï¿½0x3FFF
+					// Bank 0 window remap: store base so readRawMemory can use it for 0x0000–0x3FFF
 					// (handled in readRawMemory below)
 				}
 
 				// Always fall through to normal RAM write (if RAM enabled)
-				// so don't RETURN here ï¿½ let the generic path handle it
+				// so don't RETURN here — let the generic path handle it
 			}
 
 			if (isMBC6()) MASQ_UNLIKELY
@@ -11918,7 +11917,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 											MBC7_EEPROM_WORD(e.eepromCommand & 0x7F) = 0x0000;
 										}
 										e.eepromArgBitsLeft = 16;
-										// Don't clear command ï¿½ needed to identify WRITE vs WRAL below
+										// Don't clear command — needed to identify WRITE vs WRAL below
 										BREAK;
 									}
 									// ERASE (11 xAAAAAAA)
