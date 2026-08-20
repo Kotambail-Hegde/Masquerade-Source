@@ -87,7 +87,7 @@ _Example: The Event Debugger inspecting a Game Boy / Game Boy Color state._
 
 #### Tetris 2-Player mode with Game-Boy Link Cable
 
-<kbd><img width="672" height="348" alt="tetris-serial-link-comp" src="https://github.com/user-attachments/assets/805fce08-d3ad-4ce2-b303-121c5b0b898c" /></kbd>
+<kbd><img width="437" height="226" alt="tetris-serial-link-comp" src="https://github.com/user-attachments/assets/805fce08-d3ad-4ce2-b303-121c5b0b898c" /></kbd>
 
 ### P0010: OLC (Deprecated)
 
