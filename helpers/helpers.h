@@ -2391,6 +2391,8 @@ extern ROM ROM_TYPE;
 // Needed by NES
 extern FLAG enableZapper;
 extern FLAG nesReset;
+extern FLAG forceNTSC;
+extern FLAG forcePAL;
 
 MASQ_INLINE FLAG isCLI()
 {

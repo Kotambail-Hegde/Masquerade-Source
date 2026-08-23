@@ -43,19 +43,6 @@
 static COUNTER64 logCounter = ZERO;
 static COUNTER64 nesEmulationCounter[100] = { ZERO };
 
-// for audio
-// maximum number of inputs
-static uint32_t const MAX_INPUT_LEN = (uint32_t)(EMULATED_AUDIO_SAMPLING_RATE_FOR_NES / CEIL(NES_FPS));
-// length of filter than can be handled
-static uint32_t const MAX_FLT_LEN = 103;
-// buffer to hold all of the input samples
-static uint32_t const BUFFER_LEN = (MAX_FLT_LEN - 1 + MAX_INPUT_LEN);
-// coefficients for the FIR from https://www.arc.id.au/FilterDesign.html
-// 
-// double type buffers to hold input and output during FIR
-static double doubleInput[(uint32_t)(EMULATED_AUDIO_SAMPLING_RATE_FOR_NES / CEIL(NES_FPS))];
-static double doubleOutput[(uint32_t)(EMULATED_AUDIO_SAMPLING_RATE_FOR_NES / CEIL(NES_FPS))];
-
 static std::string _JSON_LOCATION;
 static MasqConfig_t testCase;
 
@@ -6334,18 +6321,18 @@ inline void NES_t::writeCpuRawMemoryInternal(uint16_t address, byte data, MEMORY
 					{
 						if (pNES_instance->NES_state.audio.frameSequencerMode == FRAME_SEQUENCER_MODE::FOUR_STEP_MODE)
 						{
-							if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer == (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_0::STEP_M01))
+							if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer == (frameSeqM01())
 								&& pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::PULSE_1)].lengthCounter == RESET)
 							{
 								pNES_instance->NES_state.audio.skipClockingLengthCounter = YES;
 							}
-							if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer == (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_0::STEP_M03))
+							if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer == (frameSeqM03())
 								&& pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::PULSE_1)].lengthCounter == RESET)
 							{
 								pNES_instance->NES_state.audio.skipClockingLengthCounter = YES;
 							}
-							if ((pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer != (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_0::STEP_M01))
-								&& pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer != (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_0::STEP_M03)))
+							if ((pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer != (frameSeqM01())
+								&& pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer != (frameSeqM03()))
 								|| (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::PULSE_1)].lengthCounter == RESET))
 							{
 								pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::PULSE_1)].lengthCounter
@@ -6354,18 +6341,18 @@ inline void NES_t::writeCpuRawMemoryInternal(uint16_t address, byte data, MEMORY
 						}
 						else if (pNES_instance->NES_state.audio.frameSequencerMode == FRAME_SEQUENCER_MODE::FIVE_STEP_MODE)
 						{
-							if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer == (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_1::STEP_M10))
+							if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer == (frameSeqM10())
 								&& pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::PULSE_1)].lengthCounter == RESET)
 							{
 								pNES_instance->NES_state.audio.skipClockingLengthCounter = YES;
 							}
-							if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer == (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_1::STEP_M12))
+							if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer == (frameSeqM12())
 								&& pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::PULSE_1)].lengthCounter == RESET)
 							{
 								pNES_instance->NES_state.audio.skipClockingLengthCounter = YES;
 							}
-							if ((pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer != (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_1::STEP_M10))
-								&& pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer != (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_1::STEP_M12)))
+							if ((pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer != (frameSeqM10())
+								&& pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer != (frameSeqM12()))
 								|| (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::PULSE_1)].lengthCounter == RESET))
 							{
 								pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::PULSE_1)].lengthCounter
@@ -6410,18 +6397,18 @@ inline void NES_t::writeCpuRawMemoryInternal(uint16_t address, byte data, MEMORY
 					{
 						if (pNES_instance->NES_state.audio.frameSequencerMode == FRAME_SEQUENCER_MODE::FOUR_STEP_MODE)
 						{
-							if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer == (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_0::STEP_M01))
+							if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer == (frameSeqM01())
 								&& pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::PULSE_2)].lengthCounter == RESET)
 							{
 								pNES_instance->NES_state.audio.skipClockingLengthCounter = YES;
 							}
-							if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer == (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_0::STEP_M03))
+							if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer == (frameSeqM03())
 								&& pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::PULSE_2)].lengthCounter == RESET)
 							{
 								pNES_instance->NES_state.audio.skipClockingLengthCounter = YES;
 							}
-							if ((pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer != (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_0::STEP_M01))
-								&& pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer != (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_0::STEP_M03)))
+							if ((pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer != (frameSeqM01())
+								&& pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer != (frameSeqM03()))
 								|| (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::PULSE_2)].lengthCounter == RESET))
 							{
 								pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::PULSE_2)].lengthCounter
@@ -6430,18 +6417,18 @@ inline void NES_t::writeCpuRawMemoryInternal(uint16_t address, byte data, MEMORY
 						}
 						else if (pNES_instance->NES_state.audio.frameSequencerMode == FRAME_SEQUENCER_MODE::FIVE_STEP_MODE)
 						{
-							if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer == (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_1::STEP_M10))
+							if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer == (frameSeqM10())
 								&& pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::PULSE_2)].lengthCounter == RESET)
 							{
 								pNES_instance->NES_state.audio.skipClockingLengthCounter = YES;
 							}
-							if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer == (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_1::STEP_M12))
+							if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer == (frameSeqM12())
 								&& pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::PULSE_2)].lengthCounter == RESET)
 							{
 								pNES_instance->NES_state.audio.skipClockingLengthCounter = YES;
 							}
-							if ((pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer != (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_1::STEP_M10))
-								&& pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer != (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_1::STEP_M12)))
+							if ((pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer != (frameSeqM10())
+								&& pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer != (frameSeqM12()))
 								|| (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::PULSE_2)].lengthCounter == RESET))
 							{
 								pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::PULSE_2)].lengthCounter
@@ -6481,18 +6468,18 @@ inline void NES_t::writeCpuRawMemoryInternal(uint16_t address, byte data, MEMORY
 					{
 						if (pNES_instance->NES_state.audio.frameSequencerMode == FRAME_SEQUENCER_MODE::FOUR_STEP_MODE)
 						{
-							if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer == (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_0::STEP_M01))
+							if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer == (frameSeqM01())
 								&& pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::TRIANGLE)].lengthCounter == RESET)
 							{
 								pNES_instance->NES_state.audio.skipClockingLengthCounter = YES;
 							}
-							if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer == (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_0::STEP_M03))
+							if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer == (frameSeqM03())
 								&& pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::TRIANGLE)].lengthCounter == RESET)
 							{
 								pNES_instance->NES_state.audio.skipClockingLengthCounter = YES;
 							}
-							if ((pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer != (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_0::STEP_M01))
-								&& pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer != (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_0::STEP_M03)))
+							if ((pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer != (frameSeqM01())
+								&& pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer != (frameSeqM03()))
 								|| (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::TRIANGLE)].lengthCounter == RESET))
 							{
 								pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::TRIANGLE)].lengthCounter
@@ -6501,18 +6488,18 @@ inline void NES_t::writeCpuRawMemoryInternal(uint16_t address, byte data, MEMORY
 						}
 						else if (pNES_instance->NES_state.audio.frameSequencerMode == FRAME_SEQUENCER_MODE::FIVE_STEP_MODE)
 						{
-							if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer == (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_1::STEP_M10))
+							if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer == (frameSeqM10())
 								&& pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::TRIANGLE)].lengthCounter == RESET)
 							{
 								pNES_instance->NES_state.audio.skipClockingLengthCounter = YES;
 							}
-							if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer == (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_1::STEP_M12))
+							if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer == (frameSeqM12())
 								&& pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::TRIANGLE)].lengthCounter == RESET)
 							{
 								pNES_instance->NES_state.audio.skipClockingLengthCounter = YES;
 							}
-							if ((pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer != (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_1::STEP_M10))
-								&& pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer != (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_1::STEP_M12)))
+							if ((pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer != (frameSeqM10())
+								&& pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer != (frameSeqM12()))
 								|| (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::TRIANGLE)].lengthCounter == RESET))
 							{
 								pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::TRIANGLE)].lengthCounter
@@ -6544,18 +6531,18 @@ inline void NES_t::writeCpuRawMemoryInternal(uint16_t address, byte data, MEMORY
 					{
 						if (pNES_instance->NES_state.audio.frameSequencerMode == FRAME_SEQUENCER_MODE::FOUR_STEP_MODE)
 						{
-							if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer == (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_0::STEP_M01))
+							if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer == (frameSeqM01())
 								&& pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::NOISE)].lengthCounter == RESET)
 							{
 								pNES_instance->NES_state.audio.skipClockingLengthCounter = YES;
 							}
-							if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer == (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_0::STEP_M03))
+							if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer == (frameSeqM03())
 								&& pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::NOISE)].lengthCounter == RESET)
 							{
 								pNES_instance->NES_state.audio.skipClockingLengthCounter = YES;
 							}
-							if ((pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer != (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_0::STEP_M01))
-								&& pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer != (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_0::STEP_M03)))
+							if ((pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer != (frameSeqM01())
+								&& pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer != (frameSeqM03()))
 								|| (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::NOISE)].lengthCounter == RESET))
 							{
 								pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::NOISE)].lengthCounter
@@ -6564,18 +6551,18 @@ inline void NES_t::writeCpuRawMemoryInternal(uint16_t address, byte data, MEMORY
 						}
 						else if (pNES_instance->NES_state.audio.frameSequencerMode == FRAME_SEQUENCER_MODE::FIVE_STEP_MODE)
 						{
-							if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer == (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_1::STEP_M10))
+							if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer == (frameSeqM10())
 								&& pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::NOISE)].lengthCounter == RESET)
 							{
 								pNES_instance->NES_state.audio.skipClockingLengthCounter = YES;
 							}
-							if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer == (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_1::STEP_M12))
+							if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer == (frameSeqM12())
 								&& pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::NOISE)].lengthCounter == RESET)
 							{
 								pNES_instance->NES_state.audio.skipClockingLengthCounter = YES;
 							}
-							if ((pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer != (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_1::STEP_M10))
-								&& pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer != (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_1::STEP_M12)))
+							if ((pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer != (frameSeqM10())
+								&& pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer != (frameSeqM12()))
 								|| (pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::NOISE)].lengthCounter == RESET))
 							{
 								pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::NOISE)].lengthCounter
@@ -10188,9 +10175,7 @@ void NES_t::cpuTickT(CYCLES_TYPE cycleType)
 			clockRambo1CpuIRQ();
 			clockNamco163IRQ();
 			clockMMC5();
-			ppuTick();
-			ppuTick();
-			ppuTick();
+			tickPpuForOneCpuCycle();
 			apuTick();
 			joypadTick();
 
@@ -10217,9 +10202,7 @@ void NES_t::cpuTickT(CYCLES_TYPE cycleType)
 				clockRambo1CpuIRQ();
 				clockNamco163IRQ();
 				clockMMC5();
-				ppuTick();
-				ppuTick();
-				ppuTick();
+				tickPpuForOneCpuCycle();
 				apuTick();
 				joypadTick();
 			}
@@ -10242,9 +10225,7 @@ void NES_t::cpuTickT(CYCLES_TYPE cycleType)
 				clockRambo1CpuIRQ();
 				clockNamco163IRQ();
 				clockMMC5();
-				ppuTick();
-				ppuTick();
-				ppuTick();
+				tickPpuForOneCpuCycle();
 				apuTick();
 				joypadTick();
 
@@ -10264,9 +10245,7 @@ void NES_t::cpuTickT(CYCLES_TYPE cycleType)
 				clockRambo1CpuIRQ();
 				clockNamco163IRQ();
 				clockMMC5();
-				ppuTick();
-				ppuTick();
-				ppuTick();
+				tickPpuForOneCpuCycle();
 				apuTick();
 				joypadTick();
 
@@ -10296,9 +10275,7 @@ void NES_t::cpuTickT(CYCLES_TYPE cycleType)
 					clockRambo1CpuIRQ();
 					clockNamco163IRQ();
 					clockMMC5();
-					ppuTick();
-					ppuTick();
-					ppuTick();
+					tickPpuForOneCpuCycle();
 					apuTick();
 					joypadTick();
 
@@ -10337,7 +10314,7 @@ void NES_t::syncOtherGBModuleTicks()
 	// Note: For PPU sequence, refer to https://www.nesdev.org/wiki/Cycle_reference_chart
 	// Note: For APU sequence, refer to "Glossary" of https://www.nesdev.org/wiki/APU
 
-	// 1 CPU Tick = 3 PPU Ticks
+	// NTSC: 1 CPU Tick = 3 PPU Ticks. PAL: 1 CPU Tick = 3.2 PPU Ticks on average (see tickPpuForOneCpuCycle()).
 	// 1 CPU Tick = 0.5 APU Tick excepts for Triangle channel's timer (APU generally operates at half the frequency of the CPU),
 	// But, 1 CPU Tick = 1 APU Tick for Triangle channel's timer
 	// 1 APU Tick = 6 PPU Ticks most of the time, 
@@ -10353,11 +10330,73 @@ void NES_t::syncOtherGBModuleTicks()
 	clockRambo1CpuIRQ();
 	clockNamco163IRQ();
 	clockMMC5();
-	ppuTick();
-	ppuTick();
-	ppuTick();
+	tickPpuForOneCpuCycle();
 	apuTick();
 	joypadTick();
+}
+
+// Refer : https://www.nesdev.org/wiki/Cycle_reference_chart#Clock_rates
+// Applies the region selected via setTVSystem() to every runtime timing member. Called once, at the top of initializeEmulator().
+void NES_t::applyTVSystemTimingConfig()
+{
+	palPpuTickAccumulator = RESET;
+
+	if (tvSystem == NES_TV_SYSTEM::PAL)
+	{
+		cpuClockHz = (float)NES_PAL_CPU_CLOCK_HZ;
+		ppuClockHz = (float)NES_PAL_PPU_CLOCK_HZ;
+		nesLastPpuScanline = NES_PAL_LAST_PPU_SCANLINE;
+		nesTotalPpuScanline = NES_PAL_TOTAL_PPU_SCANLINE;
+		nesFrameDots = NES_PAL_FRAME_DOTS;
+		myFPS = (float)NES_PAL_FPS;
+
+		// Refer : https://forums.nesdev.org/viewtopic.php?t=2124
+		static const uint16_t palNoise[SIXTEEN] = { 4,7,14,30,60,88,118,148,188,236,354,472,708,944,1890,3778 };
+		static const uint16_t palDmc[SIXTEEN] = { 398,354,316,298,276,236,210,198,176,148,132,118,98,78,66,50 };
+		memcpy(NOISE_PERIOD_LUT, palNoise, sizeof(palNoise));
+		memcpy(DMC_PERIOD_LUT, palDmc, sizeof(palDmc));
+	}
+	else
+	{
+		cpuClockHz = (float)NES_NTSC_CPU_CLOCK_HZ;
+		ppuClockHz = (float)NES_NTSC_PPU_CLOCK_HZ;
+		nesLastPpuScanline = NES_NTSC_LAST_PPU_SCANLINE;
+		nesTotalPpuScanline = NES_NTSC_TOTAL_PPU_SCANLINE;
+		nesFrameDots = NES_NTSC_FRAME_DOTS;
+		myFPS = (float)NES_NTSC_FPS;
+
+		static const uint16_t ntscNoise[SIXTEEN] = { 4,8,16,32,64,96,128,160,202,254,380,508,762,1016,2034,4068 };
+		static const uint16_t ntscDmc[SIXTEEN] = { 428,380,340,320,286,254,226,214,190,160,142,128,106,84,72,54 };
+		memcpy(NOISE_PERIOD_LUT, ntscNoise, sizeof(ntscNoise));
+		memcpy(DMC_PERIOD_LUT, ntscDmc, sizeof(ntscDmc));
+	}
+}
+
+// Refer : https://www.nesdev.org/wiki/Cycle_reference_chart#Clock_rates
+// NTSC: exactly 3 PPU dots per CPU cycle, no drift.
+// PAL : exactly 3.2 PPU dots per CPU cycle on average (16 PPU dots per 5 CPU cycles),
+//       implemented here as 3 dots on 4 of every 5 CPU cycles and 4 dots on the 5th
+//       ("the PPU outputs three dots for each CPU cycle, unless you're emulating a PAL NES,
+//       in which case it outputs an extra dot every fifth CPU cycle" -- nesdev forums,
+//       https://forums.nesdev.org/viewtopic.php?t=10266).
+void NES_t::tickPpuForOneCpuCycle()
+{
+	uint8_t ppuTicksThisCpuCycle = THREE;
+
+	if (tvSystem == NES_TV_SYSTEM::PAL)
+	{
+		++palPpuTickAccumulator;
+		if (palPpuTickAccumulator >= FIVE)
+		{
+			palPpuTickAccumulator = RESET;
+			ppuTicksThisCpuCycle = FOUR;
+		}
+	}
+
+	for (uint8_t i = RESET; i < ppuTicksThisCpuCycle; ++i)
+	{
+		ppuTick();
+	}
 }
 
 void NES_t::ppuTick()
@@ -10406,9 +10445,12 @@ void NES_t::ppuTick()
 					pNES_ppuRegisters->vblClearPPUCycle = pNES_instance->NES_state.emulatorStatus.ticks.ppuCounter;
 					auto diff = (pNES_ppuRegisters->vblClearPPUCycle - pNES_ppuRegisters->vblSetPPUCycle);
 					// Refer to 2nd point of "VBL Flag Timing" in https://www.nesdev.org/wiki/PPU_frame_timing
-					if ((pNES_ppuRegisters->vblClearPPUCycle - pNES_ppuRegisters->vblSetPPUCycle) != 6820)
+					// Vblank runs from scanline NES_POST_RENDER_SCANLINE (241) to nesLastPpuScanline inclusive, so its
+					// length in scanlines is (nesLastPpuScanline - NES_POST_RENDER_SCANLINE + 1); NTSC = 20, PAL = 70.
+					uint64_t expectedVblSetToClearDots = (uint64_t)(nesLastPpuScanline - NES_POST_RENDER_SCANLINE + ONE) * NES_TOTAL_PPU_CYCLES_PER_SCANLINE;
+					if (diff != expectedVblSetToClearDots)
 					{
-						FATAL("VBL set time - VBL clear clear is %llu!", diff);
+						FATAL("VBL set time - VBL clear clear is %llu! (expected %llu)", diff, expectedVblSetToClearDots);
 					}
 				}
 
@@ -11485,7 +11527,10 @@ void NES_t::ppuTick()
 		// Refer : https://www.nesdev.org/wiki/PPU_frame_timing 
 		// Refer : https://forums.nesdev.org/viewtopic.php?t=1368
 		// Refer : https://www.nesdev.org/w/images/default/4/4f/Ppu.svg
+		// Refer : https://www.nesdev.org/wiki/PAL_video ("No short line" -- PAL/2C07 never skips this dot, on odd or even frames)
 		if (
+			(tvSystem == NES_TV_SYSTEM::NTSC)
+			&&
 			(ly == NES_PRE_RENDER_SCANLINE)
 			&&
 			(checkIfRenderring() == YES)
@@ -11503,7 +11548,7 @@ void NES_t::ppuTick()
 			pNES_instance->NES_state.emulatorStatus.ticks.ppuCounterPerLY = RESET;
 			++pNES_instance->NES_state.display.currentScanline;
 
-			if (pNES_instance->NES_state.display.currentScanline >= NES_TOTAL_PPU_SCANLINE)
+			if (pNES_instance->NES_state.display.currentScanline >= nesTotalPpuScanline)
 			{
 				pNES_instance->NES_state.emulatorStatus.ticks.ppuCounterPerFrame = RESET;
 				pNES_instance->NES_state.display.currentScanline = NES_PRE_RENDER_SCANLINE;
@@ -11542,58 +11587,17 @@ void NES_t::apuTick()
 		// Refer : https://forums.nesdev.org/viewtopic.php?p=64359#p64359 for the apuSequencer magic numbers
 		if (pNES_instance->NES_state.audio.frameSequencerMode == FRAME_SEQUENCER_MODE::FOUR_STEP_MODE)
 		{
-			switch (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer)
-			{
-			case (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_0::STEP_M00)):
-			{
-				processEnvelope(AUDIO_CHANNELS::PULSE_1);
-				processEnvelope(AUDIO_CHANNELS::PULSE_2);
-				processEnvelope(AUDIO_CHANNELS::NOISE);
-				processLinearCounter();
-				BREAK;
-			}
-			case (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_0::STEP_M01)):
-			{
-				processEnvelope(AUDIO_CHANNELS::PULSE_1);
-				processEnvelope(AUDIO_CHANNELS::PULSE_2);
-				processEnvelope(AUDIO_CHANNELS::NOISE);
-				processSweep(AUDIO_CHANNELS::PULSE_1);
-				processSweep(AUDIO_CHANNELS::PULSE_2);
-				processLinearCounter();
-				processLengthCounter(AUDIO_CHANNELS::PULSE_1);
-				processLengthCounter(AUDIO_CHANNELS::PULSE_2);
-				processLengthCounter(AUDIO_CHANNELS::TRIANGLE);
-				processLengthCounter(AUDIO_CHANNELS::NOISE);
-				BREAK;
-			}
-			case (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_0::STEP_M02)):
+			uint64_t seq0 = pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer;
+
+			if (seq0 == frameSeqM00())
 			{
 				processEnvelope(AUDIO_CHANNELS::PULSE_1);
 				processEnvelope(AUDIO_CHANNELS::PULSE_2);
 				processEnvelope(AUDIO_CHANNELS::NOISE);
 				processLinearCounter();
-				BREAK;
 			}
-			case ((TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_0::STEP_M03)) - ONE):
+			else if (seq0 == frameSeqM01())
 			{
-				if (pNES_cpuMemory->NESMemoryMap.apuAndIO.JOY2_OR_FRAME_CONFIG.FRAME_CONFIG.DIS_FRAME_INTR == RESET
-					&& pNES_instance->NES_state.interrupts.irqDelayInCpuCycles == RESET)
-				{
-					pNES_cpuMemory->NESMemoryMap.apuAndIO.SND_CHN.FRAME_INTR = SET;
-					pNES_instance->NES_state.interrupts.isIRQ.fields.IRQ_SRC_FRAMECTR = SET;
-					pNES_instance->NES_state.interrupts.irqDelayInCpuCycles = ONE;
-				}
-				BREAK;
-			}
-			case (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_0::STEP_M03)):
-			{
-				if (pNES_cpuMemory->NESMemoryMap.apuAndIO.JOY2_OR_FRAME_CONFIG.FRAME_CONFIG.DIS_FRAME_INTR == RESET
-					&& pNES_instance->NES_state.interrupts.irqDelayInCpuCycles == RESET)
-				{
-					pNES_cpuMemory->NESMemoryMap.apuAndIO.SND_CHN.FRAME_INTR = SET;
-					pNES_instance->NES_state.interrupts.isIRQ.fields.IRQ_SRC_FRAMECTR = SET;
-					pNES_instance->NES_state.interrupts.irqDelayInCpuCycles = ONE;
-				}
 				processEnvelope(AUDIO_CHANNELS::PULSE_1);
 				processEnvelope(AUDIO_CHANNELS::PULSE_2);
 				processEnvelope(AUDIO_CHANNELS::NOISE);
@@ -11604,9 +11608,45 @@ void NES_t::apuTick()
 				processLengthCounter(AUDIO_CHANNELS::PULSE_2);
 				processLengthCounter(AUDIO_CHANNELS::TRIANGLE);
 				processLengthCounter(AUDIO_CHANNELS::NOISE);
-				BREAK;
 			}
-			case ((TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_0::STEP_M03)) + ONE):
+			else if (seq0 == frameSeqM02())
+			{
+				processEnvelope(AUDIO_CHANNELS::PULSE_1);
+				processEnvelope(AUDIO_CHANNELS::PULSE_2);
+				processEnvelope(AUDIO_CHANNELS::NOISE);
+				processLinearCounter();
+			}
+			else if (seq0 == (frameSeqM03() - ONE))
+			{
+				if (pNES_cpuMemory->NESMemoryMap.apuAndIO.JOY2_OR_FRAME_CONFIG.FRAME_CONFIG.DIS_FRAME_INTR == RESET
+					&& pNES_instance->NES_state.interrupts.irqDelayInCpuCycles == RESET)
+				{
+					pNES_cpuMemory->NESMemoryMap.apuAndIO.SND_CHN.FRAME_INTR = SET;
+					pNES_instance->NES_state.interrupts.isIRQ.fields.IRQ_SRC_FRAMECTR = SET;
+					pNES_instance->NES_state.interrupts.irqDelayInCpuCycles = ONE;
+				}
+			}
+			else if (seq0 == frameSeqM03())
+			{
+				if (pNES_cpuMemory->NESMemoryMap.apuAndIO.JOY2_OR_FRAME_CONFIG.FRAME_CONFIG.DIS_FRAME_INTR == RESET
+					&& pNES_instance->NES_state.interrupts.irqDelayInCpuCycles == RESET)
+				{
+					pNES_cpuMemory->NESMemoryMap.apuAndIO.SND_CHN.FRAME_INTR = SET;
+					pNES_instance->NES_state.interrupts.isIRQ.fields.IRQ_SRC_FRAMECTR = SET;
+					pNES_instance->NES_state.interrupts.irqDelayInCpuCycles = ONE;
+				}
+				processEnvelope(AUDIO_CHANNELS::PULSE_1);
+				processEnvelope(AUDIO_CHANNELS::PULSE_2);
+				processEnvelope(AUDIO_CHANNELS::NOISE);
+				processSweep(AUDIO_CHANNELS::PULSE_1);
+				processSweep(AUDIO_CHANNELS::PULSE_2);
+				processLinearCounter();
+				processLengthCounter(AUDIO_CHANNELS::PULSE_1);
+				processLengthCounter(AUDIO_CHANNELS::PULSE_2);
+				processLengthCounter(AUDIO_CHANNELS::TRIANGLE);
+				processLengthCounter(AUDIO_CHANNELS::NOISE);
+			}
+			else if (seq0 == (frameSeqM03() + ONE))
 			{
 				if (pNES_cpuMemory->NESMemoryMap.apuAndIO.JOY2_OR_FRAME_CONFIG.FRAME_CONFIG.DIS_FRAME_INTR == RESET
 					&& pNES_instance->NES_state.interrupts.irqDelayInCpuCycles == RESET)
@@ -11615,37 +11655,13 @@ void NES_t::apuTick()
 					pNES_instance->NES_state.interrupts.isIRQ.fields.IRQ_SRC_FRAMECTR = SET;
 					pNES_instance->NES_state.interrupts.irqDelayInCpuCycles = ZERO;
 				}
-				BREAK;
-			}
 			}
 		}
 		else if (pNES_instance->NES_state.audio.frameSequencerMode == FRAME_SEQUENCER_MODE::FIVE_STEP_MODE)
 		{
-			switch (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer)
-			{
-			case (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_1::STEP_M10)):
-			{
-				processEnvelope(AUDIO_CHANNELS::PULSE_1);
-				processEnvelope(AUDIO_CHANNELS::PULSE_2);
-				processEnvelope(AUDIO_CHANNELS::NOISE);
-				processSweep(AUDIO_CHANNELS::PULSE_1);
-				processSweep(AUDIO_CHANNELS::PULSE_2);
-				processLinearCounter();
-				processLengthCounter(AUDIO_CHANNELS::PULSE_1);
-				processLengthCounter(AUDIO_CHANNELS::PULSE_2);
-				processLengthCounter(AUDIO_CHANNELS::TRIANGLE);
-				processLengthCounter(AUDIO_CHANNELS::NOISE);
-				BREAK;
-			}
-			case (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_1::STEP_M11)):
-			{
-				processEnvelope(AUDIO_CHANNELS::PULSE_1);
-				processEnvelope(AUDIO_CHANNELS::PULSE_2);
-				processEnvelope(AUDIO_CHANNELS::NOISE);
-				processLinearCounter();
-				BREAK;
-			}
-			case (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_1::STEP_M12)):
+			uint64_t seq1 = pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer;
+
+			if (seq1 == frameSeqM10())
 			{
 				processEnvelope(AUDIO_CHANNELS::PULSE_1);
 				processEnvelope(AUDIO_CHANNELS::PULSE_2);
@@ -11657,16 +11673,33 @@ void NES_t::apuTick()
 				processLengthCounter(AUDIO_CHANNELS::PULSE_2);
 				processLengthCounter(AUDIO_CHANNELS::TRIANGLE);
 				processLengthCounter(AUDIO_CHANNELS::NOISE);
-				BREAK;
 			}
-			case (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_1::STEP_M13)):
+			else if (seq1 == frameSeqM11())
 			{
 				processEnvelope(AUDIO_CHANNELS::PULSE_1);
 				processEnvelope(AUDIO_CHANNELS::PULSE_2);
 				processEnvelope(AUDIO_CHANNELS::NOISE);
 				processLinearCounter();
-				BREAK;
 			}
+			else if (seq1 == frameSeqM12())
+			{
+				processEnvelope(AUDIO_CHANNELS::PULSE_1);
+				processEnvelope(AUDIO_CHANNELS::PULSE_2);
+				processEnvelope(AUDIO_CHANNELS::NOISE);
+				processSweep(AUDIO_CHANNELS::PULSE_1);
+				processSweep(AUDIO_CHANNELS::PULSE_2);
+				processLinearCounter();
+				processLengthCounter(AUDIO_CHANNELS::PULSE_1);
+				processLengthCounter(AUDIO_CHANNELS::PULSE_2);
+				processLengthCounter(AUDIO_CHANNELS::TRIANGLE);
+				processLengthCounter(AUDIO_CHANNELS::NOISE);
+			}
+			else if (seq1 == frameSeqM13())
+			{
+				processEnvelope(AUDIO_CHANNELS::PULSE_1);
+				processEnvelope(AUDIO_CHANNELS::PULSE_2);
+				processEnvelope(AUDIO_CHANNELS::NOISE);
+				processLinearCounter();
 			}
 		}
 		else
@@ -11687,16 +11720,16 @@ void NES_t::apuTick()
 
 		if (pNES_instance->NES_state.audio.frameSequencerMode == FRAME_SEQUENCER_MODE::FOUR_STEP_MODE)
 		{
-			if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer >= (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_0::STEP_M04)))
+			if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer >= (frameSeqM04()))
 			{
-				pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer = (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_0::STEP_M00));
+				pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer = (frameSeqM00());
 			}
 		}
 		else if (pNES_instance->NES_state.audio.frameSequencerMode == FRAME_SEQUENCER_MODE::FIVE_STEP_MODE)
 		{
-			if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer >= (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_1::STEP_M14)))
+			if (pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer >= (frameSeqM14()))
 			{
-				pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer = (TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_1::STEP_M10));
+				pNES_instance->NES_state.emulatorStatus.ticks.apuSequencer = (frameSeqM10());
 			}
 		}
 	}
@@ -11852,9 +11885,9 @@ void NES_t::captureDownsampledAudioSamples()
 {
 	pNES_instance->NES_state.audio.downSamplingRatioCounter += ONE;
 
-	if (pNES_instance->NES_state.audio.downSamplingRatioCounter >= ((uint32_t)(NES_CPU_CLOCK_HZ / EMULATED_AUDIO_SAMPLING_RATE_FOR_NES)))
+	if (pNES_instance->NES_state.audio.downSamplingRatioCounter >= ((int32_t)(cpuClockHz / EMULATED_AUDIO_SAMPLING_RATE_FOR_NES)))
 	{
-		pNES_instance->NES_state.audio.downSamplingRatioCounter -= ((uint32_t)(NES_CPU_CLOCK_HZ / EMULATED_AUDIO_SAMPLING_RATE_FOR_NES));
+		pNES_instance->NES_state.audio.downSamplingRatioCounter -= ((int32_t)(cpuClockHz / EMULATED_AUDIO_SAMPLING_RATE_FOR_NES));
 
 		NES_AUDIO_SAMPLE_TYPE pulse_out = MUTE_AUDIO;
 		NES_AUDIO_SAMPLE_TYPE tnd_out = MUTE_AUDIO;
@@ -12828,6 +12861,19 @@ bool NES_t::initializeEmulator()
 	// check whether to enable the db or not
 	pAbsolute_NES_instance->absolute_NES_state.enable_nes_db = to_bool(pt.get<std::string>("nes._enable_nes_db", "false"));
 
+	// get forced TV settings
+	forceNTSC = to_bool(pt.get<std::string>("nes._force_ntsc", "false"));
+	forcePAL = to_bool(pt.get<std::string>("nes._force_pal", "false"));
+
+	if (forceNTSC == YES && forcePAL == YES)
+	{
+		WARN("_force_ntsc and _force_pal cannot be enabled at the same time. Reverting to auto-detect");
+		forceNTSC = NO;
+		pt.put<std::string>("nes._force_ntsc", "false");
+		forcePAL = NO;
+		pt.put<std::string>("nes._force_pal", "false");
+	}
+
 	if (isCLI() == NO)
 	{
 		// initialization specific to OpenGL
@@ -13105,6 +13151,39 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 
 				// nes 2.0
 				FLAG is2p0 = pINES->iNES_Fields.iNES_header.fields.flag7.fields.nes2p0;
+
+				// decode TV system information		
+				if (is2p0 == NO)
+				{
+					if (pINES->iNES_Fields.iNES_header.fields.flags_8to15.ines.flag9.fields.tvSystem == TO_UINT8(NES_TV_SYSTEM::PAL)
+						|| pINES->iNES_Fields.iNES_header.fields.flags_8to15.ines.flag10.fields.tvSystem == TWO
+						|| pINES->iNES_Fields.iNES_header.fields.flags_8to15.ines.flag10.fields.tvSystem == THREE)
+					{
+						setTVSystem(NES_TV_SYSTEM::PAL);
+					}
+					else
+					{
+						setTVSystem(NES_TV_SYSTEM::NTSC);
+					}
+				}
+				else
+				{
+					if (pINES->iNES_Fields.iNES_header.fields.flags_8to15.nes2p0.flag12.fields.variant == TO_UINT8(NES_TV_SYSTEM::PAL))
+					{
+						setTVSystem(NES_TV_SYSTEM::PAL);
+					}
+					else if (pINES->iNES_Fields.iNES_header.fields.flags_8to15.nes2p0.flag12.fields.variant == TO_UINT8(NES_TV_SYSTEM::NTSC))
+					{
+						setTVSystem(NES_TV_SYSTEM::NTSC);
+					}
+					else
+					{
+						FATAL("Unknown TV system variant in NES 2.0 header");
+					}
+				}
+				// Must run before anything below derives timing from cpuClockHz/ppuClockHz/nesLastPpuScanline/nesTotalPpuScanline/nesFrameDots/myFPS.
+				// tvSystem itself is set via setTVSystem().
+				applyTVSystemTimingConfig();
 
 				BYTE* romData = nullptr;
 
@@ -13577,8 +13656,16 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 					// ---- console metadata (informational) ----
 					if (db.consoleType != ZERO || db.consoleRegion != ZERO || db.expansionType != ZERO)
 					{
-						LOG(" [DB] consoleType=%u  consoleRegion=%u  expansionType=%u",
-							db.consoleType, db.consoleRegion, db.expansionType);
+						LOG(" [DB] consoleType=%u  consoleRegion=%u  expansionType=%u", db.consoleType, db.consoleRegion, db.expansionType);
+						NES_TV_SYSTEM tvSystem = (db.consoleRegion == 1) ? NES_TV_SYSTEM::PAL : NES_TV_SYSTEM::NTSC;
+						if (getTVSystem() != tvSystem)
+						{
+							WARN("NES20DB TV system mismatch: iNES header=%d  consoleRegion=%u  -> using DB.",
+								static_cast<int>(getTVSystem()),
+								static_cast<int>(tvSystem));
+						}
+						setTVSystem((db.consoleRegion == 1) ? NES_TV_SYSTEM::PAL : NES_TV_SYSTEM::NTSC);
+						applyTVSystemTimingConfig();
 					}
 					if (db.vsHardware != ZERO || db.vsPpu != ZERO)
 					{
@@ -13661,6 +13748,20 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 						memcpy_portable(&(cpuCart[i * prgRomSizeBytes]), prgRomSizeBytes, prgRom, prgRomSizeBytes);
 					}
 					zeroBanksHandled = YES;
+				}
+
+				// Handle forces TV type
+				if (forcePAL)
+				{
+					WARN("TV System overriden to PAL via CONFIG.ini");
+					setTVSystem(NES_TV_SYSTEM::PAL);
+					applyTVSystemTimingConfig();
+				}
+				else if (forceNTSC)
+				{
+					WARN("TV System overriden to NTSC via CONFIG.ini");
+					setTVSystem(NES_TV_SYSTEM::NTSC);
+					applyTVSystemTimingConfig();
 				}
 
 				// -----------------------------------------------------------------------------

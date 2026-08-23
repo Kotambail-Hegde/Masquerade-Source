@@ -18,11 +18,22 @@
 
 #define NES_ENABLE_AUDIO								YES
 
-#define NES_FPS											60.1f
-#define NES_APU_FRAME_COUNTER_FPS						(240)
-#define NES_REFERENCE_CLOCK_HZ							21441960.0f							// Refer : https://www.nesdev.org/wiki/CPU
-#define NES_CPU_CLOCK_HZ								NES_REFERENCE_CLOCK_HZ / 12.0f		// Refer : https://www.nesdev.org/wiki/CPU
-#define NES_PPU_CLOCK_HZ								NES_CPU_CLOCK_HZ * 3.0f				// Refer : https://www.nesdev.org/wiki/CPU
+#define NES_NTSC_FPS									60.0988f							// Refer : https://www.nesdev.org/wiki/Cycle_reference_chart#Clock_rates ("Frame rate (vertical scan rate)")
+#define NES_PAL_FPS										50.0070f							// Refer : https://www.nesdev.org/wiki/Cycle_reference_chart#Clock_rates ("Frame rate (vertical scan rate)")
+#define NES_FPS											NES_NTSC_FPS						// Kept as the NTSC value on purpose: the static audio scratch buffers below (MAX_INPUT_LEN/doubleInput/doubleOutput) are just a fixed-size chunking scratchpad unrelated to actual sample generation rate (that's driven by cpuClockHz below), so they don't need to change per region.
+#define NES_APU_FRAME_COUNTER_FPS						(240)								// NTSC-only convenience constant (currently unused); PAL's frame-counter interrupt rate is ~50 Hz per https://www.nesdev.org/wiki/Cycle_reference_chart#Clock_rates
+
+#define NES_NTSC_REFERENCE_CLOCK_HZ						21441960.0f							// Refer : https://www.nesdev.org/wiki/CPU (kept as-is; pre-existing value in this codebase)
+#define NES_NTSC_CPU_CLOCK_HZ							(NES_NTSC_REFERENCE_CLOCK_HZ / 12.0f)	// Refer : https://www.nesdev.org/wiki/Cycle_reference_chart#Clock_rates
+#define NES_NTSC_PPU_CLOCK_HZ							(NES_NTSC_CPU_CLOCK_HZ * 3.0f)		// Refer : https://www.nesdev.org/wiki/Cycle_reference_chart#Clock_rates ("PPU dots per CPU cycle" = 3)
+
+#define NES_PAL_REFERENCE_CLOCK_HZ						26601712.0f							// Refer : https://www.nesdev.org/wiki/Cycle_reference_chart#Clock_rates (26.601712 MHz +/- 50 Hz)
+#define NES_PAL_CPU_CLOCK_HZ							(NES_PAL_REFERENCE_CLOCK_HZ / 16.0f)	// Refer : https://www.nesdev.org/wiki/Cycle_reference_chart#Clock_rates
+#define NES_PAL_PPU_CLOCK_HZ							(NES_PAL_CPU_CLOCK_HZ * 3.2f)		// Refer : https://www.nesdev.org/wiki/Cycle_reference_chart#Clock_rates ("PPU dots per CPU cycle" = 3.2)
+
+#define NES_REFERENCE_CLOCK_HZ							NES_NTSC_REFERENCE_CLOCK_HZ
+#define NES_CPU_CLOCK_HZ								NES_NTSC_CPU_CLOCK_HZ
+#define NES_PPU_CLOCK_HZ								NES_NTSC_PPU_CLOCK_HZ
 
 // CPU Memory Mapping
 #define RAM_START_ADDRESS								(0x0000) // 0x0000
@@ -106,8 +117,12 @@
 #define NES_LAST_PPU_CYCLE_PER_SCANLINE					(340)
 #define NES_TOTAL_PPU_CYCLES_PER_SCANLINE				(341)
 #define NES_LAST_VISIBLE_PPU_SCANLINE					(239)
-#define NES_LAST_PPU_SCANLINE							(260)
-#define NES_TOTAL_PPU_SCANLINE							(261)
+#define NES_NTSC_LAST_PPU_SCANLINE						(260)								// Refer : https://www.nesdev.org/wiki/NTSC_video (262 scanlines/frame: -1..260)
+#define NES_NTSC_TOTAL_PPU_SCANLINE						(261)								// wrap-trigger value = NES_NTSC_LAST_PPU_SCANLINE + 1
+#define NES_PAL_LAST_PPU_SCANLINE						(310)								// Refer : https://www.nesdev.org/wiki/PAL_video ("Each field contains 312 lines" -> -1..310)
+#define NES_PAL_TOTAL_PPU_SCANLINE						(311)								// wrap-trigger value = NES_PAL_LAST_PPU_SCANLINE + 1
+#define NES_LAST_PPU_SCANLINE							NES_NTSC_LAST_PPU_SCANLINE
+#define NES_TOTAL_PPU_SCANLINE							NES_NTSC_TOTAL_PPU_SCANLINE
 #define NES_PRE_RENDER_SCANLINE							(-1)
 #define NES_FIRST_VISIBLE_SCANLINE						(0)
 #define NES_POST_RENDER_SCANLINE						(241)
@@ -115,7 +130,9 @@
 
 #define NES_IRQ_SRC_NONE								(RESET)
 
-#define NES_PPU_NTSC_FRAME_DOTS							(89342)
+#define NES_NTSC_FRAME_DOTS								(89342)								// Refer : https://www.nesdev.org/wiki/Cycle_reference_chart (341 x 262; NTSC's odd-frame short-dot quirk is handled separately in the PPU tick loop, not folded in here)
+#define NES_PAL_FRAME_DOTS								(106392)							// Refer : https://www.nesdev.org/wiki/PAL_video (341 x 312; PAL never skips the pre-render dot -> no odd/even variance)
+#define NES_PPU_NTSC_FRAME_DOTS							NES_NTSC_FRAME_DOTS					// Kept as an NTSC alias for the pre-existing open-bus-decay call site (now region-aware via nesFrameDots)
 
 #define NES_MAX_ROM_SIZE								(0x202000)
 #pragma endregion MACROS
@@ -127,7 +144,43 @@ class NES_t : public abstractEmulation_t
 public:
 
 	std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom;
-	const float myFPS = (float)NES_FPS;
+	float myFPS = (float)NES_NTSC_FPS;
+
+	// TV System (region) support
+	// Refer : https://www.nesdev.org/wiki/Cycle_reference_chart#Clock_rates
+	// Refer : https://www.nesdev.org/wiki/PAL_video
+	// Refer : https://www.nesdev.org/wiki/NTSC_video
+	// Selected once via NES_t::setTVSystem()
+	enum class NES_TV_SYSTEM : BYTE
+	{
+		NTSC = ZERO,
+		PAL = ONE
+	};
+
+public:
+
+	// TV System (region) support — Refer : https://www.nesdev.org/wiki/Cycle_reference_chart#Clock_rates
+	// Call setTVSystem() once
+	// If never called, the emulator defaults to NTSC.
+	void setTVSystem(NES_TV_SYSTEM system)
+	{
+		tvSystem = system;
+	}
+
+	NES_TV_SYSTEM getTVSystem()
+	{
+		RETURN tvSystem;
+	}
+
+private:
+
+	NES_TV_SYSTEM tvSystem = NES_TV_SYSTEM::NTSC;
+	float cpuClockHz = (float)NES_NTSC_CPU_CLOCK_HZ;
+	float ppuClockHz = (float)NES_NTSC_PPU_CLOCK_HZ;
+	int32_t nesLastPpuScanline = NES_NTSC_LAST_PPU_SCANLINE;
+	int32_t nesTotalPpuScanline = NES_NTSC_TOTAL_PPU_SCANLINE;
+	uint32_t nesFrameDots = NES_NTSC_FRAME_DOTS;
+	uint8_t palPpuTickAccumulator = ZERO; // Refer : https://www.nesdev.org/wiki/Cycle_reference_chart#Clock_rates -- PAL outputs an extra PPU dot every 5th CPU cycle (16 dots / 5 CPU cycles = 3.2 average), tracked here
 
 public:
 
@@ -166,7 +219,6 @@ private:
 
 PACK_BEGIN
 private:
-
 	enum class NAMETABLE_MIRROR
 	{
 		HORIZONTAL_MIRROR,
@@ -447,6 +499,41 @@ private:
 		STEP_M14 = 37283
 	};
 
+	// Refer : https://forums.nesdev.org/viewtopic.php?t=2124 (blargg's PAL APU frame-sequencer measurements)
+	// PAL absolute values re-derived from blargg's posted deltas the same way the NTSC enum values above were
+	// (each is the running sum of "delay to next" from the $4017 write); cross-checked against the NTSC enum
+	// values above and they match exactly, so the PAL side of the same table is trusted.
+	MASQ_INLINE uint32_t frameSeqM00() {
+		RETURN(tvSystem == NES_TV_SYSTEM::PAL) ? 8315 : TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_0::STEP_M00);
+	}
+	MASQ_INLINE uint32_t frameSeqM01() {
+		RETURN(tvSystem == NES_TV_SYSTEM::PAL) ? 16629 : TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_0::STEP_M01);
+	}
+	MASQ_INLINE uint32_t frameSeqM02() {
+		RETURN(tvSystem == NES_TV_SYSTEM::PAL) ? 24941 : TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_0::STEP_M02);
+	}
+	MASQ_INLINE uint32_t frameSeqM03() {
+		RETURN(tvSystem == NES_TV_SYSTEM::PAL) ? 33255 : TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_0::STEP_M03);
+	}
+	MASQ_INLINE uint32_t frameSeqM04() {
+		RETURN(tvSystem == NES_TV_SYSTEM::PAL) ? 41569 : TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_0::STEP_M04);
+	}
+	MASQ_INLINE uint32_t frameSeqM10() {
+		RETURN(tvSystem == NES_TV_SYSTEM::PAL) ? 1 : TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_1::STEP_M10);
+	}
+	MASQ_INLINE uint32_t frameSeqM11() {
+		RETURN(tvSystem == NES_TV_SYSTEM::PAL) ? 8315 : TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_1::STEP_M11);
+	}
+	MASQ_INLINE uint32_t frameSeqM12() {
+		RETURN(tvSystem == NES_TV_SYSTEM::PAL) ? 16629 : TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_1::STEP_M12);
+	}
+	MASQ_INLINE uint32_t frameSeqM13() {
+		RETURN(tvSystem == NES_TV_SYSTEM::PAL) ? 24941 : TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_1::STEP_M13);
+	}
+	MASQ_INLINE uint32_t frameSeqM14() {
+		RETURN(tvSystem == NES_TV_SYSTEM::PAL) ? 41567 : TO_UINT(FRAME_SEQUENCER_CYCLES_MODE_1::STEP_M14);
+	}
+
 	const BYTE LENGTH_COUNTER_LUT[THIRTYTWO] =
 	{
 		10,254, 20,  2, 40,  4, 80,  6, 160,  8, 60, 10, 14, 12, 26, 14,
@@ -461,12 +548,13 @@ private:
 		{HI, LO, LO, HI, HI, HI, HI, HI}
 	};
 
-	const uint16_t NOISE_PERIOD_LUT[SIXTEEN] =
+	// Refer : https://forums.nesdev.org/viewtopic.php?t=2124 (blargg's PAL APU period measurements)
+	uint16_t NOISE_PERIOD_LUT[SIXTEEN] =
 	{
 		4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068
 	};
 
-	const uint16_t DMC_PERIOD_LUT[SIXTEEN] =
+	uint16_t DMC_PERIOD_LUT[SIXTEEN] =
 	{
 		428, 380, 340, 320, 286, 254, 226, 214, 190, 160, 142, 128, 106,  84,  72,  54
 	};
@@ -1909,8 +1997,8 @@ private:
 					{
 						struct
 						{
-							BYTE tvSystem : 2; // bit  0
-							BYTE reserved : 6; // bits  1 - 7
+							BYTE tvSystem : 1; // bit  0
+							BYTE reserved : 7; // bits  1 - 7
 						} fields;
 						BYTE raw;
 					} flag9;
@@ -2680,7 +2768,7 @@ private:
 				}
 				openBus.openBusDecayStamp[i] = now;
 			}
-			else if ((now - openBus.openBusDecayStamp[i]) > (3 * NES_PPU_NTSC_FRAME_DOTS)) // 3 frames
+			else if ((now - openBus.openBusDecayStamp[i]) > (3ULL * nesFrameDots)) // 3 frames
 			{
 				openBus.openBusValue &= ~(1 << i);
 			}
@@ -2920,6 +3008,10 @@ private:
 	}
 
 	void ppuTick();
+
+	void tickPpuForOneCpuCycle();
+
+	void applyTVSystemTimingConfig();
 
 	void apuTick();
 

@@ -373,7 +373,6 @@ Masquerade supports the following hardware accessories and peripherals used by s
   - 4-scanline_timing.nes
 
 #### Known Issues (other than the ones mentioned above)
-- PAL timings are not supported (only NTSC is supported as of now)
 - Fails many of the DMC tests
 - Fails many of the Accuracy coin tests
 

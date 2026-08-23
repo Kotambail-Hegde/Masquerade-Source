@@ -474,9 +474,11 @@ VIDEO_FILTERS currEnVFilter = VIDEO_FILTERS::NEAREST_FILTER;
 PALETTE_ID    currEnGbPalette = PALETTE_ID::PALETTE_1;
 PALETTE_ID    currEnGbcPalette = PALETTE_ID::PALETTE_1;
 
-// NES Zapper Support
+// NES Support
 FLAG enableZapper = NO;
 FLAG nesReset = NO;
+FLAG forceNTSC = NO;
+FLAG forcePAL = NO;
 
 #pragma endregion GLOBAL_INFRASTRUCTURE_DECLARATIONS
 
@@ -2286,6 +2288,36 @@ public:
 												ImGui::EndMenu();
 											}
 											ImGui::Separator();
+											if (ImGui::BeginMenu("NES", MASQ_ENABLE_NES))
+											{
+												if (ImGui::BeginMenu("TV Mode"))
+												{
+													if (ImGui::MenuItem("Auto-Detect", nullptr,forceNTSC == NO && forcePAL == NO))
+													{
+														forceNTSC = NO;
+														forcePAL = NO;
+														config.put<std::string>("nes._force_ntsc", "false");
+														config.put<std::string>("nes._force_pal", "false");
+													}
+													if (ImGui::MenuItem("NTSC", nullptr, forceNTSC == YES))
+													{
+														forceNTSC = YES;
+														forcePAL = NO;
+														config.put<std::string>("nes._force_ntsc", "true");
+														config.put<std::string>("nes._force_pal", "false");
+													}
+													if (ImGui::MenuItem("PAL", nullptr, forcePAL == YES))
+													{
+														forceNTSC = NO;
+														forcePAL = YES;
+														config.put<std::string>("nes._force_ntsc", "false");
+														config.put<std::string>("nes._force_pal", "true");
+													}
+													ImGui::EndMenu();
+												}
+
+												ImGui::EndMenu();
+											}
 											if (ImGui::BeginMenu("GB", MASQ_ENABLE_GBC))
 											{
 												if (ImGui::BeginMenu("GB Color Palette##gb_palette_menu"))
