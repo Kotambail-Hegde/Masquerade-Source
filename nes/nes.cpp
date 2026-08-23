@@ -13871,7 +13871,12 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 					memset(&(pNES_instance->NES_state.catridgeInfo.mmc1), 0,
 						sizeof(pNES_instance->NES_state.catridgeInfo.mmc1));
 
-					pNES_instance->NES_state.catridgeInfo.mmc1.intfControlReg.raw = 0x1C;
+					// Refer : https://www.nesdev.org/wiki/Programming_MMC1 -- "there is not much of a reason to use
+					// 4 KB bankswitching with CHR-RAM, it is wise for programs to just set 8 KB bankswitching mode" --
+					// meaning well-behaved CHR-RAM games (like this one) may never write the control register at all,
+					// trusting the power-on default to already be 8KB mode (C=0). 0x1C (C=1, 4KB mode) left both
+					// halves of CHR-RAM aliased onto the same 4KB when a game never explicitly selects a CHR mode.
+					pNES_instance->NES_state.catridgeInfo.mmc1.intfControlReg.raw = 0x0C;
 					pNES_instance->NES_state.catridgeInfo.mmc1.prgBank16Lo = ZERO;
 					pNES_instance->NES_state.catridgeInfo.mmc1.prgBank16Hi = (prg16kBanks > ZERO) ? (prg16kBanks - ONE) : ZERO;
 					pNES_instance->NES_state.catridgeInfo.mmc1.prgBank32 = ZERO;
