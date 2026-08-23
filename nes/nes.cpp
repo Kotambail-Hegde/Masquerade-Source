@@ -12338,26 +12338,90 @@ void NES_t::displayCompleteScreen()
 	GL_CALL(glClear(GL_COLOR_BUFFER_BIT));
 
 	// Pass 1: Render base texture (Game Boy framebuffer)
-	GL_CALL(glUseProgram(shaderProgramBasic));
+	FLAG useCrtFilter = (currEnVFilter == VIDEO_FILTERS::CRT_FILTER) && ntscResourcesInitialized;
+	if (useCrtFilter)
+	{
+#if (ENABLE_SINGLE_PALETTE_NTSC_FILTER_DEBUG == YES)
+		if (ntscDebugPaletteIndex >= 0)
+		{
+			BYTE index = (BYTE)ntscDebugPaletteIndex;
+			for (uint32_t y = ZERO; y < getScreenHeight(); ++y)
+			{
+				for (uint32_t x = ZERO; x < getScreenWidth(); ++x)
+				{
+					pNES_instance->NES_state.display.gfxColorID[x][y] = index;
+					pNES_instance->NES_state.display.gfxEmphasisBits[x][y] = ZERO;
+				}
+			}
+		}
+#endif
+		// Pack palette-index (0-63) and emphasis bits (0-7) into a normalized RG8 texture -- avoids GL_R8UI, which
+		// isn't available under the ES2 path this file already guards against (see the #if above this function).
+		static BYTE ntscPackedBuffer[screen_height][screen_width][TWO];
+		for (uint32_t y = ZERO; y < getScreenHeight(); ++y)
+		{
+			for (uint32_t x = ZERO; x < getScreenWidth(); ++x)
+			{
+				ntscPackedBuffer[y][x][ZERO] = pNES_instance->NES_state.display.gfxColorID[x][y];
+				ntscPackedBuffer[y][x][ONE] = pNES_instance->NES_state.display.gfxEmphasisBits[x][y];
+			}
+		}
+
+		if (ntscIndexTexture == ZERO)
+		{
+			GL_CALL(glGenTextures(1, &ntscIndexTexture));
+			GL_CALL(glBindTexture(GL_TEXTURE_2D, ntscIndexTexture));
+			GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST));
+			GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST));
+			GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
+			GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
+			GL_CALL(glTexImage2D(GL_TEXTURE_2D, 0, GL_RG8, getScreenWidth(), getScreenHeight(), 0, GL_RG, GL_UNSIGNED_BYTE, NULL));
+		}
+
+		GL_CALL(glBindTexture(GL_TEXTURE_2D, ntscIndexTexture));
+		GL_CALL(glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, getScreenWidth(), getScreenHeight(), GL_RG, GL_UNSIGNED_BYTE, (GLvoid*)ntscPackedBuffer));
+
+		GL_CALL(glUseProgram(shaderProgramNTSC));
+		GL_CALL(glUniform1i(glGetUniformLocation(shaderProgramNTSC, "u_IndexTexture"), 0));
+		GL_CALL(glUniform1f(glGetUniformLocation(shaderProgramNTSC, "u_ScreenWidth"), (float)getScreenWidth()));
+		GL_CALL(glUniform1f(glGetUniformLocation(shaderProgramNTSC, "u_ScreenHeight"), (float)getScreenHeight()));
+		GL_CALL(glUniform1i(glGetUniformLocation(shaderProgramNTSC, "u_OddFrame"), (pNES_instance->NES_state.display.isOddFrame == YES) ? 1 : 0));
+		GL_CALL(glUniform1f(glGetUniformLocation(shaderProgramNTSC, "u_PhaseOffsetDegrees"), ntscPhaseOffsetDegrees));
+	}
+	else
+	{
+		GL_CALL(glUseProgram(shaderProgramBasic));
+	}
 	GL_CALL(glActiveTexture(GL_TEXTURE0));
 
-	// Bind once (no redundant state changes)
-	GL_CALL(glBindTexture(GL_TEXTURE_2D, nes_texture));
-
-	// Ensure correct filter is applied only when needed
-	static GLint prevFilterSrcNES = -1;
-	static GLuint prevTexNES = 0;
-
-	if (filter != prevFilterSrcNES || prevTexNES != nes_texture)
+	if (useCrtFilter)
 	{
-		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter));
-		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter));
-		prevFilterSrcNES = filter;
-		prevTexNES = nes_texture;
+		// ntscIndexTexture was already uploaded and bound above -- this unconditional block used to always
+		// rebind nes_texture here, silently discarding that bind before the draw call. That was the actual
+		// bug: the CRT shader ran, but always sampled plain RGB through a sampler it declared as an index
+		// texture, so nothing written into gfxColorID (including the debug strip) ever reached the GPU.
+		GL_CALL(glBindTexture(GL_TEXTURE_2D, ntscIndexTexture));
 	}
+	else
+	{
+		// Bind once (no redundant state changes)
+		GL_CALL(glBindTexture(GL_TEXTURE_2D, nes_texture));
 
-	// Set uniform
-	GL_CALL(glUniform1i(glGetUniformLocation(shaderProgramBasic, "u_Texture"), 0));
+		// Ensure correct filter is applied only when needed
+		static GLint prevFilterSrcNES = -1;
+		static GLuint prevTexNES = 0;
+
+		if (filter != prevFilterSrcNES || prevTexNES != nes_texture)
+		{
+			GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter));
+			GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter));
+			prevFilterSrcNES = filter;
+			prevTexNES = nes_texture;
+		}
+
+		// Set uniform
+		GL_CALL(glUniform1i(glGetUniformLocation(shaderProgramBasic, "u_Texture"), 0));
+	}
 
 	GL_CALL(glBindVertexArray(fullscreenVAO));
 	GL_CALL(glDrawArrays(GL_TRIANGLES, 0, 6));
@@ -13112,6 +13176,15 @@ bool NES_t::initializeEmulator()
 		// 7. Compile blend shader (for LCD effect)
 		shaderProgramSource_t blendShader = parseShader(shaderPath + "/shaders/blend.shaders");
 		shaderProgramBlend = createShader(blendShader.vertexSource, blendShader.fragmentSource);
+
+		// VIDEO_FILTERS::CRT_FILTER -- NTSC composite-artifact simulation. Refer : https://www.nesdev.org/wiki/NTSC_video
+		shaderProgramSource_t ntscShader = parseShader(shaderPath + "/shaders/ntsc.shaders");
+		shaderProgramNTSC = createShader(ntscShader.vertexSource, ntscShader.fragmentSource);
+		ntscResourcesInitialized = (shaderProgramNTSC != ZERO);
+		if (!ntscResourcesInitialized)
+		{
+			WARN("CRT filter shader failed to compile/link -- falling back to shaderProgramBasic when CRT_FILTER is selected");
+		}
 
 		DEBUG("PASSTHROUGH VERTEX");
 		DEBUG("%s", passthroughShader.vertexSource.c_str());

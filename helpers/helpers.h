@@ -13,6 +13,8 @@
 #endif
 #define NOMINMAX
 #define GL_FIXED_FUNCTION_PIPELINE                  NO
+#define ENABLE_IDLE_MESSAGE                         NO
+#define ENABLE_SINGLE_PALETTE_NTSC_FILTER_DEBUG     NO
 #pragma endregion ADDITIONAL_FUNCTIONALITIES_PRE
 
 // =========================================================
@@ -2393,6 +2395,10 @@ extern FLAG enableZapper;
 extern FLAG nesReset;
 extern FLAG forceNTSC;
 extern FLAG forcePAL;
+extern float ntscPhaseOffsetDegrees;
+#if (ENABLE_SINGLE_PALETTE_NTSC_FILTER_DEBUG == YES)
+extern int ntscDebugPaletteIndex;
+#endif
 
 MASQ_INLINE FLAG isCLI()
 {

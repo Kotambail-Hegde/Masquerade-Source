@@ -196,6 +196,11 @@ public:
 	static const uint32_t debugger_pixel_width = 1;
 	const char* NAME = "NES";
 
+	// VIDEO_FILTERS::CRT_FILTER -- NTSC composite-artifact simulation. Refer : https://www.nesdev.org/wiki/NTSC_video
+	GLuint shaderProgramNTSC = ZERO;
+	GLuint ntscIndexTexture = ZERO;
+	bool ntscResourcesInitialized = false;
+
 private:
 
 	MasqConfig_t pt;
@@ -1823,6 +1828,7 @@ private:
 		} obj;
 		FLAG isOddFrame;
 		ID gfxColorID[screen_width][screen_height];
+		BYTE gfxEmphasisBits[screen_width][screen_height]; // packed EMP_RED|EMP_GREEN|EMP_BLUE (bits 0-2), captured alongside gfxColorID for VIDEO_FILTERS::CRT_FILTER's composite/NTSC-artifact decode -- Refer : https://www.nesdev.org/wiki/NTSC_video
 		union
 		{
 			Pixel imGuiBuffer1D[screen_width * screen_height];

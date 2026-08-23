@@ -479,6 +479,10 @@ FLAG enableZapper = NO;
 FLAG nesReset = NO;
 FLAG forceNTSC = NO;
 FLAG forcePAL = NO;
+float ntscPhaseOffsetDegrees = 104.5f; // calibration constant -- tune against a known flat-color screen; see ntsc.shaders
+#if (ENABLE_SINGLE_PALETTE_NTSC_FILTER_DEBUG == YES)
+int ntscDebugPaletteIndex = INVALID;
+#endif
 
 #pragma endregion GLOBAL_INFRASTRUCTURE_DECLARATIONS
 
@@ -2273,12 +2277,25 @@ public:
 #endif
 												ImGui::RadioButton("Bilinear", &selection, TO_INT(VIDEO_FILTERS::BILINEAR_FILTER));
 												ImGui::RadioButton("LCD", &selection, TO_INT(VIDEO_FILTERS::LCD_FILTER));
+												ImGui::RadioButton("CRT", &selection, TO_INT(VIDEO_FILTERS::CRT_FILTER));
+												if (selection == TO_INT(VIDEO_FILTERS::CRT_FILTER))
+												{
+													ImGui::SliderFloat("Hue Phase##NtscPhase", &ntscPhaseOffsetDegrees, -180.0f, 180.0f, "%.1f deg");
+#if (ENABLE_SINGLE_PALETTE_NTSC_FILTER_DEBUG == YES)
+													FLAG debugOn = (ntscDebugPaletteIndex >= 0);
+													if (ImGui::Checkbox("Show Single Palette Entry##NtscDebugToggle", &debugOn))
+													{
+														ntscDebugPaletteIndex = debugOn ? 0 : -1;
+													}
+													if (debugOn)
+													{
+														ImGui::SliderInt("Palette Index##NtscDebugIndex", &ntscDebugPaletteIndex, 0, 63);
+													}
+#endif
+												}
 #ifdef __EMSCRIPTEN__
 												ImGui::EndDisabled();
 #endif
-												ImGui::BeginDisabled();
-												ImGui::RadioButton("CRT", &selection, TO_INT(VIDEO_FILTERS::CRT_FILTER));
-												ImGui::EndDisabled();
 												if (currEnVFilter != (VIDEO_FILTERS)selection)
 												{
 													config.put<std::string>("mods._VIDEO_EFFECTS", vFiltersToConfig.at((VIDEO_FILTERS)selection));
