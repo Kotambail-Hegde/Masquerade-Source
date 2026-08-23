@@ -1710,6 +1710,7 @@ private:
 		{
 			FLAG isOutputUnitSilent;
 			FLAG isSampleBufferEmpty;
+			FLAG dmcDmaPending; // Set here when the sample buffer needs a refill; the actual CPU-stalling read happens in NES_t::cpuTickT(), mirroring OAM DMA. Refer : https://www.nesdev.org/wiki/DMA and https://forums.nesdev.org/viewtopic.php?t=14120
 			BYTE bitsInOutputUnit;
 			BYTE outputShift;
 			BYTE sampleBuffer;
@@ -3151,28 +3152,41 @@ private:
 			}
 		}
 
-		if ((dmcReg.lengthCounter > RESET) && (dmc.isSampleBufferEmpty == YES))
+		if ((dmcReg.lengthCounter > RESET) && (dmc.isSampleBufferEmpty == YES) && (dmc.dmcDmaPending == NO))
 		{
 			pNES_instance->NES_state.emulatorStatus.ticks.dmcDmaCounter = RESET;
 
-			APUTODO("Emulate the CPU halt cycles during the below DMC DMA read operation");
+			// Refer : https://www.nesdev.org/wiki/DMA -- request the fetch; NES_t::cpuTickT() performs the actual
+			// 3-4 cycle CPU-stalling read (halt/dummy/alignment/read) and then calls completeDmcDmaFetch() below.
+			dmc.dmcDmaPending = YES;
+		}
+	}
 
-			dmc.sampleBuffer = readCpuRawMemory(dmc.dmcAddress, MEMORY_ACCESS_SOURCE::DMA);
-			dmc.isSampleBufferEmpty = NO;
-			dmc.dmcAddress = ((dmc.dmcAddress + ONE) & 0x7FFF) | 0x8000;
+	// Refer : https://www.nesdev.org/wiki/DMA and https://forums.nesdev.org/viewtopic.php?t=14120
+	// Called from NES_t::cpuTickT() once the delayed, CPU-stalling DMC sample read has actually happened.
+	// This is exactly the body that used to run immediately after the (unstalled) read inside tickDMC().
+	MASQ_INLINE void completeDmcDmaFetch()
+	{
+		auto& dmcReg = pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)];
+		auto& dmc = dmcReg.dmc;
+		auto& apuIO = pNES_cpuMemory->NESMemoryMap.apuAndIO;
 
-			if (--dmcReg.lengthCounter == RESET)
+		dmc.sampleBuffer = readCpuRawMemory(dmc.dmcAddress, MEMORY_ACCESS_SOURCE::DMA);
+		dmc.isSampleBufferEmpty = NO;
+		dmc.dmcDmaPending = NO;
+		dmc.dmcAddress = ((dmc.dmcAddress + ONE) & 0x7FFF) | 0x8000;
+
+		if (--dmcReg.lengthCounter == RESET)
+		{
+			if (apuIO.DMC_FREQ.LOOP_SAMPLE == SET)
 			{
-				if (apuIO.DMC_FREQ.LOOP_SAMPLE == SET)
-				{
-					dmcReg.lengthCounter = dmc.dmcSampleLength;
-					dmc.dmcAddress = dmc.dmcSampleAddress;
-					pNES_instance->NES_state.dmcDMA.sourceAddress = dmc.dmcSampleAddress;
-				}
-				else if (apuIO.DMC_FREQ.IRQ_ENABLE == SET)
-				{
-					pNES_instance->NES_state.interrupts.isIRQ.fields.IRQ_SRC_DMC = SET;
-				}
+				dmcReg.lengthCounter = dmc.dmcSampleLength;
+				dmc.dmcAddress = dmc.dmcSampleAddress;
+				pNES_instance->NES_state.dmcDMA.sourceAddress = dmc.dmcSampleAddress;
+			}
+			else if (apuIO.DMC_FREQ.IRQ_ENABLE == SET)
+			{
+				pNES_instance->NES_state.interrupts.isIRQ.fields.IRQ_SRC_DMC = SET;
 			}
 		}
 	}

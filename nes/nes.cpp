@@ -10172,6 +10172,80 @@ void NES_t::cpuTickT(CYCLES_TYPE cycleType)
 			--pNES_instance->NES_state.interrupts.irqDelayInCpuCycles;
 		}
 
+		// Handle DMC DMA (Refer : https://www.nesdev.org/wiki/DMA, https://forums.nesdev.org/viewtopic.php?t=14120)
+		// TODO: Simplified vs. real hardware: does not yet model the "DMC lands mid-OAM-DMA -> only 2 cycles" overlap case,
+		// only the standalone 3-4 cycle stall. Mirrors the OAM DMA halt pattern below using the same dmaGetPutCounter.
+		auto& dmc = pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::DMC)].dmc;
+		if (dmc.dmcDmaPending == YES && cycleType == CYCLES_TYPE::READ_CYCLE)
+		{
+			// Halt-attempt cycle: this READ_CYCLE itself is the hijacked read (point 1 of the forum thread above)
+			++pNES_instance->NES_state.emulatorStatus.ticks.dmaGetPutCounter;
+			clockVRC467IRQ();
+			clockJalecoIRQ();
+			clockINES016IRQ();
+			clockINES067IRQ();
+			clockINES069IRQ();
+			clockINES105IRQ();
+			clockRambo1CpuIRQ();
+			clockNamco163IRQ();
+			clockMMC5();
+			tickPpuForOneCpuCycle();
+			apuTick();
+			joypadTick();
+
+			// DMC-only dummy read (point 2)
+			++pNES_instance->NES_state.emulatorStatus.ticks.dmaGetPutCounter;
+			clockVRC467IRQ();
+			clockJalecoIRQ();
+			clockINES016IRQ();
+			clockINES067IRQ();
+			clockINES069IRQ();
+			clockINES105IRQ();
+			clockRambo1CpuIRQ();
+			clockNamco163IRQ();
+			clockMMC5();
+			tickPpuForOneCpuCycle();
+			apuTick();
+			joypadTick();
+
+			// Alignment cycle if landed on a "put" cycle (point 3)
+			if (GETBIT(ZERO, pNES_instance->NES_state.emulatorStatus.ticks.dmaGetPutCounter) == SET)
+			{
+				++pNES_instance->NES_state.emulatorStatus.ticks.dmaGetPutCounter;
+				clockVRC467IRQ();
+				clockJalecoIRQ();
+				clockINES016IRQ();
+				clockINES067IRQ();
+				clockINES069IRQ();
+				clockINES105IRQ();
+				clockRambo1CpuIRQ();
+				clockNamco163IRQ();
+				clockMMC5();
+				tickPpuForOneCpuCycle();
+				apuTick();
+				joypadTick();
+			}
+
+			// Actual DMA read (point 4)
+			++pNES_instance->NES_state.emulatorStatus.ticks.dmaGetPutCounter;
+			completeDmcDmaFetch();
+			clockVRC467IRQ();
+			clockJalecoIRQ();
+			clockINES016IRQ();
+			clockINES067IRQ();
+			clockINES069IRQ();
+			clockINES105IRQ();
+			clockRambo1CpuIRQ();
+			clockNamco163IRQ();
+			clockMMC5();
+			tickPpuForOneCpuCycle();
+			apuTick();
+			joypadTick();
+
+			++pNES_instance->NES_state.emulatorStatus.ticks.cpuCounter;
+			RETURN;
+		}
+
 		// Handle DMA
 		if (pNES_instance->NES_state.oamDMA.DMAInProgress == YES && cycleType == CYCLES_TYPE::READ_CYCLE)
 		{
