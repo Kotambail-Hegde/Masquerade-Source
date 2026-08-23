@@ -10935,8 +10935,27 @@ void NES_t::ppuTick()
 						ID paletteID = readPpuRawMemory(paletteRamAddress, MEMORY_ACCESS_SOURCE::PPU) & 0x003F;
 						Pixel p = palScreen[paletteID];
 
+						const BYTE emphasis =
+							(pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.EMP_RED << ZERO)
+							| (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.EMP_GREEN << ONE)
+							| (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.EMP_BLUE << TWO);
+
+						if (emphasis != ZERO)
+						{
+							const float redFactor = (emphasis & 0x01) ? 1.0f : 0.75f;
+							const float greenFactor = (emphasis & 0x02) ? 1.0f : 0.75f;
+							const float blueFactor = (emphasis & 0x04) ? 1.0f : 0.75f;
+
+							p.r = (uint8_t)(p.r * redFactor);
+							p.g = (uint8_t)(p.g * greenFactor);
+							p.b = (uint8_t)(p.b * blueFactor);
+						}
+
 						// Needed for Zapper Support
 						pNES_instance->NES_state.display.gfxColorID[cycle - ONE][ly] = paletteID;
+
+						// Needed for VIDEO_FILTERS::CRT_FILTER's composite/NTSC-artifact decode
+						pNES_instance->NES_state.display.gfxEmphasisBits[cycle - ONE][ly] = emphasis;
 
 						// Update the ImGui Buffer
 						pNES_instance->NES_state.display.imGuiBuffer.imGuiBuffer2D[ly][cycle - ONE] = p;
