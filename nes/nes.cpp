@@ -655,10 +655,20 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 			{
 				auto& mmc1 = pNES_instance->NES_state.catridgeInfo.mmc1;
 
+				// Refer : https://forums.nesdev.org/viewtopic.php?t=13818 -- on real SGROM/SNROM boards the 8KB CHR-RAM
+				// chip only has 13 address pins (A0-A12); the mapper's CHR bank-select bits are still latched and
+				// technically "run through" the mapper same as CHR-ROM, but they never reach a real address pin on
+				// an 8KB chip, so any bank value aliases into the same physical 8KB. Mask to reproduce that.
+				const bool isChrRam = (pINES->iNES_Fields.iNES_header.fields.sizeOfChrRomIn8KB == ZERO);
+
 				// 8KB mode
 				if (mmc1.intfControlReg.fields1.c == RESET)
 				{
-					const uint32_t index = (mmc1.chrBank8 << 12) | (address & 0x1FFF);
+					uint32_t index = (mmc1.chrBank8 << 12) | (address & 0x1FFF);
+					if (isChrRam)
+					{
+						index &= 0x1FFF;
+					}
 					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index];
 				}
 				// 4KB mode
@@ -666,7 +676,11 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 				{
 					const uint32_t patternTable = (address >> 12) & 1;
 					const uint32_t bank = (patternTable == 0) ? mmc1.chrBank4Lo : mmc1.chrBank4Hi;
-					const uint32_t index = (bank << 12) | (address & 0x0FFF);
+					uint32_t index = (bank << 12) | (address & 0x0FFF);
+					if (isChrRam)
+					{
+						index &= 0x1FFF;
+					}
 					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index];
 				}
 			}
@@ -2947,10 +2961,11 @@ void NES_t::writePpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 				{
 					auto& mmc1 = pNES_instance->NES_state.catridgeInfo.mmc1;
 
+					// Refer : https://forums.nesdev.org/viewtopic.php?t=13818 -- see matching comment on the read side
 					// 8KB mode
 					if (mmc1.intfControlReg.fields1.c == RESET)
 					{
-						const uint32_t index = (mmc1.chrBank8 << 12) | (address & 0x1FFF);
+						const uint32_t index = ((mmc1.chrBank8 << 12) | (address & 0x1FFF)) & 0x1FFF;
 						pNES_catridgeMemory->maxCatridgeCHRROM[index] = data;
 					}
 					// 4KB mode
@@ -2958,7 +2973,7 @@ void NES_t::writePpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 					{
 						const uint32_t patternTable = (address >> 12) & 1;
 						const uint32_t bank = (patternTable == 0) ? mmc1.chrBank4Lo : mmc1.chrBank4Hi;
-						const uint32_t index = (bank << 12) | (address & 0x0FFF);
+						const uint32_t index = ((bank << 12) | (address & 0x0FFF)) & 0x1FFF;
 						pNES_catridgeMemory->maxCatridgeCHRROM[index] = data;
 					}
 				}
