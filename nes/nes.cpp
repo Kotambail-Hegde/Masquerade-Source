@@ -4171,101 +4171,110 @@ inline byte NES_t::readCpuRawMemoryInternal(uint16_t address, MEMORY_ACCESS_SOUR
 					}
 					if (IF_ADDRESS_WITHIN(address, CATRIDGE_ROM_BANK0_START_ADDRESS, UNMAPPED_END_ADDRESS))
 					{
-						switch (mmc1.intfControlReg.fields1.pp)
+						if (pNES_instance->NES_state.catridgeInfo.subMapper == SUB_MAPPER::SEROM_SHROM_SH1ROM)
 						{
-						case ZERO:
-						case ONE:
-						{
-							// NOTE: "prgBank32 * 0x4000" is used instead of "prgBank32 * 0x8000" as bank IDs are based on 16KB mode even when 32KB mode is selected
-							index = (mmc1.prgBank32 | mmc1.surom_sxrom.prgBank256) * 0x4000;
-							index += ((address - CATRIDGE_ROM_BANK0_START_ADDRESS) & 0x7FFF);
-							BREAK;
+							// SEROM / SHROM / SH1ROM:
+							// Fixed 32KB PRG. MMC1 PRG banking output is not connected.
+							index = address - CATRIDGE_ROM_BANK0_START_ADDRESS;
 						}
-						case TWO:
-						case THREE:
+						else
 						{
-							if (IF_ADDRESS_WITHIN(address, CATRIDGE_ROM_BANK0_START_ADDRESS, CATRIDGE_ROM_BANK0_END_ADDRESS))
+							switch (mmc1.intfControlReg.fields1.pp)
 							{
-								index = (mmc1.prgBank16Lo | mmc1.surom_sxrom.prgBank256) * 0x4000;
-								index += ((address - CATRIDGE_ROM_BANK0_START_ADDRESS) & 0x3FFF);
+							case ZERO:
+							case ONE:
+							{
+								// NOTE: "prgBank32 * 0x4000" is used instead of "prgBank32 * 0x8000" as bank IDs are based on 16KB mode even when 32KB mode is selected
+								index = (mmc1.prgBank32 | mmc1.surom_sxrom.prgBank256) * 0x4000;
+								index += ((address - CATRIDGE_ROM_BANK0_START_ADDRESS) & 0x7FFF);
+								BREAK;
 							}
-							else if (IF_ADDRESS_WITHIN(address, CATRIDGE_ROM_BANK1_START_ADDRESS, CATRIDGE_ROM_BANK1_END_ADDRESS))
+							case TWO:
+							case THREE:
 							{
-								index = (mmc1.prgBank16Hi | mmc1.surom_sxrom.prgBank256) * 0x4000;
-								index += ((address - CATRIDGE_ROM_BANK1_START_ADDRESS) & 0x3FFF);
-							}
-							else
-							{
-								FATAL("Invalid Memory Region for MMC1");
-							}
-							BREAK;
-						}
-						}
-
-						// MMC1A A17-bypass: if bit 4 of $E000 is set, bit 3 directly drives A17 across all $8000-$FFFF
-						if (mmc1.isMmc1A == YES && (mmc1.prgBank16Lo & 0x10) /* bit 4 of last $E000 write */)
-						{
-							// bit 3 of prgBank16Lo/Hi forces the upper 256KB half
-							// prgBank256 equivalent: (prgBank16Lo >> 3) & 1, applied to both banks
-							const uint32_t a17 = (mmc1.prgBank16Lo & 0x08) ? 0x10 : 0x00; // drives A17
-							// index already computed above — add the outer-bank offset
-							index += (a17 * 0x4000);
-						}
-
-						if (pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::INES_MAPPER_105)
-						{
-							auto& mmc1 = pNES_instance->NES_state.catridgeInfo.mmc1;
-							auto& ev = mmc1.nes_event;
-
-							const bool oBit = (mmc1.chrBank4Lo & 0x08) != 0; // bit 3 = O (chip select)
-							const BYTE aReg = (mmc1.chrBank4Lo & 0x06) >> 1;  // bits 2:1 = AA (32KB bank in lower 128KB)
-							const bool pMode = (mmc1.intfControlReg.fields1.pp >= 2); // MMC1 P bit (pp mode 2 or 3)
-							const bool slotSel = (mmc1.intfControlReg.fields1.pp == 3); // S: pp==3 means slot 0 is swappable
-
-							const uint32_t offset = address - CATRIDGE_ROM_BANK0_START_ADDRESS;
-
-							if (ev.initState < 2 || !oBit)
-							{
-								// Uninitialized OR O=0: 32KB from lower 128KB, bank = aReg (0 if uninitialized)
-								const BYTE bank32 = (ev.initState < 2) ? 0 : aReg;
-								index = (bank32 * 0x8000) + (offset & 0x7FFF);
-							}
-							else
-							{
-								// O=1: upper 128KB (add 0x20000 base), MMC1-style banking using $E000 reg
-								const uint32_t upperBase = 0x20000U; // 128KB offset
-								const BYTE bReg = mmc1.prgBank16Lo & 0x07; // lower 3 bits of $E000
-								const BYTE prgReg = bReg | 0x08;           // always within upper 128KB (banks 8..15)
-
-								if (!pMode) // pp = 0 or 1: 32KB swap
+								if (IF_ADDRESS_WITHIN(address, CATRIDGE_ROM_BANK0_START_ADDRESS, CATRIDGE_ROM_BANK0_END_ADDRESS))
 								{
-									index = upperBase + ((prgReg & 0xFE) * 0x4000) + (offset & 0x7FFF);
+									index = (mmc1.prgBank16Lo | mmc1.surom_sxrom.prgBank256) * 0x4000;
+									index += ((address - CATRIDGE_ROM_BANK0_START_ADDRESS) & 0x3FFF);
 								}
-								else if (!slotSel) // pp = 2: fix bank 8 at $8000, swap at $C000
+								else if (IF_ADDRESS_WITHIN(address, CATRIDGE_ROM_BANK1_START_ADDRESS, CATRIDGE_ROM_BANK1_END_ADDRESS))
 								{
-									if (IF_ADDRESS_WITHIN(address, CATRIDGE_ROM_BANK0_START_ADDRESS, CATRIDGE_ROM_BANK0_END_ADDRESS))
-									{
-										index = upperBase + (0x08 * 0x4000) + (offset & 0x3FFF);
-									}
-									else
-									{
-										index = upperBase + (prgReg * 0x4000) + (offset & 0x3FFF);
-									}
+									index = (mmc1.prgBank16Hi | mmc1.surom_sxrom.prgBank256) * 0x4000;
+									index += ((address - CATRIDGE_ROM_BANK1_START_ADDRESS) & 0x3FFF);
 								}
-								else // pp = 3: swap at $8000, fix bank 0x0F at $C000
+								else
 								{
-									if (IF_ADDRESS_WITHIN(address, CATRIDGE_ROM_BANK0_START_ADDRESS, CATRIDGE_ROM_BANK0_END_ADDRESS))
+									FATAL("Invalid Memory Region for MMC1");
+								}
+								BREAK;
+							}
+							}
+
+							// MMC1A A17-bypass: if bit 4 of $E000 is set, bit 3 directly drives A17 across all $8000-$FFFF
+							if (mmc1.isMmc1A == YES && (mmc1.prgBank16Lo & 0x10) /* bit 4 of last $E000 write */)
+							{
+								// bit 3 of prgBank16Lo/Hi forces the upper 256KB half
+								// prgBank256 equivalent: (prgBank16Lo >> 3) & 1, applied to both banks
+								const uint32_t a17 = (mmc1.prgBank16Lo & 0x08) ? 0x10 : 0x00; // drives A17
+								// index already computed above — add the outer-bank offset
+								index += (a17 * 0x4000);
+							}
+
+							if (pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::INES_MAPPER_105)
+							{
+								auto& mmc1 = pNES_instance->NES_state.catridgeInfo.mmc1;
+								auto& ev = mmc1.nes_event;
+
+								const bool oBit = (mmc1.chrBank4Lo & 0x08) != 0; // bit 3 = O (chip select)
+								const BYTE aReg = (mmc1.chrBank4Lo & 0x06) >> 1;  // bits 2:1 = AA (32KB bank in lower 128KB)
+								const bool pMode = (mmc1.intfControlReg.fields1.pp >= 2); // MMC1 P bit (pp mode 2 or 3)
+								const bool slotSel = (mmc1.intfControlReg.fields1.pp == 3); // S: pp==3 means slot 0 is swappable
+
+								const uint32_t offset = address - CATRIDGE_ROM_BANK0_START_ADDRESS;
+
+								if (ev.initState < 2 || !oBit)
+								{
+									// Uninitialized OR O=0: 32KB from lower 128KB, bank = aReg (0 if uninitialized)
+									const BYTE bank32 = (ev.initState < 2) ? 0 : aReg;
+									index = (bank32 * 0x8000) + (offset & 0x7FFF);
+								}
+								else
+								{
+									// O=1: upper 128KB (add 0x20000 base), MMC1-style banking using $E000 reg
+									const uint32_t upperBase = 0x20000U; // 128KB offset
+									const BYTE bReg = mmc1.prgBank16Lo & 0x07; // lower 3 bits of $E000
+									const BYTE prgReg = bReg | 0x08;           // always within upper 128KB (banks 8..15)
+
+									if (!pMode) // pp = 0 or 1: 32KB swap
 									{
-										index = upperBase + (prgReg * 0x4000) + (offset & 0x3FFF);
+										index = upperBase + ((prgReg & 0xFE) * 0x4000) + (offset & 0x7FFF);
 									}
-									else
+									else if (!slotSel) // pp = 2: fix bank 8 at $8000, swap at $C000
 									{
-										index = upperBase + (0x0F * 0x4000) + (offset & 0x3FFF);
+										if (IF_ADDRESS_WITHIN(address, CATRIDGE_ROM_BANK0_START_ADDRESS, CATRIDGE_ROM_BANK0_END_ADDRESS))
+										{
+											index = upperBase + (0x08 * 0x4000) + (offset & 0x3FFF);
+										}
+										else
+										{
+											index = upperBase + (prgReg * 0x4000) + (offset & 0x3FFF);
+										}
+									}
+									else // pp = 3: swap at $8000, fix bank 0x0F at $C000
+									{
+										if (IF_ADDRESS_WITHIN(address, CATRIDGE_ROM_BANK0_START_ADDRESS, CATRIDGE_ROM_BANK0_END_ADDRESS))
+										{
+											index = upperBase + (prgReg * 0x4000) + (offset & 0x3FFF);
+										}
+										else
+										{
+											index = upperBase + (0x0F * 0x4000) + (offset & 0x3FFF);
+										}
 									}
 								}
 							}
 						}
-
+						
 						if ((ceNES->interceptCPURead(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, address, &modedData, &compareVal, &hasCompare))
 							&&
 							(!hasCompare || (BYTE)compareVal == pNES_catridgeMemory->maxCatridgePRGROM[index]))
@@ -13904,15 +13913,23 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 
 					if (zeroBanksHandled == NO)
 					{
-						memcpy_portable(&(cpuCart[0x0000]), 0x4000, prgRom, 0x4000);
-
-						if (prg16kBanks == ONE)
+						if (pNES_instance->NES_state.catridgeInfo.subMapper == SUB_MAPPER::SEROM_SHROM_SH1ROM)
 						{
-							memcpy_portable(&(cpuCart[0x4000]), 0x4000, prgRom, 0x4000);
+							// SEROM / SHROM / SH1ROM: fixed 32KB PRG.
+							memcpy_portable(&(cpuCart[0x0000]), 0x8000, prgRom, 0x8000);
 						}
 						else
 						{
-							memcpy_portable(&(cpuCart[0x4000]), 0x4000, &(prgRom[(prg16kBanks - ONE) * 0x4000]), 0x4000);
+							memcpy_portable(&(cpuCart[0x0000]), 0x4000, prgRom, 0x4000);
+
+							if (prg16kBanks == ONE)
+							{
+								memcpy_portable(&(cpuCart[0x4000]), 0x4000, prgRom, 0x4000);
+							}
+							else
+							{
+								memcpy_portable(&(cpuCart[0x4000]), 0x4000, &(prgRom[(prg16kBanks - ONE) * 0x4000]), 0x4000);
+							}
 						}
 					}
 
