@@ -2357,9 +2357,10 @@ public:
 						if (ENABLED)
 						{
 							static FLAG showEmuWin = YES;
+							static FLAG focusEmuWindowOnStartup = YES;
 							static FLAG showUpdWin = NO;
 							static FLAG showAboutWin = NO;
-							static FLAG showLoggerWin = NO;
+							static FLAG showLoggerWin = YES;
 							static FLAG showCheatWin = NO;
 							static FLAG maintainAspectRatio = config.get<FLAG>("mods._MAINTAIN_ASPECT_RATIO", true);
 							static FLAG accurateInputSampling = config.get<FLAG>("mods._ENABLE_ACCURATE_INPUT_SAMPLING", false);
@@ -2398,7 +2399,7 @@ public:
 							ImGui::NewFrame();
 
 							ImGuiDockNodeFlags dockSpaceFlags = ImGuiDockNodeFlags_AutoHideTabBar;
-							if (!showUpdWin && !showAboutWin && !showLoggerWin)
+							if (!showUpdWin && !showAboutWin)
 								dockSpaceFlags |= ImGuiDockNodeFlags_NoTabBar;
 							ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(), dockSpaceFlags);
 
@@ -2953,8 +2954,9 @@ public:
 											ImGui::EndMenu();
 										}
 										ImGui::Separator();
-										ImGui::MenuItem("Logger Configuration##LoggerConfiguration", NULL, NO, NO);
-										if (ImGui::MenuItem("Logger Console##LoggerConsole", NULL, showLoggerWin))
+										ImGui::MenuItem("Log Configuration##LogConfiguration", NULL, NO, NO);
+										ImGui::Separator();
+										if (ImGui::MenuItem("Console##LoggerConsole", NULL, showLoggerWin))
 										{
 											showLoggerWin = (showLoggerWin == NO) ? YES : NO;
 										}
@@ -3041,6 +3043,11 @@ public:
 								// ---- Emulation window ----------------------------
 								ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarSize, 0.5f * ImGui::GetStyle().ScrollbarSize);
 								ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+								if (focusEmuWindowOnStartup)
+								{
+									ImGui::SetNextWindowFocus();
+									focusEmuWindowOnStartup = NO;
+								}
 								ImGui::Begin(emuWindow.c_str(), &showEmuWin,
 									ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove |
 									ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoScrollbar |
@@ -3056,7 +3063,7 @@ public:
 											ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(ImGui::GetStyle().ItemSpacing.x, 0.0f));
 											float headerTopSpace = 10.0f;
 											if (showUpdWin || showAboutWin || showLoggerWin) headerTopSpace *= 2.0f;
-											else ImGui::Dummy(ImVec2(0.0f, headerTopSpace));
+											ImGui::Dummy(ImVec2(0.0f, headerTopSpace));
 
 											ImDrawList* drawList = ImGui::GetWindowDrawList();
 											ImVec2      winPos = ImGui::GetWindowPos();
@@ -3480,13 +3487,45 @@ public:
 								}
 
 								// ---- Logger console -------------------------
-								if (showLoggerWin == YES)
+								if (showLoggerWin == YES && showBiosPrompt == NO)
 								{
-									ImGui::PushStyleColor(ImGuiCol_WindowBg, IM_COL32(0, 0, 0, 255));
-									ImGui::Begin("Logger Console", &showLoggerWin, ImGuiWindowFlags_AlwaysAutoResize);
+									ImGuiWindowClass consoleWindowClass;
+									consoleWindowClass.ViewportFlagsOverrideSet = ImGuiViewportFlags_NoAutoMerge;
+									ImGui::SetNextWindowClass(&consoleWindowClass);
+									ImGui::SetNextWindowDockID(0, ImGuiCond_FirstUseEver);
+									ImGui::SetNextWindowSize(ImVec2(920.0f, 480.0f), ImGuiCond_FirstUseEver);
+									ImGui::SetNextWindowPos(ImVec2(120.0f, 120.0f), ImGuiCond_FirstUseEver);
+									ImGui::SetNextWindowSizeConstraints(ImVec2(500.0f, 260.0f), ImVec2(FLT_MAX, FLT_MAX));
+
+									ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 8.0f);
+									ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1.5f);
+									ImGui::PushStyleColor(ImGuiCol_WindowBg, IM_COL32(3, 7, 4, 255));
+									ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(50, 180, 100, 140));
+									ImGui::PushStyleColor(ImGuiCol_MenuBarBg, IM_COL32(6, 16, 9, 255));
+									ImGui::PushStyleColor(ImGuiCol_TitleBg, IM_COL32(4, 10, 6, 255));
+									ImGui::PushStyleColor(ImGuiCol_TitleBgActive, IM_COL32(6, 20, 11, 255));
+
+									ImGui::Begin("Console##standalone", &showLoggerWin, ImGuiWindowFlags_MenuBar);
+
+									if (ImGui::BeginMenuBar())
+									{
+										if (ImGui::BeginMenu("File"))
+										{
+											if (ImGui::MenuItem("Clear"))
+												appLog.Clear();
+											ImGui::Separator();
+											if (ImGui::MenuItem("Close"))
+												showLoggerWin = NO;
+											ImGui::EndMenu();
+										}
+										ImGui::EndMenuBar();
+									}
+
 									appLog.Draw();
 									ImGui::End();
-									ImGui::PopStyleColor();
+
+									ImGui::PopStyleColor(5);
+									ImGui::PopStyleVar(2);
 								}
 
 								// ---- PPU/CPU/APU/Event debugger ----------------

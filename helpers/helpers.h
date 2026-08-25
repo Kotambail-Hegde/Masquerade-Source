@@ -1195,31 +1195,418 @@ MASQ_INLINE std::string StripAnsiColors(const std::string& input)
 
 struct ImGuiLogBuffer
 {
+#if ENABLE_IDLE_MESSAGE
+    // ============================================================
+    // IDLE MESSAGE CONFIGURATION
+    // ============================================================
+    static constexpr bool ENABLE_IDLE_MESSAGES = NO;
+    static constexpr int IDLE_FIRST_MESSAGE_MINUTES = 1;
+    static constexpr int IDLE_NEXT_MESSAGE_MIN_SECONDS = 30;
+    static constexpr int IDLE_NEXT_MESSAGE_MAX_SECONDS = 120;
+    static constexpr int IDLE_SEQUENCE_MESSAGE_COUNT = 3;
+    static constexpr int IDLE_COOLDOWN_MINUTES = 1;
+    std::chrono::steady_clock::time_point nextIdleMessage =std::chrono::steady_clock::now() + std::chrono::minutes(IDLE_FIRST_MESSAGE_MINUTES);
+    int idleMessageCount = 0;
+    void TickIdleMessages()
+    {
+        if (!ENABLE_IDLE_MESSAGES)
+        {
+            RETURN;
+        }
+
+        using namespace std::chrono;
+
+        const auto now = steady_clock::now();
+
+        if (now < nextIdleMessage)
+        {
+            RETURN;
+        }
+
+        static const char* idleMessages[] =
+        {
+            "Hi.",
+            "Hello there.",
+            "Which game are you playing?",
+            "Still there?",
+            "What are you playing?",
+            "Everything looks quiet...",
+            "Need any help?",
+            "What ROM are you running?",
+            "Are you testing something?",
+            "I am still here.",
+            "Masquerade is waiting.",
+            "Interesting...",
+            "Nice game.",
+            "System idle.",
+            "Did you forget about me?"
+        };
+
+        static constexpr size_t messageCount =
+            sizeof(idleMessages) / sizeof(idleMessages[0]);
+
+        static std::mt19937 randomEngine{ std::random_device{}() };
+
+        static size_t lastMessage = messageCount;
+
+        std::uniform_int_distribution<size_t> messageDistribution(0, messageCount - 1);
+
+        size_t messageIndex;
+
+        do
+        {
+            messageIndex = messageDistribution(randomEngine);
+        }
+        while (messageCount > 1 && messageIndex == lastMessage);
+
+        lastMessage = messageIndex;
+
+        // ------------------------------------------------------------
+        // Show ONE message.
+        //
+        // This is deliberately NOT added through Add(), because
+        // Add() resets the idle sequence.
+        // ------------------------------------------------------------
+
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            lines.emplace_back(idleMessages[messageIndex]);
+        }
+
+        idleMessageCount++;
+
+        // ------------------------------------------------------------
+        // Three SEPARATE idle messages have appeared.
+        //
+        // Clear the terminal and restart the idle timer.
+        // ------------------------------------------------------------
+
+        if (idleMessageCount >= IDLE_SEQUENCE_MESSAGE_COUNT)
+        {
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                if (lines.size() >= IDLE_SEQUENCE_MESSAGE_COUNT)
+                {
+                    lines.erase(lines.end() - IDLE_SEQUENCE_MESSAGE_COUNT, lines.end());
+                }
+            }
+
+            idleMessageCount = 0;
+            nextIdleMessage = now + minutes(IDLE_COOLDOWN_MINUTES);
+
+            return;
+        }
+
+        // ------------------------------------------------------------
+        // Wait before showing the next idle message.
+        // ------------------------------------------------------------
+
+        std::uniform_int_distribution<int> delayDistribution(IDLE_NEXT_MESSAGE_MIN_SECONDS, IDLE_NEXT_MESSAGE_MAX_SECONDS);
+
+        nextIdleMessage = now + seconds(delayDistribution(randomEngine));
+    }
+
+    void ResetIdleTimer()
+    {
+        idleMessageCount = 0;
+        nextIdleMessage = std::chrono::steady_clock::now() + std::chrono::minutes(IDLE_FIRST_MESSAGE_MINUTES);
+    }
+#endif
+
     std::vector<std::string> lines;
     std::mutex               mutex;
 
     void Add(const char* str)
     {
-        std::lock_guard<std::mutex> lock(mutex);
-        lines.emplace_back(str);
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            lines.emplace_back(str);
+        }
+
+#if ENABLE_IDLE_MESSAGE
+        // ------------------------------------------------------------
+        // Real console activity cancels the idle-message sequence.
+        // ------------------------------------------------------------
+
+        idleMessageCount = 0;
+        nextIdleMessage = std::chrono::steady_clock::now() + std::chrono::minutes(IDLE_FIRST_MESSAGE_MINUTES);
+#endif
     }
+
     void Clear()
     {
         std::lock_guard<std::mutex> lock(mutex);
         lines.clear();
     }
+
     void Draw()
     {
+#if ENABLE_IDLE_MESSAGE
+        // Process terminal idle timeout & background tasks
+        TickIdleMessages();
+#endif
+
         ImVec2 start_pos = ImGui::GetCursorScreenPos();
         ImVec2 avail = ImGui::GetContentRegionAvail();
-        ImGui::GetWindowDrawList()->AddRectFilled(start_pos,
-            ImVec2(start_pos.x + avail.x, start_pos.y + avail.y), IM_COL32(0, 0, 0, 255));
-        ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(0, 255, 0, 255));
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
+
+        // Vintage CRT Color Palette Definitions
+        const ImU32 bgColor = IM_COL32(3, 7, 4, 255);
+        const ImU32 inputBgColor = IM_COL32(4, 12, 7, 255);
+        const ImU32 glowOuter = IM_COL32(80, 255, 150, 18);
+        const ImU32 glowMiddle = IM_COL32(100, 255, 160, 35);
+        const ImU32 glowInner = IM_COL32(130, 255, 170, 65);
+        const ImU32 phosphorColor = IM_COL32(180, 255, 200, 255);
+        const ImU32 scanlineColor = IM_COL32(80, 255, 150, 10);
+
+        static char inputBuffer[1024] = {};
+
+        // Render Window Background
+        drawList->AddRectFilled(start_pos, ImVec2(start_pos.x + avail.x, start_pos.y + avail.y), bgColor);
+
+        // Dynamic Terminal Path Resolution
+        static std::string terminalPath;
+        if (terminalPath.empty())
+        {
+            try
+            {
+                terminalPath = std::filesystem::current_path().string();
+#ifdef _WIN32
+                for (char& c : terminalPath)
+                {
+                    if (c == '\\') c = '/';
+                }
+                if (terminalPath.size() >= 2 && terminalPath[1] == ':') terminalPath.insert(0, "/");
+#endif
+            }
+            catch (...)
+            {
+                terminalPath = "/";
+            }
+        }
+
+        const std::string prompt = "root@masquerade:" + terminalPath + "> ";
+
+        // Scrolling Terminal Container
+        ImGui::BeginChild("##Terminal", ImVec2(0.0f, 0.0f), false, ImGuiWindowFlags_NoBackground);
+        ImGui::SetScrollX(0.0f);
+        ImDrawList* terminalDrawList = ImGui::GetWindowDrawList();
+
+        // Helper Lambda: Renders CRT Multi-Layer Phosphor Glow Text Effect
+        auto DrawGlowingText = [&](ImDrawList* list, ImVec2 p, const char* txt) {
+            // Outer Glow (3px radius)
+            list->AddText(ImVec2(p.x - 3, p.y), glowOuter, txt); list->AddText(ImVec2(p.x + 3, p.y), glowOuter, txt);
+            list->AddText(ImVec2(p.x, p.y - 3), glowOuter, txt); list->AddText(ImVec2(p.x, p.y + 3), glowOuter, txt);
+            // Middle Glow (2px radius)
+            list->AddText(ImVec2(p.x - 2, p.y), glowMiddle, txt); list->AddText(ImVec2(p.x + 2, p.y), glowMiddle, txt);
+            list->AddText(ImVec2(p.x, p.y - 2), glowMiddle, txt); list->AddText(ImVec2(p.x, p.y + 2), glowMiddle, txt);
+            // Inner Glow (1px radius)
+            list->AddText(ImVec2(p.x - 1, p.y), glowInner, txt); list->AddText(ImVec2(p.x + 1, p.y), glowInner, txt);
+            list->AddText(ImVec2(p.x, p.y - 1), glowInner, txt); list->AddText(ImVec2(p.x, p.y + 1), glowInner, txt);
+            // Phosphor Core Pass
+            list->AddText(p, phosphorColor, txt);
+            };
+
+        // Render Saved Output Log Lines
         {
             std::lock_guard<std::mutex> lock(mutex);
-            for (const auto& line : lines) ImGui::TextUnformatted(line.c_str());
+            for (const auto& line : lines)
+            {
+                DrawGlowingText(terminalDrawList, ImGui::GetCursorScreenPos(), line.c_str());
+                ImGui::Dummy(ImVec2(0.0f, ImGui::GetTextLineHeight()));
+            }
         }
-        ImGui::PopStyleColor();
+
+        // Active Input Row Positioning & Background Setup
+        ImVec2 inputPos = ImGui::GetCursorScreenPos();
+        ImVec2 promptSize = ImGui::CalcTextSize(prompt.c_str());
+        float inputRight = inputPos.x + ImGui::GetContentRegionAvail().x;
+
+        terminalDrawList->AddRectFilled(ImVec2(inputPos.x + promptSize.x, inputPos.y), ImVec2(inputRight, inputPos.y + ImGui::GetTextLineHeight()), inputBgColor);
+
+        // Draw Live Command Line Buffer Glow
+        std::string currentLine = prompt + std::string(inputBuffer);
+        DrawGlowingText(terminalDrawList, inputPos, currentLine.c_str());
+
+        // Setup Transparent ImGui Input Field Over Glow Surface
+        ImGui::SetCursorScreenPos(ImVec2(inputPos.x + promptSize.x, inputPos.y));
+        ImGui::PushStyleColor(ImGuiCol_Text, phosphorColor);
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, IM_COL32(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, IM_COL32(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_FrameBgActive, IM_COL32(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_NavHighlight, IM_COL32(0, 0, 0, 0));
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0.0f, 0.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+
+        // Auto-Focus Command Line
+        static bool requestFocus = true;
+        if (requestFocus)
+        {
+            ImGui::SetKeyboardFocusHere(); requestFocus = false;
+        }
+
+        // Read Input Frame
+        bool submitted = ImGui::InputText("##TerminalInput", inputBuffer, sizeof(inputBuffer), ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_NoHorizontalScroll);
+        ImGui::PopStyleVar(2);
+        ImGui::PopStyleColor(6);
+
+        // Parse Executed Commands
+        if (submitted)
+        {
+            std::string command = inputBuffer;
+            if (!command.empty())
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                lines.emplace_back(prompt + command);
+            }
+
+#if ENABLE_IDLE_MESSAGE
+            ResetIdleTimer();
+#endif
+
+            if (command == "clear")
+            {
+                Clear();
+            }
+            else if (command == "--help")
+            {
+                char vBuf[32];
+                std::snprintf(vBuf, sizeof(vBuf), "%.4f", VERSION);
+
+                // Precise Em-Space / Thin-Space pixel adjustment strictly inside this block
+                auto AlignLine = [](const char* cmd, const char* desc, float targetPixelWidth = 190.0f) {
+                    std::string line = "  " + std::string(cmd);
+                    float width = ImGui::CalcTextSize(line.c_str()).x;
+
+                    // Em-space (\u2003) is wide, standard space is medium, Hair-space (\u200A) is fine-grained
+                    static const std::string EM_SPACE = "\xE2\x80\x83";
+                    static const std::string THIN_SPACE = "\xE2\x80\x89";
+
+                    float emWidth = ImGui::CalcTextSize(EM_SPACE.c_str()).x;
+                    float thinWidth = ImGui::CalcTextSize(THIN_SPACE.c_str()).x;
+
+                    // Fill majority distance using wide Em-Spaces
+                    while (width + emWidth <= targetPixelWidth)
+                    {
+                        line += EM_SPACE;
+                        width += emWidth;
+                    }
+
+                    // Fill remaining sub-pixel gap using Thin-Spaces
+                    while (width + thinWidth <= targetPixelWidth)
+                    {
+                        line += THIN_SPACE;
+                        width += thinWidth;
+                    }
+
+                    return line + " - " + desc;
+                    };
+
+                std::lock_guard<std::mutex> lock(mutex);
+                lines.emplace_back(std::string("Masquerade Multi-System Emulator v") + vBuf);
+                lines.emplace_back("Usage:");
+                lines.emplace_back(AlignLine("[ROM_FILE...]", "Load and run ROM(s)", 200.0f));
+                lines.emplace_back(AlignLine("--version", "Print version and exit", 200.0f));
+                lines.emplace_back(AlignLine("--help", "Show this help message", 200.0f));
+                lines.emplace_back(AlignLine("--about", "Show Masquerade information", 200.0f));
+                lines.emplace_back(AlignLine("clear", "Clear terminal", 200.0f));
+                lines.emplace_back(AlignLine("ls", "List files", 200.0f));
+                lines.emplace_back(AlignLine("pwd", "Show current directory", 200.0f));
+                lines.emplace_back(AlignLine("whoami", "Show current user", 200.0f));
+                lines.emplace_back(AlignLine("hostname", "Show system hostname", 200.0f));
+                lines.emplace_back(AlignLine("date", "Show current date/time", 200.0f));
+                lines.emplace_back(AlignLine("echo <text>", "Print text", 200.0f));
+            }
+            else if (command == "ls")
+            {
+                try
+                {
+                    std::lock_guard<std::mutex> lock(mutex);
+                    for (const auto& entry : std::filesystem::directory_iterator(std::filesystem::current_path()))
+                        lines.emplace_back(entry.path().filename().string());
+                }
+                catch (const std::exception& e)
+                {
+                    std::lock_guard<std::mutex> lock(mutex);
+                    lines.emplace_back(std::string("ls: ") + e.what());
+                }
+            }
+            else if (command == "pwd")
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                lines.emplace_back(std::filesystem::current_path().string());
+            }
+            else if (command == "whoami")
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                lines.emplace_back("root");
+            }
+            else if (command == "hostname")
+            {
+                char hBuf[256] = {};
+                std::lock_guard<std::mutex> lock(mutex);
+#ifdef _WIN32
+                DWORD sz = sizeof(hBuf);
+                lines.emplace_back(GetComputerNameA(hBuf, &sz) ? hBuf : "masquerade");
+#else
+                lines.emplace_back(gethostname(hBuf, sizeof(hBuf)) == 0 ? hBuf : "masquerade");
+#endif
+            }
+            else if (command == "date")
+            {
+                std::time_t now = std::time(nullptr);
+                char tBuf[128] = {};
+                std::tm tInfo = {};
+#ifdef _WIN32
+                localtime_s(&tInfo, &now);
+#else
+                localtime_r(&now, &tInfo);
+#endif
+                std::strftime(tBuf, sizeof(tBuf), "%a %b %d %H:%M:%S %Y", &tInfo);
+                std::lock_guard<std::mutex> lock(mutex);
+                lines.emplace_back(tBuf);
+            }
+            else if (command.rfind("echo ", 0) == 0)
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                lines.emplace_back(command.substr(5));
+            }
+            else if (command == "--version")
+            {
+                char vBuf[32]; std::snprintf(vBuf, sizeof(vBuf), "%.4f", VERSION);
+                std::lock_guard<std::mutex> lock(mutex);
+                lines.emplace_back(std::string("Masquerade Multi-System Emulator v") + vBuf);
+            }
+            else if (command == "about")
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                lines.emplace_back("Masquerade Multi-Console Emulator");
+                lines.emplace_back("NES / GB / GBC / GBA / Chip-8 / Pac-Man / Space Invaders");
+            }
+            else if (!command.empty())
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                lines.emplace_back("bash: " + command + ": command not found");
+            }
+
+            inputBuffer[0] = '\0';
+            requestFocus = true;
+        }
+
+        // Allocate Input Row Height & Auto-scroll Output
+        ImGui::Dummy(ImVec2(0.0f, ImGui::GetTextLineHeight()));
+        ImGui::SetScrollHereY(1.0f);
+        ImGui::EndChild();
+
+        // Render Foreground Overlays (CRT Scanlines & Framed Bezel)
+        drawList->PushClipRect(start_pos, ImVec2(start_pos.x + avail.x, start_pos.y + avail.y), true);
+        for (float y = start_pos.y; y < start_pos.y + avail.y; y += 2.0f)
+            drawList->AddLine(ImVec2(start_pos.x, y), ImVec2(start_pos.x + avail.x, y), scanlineColor);
+
+        drawList->AddRect(start_pos, ImVec2(start_pos.x + avail.x, start_pos.y + avail.y), IM_COL32(50, 180, 100, 35));
+        drawList->PopClipRect();
     }
 };
 
