@@ -1911,18 +1911,160 @@ private:
 #ifndef __RPI_PICO__
 public:
 
+	// Faux-glow for the ENTIRE ImGui frame in one place, instead of touching
+	// every Text()/TextColored() call site. NOT real bloom (no HDR threshold,
+	// no gaussian blur) -- just staggered low-alpha offset copies replayed
+	// underneath the crisp pass. Glows all draw content (text, borders,
+	// buttons), not just text, since they share the same draw data.
+	// Cost: N extra full draw-data replays per frame -- keep offsets small.
+	static void RenderDrawDataWithGlow(ImDrawData* draw_data)
+	{
+		static const ImVec2 offsets[6] = { {-1.5f,0},{1.5f,0},{0,-1.5f},{0,1.5f},{-1,-1},{1,1} };
+		const float passAlpha = 0.06f; // per-pass contribution; six passes ~= faint halo
+
+		ImVec2 origPos = draw_data->DisplayPos;
+
+		for (auto& o : offsets)
+		{
+			ImDrawData glowPass = *draw_data; // shallow copy -- shares CmdLists array
+			glowPass.DisplayPos = ImVec2(origPos.x + o.x, origPos.y + o.y);
+
+			// Dim every vertex's alpha for this pass only.
+			for (int n = 0; n < glowPass.CmdListsCount; n++)
+				for (ImDrawVert& v : glowPass.CmdLists[n]->VtxBuffer)
+				{
+					ImU32 a = (v.col >> IM_COL32_A_SHIFT) & 0xFF;
+					a = (ImU32)(a * passAlpha);
+					v.col = (v.col & ~IM_COL32_A_MASK) | (a << IM_COL32_A_SHIFT);
+				}
+
+			ImGui_ImplOpenGL3_RenderDrawData(&glowPass);
+
+			// Restore alpha -- VtxBuffer is shared with draw_data / the next pass.
+			for (int n = 0; n < glowPass.CmdListsCount; n++)
+				for (ImDrawVert& v : glowPass.CmdLists[n]->VtxBuffer)
+				{
+					ImU32 a = (v.col >> IM_COL32_A_SHIFT) & 0xFF;
+					a = (ImU32)(a / passAlpha);
+					v.col = (v.col & ~IM_COL32_A_MASK) | (a << IM_COL32_A_SHIFT);
+				}
+		}
+
+		// Real, crisp pass on top.
+		ImGui_ImplOpenGL3_RenderDrawData(draw_data);
+	}
+
+	void setupPhosphorTheme()
+	{
+		ImGuiStyle& style = ImGui::GetStyle();
+		ImVec4* colors = style.Colors;
+
+		// ---- Soft Matrix Green Palette -----------------------------------
+		// NOTE: bgBase / glowBorder / menuBarBg / titleBg / titleBgActive are
+		// the exact IM_COL32 values the standalone Console window hardcodes
+		// (see the Console PushStyleColor block), converted to normalized
+		// floats, so the two windows read as one consistent theme instead
+		// of the Console looking "glowier" than everything else.
+		const ImVec4 bgBase = ImVec4(3.0f / 255.0f, 7.0f / 255.0f, 4.0f / 255.0f, 1.00f);          // matches Console WindowBg (3,7,4,255)
+		const ImVec4 bgDark = ImVec4(6.0f / 255.0f, 16.0f / 255.0f, 9.0f / 255.0f, 1.00f);         // matches Console MenuBarBg (6,16,9,255)
+		const ImVec4 titleBg = ImVec4(4.0f / 255.0f, 10.0f / 255.0f, 6.0f / 255.0f, 1.00f);        // matches Console TitleBg (4,10,6,255)
+		const ImVec4 titleBgActive = ImVec4(6.0f / 255.0f, 20.0f / 255.0f, 11.0f / 255.0f, 1.00f); // matches Console TitleBgActive (6,20,11,255)
+		const ImVec4 textPhosphor = ImVec4(0.350f, 0.950f, 0.550f, 1.00f);
+		const ImVec4 textDim = ImVec4(0.120f, 0.450f, 0.220f, 0.75f);
+		const ImVec4 glowBorder = ImVec4(50.0f / 255.0f, 180.0f / 255.0f, 100.0f / 255.0f, 140.0f / 255.0f); // matches Console Border (50,180,100,140)
+
+		// ---- Window & Menus ----------------------------------------------
+		colors[ImGuiCol_WindowBg] = bgBase;
+		colors[ImGuiCol_ChildBg] = bgBase;
+		colors[ImGuiCol_PopupBg] = ImVec4(bgBase.x, bgBase.y, bgBase.z, 0.98f);
+		colors[ImGuiCol_MenuBarBg] = bgDark;
+		colors[ImGuiCol_Border] = glowBorder;
+		colors[ImGuiCol_BorderShadow] = ImVec4(glowBorder.x, glowBorder.y, glowBorder.z, 0.25f); // soft outer halo, same hue as the border
+
+		// ---- Text Colors -------------------------------------------------
+		colors[ImGuiCol_Text] = textPhosphor;
+		colors[ImGuiCol_TextDisabled] = textDim;
+
+		// ---- Interactive Controls ----------------------------------------
+		colors[ImGuiCol_FrameBg] = ImVec4(0.015f, 0.050f, 0.025f, 0.60f);
+		colors[ImGuiCol_FrameBgHovered] = ImVec4(0.030f, 0.160f, 0.070f, 0.75f);
+		colors[ImGuiCol_FrameBgActive] = ImVec4(0.050f, 0.280f, 0.120f, 0.90f);
+
+		colors[ImGuiCol_Button] = ImVec4(0.020f, 0.100f, 0.045f, 0.70f);
+		colors[ImGuiCol_ButtonHovered] = ImVec4(0.040f, 0.220f, 0.090f, 0.85f);
+		colors[ImGuiCol_ButtonActive] = ImVec4(0.060f, 0.350f, 0.140f, 1.00f);
+
+		// Brightened to match glowBorder's saturation -- the old values
+		// were dim enough that flyout submenus (Bios/Audio/Video/...)
+		// read as flat/muddy next to the punchier window border.
+		colors[ImGuiCol_Header] = ImVec4(glowBorder.x * 0.35f, glowBorder.y * 0.35f, glowBorder.z * 0.35f, 0.50f);
+		colors[ImGuiCol_HeaderHovered] = ImVec4(glowBorder.x * 0.65f, glowBorder.y * 0.65f, glowBorder.z * 0.65f, 0.75f);
+		colors[ImGuiCol_HeaderActive] = ImVec4(glowBorder.x, glowBorder.y, glowBorder.z, 0.90f);
+
+		colors[ImGuiCol_CheckMark] = textPhosphor;
+		colors[ImGuiCol_SliderGrab] = ImVec4(0.040f, 0.220f, 0.090f, 0.85f);
+		colors[ImGuiCol_SliderGrabActive] = textPhosphor;
+
+		// ---- Scrollbars & Tabs -------------------------------------------
+		colors[ImGuiCol_ScrollbarBg] = ImVec4(bgDark.x, bgDark.y, bgDark.z, 0.60f);
+		colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.030f, 0.150f, 0.060f, 0.80f);
+		colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.050f, 0.250f, 0.100f, 0.90f);
+		colors[ImGuiCol_ScrollbarGrabActive] = textPhosphor;
+
+		colors[ImGuiCol_Tab] = ImVec4(0.015f, 0.070f, 0.030f, 0.60f);
+		colors[ImGuiCol_TabHovered] = ImVec4(0.040f, 0.200f, 0.080f, 0.80f);
+		colors[ImGuiCol_TabActive] = ImVec4(0.030f, 0.150f, 0.060f, 1.00f);
+		colors[ImGuiCol_TabUnfocused] = ImVec4(0.010f, 0.040f, 0.020f, 0.60f);
+		colors[ImGuiCol_TabUnfocusedActive] = ImVec4(0.015f, 0.070f, 0.030f, 0.80f);
+
+		colors[ImGuiCol_TitleBg] = titleBg;
+		colors[ImGuiCol_TitleBgActive] = titleBgActive;
+		colors[ImGuiCol_TitleBgCollapsed] = titleBg;
+		colors[ImGuiCol_Separator] = glowBorder;
+
+		// ---- Style Metrics -----------------------------------------------
+		style.WindowPadding = ImVec2(10.0f, 8.0f);
+		style.FramePadding = ImVec2(8.0f, 4.0f);
+		style.ItemSpacing = ImVec2(8.0f, 6.0f);
+		style.IndentSpacing = 25.0f;
+		style.ScrollbarSize = 14.0f;
+		style.GrabMinSize = 10.0f;
+
+		// Matches the Console's PushStyleVar(WindowRounding, 8.0f) /
+		// PushStyleVar(WindowBorderSize, 1.5f) so every window in this
+		// theme has the same rounding/border weight as the Console.
+		style.WindowBorderSize = 1.5f;
+		style.FrameBorderSize = 0.0f;
+		style.WindowRounding = 8.0f;
+		style.FrameRounding = 3.0f;
+		style.PopupRounding = 8.0f;
+		style.ScrollbarRounding = 3.0f;
+		style.GrabRounding = 2.0f;
+		style.TabRounding = 3.0f;
+	}
+
 	int setupThemes()
 	{
-		ImVec4* colors = ImGui::GetStyle().Colors;
+		// ---- Check for standalone CRT/Phosphor theme first --------------
+		if (currentEmuTheme == SE_THEME_PHOSPHOR)
+		{
+			setupPhosphorTheme(); // Delegate directly to the Phosphor theme function
+			RETURN SUCCESS;
+		}
+
+		ImGuiStyle& style = ImGui::GetStyle();
+		ImVec4* colors = style.Colors;
+
+		// ---- Default Dark Base Palette ---------------------------------
 		colors[ImGuiCol_Text] = ImVec4(1.00f, 1.00f, 1.00f, 1.00f);
-		colors[ImGuiCol_TextDisabled] = ImVec4(0.6f, 0.6f, 0.6f, 0.5f);
+		colors[ImGuiCol_TextDisabled] = ImVec4(0.60f, 0.60f, 0.60f, 0.50f);
 		colors[ImGuiCol_WindowBg] = ImVec4(0.14f, 0.14f, 0.14f, 1.00f);
 		colors[ImGuiCol_ChildBg] = ImVec4(0.19f, 0.19f, 0.19f, 0.40f);
 		colors[ImGuiCol_PopupBg] = ImVec4(0.22f, 0.22f, 0.22f, 0.92f);
-		colors[ImGuiCol_Border] = ImVec4(0.1f, 0.1f, 0.1f, 1.0f);
+		colors[ImGuiCol_Border] = ImVec4(0.10f, 0.10f, 0.10f, 1.00f);
 		colors[ImGuiCol_BorderShadow] = ImVec4(0.00f, 0.00f, 0.00f, 0.24f);
-		colors[ImGuiCol_FrameBg] = ImVec4(0.2f, 0.2f, 0.2f, 0.9f);
-		colors[ImGuiCol_FrameBgHovered] = ImVec4(0.1f, 0.1f, 0.1f, 1.0f);
+		colors[ImGuiCol_FrameBg] = ImVec4(0.20f, 0.20f, 0.20f, 0.90f);
+		colors[ImGuiCol_FrameBgHovered] = ImVec4(0.10f, 0.10f, 0.10f, 1.00f);
 		colors[ImGuiCol_FrameBgActive] = ImVec4(0.29f, 0.29f, 0.29f, 1.00f);
 		colors[ImGuiCol_TitleBg] = ImVec4(0.00f, 0.00f, 0.00f, 1.00f);
 		colors[ImGuiCol_TitleBgActive] = ImVec4(0.06f, 0.06f, 0.06f, 1.00f);
@@ -1933,15 +2075,15 @@ public:
 		colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.40f, 0.40f, 0.40f, 0.54f);
 		colors[ImGuiCol_ScrollbarGrabActive] = ImVec4(0.56f, 0.56f, 0.56f, 0.54f);
 		colors[ImGuiCol_CheckMark] = ImVec4(0.33f, 0.67f, 0.86f, 1.00f);
-		colors[ImGuiCol_SliderGrab] = ImVec4(0.34f, 0.34f, 0.34f, 0.8f);
-		colors[ImGuiCol_SliderGrabActive] = ImVec4(0.56f, 0.56f, 0.56f, 0.8f);
+		colors[ImGuiCol_SliderGrab] = ImVec4(0.34f, 0.34f, 0.34f, 0.80f);
+		colors[ImGuiCol_SliderGrabActive] = ImVec4(0.56f, 0.56f, 0.56f, 0.80f);
 		colors[ImGuiCol_Button] = ImVec4(0.25f, 0.25f, 0.25f, 1.00f);
 		colors[ImGuiCol_ButtonHovered] = ImVec4(0.19f, 0.19f, 0.19f, 0.54f);
-		colors[ImGuiCol_ButtonActive] = ImVec4(0.4f, 0.4f, 0.4f, 1.00f);
+		colors[ImGuiCol_ButtonActive] = ImVec4(0.40f, 0.40f, 0.40f, 1.00f);
 		colors[ImGuiCol_Header] = ImVec4(0.00f, 0.00f, 0.00f, 0.52f);
 		colors[ImGuiCol_HeaderHovered] = ImVec4(0.00f, 0.00f, 0.00f, 0.36f);
 		colors[ImGuiCol_HeaderActive] = ImVec4(0.20f, 0.22f, 0.23f, 0.33f);
-		colors[ImGuiCol_Separator] = ImVec4(0.28f, 0.28f, 0.28f, 0.9f);
+		colors[ImGuiCol_Separator] = ImVec4(0.28f, 0.28f, 0.28f, 0.90f);
 		colors[ImGuiCol_SeparatorHovered] = ImVec4(0.44f, 0.44f, 0.44f, 0.29f);
 		colors[ImGuiCol_SeparatorActive] = ImVec4(0.40f, 0.44f, 0.47f, 1.00f);
 		colors[ImGuiCol_ResizeGrip] = ImVec4(0.28f, 0.28f, 0.28f, 0.29f);
@@ -1970,131 +2112,132 @@ public:
 		colors[ImGuiCol_NavWindowingDimBg] = ImVec4(1.00f, 0.00f, 0.00f, 0.20f);
 		colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.00f, 0.00f, 0.00f, 0.60f);
 
-		// ---- Custom palette override --------------------------------
-		if (currentEmuTheme == THEME_CUSTOM)
+		// ---- Helper lambda to unpack palette colors --------------------
+		auto getPaletteColor = [](const uint8_t* palette, int idx) -> ImVec4 {
+			return ImVec4(
+				palette[idx * 4 + 0] / 255.0f,
+				palette[idx * 4 + 1] / 255.0f,
+				palette[idx * 4 + 2] / 255.0f,
+				palette[idx * 4 + 3] / 255.0f
+			);
+			};
+
+		// ---- Custom palette override ------------------------------------
+		if (currentEmuTheme == SE_THEME_CUSTOM)
 		{
 			uint8_t* palette = customSEpalettes;
 
-			auto applyPaletteEntry = [&](int idx, auto&&... targets) {
-				if (!palette[idx * 4 + 3]) RETURN;
-				float r = palette[idx * 4 + 0] / 255.0f, g = palette[idx * 4 + 1] / 255.0f,
-					b = palette[idx * 4 + 2] / 255.0f, a = palette[idx * 4 + 3] / 255.0f;
-				(void)std::initializer_list<int>{ ((targets = ImVec4(r, g, b, a)), 0)... };
-				};
+			if (palette[0 * 4 + 3] > 0)
+			{
+				ImVec4 base = getPaletteColor(palette, 0);
+				colors[ImGuiCol_WindowBg] = colors[ImGuiCol_ChildBg] =
+					colors[ImGuiCol_PopupBg] = colors[ImGuiCol_MenuBarBg] = base;
+			}
 
-			// Base color
-			if (palette[0 * 4 + 3])
+			if (palette[1 * 4 + 3] > 0)
 			{
-				float r = palette[0 * 4 + 0] / 255.0f, g = palette[0 * 4 + 1] / 255.0f, b = palette[0 * 4 + 2] / 255.0f, a = palette[0 * 4 + 3] / 255.0f;
-				colors[ImGuiCol_WindowBg] = colors[ImGuiCol_ChildBg] = colors[ImGuiCol_PopupBg] = colors[ImGuiCol_MenuBarBg] = ImVec4(r, g, b, a);
+				ImVec4 text = getPaletteColor(palette, 1);
+				colors[ImGuiCol_Text] = text;
+				colors[ImGuiCol_PlotLinesHovered] = text;
+				colors[ImGuiCol_PlotHistogramHovered] = text;
+				colors[ImGuiCol_TextDisabled] = ImVec4(text.x, text.y, text.z, text.w * 0.4f);
+				colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(text.x, text.y, text.z, text.w * 0.6f);
+				colors[ImGuiCol_SliderGrabActive] =
+					colors[ImGuiCol_ScrollbarGrabActive] = ImVec4(text.x, text.y, text.z, text.w * 0.8f);
 			}
-			// Text color
-			if (palette[1 * 4 + 3])
+
+			if (palette[2 * 4 + 3] > 0)
 			{
-				float r = palette[1 * 4 + 0] / 255.0f, g = palette[1 * 4 + 1] / 255.0f, b = palette[1 * 4 + 2] / 255.0f, a = palette[1 * 4 + 3] / 255.0f;
-				colors[ImGuiCol_PlotLinesHovered] = colors[ImGuiCol_PlotHistogramHovered] = colors[ImGuiCol_Text] = ImVec4(r, g, b, a);
-				colors[ImGuiCol_TextDisabled] = ImVec4(r, g, b, a * 0.4f);
-				colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(r, g, b, a * 0.6f);
-				colors[ImGuiCol_SliderGrabActive] = colors[ImGuiCol_ScrollbarGrabActive] = ImVec4(r, g, b, a * 0.8f);
+				ImVec4 sec = getPaletteColor(palette, 2);
+				colors[ImGuiCol_FrameBg] = ImVec4(sec.x, sec.y, sec.z, sec.w * 0.5f);
+				colors[ImGuiCol_ScrollbarBg] = sec;
+				colors[ImGuiCol_Button] = sec;
+				colors[ImGuiCol_ButtonHovered] = ImVec4(sec.x, sec.y, sec.z, sec.w * 0.54f);
+				colors[ImGuiCol_ButtonActive] = ImVec4(
+					std::min(sec.x * 2.0f, 1.0f),
+					std::min(sec.y * 2.0f, 1.0f),
+					std::min(sec.z * 2.0f, 1.0f),
+					sec.w
+				);
 			}
-			// Second color
-			if (palette[2 * 4 + 3])
+
+			if (palette[3 * 4 + 3] > 0)
 			{
-				float r = palette[2 * 4 + 0] / 255.0f, g = palette[2 * 4 + 1] / 255.0f, b = palette[2 * 4 + 2] / 255.0f, a = palette[2 * 4 + 3] / 255.0f;
-				colors[ImGuiCol_FrameBg] = ImVec4(r, g, b, a * 0.5f);
-				colors[ImGuiCol_ScrollbarBg] = ImVec4(r, g, b, a);
-				colors[ImGuiCol_Button] = ImVec4(r, g, b, a);
-				colors[ImGuiCol_ButtonHovered] = ImVec4(r, g, b, a * 0.54f);
-				colors[ImGuiCol_ButtonActive] = ImVec4(r * 2, g * 2, b * 2, a);
+				ImVec4 tab = getPaletteColor(palette, 3);
+				colors[ImGuiCol_TitleBg] =
+					colors[ImGuiCol_TitleBgActive] =
+					colors[ImGuiCol_TitleBgCollapsed] =
+					colors[ImGuiCol_TableHeaderBg] =
+					colors[ImGuiCol_TableBorderStrong] = tab;
+				colors[ImGuiCol_SliderGrab] =
+					colors[ImGuiCol_ScrollbarGrab] = tab;
+				colors[ImGuiCol_FrameBgHovered] = ImVec4(tab.x, tab.y, tab.z, tab.w * 0.75f);
+				colors[ImGuiCol_FrameBgActive] = tab;
+				colors[ImGuiCol_Tab] =
+					colors[ImGuiCol_Header] = ImVec4(tab.x, tab.y, tab.z, tab.w * 0.50f);
+				colors[ImGuiCol_TabHovered] =
+					colors[ImGuiCol_HeaderHovered] = ImVec4(tab.x, tab.y, tab.z, tab.w * 0.75f);
+				colors[ImGuiCol_TabActive] =
+					colors[ImGuiCol_HeaderActive] = tab;
 			}
-			// Tab/Header color
-			if (palette[3 * 4 + 3])
+
+			if (palette[4 * 4 + 3] > 0)
 			{
-				float r = palette[3 * 4 + 0] / 255.0f, g = palette[3 * 4 + 1] / 255.0f, b = palette[3 * 4 + 2] / 255.0f, a = palette[3 * 4 + 3] / 255.0f;
-				colors[ImGuiCol_TitleBg] = colors[ImGuiCol_TitleBgActive] = colors[ImGuiCol_TitleBgCollapsed] =
-					colors[ImGuiCol_TableHeaderBg] = colors[ImGuiCol_TableBorderStrong] = ImVec4(r, g, b, a);
-				colors[ImGuiCol_SliderGrab] = colors[ImGuiCol_ScrollbarGrab] = ImVec4(r, g, b, a);
-				colors[ImGuiCol_FrameBgHovered] = ImVec4(r, g, b, a * 0.75f);
-				colors[ImGuiCol_FrameBgActive] = ImVec4(r, g, b, a);
-				colors[ImGuiCol_Tab] = colors[ImGuiCol_Header] = ImVec4(r, g, b, a * 0.5f);
-				colors[ImGuiCol_TabHovered] = colors[ImGuiCol_HeaderHovered] = ImVec4(r, g, b, a * 0.75f);
-				colors[ImGuiCol_TabActive] = colors[ImGuiCol_HeaderActive] = ImVec4(r, g, b, a);
-			}
-			// Accent color
-			if (palette[4 * 4 + 3])
-			{
-				float r = palette[4 * 4 + 0] / 255.0f, g = palette[4 * 4 + 1] / 255.0f, b = palette[4 * 4 + 2] / 255.0f, a = palette[4 * 4 + 3] / 255.0f;
-				colors[ImGuiCol_PlotLines] = colors[ImGuiCol_PlotHistogram] = colors[ImGuiCol_CheckMark] = ImVec4(r, g, b, a);
+				ImVec4 accent = getPaletteColor(palette, 4);
+				colors[ImGuiCol_PlotLines] =
+					colors[ImGuiCol_PlotHistogram] =
+					colors[ImGuiCol_CheckMark] = accent;
 			}
 		}
 
-		// ---- Light theme: invert luminance -------------------------
+		// ---- Light theme ------------------------------------------------
 		if (currentEmuTheme == SE_THEME_LIGHT)
 		{
-			int invert_list[] = {
-				ImGuiCol_Text, ImGuiCol_TextDisabled, ImGuiCol_WindowBg, ImGuiCol_ChildBg,
-				ImGuiCol_PopupBg, ImGuiCol_Border, ImGuiCol_BorderShadow, ImGuiCol_FrameBg,
-				ImGuiCol_FrameBgHovered, ImGuiCol_FrameBgActive, ImGuiCol_TitleBg,
-				ImGuiCol_TitleBgActive, ImGuiCol_TitleBgCollapsed, ImGuiCol_MenuBarBg,
-				ImGuiCol_ScrollbarBg, ImGuiCol_ScrollbarGrab, ImGuiCol_ScrollbarGrabHovered,
-				ImGuiCol_ScrollbarGrabActive, ImGuiCol_SliderGrab, ImGuiCol_SliderGrabActive,
-				ImGuiCol_Button, ImGuiCol_ButtonHovered, ImGuiCol_ButtonActive,
-				ImGuiCol_Header, ImGuiCol_HeaderHovered, ImGuiCol_HeaderActive,
-				ImGuiCol_Separator, ImGuiCol_SeparatorHovered, ImGuiCol_SeparatorActive,
-				ImGuiCol_ResizeGrip, ImGuiCol_ResizeGripHovered, ImGuiCol_ResizeGripActive,
-				ImGuiCol_Tab, ImGuiCol_TabHovered, ImGuiCol_TabActive,
-				ImGuiCol_TabUnfocused, ImGuiCol_TabUnfocusedActive,
-				ImGuiCol_TableHeaderBg, ImGuiCol_TableBorderStrong, ImGuiCol_TableBorderLight,
-				ImGuiCol_TableRowBg, ImGuiCol_TableRowBgAlt, ImGuiCol_TextSelectedBg,
-				ImGuiCol_DragDropTarget, ImGuiCol_NavHighlight,
-				ImGuiCol_NavWindowingHighlight, ImGuiCol_NavWindowingDimBg, ImGuiCol_ModalWindowDimBg,
-			};
-			for (int i = 0; i < (int)(sizeof(invert_list) / sizeof(invert_list[0])); ++i)
+			for (int i = 0; i < ImGuiCol_COUNT; ++i)
 			{
-				colors[invert_list[i]].x = 1.0f - colors[invert_list[i]].x;
-				colors[invert_list[i]].y = 1.0f - colors[invert_list[i]].y;
-				colors[invert_list[i]].z = 1.0f - colors[invert_list[i]].z;
+				if (i == ImGuiCol_ModalWindowDimBg || i == ImGuiCol_NavWindowingDimBg)
+					continue;
+
+				colors[i].x = 1.0f - colors[i].x;
+				colors[i].y = 1.0f - colors[i].y;
+				colors[i].z = 1.0f - colors[i].z;
 			}
 		}
 
-		// ---- Style metrics -----------------------------------------
-		ImGuiStyle* style = &ImGui::GetStyle();
-		style->WindowPadding = ImVec2(8.00f, 8.00f);
-		style->FramePadding = ImVec2(5.00f, 2.00f);
-		style->ItemSpacing = ImVec2(6.00f, 6.00f);
-		style->TouchExtraPadding = ImVec2(2.00f, 4.00f);
-		style->IndentSpacing = 25;
-		style->ScrollbarSize = 15;
-		style->GrabMinSize = 10;
-		style->WindowBorderSize = 0;
-		style->ChildBorderSize = 0;
-		style->PopupBorderSize = 0;
-		style->FrameBorderSize = 0;
-		style->TabBorderSize = 0;
-		style->WindowRounding = 0;
-		style->ChildRounding = 4;
-		style->FrameRounding = 0;
-		style->PopupRounding = 0;
-		style->ScrollbarRounding = 9;
-		style->GrabRounding = 100;
-		style->LogSliderDeadzone = 4;
-		style->TabRounding = 4;
-		style->ButtonTextAlign = ImVec2(0.5f, 0.5f);
+		// ---- Style Metrics ----------------------------------------------
+		style.WindowPadding = ImVec2(8.00f, 8.00f);
+		style.FramePadding = ImVec2(5.00f, 2.00f);
+		style.ItemSpacing = ImVec2(6.00f, 6.00f);
+		style.TouchExtraPadding = ImVec2(2.00f, 4.00f);
+		style.IndentSpacing = 25.0f;
+		style.ScrollbarSize = 15.0f;
+		style.GrabMinSize = 10.0f;
+		style.WindowBorderSize = 0.0f;
+		style.ChildBorderSize = 0.0f;
+		style.PopupBorderSize = 0.0f;
+		style.FrameBorderSize = 0.0f;
+		style.TabBorderSize = 0.0f;
+		style.WindowRounding = 0.0f;
+		style.ChildRounding = 4.0f;
+		style.FrameRounding = 0.0f;
+		style.PopupRounding = 0.0f;
+		style.ScrollbarRounding = 9.0f;
+		style.GrabRounding = 100.0f;
+		style.LogSliderDeadzone = 4.0f;
+		style.TabRounding = 4.0f;
+		style.ButtonTextAlign = ImVec2(0.5f, 0.5f);
 
-		// ---- Black theme: zero out backgrounds ---------------------
+		// ---- Black theme ------------------------------------------------
 		if (currentEmuTheme == SE_THEME_BLACK)
 		{
-			int black_list[] = {
-				ImGuiCol_WindowBg, ImGuiCol_ChildBg, ImGuiCol_PopupBg,
-				ImGuiCol_TitleBg,  ImGuiCol_MenuBarBg,
-			};
+			colors[ImGuiCol_WindowBg] = ImVec4(0.00f, 0.00f, 0.00f, 1.00f);
+			colors[ImGuiCol_ChildBg] = ImVec4(0.00f, 0.00f, 0.00f, 1.00f);
+			colors[ImGuiCol_PopupBg] = ImVec4(0.00f, 0.00f, 0.00f, 1.00f);
+			colors[ImGuiCol_TitleBg] = ImVec4(0.00f, 0.00f, 0.00f, 1.00f);
+			colors[ImGuiCol_MenuBarBg] = ImVec4(0.00f, 0.00f, 0.00f, 1.00f);
 			colors[ImGuiCol_Button] = ImVec4(0.18f, 0.18f, 0.18f, 1.00f);
-			colors[ImGuiCol_FrameBg] = ImVec4(0.15f, 0.15f, 0.15f, 0.9f);
-			colors[ImGuiCol_ScrollbarBg] = ImVec4(0.1f, 0.1f, 0.1f, 0.6f);
-			for (int i = 0; i < (int)(sizeof(black_list) / sizeof(black_list[0])); ++i)
-			{
-				colors[black_list[i]].x = 0; colors[black_list[i]].y = 0; colors[black_list[i]].z = 0;
-			}
+			colors[ImGuiCol_FrameBg] = ImVec4(0.15f, 0.15f, 0.15f, 0.90f);
+			colors[ImGuiCol_ScrollbarBg] = ImVec4(0.10f, 0.10f, 0.10f, 0.60f);
 		}
 
 		RETURN SUCCESS;
@@ -3013,7 +3156,7 @@ public:
 										ImGui::Separator();
 										if (ImGui::BeginMenu("Theme"))
 										{
-											const char* themes[] = { "Dark", "Light", "Black" };
+											const char* themes[] = { "Dark", "Light", "Black", "Phosphor"};
 											for (int i = 0; i < IM_ARRAYSIZE(themes); i++)
 											{
 												if (ImGui::MenuItem(themes[i], NULL, currentEmuTheme == i))
@@ -4002,10 +4145,19 @@ public:
 							// ---- Render ----------------------------------
 							ImGui::Render();
 							glViewport(0, 0, (int)io.DisplaySize.x, (int)io.DisplaySize.y);
-							glClearColor(clear_color.x * clear_color.w, clear_color.y * clear_color.w,
-								clear_color.z * clear_color.w, clear_color.w);
+							glClearColor(clear_color.x* clear_color.w, clear_color.y* clear_color.w,
+								clear_color.z* clear_color.w, clear_color.w);
 							glClear(GL_COLOR_BUFFER_BIT);
-							ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+							// Call glow logic only when Phosphor theme is selected
+							if (currentEmuTheme == SE_THEME_PHOSPHOR)
+							{
+								RenderDrawDataWithGlow(ImGui::GetDrawData());
+							}
+							else
+							{
+								ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+							}
 
 							if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
 							{

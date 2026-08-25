@@ -872,7 +872,8 @@ extern "C" {
 #define SE_THEME_DARK                               0
 #define SE_THEME_LIGHT                              1
 #define SE_THEME_BLACK                              2
-#define THEME_CUSTOM                                3
+#define SE_THEME_PHOSPHOR                           3
+#define SE_THEME_CUSTOM                             4
 #endif
 
 // --- CPU SST toggles (all platforms) -----------------
@@ -2309,7 +2310,8 @@ enum class EMULATOR_THEME
 {
     DARK = 0,
     LIGHT = 1,
-    BLACK = 2
+    BLACK = 2,
+    PHOSPHOR = 3
 };
 
 enum class VIDEO_FILTERS
@@ -2347,13 +2349,15 @@ std::unordered_map<std::string, EMULATOR_THEME> const configToEmuThemes =
 {
     {"DARK",  EMULATOR_THEME::DARK },
     {"LIGHT", EMULATOR_THEME::LIGHT},
-    {"BLACK", EMULATOR_THEME::BLACK}
+    {"BLACK", EMULATOR_THEME::BLACK},
+    {"PHOSPHOR", EMULATOR_THEME::PHOSPHOR}
 };
 std::unordered_map<EMULATOR_THEME, std::string> const emuThemesToConfig =
 {
     {EMULATOR_THEME::DARK,  "DARK" },
     {EMULATOR_THEME::LIGHT, "LIGHT"},
-    {EMULATOR_THEME::BLACK, "BLACK"}
+    {EMULATOR_THEME::BLACK, "BLACK"},
+    {EMULATOR_THEME::PHOSPHOR, "PHOSPHOR"},
 };
 std::unordered_map<std::string, VIDEO_FILTERS> const configToVFilters =
 {
