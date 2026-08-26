@@ -4712,33 +4712,38 @@ inline byte NES_t::readCpuRawMemoryInternal(uint16_t address, MEMORY_ACCESS_SOUR
 
 						// PRG banking modes — compute ROM index or RAM bank+offset
 						// Refer https://www.nesdev.org/wiki/MMC5#PRG_Registers
+						const uint32_t prgRomSize = totalPrg8kBanks * 0x2000;
+
 						switch (mmc5.prgMode)
 						{
-						case 0: // 32KB ROM at $8000-$FFFF via $5117 (& 0x7C for alignment)
+						case 0: // 32KB ROM at $8000-$FFFF via $5117
 						{
-							// $5117 always ROM; bottom 2 bits ignored for 32KB alignment
-							index = (uint32_t)((mmc5.prgBanks[4] & 0x7C) % totalPrg8kBanks) * 0x2000 + (address - 0x8000);
+							// $5117: 32KB-aligned bank
+							const uint32_t bankBase = (uint32_t)(mmc5.prgBanks[4] & 0x7C) * 0x2000;
+							index = (bankBase + (address - 0x8000)) % prgRomSize;
 							BREAK;
 						}
 						case 1: // 16KB + 16KB
 						{
 							if (address <= 0xBFFF)
 							{
-								// $8000-$BFFF: $5115 (index 2), bit 0 ignored (16KB alignment)
+								// $8000-$BFFF: $5115, 16KB-aligned
 								if ((mmc5.prgBanks[2] & 0x80) == 0)
 								{
 									isRAM = true;
-									index = (uint32_t)((mmc5.prgBanks[2] & 0x06) % totalPrg8kBanks) * 0x2000 + (address - 0x8000);
+									index = (uint32_t)(mmc5.prgBanks[2] & 0x06) * 0x2000 + (address - 0x8000);
 								}
 								else
 								{
-									index = (uint32_t)((mmc5.prgBanks[2] & 0x7E) % totalPrg8kBanks) * 0x2000 + (address - 0x8000);
+									const uint32_t bankBase = (uint32_t)(mmc5.prgBanks[2] & 0x7E) * 0x2000;
+									index = (bankBase + (address - 0x8000)) % prgRomSize;
 								}
 							}
 							else
 							{
-								// $C000-$FFFF: $5117 (index 4), always ROM
-								index = (uint32_t)((mmc5.prgBanks[4] & 0x7E) % totalPrg8kBanks) * 0x2000 + (address - 0xC000);
+								// $C000-$FFFF: $5117, always ROM, 16KB-aligned
+								const uint32_t bankBase = (uint32_t)(mmc5.prgBanks[4] & 0x7E) * 0x2000;
+								index = (bankBase + (address - 0xC000)) % prgRomSize;
 							}
 							BREAK;
 						}
@@ -4746,85 +4751,95 @@ inline byte NES_t::readCpuRawMemoryInternal(uint16_t address, MEMORY_ACCESS_SOUR
 						{
 							if (address <= 0xBFFF)
 							{
-								// $8000-$BFFF: $5115 (index 2), bit 0 ignored (16KB alignment)
+								// $8000-$BFFF: $5115, 16KB-aligned
 								if ((mmc5.prgBanks[2] & 0x80) == 0)
 								{
 									isRAM = true;
-									index = (uint32_t)((mmc5.prgBanks[2] & 0x06) % totalPrg8kBanks) * 0x2000 + (address - 0x8000);
+									index = (uint32_t)(mmc5.prgBanks[2] & 0x06) * 0x2000 + (address - 0x8000);
 								}
 								else
 								{
-									index = (uint32_t)((mmc5.prgBanks[2] & 0x7E) % totalPrg8kBanks) * 0x2000 + (address - 0x8000);
+									const uint32_t bankBase = (uint32_t)(mmc5.prgBanks[2] & 0x7E) * 0x2000;
+									index = (bankBase + (address - 0x8000)) % prgRomSize;
 								}
 							}
 							else if (address <= 0xDFFF)
 							{
-								// $C000-$DFFF: $5116 (index 3)
+								// $C000-$DFFF: $5116, 8KB
 								if ((mmc5.prgBanks[3] & 0x80) == 0)
 								{
 									isRAM = true;
-									index = (uint32_t)((mmc5.prgBanks[3] & 0x07) % totalPrg8kBanks) * 0x2000 + (address - 0xC000);
+									index = (uint32_t)(mmc5.prgBanks[3] & 0x07) * 0x2000 + (address - 0xC000);
 								}
 								else
 								{
-									index = (uint32_t)((mmc5.prgBanks[3] & 0x7F) % totalPrg8kBanks) * 0x2000 + (address - 0xC000);
+									const uint32_t bankBase = (uint32_t)(mmc5.prgBanks[3] & 0x7F) * 0x2000;
+									index = (bankBase + (address - 0xC000)) % prgRomSize;
 								}
 							}
 							else
 							{
-								// $E000-$FFFF: $5117 (index 4), always ROM
-								index = (uint32_t)((mmc5.prgBanks[4] & 0x7F) % totalPrg8kBanks) * 0x2000 + (address - 0xE000);
+								// $E000-$FFFF: $5117, always ROM, 8KB
+								const uint32_t bankBase = (uint32_t)(mmc5.prgBanks[4] & 0x7F) * 0x2000;
+								index = (bankBase + (address - 0xE000)) % prgRomSize;
 							}
+
 							BREAK;
 						}
+
 						case 3: // 8KB + 8KB + 8KB + 8KB
 						{
 							if (address <= 0x9FFF)
 							{
-								// $8000-$9FFF: $5114 (index 1)
+								// $8000-$9FFF: $5114
 								if ((mmc5.prgBanks[1] & 0x80) == 0)
 								{
 									isRAM = true;
-									index = (uint32_t)((mmc5.prgBanks[1] & 0x07) % totalPrg8kBanks) * 0x2000 + (address - 0x8000);
+									index = (uint32_t)(mmc5.prgBanks[1] & 0x07) * 0x2000 + (address - 0x8000);
 								}
 								else
 								{
-									index = (uint32_t)((mmc5.prgBanks[1] & 0x7F) % totalPrg8kBanks) * 0x2000 + (address - 0x8000);
+									const uint32_t bankBase = (uint32_t)(mmc5.prgBanks[1] & 0x7F) * 0x2000;
+									index = (bankBase + (address - 0x8000)) % prgRomSize;
 								}
 							}
 							else if (address <= 0xBFFF)
 							{
-								// $A000-$BFFF: $5115 (index 2)
+								// $A000-$BFFF: $5115
 								if ((mmc5.prgBanks[2] & 0x80) == 0)
 								{
 									isRAM = true;
-									index = (uint32_t)((mmc5.prgBanks[2] & 0x07) % totalPrg8kBanks) * 0x2000 + (address - 0xA000);
+									index = (uint32_t)(mmc5.prgBanks[2] & 0x07) * 0x2000 + (address - 0xA000);
 								}
 								else
 								{
-									index = (uint32_t)((mmc5.prgBanks[2] & 0x7F) % totalPrg8kBanks) * 0x2000 + (address - 0xA000);
+									const uint32_t bankBase =(uint32_t)(mmc5.prgBanks[2] & 0x7F) * 0x2000;
+									index = (bankBase + (address - 0xA000)) % prgRomSize;
 								}
 							}
 							else if (address <= 0xDFFF)
 							{
-								// $C000-$DFFF: $5116 (index 3)
+								// $C000-$DFFF: $5116
 								if ((mmc5.prgBanks[3] & 0x80) == 0)
 								{
 									isRAM = true;
-									index = (uint32_t)((mmc5.prgBanks[3] & 0x07) % totalPrg8kBanks) * 0x2000 + (address - 0xC000);
+									index = (uint32_t)(mmc5.prgBanks[3] & 0x07) * 0x2000 + (address - 0xC000);
 								}
 								else
 								{
-									index = (uint32_t)((mmc5.prgBanks[3] & 0x7F) % totalPrg8kBanks) * 0x2000 + (address - 0xC000);
+									const uint32_t bankBase = (uint32_t)(mmc5.prgBanks[3] & 0x7F) * 0x2000;
+									index = (bankBase + (address - 0xC000)) % prgRomSize;
 								}
 							}
 							else
 							{
-								// $E000-$FFFF: $5117 (index 4), always ROM
-								index = (uint32_t)((mmc5.prgBanks[4] & 0x7F) % totalPrg8kBanks) * 0x2000 + (address - 0xE000);
+								// $E000-$FFFF: $5117, always ROM
+								const uint32_t bankBase = (uint32_t)(mmc5.prgBanks[4] & 0x7F) * 0x2000;
+								index = (bankBase + (address - 0xE000)) % prgRomSize;
 							}
 							BREAK;
 						}
+
 						default:
 						{
 							FATAL("Invalid MMC5 PRG mode");
