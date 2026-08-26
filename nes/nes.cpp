@@ -3854,13 +3854,19 @@ inline byte NES_t::readCpuRawMemoryInternal(uint16_t address, MEMORY_ACCESS_SOUR
 				{
 					SCOUNTER64 ppuCycle = pNES_instance->NES_state.emulatorStatus.ticks.ppuCounterPerLY;
 					SCOUNTER32 scanline = pNES_instance->NES_state.display.currentScanline;
-					bool isVisibleScanline = (scanline >= NES_FIRST_VISIBLE_SCANLINE && scanline <= NES_LAST_VISIBLE_PPU_SCANLINE);
+					// Refer to https://forums.nesdev.org/viewtopic.php?f=3&t=15763 -- sprite evaluation (and thus the
+					// $2004 read-during-rendering glitch) is active on the pre-render scanline too, not just the
+					// visible ones, matching the state machine driving oamByte (see the block gated on
+					// "ly >= NES_PRE_RENDER_SCANLINE" elsewhere in this file). The old isVisibleScanline check here
+					// excluded the pre-render line, so reads during dots 65-256 of that line incorrectly fell
+					// through to a plain direct-memory read instead of exposing the glitched evaluation state.
+					bool isEvaluatingSprites = (scanline >= NES_PRE_RENDER_SCANLINE && scanline <= NES_LAST_VISIBLE_PPU_SCANLINE);
 					bool isRendering = (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.ENABLE_BG_RENDERING == SET
 						|| pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.ENABLE_SPRITE_RENDERING == SET);
 
 					uint8_t data;
 
-					if (isRendering && isVisibleScanline)
+					if (isRendering && isEvaluatingSprites)
 					{
 						// Refer to https://www.nesdev.org/wiki/PPU_registers#OAMDATA
 						// "It mentions the following : "Reading OAMDATA while the PPU is rendering will expose internal OAM accesses during sprite evaluation and loading"
