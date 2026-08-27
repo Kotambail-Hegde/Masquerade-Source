@@ -85,7 +85,7 @@ spaceInvaders_t::spaceInvaders_t(int nFiles, std::array<std::string, MAX_NUMBER_
 	}
 }
 
-void spaceInvaders_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void* input, void* network)
+void spaceInvaders_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void* input, void* network, void* camera)
 {
 	INC8 indexToCheck = RESET;
 

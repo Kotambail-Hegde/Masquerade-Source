@@ -148,10 +148,17 @@ uint32_t shaderProgramBlend = 0;
 uint32_t fullscreenVAO = 0;
 uint32_t fullscreenVBO = 0;
 uint32_t FRAME_BUFFER_SCALE = 4;
+#if !defined(__RPI_PICO__) && !defined(ENABLE_OTA_EXECUTABLE) && !defined(ENABLE_SERVER_EXECUTABLE)
+GLuint camera_gl_texture = 0;
+FLAG show_camera_hardware_window = NO;
+FLAG camera_success = NO;
+FLAG camera_connected = NO;
+static SDL_Camera* camera = nullptr;
+#else
+void* camera = nullptr;
+#endif // !__RPI_PICO__ && !ENABLE_OTA_EXECUTABLE && !ENABLE_SERVER_EXECUTABLE 
 
 #pragma region IMGUI_SPECIFIC_DECLARATIONS
-// IMGUI demo
-const FLAG RUN_IMGUI_DEMO = NO;
 
 // IMGUI default window settings
 const std::string imguiDefaultIni = R"(
@@ -695,6 +702,99 @@ FLAG LoadTextureFromFile(const char* file_name, GLuint* out_texture, int* out_wi
 #endif // !__RPI_PICO__
 
 #pragma endregion GLOBAL_INFRASTRUCTURE_DEFINITION
+
+// --- Camera types (desktop only) -------------
+#if !defined(__RPI_PICO__) && !defined(ENABLE_OTA_EXECUTABLE) && !defined(ENABLE_SERVER_EXECUTABLE)
+#pragma region CAMERA_HELPERS
+static void PrintCameraSpecs(SDL_CameraID camera_id)
+{
+	SDL_CameraSpec** specs = SDL_GetCameraSupportedFormats(camera_id, NULL);
+	if (specs)
+	{
+		int i;
+		DEBUG("Available formats:");
+		for (i = 0; specs[i]; ++i)
+		{
+			const SDL_CameraSpec* s = specs[i];
+			const float fps = (s->framerate_denominator != 0)
+				? ((float)s->framerate_numerator / s->framerate_denominator)
+				: 0.0f;
+			DEBUG("    %dx%d %.2f FPS %s", s->width, s->height, fps, SDL_GetPixelFormatName(s->format));
+		}
+		SDL_free(specs);
+	}
+}
+
+// Returns YES if a supported spec within max_size was found and written to *spec.
+// Returns NO if nothing fit — caller should pass NULL to SDL_OpenCamera in that case,
+// not the zeroed *spec, so SDL picks a native format instead of requesting an invalid one.
+static FLAG PickCameraSpec(SDL_CameraID camera_id, SDL_CameraSpec* spec)
+{
+	SDL_CameraSpec** specs = SDL_GetCameraSupportedFormats(camera_id, NULL);
+	FLAG found = NO;
+	SDL_zerop(spec);
+	if (specs)
+	{
+		int i;
+
+		// FIX: Query the maximum texture size directly from your OpenGL Context instead of SDL_Renderer
+		GLint max_size = 2048; // Safe baseline fallback
+		glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_size);
+
+		for (i = 0; specs[i]; ++i)
+		{
+			const SDL_CameraSpec* s = specs[i];
+			if (s->width <= (int)max_size && s->height <= (int)max_size)
+			{
+				SDL_copyp(spec, s);
+				found = YES;
+				break;
+			}
+		}
+		SDL_free(specs);
+	}
+	RETURN found;
+}
+
+static void RenderCameraHardwareUI(SDL_Camera* camera)
+{
+	if (show_camera_hardware_window == NO) RETURN;
+
+	// Use your exact positioning mechanics relative to the core application frame
+	ImGuiViewport* viewport = ImGui::GetMainViewport();
+	const float defaultWidth = 640.0f;
+	const float defaultHeight = 500.0f;
+
+	// Position the window floating on the right side of your workspace
+	ImGui::SetNextWindowPos(
+		ImVec2(
+			viewport->WorkPos.x + (viewport->WorkSize.x - defaultWidth) - 20.0f,
+			viewport->WorkPos.y + 60.0f),
+		ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowSize(ImVec2(defaultWidth, defaultHeight), ImGuiCond_FirstUseEver);
+
+	ImGuiWindowFlags winFlags = ImGuiWindowFlags_NoCollapse;
+
+	// Open the standard internal panel frame container
+	if (ImGui::Begin("Hardware Camera Feed", &show_camera_hardware_window, winFlags))
+	{
+		if (camera_gl_texture != 0)
+		{
+			ImTextureID texture_id = (ImTextureID)(intptr_t)camera_gl_texture;
+			ImVec2 available_space = ImGui::GetContentRegionAvail();
+
+			// Draw your video image streaming buffer directly onto the panel
+			ImGui::Image(texture_id, available_space);
+		}
+		else
+		{
+			ImGui::Text("Awaiting a valid hardware video transmission stream...");
+		}
+	}
+	ImGui::End();
+}
+#pragma endregion CAMERA_HELPERS
+#endif // !__RPI_PICO__ && !ENABLE_OTA_EXECUTABLE && !ENABLE_SERVER_EXECUTABLE 
 
 #ifndef __EMSCRIPTEN__
 #pragma region NETWORK_HELPERS
@@ -1399,7 +1499,7 @@ private:
 		IInputBackend* iBackend = new PicoInputBackend();
 #endif
 
-		current_instance->setupTheCoreOfEmulation(nullptr, nullptr, iBackend, nullptr);
+		current_instance->setupTheCoreOfEmulation(nullptr, nullptr, iBackend, nullptr, camera);
 		keyBindings.setDefault(current_instance->getEmulationID());
 
 		currentFrame = ZERO;
@@ -1499,7 +1599,8 @@ private:
 		FLAG status = SUCCESS;
 
 		current_instance->destroyEmulator();
-		// TODO: Pico-specific teardown (Waveshark driver shutdown, etc.)
+		
+		TODO("Pico - specific teardown(Waveshark driver shutdown, etc.");
 
 		RETURN status;
 	}
@@ -2280,13 +2381,17 @@ public:
 		else
 		{
 			// ---- SDL init -------------------------------------------
-			if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD))
+			SDL_InitFlags sdlInitFlags = SDL_INIT_VIDEO | SDL_INIT_GAMEPAD;
+#if !defined(__RPI_PICO__) && !defined(ENABLE_OTA_EXECUTABLE) && !defined(ENABLE_SERVER_EXECUTABLE)
+			sdlInitFlags |= SDL_INIT_CAMERA;
+#endif // !__RPI_PICO__ && !ENABLE_OTA_EXECUTABLE && !ENABLE_SERVER_EXECUTABLE 
+			if (!SDL_Init(sdlInitFlags))
 			{
 				FATAL("Error: SDL_Init(): %s", SDL_GetError());
 				RETURN INVALID;
 			}
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__)
 			// ---- SDL_net init -------------------------------------
 			if (!NET_Init())
 			{
@@ -2296,7 +2401,7 @@ public:
 			}
 
 			abstractEmulationLinkSession_t& linkSession = abstractEmulation_t::getLinkSession();
-#endif
+#endif // !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__)
 
 			// ---- GLSL / context version selection -------------------
 #if defined(IMGUI_IMPL_OPENGL_ES2)
@@ -2432,9 +2537,6 @@ public:
 
 			FlushEarlyLogsToImGui();
 
-			if (RUN_IMGUI_DEMO == NO)
-				OnUserCreate();
-
 #ifndef __EMSCRIPTEN__
 			auto uiSpritesDir = config.get<std::string>("internal._ui_sprites_directory", "");
 			if (uiSpritesDir.empty())
@@ -2449,6 +2551,76 @@ public:
 			uint32_t clickWinTexture = 0;
 			FLAG clickWinStatus = LoadTextureFromFile(imLoc.c_str(), &clickWinTexture, &clickWinWidth, &clickWinHeight);
 			IM_ASSERT(clickWinStatus);
+
+#if !defined(__RPI_PICO__) && !defined(ENABLE_OTA_EXECUTABLE) && !defined(ENABLE_SERVER_EXECUTABLE)
+			// ---- SDL_camera init ----------------------------------
+			int devcount = 0;
+			static SDL_CameraID front_camera = 0;
+			static SDL_CameraID back_camera = 0;
+			SDL_CameraID camera_id = 0;
+			SDL_CameraSpec spec;
+			camera_success = YES;
+
+			DEBUG("Using SDL camera driver: %s", SDL_GetCurrentCameraDriver());
+			SDL_CameraID* devices = SDL_GetCameras(&devcount);
+			if (!devices)
+			{
+				DEBUG("SDL_GetCameras failed: %s", SDL_GetError());
+				camera_success = NO;
+			}
+			DEBUG("Saw %d camera devices.", devcount);
+			for (int i = 0; i < devcount; i++)
+			{
+				const SDL_CameraID device = devices[i];
+				const char* name = SDL_GetCameraName(device);
+				const SDL_CameraPosition position = SDL_GetCameraPosition(device);
+				const char* posstr = "";
+				if (position == SDL_CAMERA_POSITION_FRONT_FACING)
+				{
+					if (!front_camera)
+					{
+						front_camera = device;
+					}
+					posstr = "[front-facing] ";
+				}
+				else if (position == SDL_CAMERA_POSITION_BACK_FACING)
+				{
+					if (!back_camera)
+					{
+						back_camera = device;
+					}
+					posstr = "[back-facing] ";
+				}
+				DEBUG("  - Camera #%d: %s %s", i, posstr, name);
+				PrintCameraSpecs(device);
+			}
+			if (!camera_id)
+			{
+				if (front_camera)
+				{
+					camera_id = front_camera;
+				}
+				else if (devcount > 0)
+				{
+					camera_id = devices[0];
+				}
+			}
+			FLAG haveSpec = PickCameraSpec(camera_id, &spec);
+
+			// --- ALLOCATE GENERIC OPENGL TEXTURE SLOT ---
+			if (camera_success == YES)
+			{
+				glGenTextures(1, &camera_gl_texture);
+				glBindTexture(GL_TEXTURE_2D, camera_gl_texture);
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+				glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+				glBindTexture(GL_TEXTURE_2D, 0);
+			}
+#endif // !__RPI_PICO__ && !ENABLE_OTA_EXECUTABLE && !ENABLE_SERVER_EXECUTABLE 
+
+			OnUserCreate();
 
 			// ---- Main loop ------------------------------------------
 			ID64 tickAtStart = RESET;
@@ -3104,14 +3276,19 @@ public:
 											showLoggerWin = (showLoggerWin == NO) ? YES : NO;
 										}
 										ImGui::Separator();
-#ifndef __EMSCRIPTEN__
+#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__) && !defined(ENABLE_OTA_EXECUTABLE) && !defined(ENABLE_SERVER_EXECUTABLE)
 										FLAG isNetworkOptionEnabled = YES;
 #else
 										FLAG isNetworkOptionEnabled = NO;
-#endif
+#endif // !__RPI_PICO__ && !__EMSCRIPTEN__ && !ENABLE_OTA_EXECUTABLE && !ENABLE_SERVER_EXECUTABLE 
+#if !defined(__RPI_PICO__) && !defined(ENABLE_OTA_EXECUTABLE) && !defined(ENABLE_SERVER_EXECUTABLE)
+										FLAG isCameraOptionEnabled = (camera_success == YES);
+#else
+										FLAG isCameraOptionEnabled = NO;
+#endif // !__RPI_PICO__ && !ENABLE_OTA_EXECUTABLE && !ENABLE_SERVER_EXECUTABLE 
 										if (ImGui::BeginMenu("Network", isNetworkOptionEnabled))
 										{
-#ifndef __EMSCRIPTEN__
+#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__) && !defined(ENABLE_OTA_EXECUTABLE) && !defined(ENABLE_SERVER_EXECUTABLE)
 											const LinkConnectionState connectionState = linkSession.getConnectionState();
 											const FLAG connected = connectionState == LinkConnectionState::CONNECTED || connectionState == LinkConnectionState::LINK_READY;
 											const FLAG linkReady = connectionState == LinkConnectionState::LINK_READY;
@@ -3150,7 +3327,98 @@ public:
 											{
 												networkUI.showTestConsole = YES;
 											}
-#endif
+#endif // !__RPI_PICO__ && !__EMSCRIPTEN__ && !ENABLE_OTA_EXECUTABLE && !ENABLE_SERVER_EXECUTABLE 
+											ImGui::EndMenu();
+										}
+										ImGui::Separator();
+										if (ImGui::BeginMenu("Camera", isCameraOptionEnabled))
+										{
+#if !defined(__RPI_PICO__) && !defined(ENABLE_OTA_EXECUTABLE) && !defined(ENABLE_SERVER_EXECUTABLE)
+											// 1. Simple toggle to open/close the camera window panel
+											if (ImGui::MenuItem("Show Camera Viewport", nullptr, &show_camera_hardware_window))
+											{
+												// Window state toggles automatically via pointer reference
+											}
+
+											if (current_instance->getEmulationID() == EMULATION_ID::GB_GBC_ID)
+											{
+												ImGui::Separator();
+												GBc_t* gbc = static_cast<GBc_t*>(current_instance);
+												FLAG showCaptureStages =(gbc->show_gbc_capture_stages_window == YES);
+												if (ImGui::Checkbox("GB/GBC Capture: All Stages", &showCaptureStages))
+												{
+													gbc->show_gbc_capture_stages_window = showCaptureStages ? YES : NO;
+												}
+												// Slider for the user-defined exposure divisor
+												// Range set from min 0x0030 (48) to max 0xFFFF (65535)
+												int exposure_divisor = gbc->cam_exposure_divisor;
+												if (ImGui::SliderInt("Exposure Scaling Divisor", &exposure_divisor, 0x0030, 0xFFFF, "0x%04X"))
+												{
+													gbc->cam_exposure_divisor = exposure_divisor;
+												}
+												// Percentage of the genuine Game Boy Camera capture duration to simulate.
+												// 100% = genuine hardware timing.
+												// 0%   = instant capture.
+												int percent = gbc->camera_capture_timing_percent;
+												if (ImGui::SliderInt("Capture Timing", &percent, 0, 100, "%d%%"))
+												{
+													gbc->camera_capture_timing_percent = percent;
+												}
+											}
+
+											if (camera != nullptr)
+											{
+												if (ImGui::MenuItem("Disconnect Camera"))
+												{
+													SDL_CloseCamera(camera);
+													camera = nullptr;
+													camera_id = 0;
+													show_camera_hardware_window = NO;
+													camera_connected = NO;
+												}
+											}
+
+											ImGui::Separator();
+											ImGui::TextDisabled("Available Devices:");
+
+											if (!devices || devcount == 0)
+											{
+												ImGui::TextDisabled("  No cameras detected");
+											}
+											else
+											{
+												// Loop through the array populated during initialization
+												for (int i = 0; i < devcount; i++)
+												{
+													const SDL_CameraID device = devices[i];
+													const char* name = SDL_GetCameraName(device);
+
+													// Check if this device is the one currently opened
+													// (You can track this by comparing against a global active_id)
+													bool is_current = (camera != nullptr && camera_id == device);
+
+													if (ImGui::MenuItem(name, nullptr, is_current))
+													{
+														// If they click a different camera, switch to it
+														if ((camera_id != device) || camera_connected == NO)
+														{
+															if (camera != nullptr)
+															{
+																SDL_CloseCamera(camera);
+															}
+
+															camera_id = device;
+															camera_connected = YES;
+
+															// Called cleanly without dragging an old renderer handle
+															FLAG haveSpec = PickCameraSpec(camera_id, &spec);
+															camera = SDL_OpenCamera(camera_id, haveSpec == YES ? &spec : NULL);
+															current_instance->resetCamera(camera);
+														}
+													}
+												}
+											}
+#endif  // !__RPI_PICO__ && !ENABLE_OTA_EXECUTABLE && !ENABLE_SERVER_EXECUTABLE 
 											ImGui::EndMenu();
 										}
 										ImGui::Separator();
@@ -4011,7 +4279,7 @@ public:
 											SavePersistentFSComplete = NO; ClearPersistentFSComplete = NO;
 											done = YES;
 										}
-#endif
+#endif // !__EMSCRIPTEN__
 									}
 
 #ifndef __EMSCRIPTEN__
@@ -4022,14 +4290,94 @@ public:
 										networkUI.receivedTestBytes.push_back(linkSession.getLastReceivedTestPacket());
 										linkSession.clearReceivedTestPacket();
 									}
-#endif
+#endif // !__EMSCRIPTEN__
+
+#if !defined(__RPI_PICO__) && !defined(ENABLE_OTA_EXECUTABLE) && !defined(ENABLE_SERVER_EXECUTABLE)
+
+									// Called every 16.66ms to update the camera hardware texture
+									// Below openGL processing needed only if we are showing the camera hardware window and have a valid frame
+									if (show_camera_hardware_window == YES && camera != nullptr)
+									{
+										uint64_t timestampNS = 0;
+										// 1. Grab the latest raw hardware video frame from SDL3
+										SDL_Surface* camera_frame = SDL_AcquireCameraFrame(camera, &timestampNS);
+
+										if (camera_frame != nullptr)
+										{
+											// Set unpack alignment to 1 to handle non-power-of-two hardware resolutions safely
+											glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+											glBindTexture(GL_TEXTURE_2D, camera_gl_texture);
+
+											GLint internalFormat = GL_RGBA;
+											GLenum format = GL_RGBA;
+											GLenum type = GL_UNSIGNED_BYTE;
+
+											if (camera_frame->format == SDL_PIXELFORMAT_NV12)
+											{
+												// 1. Create a temporary destination surface matching standard RGBA
+												SDL_Surface* converted_frame = SDL_ConvertSurface(camera_frame, SDL_PIXELFORMAT_RGBA32);
+
+												if (converted_frame != nullptr)
+												{
+													// 2. Safely upload the standard converted pixel data array to OpenGL
+													glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, converted_frame->w, converted_frame->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, converted_frame->pixels);
+													// 3. Destroy the temporary surface container to prevent RAM memory leaks
+													SDL_DestroySurface(converted_frame);
+												}
+											}
+											else
+											{
+												// Detect format and translate to the appropriate OpenGL equivalents
+												switch (camera_frame->format)
+												{
+												case SDL_PIXELFORMAT_RGBA32:
+													internalFormat = GL_RGBA;
+													format = GL_RGBA;
+													BREAK;
+												case SDL_PIXELFORMAT_BGRA32:
+													internalFormat = GL_RGBA;
+													format = GL_BGRA; // Flips Blue and Red channels to match hardware
+													BREAK;
+												case SDL_PIXELFORMAT_ARGB32:
+													internalFormat = GL_RGBA;
+													format = GL_BGRA; // OpenGL handles ARGB data via BGRA with proper byte shifts
+													BREAK;
+												case SDL_PIXELFORMAT_RGB24:
+													internalFormat = GL_RGB;
+													format = GL_RGB;
+													BREAK;
+												case SDL_PIXELFORMAT_BGR24:
+													internalFormat = GL_RGB;
+													format = GL_BGR;
+													BREAK;
+												default:
+													DEBUG("Warning: Camera sent unmapped pixel format: %s", SDL_GetPixelFormatName(camera_frame->format));
+													BREAK;
+												}
+
+												// Safely upload without crashing memory offsets
+												glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, camera_frame->w, camera_frame->h, 0, format, type, camera_frame->pixels);
+											}
+
+											glBindTexture(GL_TEXTURE_2D, 0);
+											SDL_ReleaseCameraFrame(camera, camera_frame);
+										}
+									}
+
+									if (current_instance->getEmulationID() == EMULATION_ID::GB_GBC_ID)
+									{
+										GBc_t* gbc = static_cast<GBc_t*>(current_instance);
+										gbc->RenderGBCCaptureStagesUI();
+									}
+									RenderCameraHardwareUI(camera);
+#endif // !__RPI_PICO__ && !ENABLE_OTA_EXECUTABLE && !ENABLE_SERVER_EXECUTABLE
 								}
 
 #ifndef __EMSCRIPTEN__
 								if (networkUI.showConnectPopup)
 								{
 									ImGui::OpenPopup("Connect to Link Server");
-									networkUI.showConnectPopup = false;
+									networkUI.showConnectPopup = NO;
 								}
 
 								if (ImGui::BeginPopupModal("Connect to Link Server", nullptr,ImGuiWindowFlags_AlwaysAutoResize))
@@ -4276,29 +4624,39 @@ public:
 #ifdef __EMSCRIPTEN__
 			EMSCRIPTEN_MAINLOOP_END;
 #else
-			if (RUN_IMGUI_DEMO == NO)
+			if (camera != NULL)
 			{
-				glDeleteTextures(1, &masquerade_texture);
-				masquerade_texture = 0; // Reset!
+				SDL_CloseCamera(camera);
+				glDeleteTextures(1, &camera_gl_texture);
+				camera = NULL;
+			}
 
-				OnUserDestroy(window);
+			if (devices != nullptr)
+			{
+				SDL_free(devices);
+				devices = nullptr;
+			}
+
+			glDeleteTextures(1, &masquerade_texture);
+			masquerade_texture = 0; // Reset!
+
+			OnUserDestroy(window);
 
 #if (GL_FIXED_FUNCTION_PIPELINE == NO)
-				glDeleteBuffers(1, &fullscreenVBO);
-				fullscreenVBO = 0; // Reset!
+			glDeleteBuffers(1, &fullscreenVBO);
+			fullscreenVBO = 0; // Reset!
 
-				glDeleteVertexArrays(1, &fullscreenVAO);
-				fullscreenVAO = 0; // Reset!
+			glDeleteVertexArrays(1, &fullscreenVAO);
+			fullscreenVAO = 0; // Reset!
 
-				glDeleteProgram(shaderProgramBasic);
-				shaderProgramBasic = 0; // Reset!
+			glDeleteProgram(shaderProgramBasic);
+			shaderProgramBasic = 0; // Reset!
 
-				glDeleteProgram(shaderProgramBlend);
-				shaderProgramBlend = 0; // Reset!
+			glDeleteProgram(shaderProgramBlend);
+			shaderProgramBlend = 0; // Reset!
 #endif
-				glDeleteFramebuffers(1, &frame_buffer);
-				frame_buffer = 0; // Reset!
-			}
+			glDeleteFramebuffers(1, &frame_buffer);
+			frame_buffer = 0; // Reset!
 
 			NFD_Quit();
 #ifndef __EMSCRIPTEN__

@@ -271,7 +271,7 @@ public:
 
 	virtual ~abstractEmulation_t() {};
 
-	virtual void setupTheCoreOfEmulation(void* masqueradeInstance = nullptr, void* audio = nullptr, void* input = nullptr, void* network = nullptr) = 0;
+	virtual void setupTheCoreOfEmulation(void* masqueradeInstance = nullptr, void* audio = nullptr, void* input = nullptr, void* network = nullptr, void* camera = nullptr) = 0;
 
 public:
 
@@ -380,6 +380,11 @@ public:
 	virtual FLAG loadState(uint8_t id = 0) = 0;
 	virtual FLAG fillGamePlayStack() = 0;
 	virtual FLAG rewindGamePlay() = 0;
+
+	virtual FLAG resetAudio(void* audio = nullptr) = 0;
+	virtual FLAG resetInput(void* input = nullptr) = 0;
+	virtual FLAG resetNetwork(void* network = nullptr) = 0;
+	virtual FLAG resetCamera(void* camera = nullptr) = 0;
 
 	virtual FLAG runEmulationAtHostRate(uint32_t currentFrame) = 0;
 	virtual FLAG runEmulationLoopAtHostRate(uint32_t currentFrame) = 0;

@@ -1066,6 +1066,12 @@ extern float    emuWindowMaxX;
 extern float    emuWindowMaxY;
 #endif
 
+// Desktop-only camera externs (SDL3)
+#if !defined(__RPI_PICO__) && !defined(ENABLE_OTA_EXECUTABLE) && !defined(ENABLE_SERVER_EXECUTABLE)
+extern FLAG camera_success;
+extern FLAG camera_connected;
+#endif
+
 MASQ_INLINE uint32_t fnv1a_runtime(const std::string& str)
 {
     uint32_t hash = 0x811C9DC5; // offset basis
@@ -2049,6 +2055,20 @@ MASQ_INLINE void int64ToDouble(int64_t* input, double* output, int length)
 MASQ_INLINE void doubleToInt64(double* input, int64_t* output, int length)
 {
     for (int i = 0; i < length; i++) output[i] = (int64_t)input[i];
+}
+MASQ_INLINE int clampInt(int lo, int value, int hi)
+{
+    if (value < lo) RETURN lo;
+    if (value > hi) RETURN hi;
+    RETURN value;
+}
+MASQ_INLINE int minInt(int a, int b) 
+{
+    RETURN (a < b) ? a : b;
+}
+MASQ_INLINE int maxInt(int a, int b) 
+{
+    RETURN (a > b) ? a : b;
 }
 
 // Used by NES database

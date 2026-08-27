@@ -25,8 +25,13 @@ public:
 		this->pixel_width = 1;
 	}
 	~defaults_t() {};
-	void setupTheCoreOfEmulation(void* masqueradeInstance = nullptr, void* audio = nullptr, void* input = nullptr, void* network = nullptr) override { MASQ_UNUSED(masqueradeInstance); MASQ_UNUSED(audio); MASQ_UNUSED(input); MASQ_UNUSED(network); };
+	void setupTheCoreOfEmulation(void* masqueradeInstance = nullptr, void* audio = nullptr, void* input = nullptr, void* network = nullptr, void* camera = nullptr) override 
+	{ MASQ_UNUSED(masqueradeInstance); MASQ_UNUSED(audio); MASQ_UNUSED(input); MASQ_UNUSED(network); MASQ_UNUSED(camera); };
 	void sendBiosToEmulator(bios_t* bios = nullptr) override { MASQ_UNUSED(bios); };
+	FLAG resetAudio(void* audio = nullptr) override { MASQ_UNUSED(audio); RETURN SUCCESS; };
+	FLAG resetInput(void* input = nullptr) override { MASQ_UNUSED(input); RETURN SUCCESS;};
+	FLAG resetNetwork(void* network = nullptr) override { MASQ_UNUSED(network); RETURN SUCCESS;};
+	FLAG resetCamera(void* camera = nullptr) override { MASQ_UNUSED(camera); RETURN SUCCESS;};
 
 	uint32_t screen_height;
 	uint32_t screen_width;

@@ -160,6 +160,8 @@ Masquerade supports the following hardware accessories and peripherals used by s
   * [Accelerometer support](https://github.com/Kotambail-Hegde/Masquerade-Emulator/issues/25)
 * **Game Boy Printer** — Support for emulating the Game Boy Printer.
   * [Game Boy Printer support](https://github.com/Kotambail-Hegde/Masquerade-Emulator/issues/200)
+* **Game Boy Camera** — Support for emulating the Game Boy Camera.
+  * [Game Boy Camera support](https://github.com/Kotambail-Hegde/Masquerade-Emulator/issues/143)
 * **Game Boy Link Cable** — Support for emulating the Game Boy Serial Link Cable.
   * [Game Boy Link Cable](https://github.com/Kotambail-Hegde/Masquerade-Emulator/issues/199)
 
@@ -221,6 +223,7 @@ Masquerade supports the following hardware accessories and peripherals used by s
   - HuC-3
   - MMM01
   - WISDOM TREE
+  - Pocket Camera
 - Supports Game Boy Printer
 - Supports Game Boy Camera
 - Supports Link Cable for multiplayer mode (Work In Progress)
@@ -543,6 +546,7 @@ correctness.
 - [Antonio's Technical Documentation](https://github.com/AntonioND/giibiiadvance/blob/master/docs/TCAGBD.pdf) - Game Boy Advance technical guide
 - [GBDEV Game Boy Printer](https://gbdev.gg8.se/wiki/articles/Gameboy_Printer) - Game Boy Printer technical guide 
 - [Shonumi's Game Boy Printer's RLE compression](https://shonumi.github.io/articles/art2.html) - Game Boy Printer Compression Mode technical guide
+- [Antonio's Game Boy Camera Technical Information](https://codeberg.org/SkyLyrac/gbcam-rev-engineer/src/branch/master/doc/gb_camera_doc_v1_1_1.pdf) - Game Boy Camera technical guide
 - [Shonumi's Game Boy 4-Player Adapter](https://shonumi.github.io/articles/art9.html) - Game Boy 4-Player Adapter technical guide
 
 #### Game Boy Advance

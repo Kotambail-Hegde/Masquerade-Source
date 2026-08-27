@@ -45,7 +45,7 @@ gameOfLife_t::gameOfLife_t(MasqConfig_t& config)
 	ifNoDirectoryThenCreate(_SAVE_LOCATION);
 }
 
-void gameOfLife_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void* input, void* network)
+void gameOfLife_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void* input, void* network, void* camera)
 {
 	if (masqueradeInstance != nullptr)
 	{

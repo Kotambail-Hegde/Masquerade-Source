@@ -455,7 +455,7 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 	}
 }
 
-void GBc_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void* input, void* network)
+void GBc_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void* input, void* network, void* camera)
 {
 	uint8_t indexToCheck = 0;
 
@@ -476,6 +476,11 @@ void GBc_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void*
 		}
 
 		pInputBackend = static_cast<IInputBackend*>(input);
+		if (camera != nullptr)
+		{
+			pCameraBackend = static_cast<SDL_Camera*>(camera);
+			gbCameraEngine.reset(camera);
+		}
 
 		loadRom(rom);
 
@@ -492,6 +497,19 @@ void GBc_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void*
 		FATAL("un-supported rom");
 		throw std::runtime_error("un-supported rom");
 	}
+}
+
+FLAG GBc_t::resetCamera(void* camera)
+{
+	if (camera != nullptr)
+	{
+		pCameraBackend = static_cast<SDL_Camera*>(camera);
+		gbCameraEngine.reset(camera);
+
+		RETURN SUCCESS;
+	}
+
+	RETURN FAILURE;
 }
 
 void GBc_t::setEmulationWindowOffsets(uint32_t x, uint32_t y, FLAG isEnabled)
@@ -1278,6 +1296,7 @@ void GBc_t::gbCpuTick2T(FLAG isT2orT3, int32_t specAddress, int32_t specData)
 
 		pGBc_instance->GBc_state.emulatorStatus.isNewTimerCycle = YES;
 
+		cameraTick();
 		dmaTick();
 		joypadTick();
 	}
@@ -1302,6 +1321,8 @@ void GBc_t::syncOtherGBModuleTicks(int32_t specAddress, int32_t specData)
 
 	if (isCGBDoubleSpeedEnabled() == YES)
 	{
+		TODO("check if cameraTick() should be called twice in double speed mode ?");
+		cameraTick();
 		dmaTick();
 		joypadTick();
 		timerTick();
@@ -1353,6 +1374,7 @@ void GBc_t::syncOtherGBModuleTicks(int32_t specAddress, int32_t specData)
 	else
 	{
 		resetTickForDoubleSpeed();
+		cameraTick();
 		dmaTick();
 		joypadTick();
 		timerTick();
@@ -1870,6 +1892,23 @@ void GBc_t::rtcTick()
 			}
 		}
 	}
+}
+
+void GBc_t::cameraTick()
+{
+#ifndef __RPI_PICO__
+	// Advance Camera capture timing
+	if (isGameBoyCamera() == YES) MASQ_UNLIKELY
+	{
+		if (pGBc_emuStatus->cameraUnit.startCapture == YES && pGBc_emuStatus->cameraUnit.captureTicksRemaining > ZERO)
+		{
+			if (--pGBc_emuStatus->cameraUnit.captureTicksRemaining == ZERO)
+			{
+				pGBc_emuStatus->cameraUnit.startCapture = NO;
+			}
+		}
+	}
+#endif
 }
 
 void GBc_t::requestVblankStatInterrupt()
@@ -8046,6 +8085,11 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 			initMBC();
 			setMBCType(pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_fields.cartridgeType);
 
+			if (isGameBoyCamera() && camera_success == YES)
+			{
+				LOG("Game Boy Camera detected");
+			}
+
 			// MMM01 detection
 			if (totalBanks >= TWO)
 			{
@@ -9582,15 +9626,13 @@ byte GBc_t::readRawMemory(uint16_t address
 				address &= (0x200 - ONE);
 			}
 
-			if (isGameBoyCamera() && pGBc_emuStatus->cameraUnit.isCAMMode == YES) MASQ_UNLIKELY
+			if (isGameBoyCamera() == YES && pGBc_emuStatus->cameraUnit.isCAMMode == YES) MASQ_UNLIKELY
 			{
-				TODO("Bit 0 of triggerStatus is the busy bit for camera unit; we will hardcode it to not busy, as we don't emulate the camera hardware");
-				UNSETBIT(pGBc_emuStatus->cameraUnit.triggerStatus, ZERO); // This bit is the busy bit for camera unit; we will hardcode it to not busy
+				// Bit 0 is the capture busy flag.
+				pGBc_emuStatus->cameraUnit.startCapture ? SETBIT(pGBc_emuStatus->cameraUnit.triggerStatus, ZERO) : UNSETBIT(pGBc_emuStatus->cameraUnit.triggerStatus, ZERO);
 
-				// All registers are mirrored every $80 bytes; Refer https://gbdev.io/pandocs/Gameboy_Camera.html#4000-5fff---ram-bank-numbercam-registers-select-write-only
-				RETURN ((address & 0x7F) == 0)
-					? (pGBc_emuStatus->cameraUnit.triggerStatus & 0x07)
-					: ZERO;
+				// All registers are mirrored every $80 bytes.
+				RETURN ((address & 0x7F) == ZERO) ? (pGBc_emuStatus->cameraUnit.triggerStatus & 0x07) : ZERO;
 			}
 
 			uint8_t ramBank = getRAMBankNumber();
@@ -9601,9 +9643,9 @@ byte GBc_t::readRawMemory(uint16_t address
 			* Hence, ramBank need not be reset here again.
 			*/
 
-			if (isRAMBankEnabled() == YES)
+			if (isRAMBankEnabled() == YES || isGameBoyCamera() == YES)
 			{
-				if (isGameBoyCamera() && pGBc_emuStatus->cameraUnit.startCapture) MASQ_UNLIKELY
+				if (pGBc_emuStatus->cameraUnit.startCapture) MASQ_UNLIKELY
 				{
 					RETURN ZERO;
 				}
@@ -11242,7 +11284,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 			// --- 0x0000 - 0x1FFF : RAM/RTC enable ---
 			if (address <= 0x1FFF)
 			{
-				if (isMBC1() || isMBC1M() || isMBC2() || isMBC3() || isMBC5() || isMBC7() || isHUC1() || isHUC3() || isMMM01() || isPoke2in1())
+				if (isMBC1() || isMBC1M() || isMBC2() || isMBC3() || isMBC5() || isMBC7() || isHUC1() || isHUC3() || isMMM01() || isPoke2in1() || isGameBoyCamera())
 				{
 					if (isPoke2in1()) MASQ_UNLIKELY
 					{
@@ -11381,7 +11423,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 			// --- 0x2000 - 0x3FFF : ROM bank lower bits ---
 			else if (address <= 0x3FFF)
 			{
-				if (isMBC1() || isMBC1M() || isMBC2() || isMBC3() || isMBC5() || isMBC7() || isHUC1() || isHUC3() || isMMM01() || isPoke2in1())
+				if (isMBC1() || isMBC1M() || isMBC2() || isMBC3() || isMBC5() || isMBC7() || isHUC1() || isHUC3() || isMMM01() || isPoke2in1() || isGameBoyCamera())
 				{
 					if (isPoke2in1()) MASQ_UNLIKELY
 					{
@@ -11506,8 +11548,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 					}
 					RETURN;
 				}
-
-				if (isMBC1() || isMBC1M())
+				else if (isMBC1() || isMBC1M())
 				{
 					// Refer : https://gekkio.fi/files/gb-docs/gbctr.pdf
 					if (isMBC1M())
@@ -12022,16 +12063,40 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 
 				if (address == 0x0000)
 				{
+					const FLAG wasIdle = (pGBc_emuStatus->cameraUnit.captureTicksRemaining == ZERO) ? YES : NO;
+
 					pGBc_emuStatus->cameraUnit.startCapture = GETBIT(ZERO, data) ? YES : NO;
-					TODO("We immediately set the capture to complete for now, as we don't emulate the camera hardware");
-					pGBc_emuStatus->cameraUnit.startCapture = NO;
 					pGBc_emuStatus->cameraUnit.triggerStatus = data & 0x07;
+
+					if (pGBc_emuStatus->cameraUnit.startCapture == YES)
+					{
+						if (wasIdle == YES)
+						{
+							// Genuine fresh trigger, not a resume from pause.
+							// Refer to https://gbdev.io/pandocs/Gameboy_Camera.html#game-boy-camera-timings
+							const uint32_t nBit = (pGBc_emuStatus->cameraUnit.allRegisters[1] & 0x80) ? ZERO : 512;
+							const uint32_t exposure = (static_cast<uint32_t>(pGBc_emuStatus->cameraUnit.allRegisters[2]) << 8) | pGBc_emuStatus->cameraUnit.allRegisters[3];
+							const uint32_t genuine_capture_ticks = 32446 + nBit + (16 * exposure);
+							// Scale the genuine capture duration according to the selected timing percentage.
+							// 100% preserves the genuine capture duration; lower values shorten the delay.
+							pGBc_emuStatus->cameraUnit.captureTicksRemaining = (genuine_capture_ticks * camera_capture_timing_percent) / 100;
+
+							if (camera_success)
+							{
+								doCameraCapture();
+							}
+						}
+						// else: resuming a paused capture. Per
+						// https://gbdev.io/pandocs/Gameboy_Camera.html#register-a000,
+						// leave captureTicksRemaining and the already-computed image
+						// untouched — don't recompute timing or re-capture.
+					}
+
 					RETURN;
 				}
 
 				if (pGBc_emuStatus->cameraUnit.startCapture == NO)
 				{
-					TODO("Yet to emulate the group 2 and 3 registers of camera unit");
 					pGBc_emuStatus->cameraUnit.allRegisters[address] = data;
 				}
 

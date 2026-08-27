@@ -24,6 +24,12 @@
 #define AUDIO_BUFFER_SIZE_FOR_GB_GBC					(CEIL((EMULATED_AUDIO_SAMPLING_RATE_FOR_GB_GBC / GB_GBC_FPS)))
 #endif
 #define PIXEL_FIFO_SIZE_FOR_GB_GBC						(SIXTEEN)
+// Gameboy Camera
+#define GBCAM_SENSOR_EXTRA_LINES						(8)
+#define GBCAM_SENSOR_W									(128)
+#define GBCAM_SENSOR_H									(112 + GBCAM_SENSOR_EXTRA_LINES)
+#define GBCAM_W											(128)
+#define GBCAM_H											(112)
 #pragma endregion MACROS
 
 #pragma region CORE
@@ -224,6 +230,76 @@ public:
 	~GBc4PlayerAdapterEngine_t();
 	void reset();
 	void tick();
+};
+
+class GBcCameraEngine_t
+{
+public:
+	~GBcCameraEngine_t()
+	{
+		deinitialize();
+	}
+
+	void reset(void* camera)
+	{
+		gbCamera = static_cast<SDL_Camera*>(camera);
+		initialized = (gbCamera != nullptr) ? YES : NO;
+	}
+
+	void deinitialize()
+	{
+		if (scaledFrame != nullptr)
+		{
+			SDL_DestroySurface(scaledFrame);
+			scaledFrame = nullptr;
+		}
+		gbCamera = nullptr;
+		initialized = NO;
+	}
+
+	// Returns YES if webcamOutput was refreshed this call, NO if no new
+	// frame was available (normal — SDL_AcquireCameraFrame is non-blocking)
+	// or on failure. Prior contents of webcamOutput are left untouched
+	// on a NO.
+	FLAG captureFrame();
+
+	MASQ_INLINE FLAG isCameraInitialized()
+	{
+		RETURN initialized;
+	}
+	MASQ_INLINE SDL_Camera* getGbCamera()
+	{
+		RETURN gbCamera;
+	}
+
+private:
+	FLAG initialized = NO;
+
+	SDL_Camera* gbCamera = nullptr;
+
+	// Owned by us. Created once, reused every frame, freed in deinitialize().
+	SDL_Surface* scaledFrame = nullptr;
+
+	FLAG ensureScaledFrame()
+	{
+		if (scaledFrame != nullptr)
+		{
+			RETURN YES;
+		}
+		scaledFrame = SDL_CreateSurface(GBCAM_SENSOR_W, GBCAM_SENSOR_H, SDL_PIXELFORMAT_RGBA32);
+		if (scaledFrame == nullptr)
+		{
+			DEBUG("GBcCameraEngine_t: SDL_CreateSurface failed: %s", SDL_GetError());
+			RETURN NO;
+		}
+		RETURN YES;
+	}
+
+public:
+	// Webcam image (raw, luminance)
+	int preprocessed[GBCAM_SENSOR_W][GBCAM_SENSOR_H];
+	// Image processed by sensor chip
+	int postprocessed[GBCAM_SENSOR_W][GBCAM_SENSOR_H];
 };
 
 class GBc_t : public abstractEmulation_t
@@ -2112,6 +2188,7 @@ private:
 				// Complete register space (A000-A035)
 				BYTE allRegisters[54];
 			};
+			uint32_t captureTicksRemaining;
 		} cameraUnit;
 		struct
 		{
@@ -2259,6 +2336,17 @@ private:
 		uint8_t paletteRAMMemory[sizeof(gbcColor_t) * EIGHT * FOUR];
 	} entireObjectPaletteRAM_t;
 
+	struct GBcCameraDebugStages_t
+	{
+		FLAG hasData = NO;
+		int rawWebcam[GBCAM_SENSOR_W][GBCAM_SENSOR_H];
+		int postExposure[GBCAM_SENSOR_W][GBCAM_SENSOR_H];
+		int postInvert[GBCAM_SENSOR_W][GBCAM_SENSOR_H];
+		int postFilter[GBCAM_SENSOR_W][GBCAM_SENSOR_H];
+		BYTE fourColor[GBCAM_W][GBCAM_H];
+		BYTE finalTiles[14][16][16];
+	};
+
 	typedef struct
 	{
 		// core
@@ -2283,6 +2371,7 @@ private:
 		quirks_t quirks;
 		PALETTE_ID gb_palette;
 		PALETTE_ID gbc_palette; // Used to handle GBC color correction
+		GBcCameraDebugStages_t cameraDebugStages;
 		emulatorStatus_t emulatorStatus;
 	} GBc_state_t;
 
@@ -2583,6 +2672,27 @@ private:
 
 private:
 
+#ifndef __RPI_PICO__
+	GLuint gbcStageTex_rawWebcam = 0;
+	GLuint gbcStageTex_postExposure = 0;
+	GLuint gbcStageTex_postInvert = 0;
+	GLuint gbcStageTex_postFilter = 0;
+	GLuint gbcStageTex_fourColor = 0;
+	GLuint gbcStageTex_finalOutput = 0;
+	GBcCameraEngine_t gbCameraEngine;
+	SDL_Camera* pCameraBackend = nullptr;
+#endif // !__RPI_PICO__
+
+public:
+
+#ifndef __RPI_PICO__
+	FLAG show_gbc_capture_stages_window = NO;
+	BYTE camera_capture_timing_percent = 1;
+	uint16_t cam_exposure_divisor = 0x3D00;
+#endif // !__RPI_PICO__
+
+private:
+
 	static const uint16_t TYPE_BG_WIN = (ZERO << FIFTEEN);
 	static const uint16_t TYPE_OBJ = (ONE << FIFTEEN);
 	uint16_t mapPalette[8192 /* TODO: Calculate this based on VRAM instead of using magic numbers */] = {ZERO}; // MSB == 1 (OBJ) ; MSB == 0 (BG)
@@ -2737,8 +2847,19 @@ PACK_END
 public:
 
 	GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config, CheatEngine_t* ce = nullptr);
-	void setupTheCoreOfEmulation(void* masqueradeInstance = nullptr, void* audio = nullptr, void* input = nullptr, void* network = nullptr) override;
+	void setupTheCoreOfEmulation(void* masqueradeInstance = nullptr, void* audio = nullptr, void* input = nullptr, void* network = nullptr, void* camera = nullptr) override;
 	void sendBiosToEmulator(bios_t* bios = nullptr) override {};
+
+	FLAG resetAudio(void* audio = nullptr) override { 
+		RETURN SUCCESS; 
+	};
+	FLAG resetInput(void* input = nullptr) override {
+		RETURN SUCCESS;
+	};
+	FLAG resetNetwork(void* network = nullptr) override {
+		RETURN SUCCESS;
+	};
+	FLAG resetCamera(void* camera = nullptr);
 
 public:
 
@@ -2975,6 +3096,15 @@ public:
 
 	// For MMM01
 	void updateMMM01RamBanking();
+
+public:
+
+	void doCameraCapture();
+	void CreateGBCStageTextures();
+	void UploadStageGrayscale(GLuint tex, const int* src, int w, int h, int srcColStride);
+	void UploadStageFourColor(GLuint tex, const BYTE* src, int w, int h, int srcColStride);
+	void UploadStageFinalOutput(GLuint tex, const BYTE finalTiles[14][16][16]);
+	void RenderGBCCaptureStagesUI();
 
 public:
 
@@ -3328,6 +3458,7 @@ private:
 	void timerTick();
 	void serialTick();
 	void rtcTick();
+	void cameraTick();
 	static MASQ_INLINE uint16_t readOAMWord(const BYTE* OAM, int byteOffset)
 	{
 		RETURN (uint16_t)OAM[byteOffset] | ((uint16_t)OAM[byteOffset + 1] << 8);

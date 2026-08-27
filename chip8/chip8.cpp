@@ -42,7 +42,7 @@ chip8_t::chip8_t(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, Masq
 	this->rom[ZERO] = rom[ZERO];
 }
 
-void chip8_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void* input, void* network)
+void chip8_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void* input, void* network, void* camera)
 {
 	if (!initializeEmulator())
 	{

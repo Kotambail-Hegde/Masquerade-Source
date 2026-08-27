@@ -401,8 +401,21 @@ private:
 public:
 
 	chip8_t(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config);
-	void setupTheCoreOfEmulation(void* masqueradeInstance = nullptr, void* audio = nullptr, void* input = nullptr, void* network = nullptr) override;
+	void setupTheCoreOfEmulation(void* masqueradeInstance = nullptr, void* audio = nullptr, void* input = nullptr, void* network = nullptr, void* camera = nullptr) override;
 	void sendBiosToEmulator(bios_t* bios = nullptr) override { MASQ_UNUSED(bios); };
+
+	FLAG resetAudio(void* audio = nullptr) override {
+		RETURN SUCCESS;
+	};
+	FLAG resetInput(void* input = nullptr) override {
+		RETURN SUCCESS;
+	};
+	FLAG resetNetwork(void* network = nullptr) override {
+		RETURN SUCCESS;
+	};
+	FLAG resetCamera(void* camera = nullptr) override {
+		RETURN SUCCESS;
+	};
 
 public:
 

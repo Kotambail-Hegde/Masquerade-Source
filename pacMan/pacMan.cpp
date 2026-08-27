@@ -161,7 +161,7 @@ pacMan_t::pacMan_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATF
 	}
 }
 
-void pacMan_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void* input, void* network)
+void pacMan_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void* input, void* network, void* camera)
 {
 	INC8 indexToCheck = RESET;
 

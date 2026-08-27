@@ -2062,6 +2062,478 @@ bool GBcPrinterEngine_t::savePrintedImageAsPng(PrintedImageWindow& window)
 	RETURN TRUE;
 }
 
+#ifndef __RPI_PICO__
+// =====================================================================================
+// GB/GBC Camera
+// =====================================================================================
+
+FLAG GBcCameraEngine_t::captureFrame()
+{
+	if (isCameraInitialized() == NO)
+	{
+		RETURN NO;
+	}
+
+	if (ensureScaledFrame() == NO)
+	{
+		RETURN NO;
+	}
+
+	uint64_t timestampNS = 0;
+	SDL_Surface* camFrame = SDL_AcquireCameraFrame(getGbCamera(), &timestampNS);
+	if (camFrame == nullptr)
+	{
+		// Normal: non-blocking API, no frame ready yet this tick.
+		RETURN NO;
+	}
+
+	SDL_Surface* converted = nullptr;
+	SDL_Surface* blitSrc = camFrame;
+
+	if (camFrame->format == SDL_PIXELFORMAT_NV12)
+	{
+		converted = SDL_ConvertSurface(camFrame, SDL_PIXELFORMAT_RGBA32);
+		// Camera-owned surface: release it now, per SDL3 docs ("as
+		// quickly as possible after acquisition"). We're done with it —
+		// its pixel data has already been copied into `converted`.
+		SDL_ReleaseCameraFrame(getGbCamera(), camFrame);
+		camFrame = nullptr;
+
+		if (converted == nullptr)
+		{
+			DEBUG("GBcCameraEngine_t: SDL_ConvertSurface failed: %s", SDL_GetError());
+			RETURN NO;
+		}
+		blitSrc = converted;
+	}
+
+	FLAG blitOk = SDL_BlitSurfaceScaled(blitSrc, NULL, scaledFrame, NULL, SDL_SCALEMODE_LINEAR) ? YES : NO;
+
+	// Release whatever we blitted from, via the correct API for its origin.
+	if (converted != nullptr)
+	{
+		SDL_DestroySurface(converted);
+	}
+	else
+	{
+		SDL_ReleaseCameraFrame(getGbCamera(), camFrame);
+	}
+
+	if (blitOk == NO)
+	{
+		DEBUG("GBcCameraEngine_t: SDL_BlitSurfaceScaled failed: %s", SDL_GetError());
+		RETURN NO;
+	}
+
+	const SDL_PixelFormatDetails* fmt = SDL_GetPixelFormatDetails(scaledFrame->format);
+	if (fmt == nullptr)
+	{
+		DEBUG("GBcCameraEngine_t: SDL_GetPixelFormatDetails failed: %s", SDL_GetError());
+		RETURN NO;
+	}
+
+	const FLAG mustLock = SDL_MUSTLOCK(scaledFrame) ? YES : NO;
+	if (mustLock == YES && !SDL_LockSurface(scaledFrame))
+	{
+		DEBUG("GBcCameraEngine_t: SDL_LockSurface failed: %s", SDL_GetError());
+		RETURN NO;
+	}
+
+	const uint8_t* __restrict base = (const uint8_t*)scaledFrame->pixels;
+	const int pitch = scaledFrame->pitch;
+
+	for (int y = 0; y < GBCAM_SENSOR_H; ++y)
+	{
+		const uint32_t* __restrict row = (const uint32_t*)(base + y * pitch);
+
+		for (int x = 0; x < GBCAM_SENSOR_W; ++x)
+		{
+			uint32_t px = row[x];
+
+			uint32_t r = (px & fmt->Rmask) >> fmt->Rshift;
+			uint32_t g = (px & fmt->Gmask) >> fmt->Gshift;
+			uint32_t b = (px & fmt->Bmask) >> fmt->Bshift;
+
+			// ITU-R BT.601 luma weights, fixed-point (>>8)
+			int brightness = (int)((r * 77 + g * 150 + b * 29) >> 8);
+
+			preprocessed[x][y] = brightness;
+		}
+	}
+
+	if (mustLock == YES)
+	{
+		SDL_UnlockSurface(scaledFrame);
+	}
+
+	RETURN YES;
+}
+
+// Refer https://gbdev.io/pandocs/Gameboy_Camera.html#sample-code-for-emulators
+void GBc_t::doCameraCapture()
+{
+	// Refresh preprocessed[][]. SDL3's capture is non-blocking -- on a
+	// miss, gbCameraEngine keeps the previous frame (see captureFrame()).
+	gbCameraEngine.captureFrame();
+
+	auto& cam = pGBc_emuStatus->cameraUnit;
+	auto& dbg = pGBc_instance->GBc_state.cameraDebugStages;
+
+	// --- A000: P/M bits from bits 1-2 ---
+	BYTE P_bits = 0;
+	BYTE M_bits = 0;
+	switch ((cam.triggerStatus >> 1) & 3)
+	{
+	case 0: P_bits = 0x00; M_bits = 0x01; BREAK;
+	case 1: P_bits = 0x01; M_bits = 0x00; BREAK;
+	case 2:
+	case 3: P_bits = 0x01; M_bits = 0x02; BREAK;
+	default: BREAK;
+	}
+
+	// --- A001 -> configuration[0] ---
+	BYTE N_bit = (cam.configuration[0] & BIT(7)) >> 7;
+	BYTE VH_bits = (cam.configuration[0] & (BIT(6) | BIT(5))) >> 5;
+
+	// --- A002/A003 -> configuration[1]/[2] ---
+	uint32_t EXPOSURE_bits = cam.configuration[2] | (cam.configuration[1] << 8);
+
+	// --- A004 -> configuration[3] ---
+	static const float edge_ratio_lut[8] = { 0.50f, 0.75f, 1.00f, 1.25f, 2.00f, 3.00f, 4.00f, 5.00f };
+	float EDGE_alpha = edge_ratio_lut[(cam.configuration[3] & 0x70) >> 4];
+	BYTE E3_bit = (cam.configuration[3] & BIT(7)) >> 7;
+	BYTE I_bit = (cam.configuration[3] & BIT(3)) >> 3;
+
+	auto& preprocessed = gbCameraEngine.preprocessed;
+	auto& postprocessed = gbCameraEngine.postprocessed;
+
+	if (show_gbc_capture_stages_window)
+	{
+		memcpy(dbg.rawWebcam, preprocessed, sizeof(dbg.rawWebcam));
+	}
+
+	// Webcam -> sensor buffer, applying exposure + voltage adaptation
+	for (int i = 0; i < GBCAM_SENSOR_W; i++)
+	{
+		for (int j = 0; j < GBCAM_SENSOR_H; j++)
+		{
+			int value = preprocessed[i][j];
+			value = (value * (int)EXPOSURE_bits) / cam_exposure_divisor;
+			value = 128 + (((value - 128) * 1) / 8);
+			postprocessed[i][j] = clampInt(0, value, 255);
+		}
+	}
+
+	if (show_gbc_capture_stages_window)
+	{
+		memcpy(dbg.postExposure, postprocessed, sizeof(dbg.postExposure));
+	}
+
+	if (I_bit)
+	{
+		for (int i = 0; i < GBCAM_SENSOR_W; i++)
+			for (int j = 0; j < GBCAM_SENSOR_H; j++)
+				postprocessed[i][j] = 255 - postprocessed[i][j];
+	}
+
+	// Make signed
+	for (int i = 0; i < GBCAM_SENSOR_W; i++)
+		for (int j = 0; j < GBCAM_SENSOR_H; j++)
+			postprocessed[i][j] -= 128;
+
+	if (show_gbc_capture_stages_window)
+	{
+		memcpy(dbg.postInvert, postprocessed, sizeof(dbg.postInvert));
+	}
+
+	static int temp_buf[GBCAM_SENSOR_W][GBCAM_SENSOR_H];
+
+	BYTE filtering_mode = (N_bit << 3) | (VH_bits << 1) | E3_bit;
+	switch (filtering_mode)
+	{
+	case 0x0: // 1-D filtering
+	{
+		for (int i = 0; i < GBCAM_SENSOR_W; i++)
+			for (int j = 0; j < GBCAM_SENSOR_H; j++)
+				temp_buf[i][j] = postprocessed[i][j];
+
+		for (int i = 0; i < GBCAM_SENSOR_W; i++)
+		{
+			for (int j = 0; j < GBCAM_SENSOR_H; j++)
+			{
+				int ms = temp_buf[i][minInt(j + 1, GBCAM_SENSOR_H - 1)];
+				int px = temp_buf[i][j];
+				int value = 0;
+				if (P_bits & BIT(0)) value += px;
+				if (P_bits & BIT(1)) value += ms;
+				if (M_bits & BIT(0)) value -= px;
+				if (M_bits & BIT(1)) value -= ms;
+				postprocessed[i][j] = clampInt(-128, value, 127);
+			}
+		}
+		BREAK;
+	}
+	case 0x2: // 1-D filtering + horizontal enhancement
+	{
+		for (int i = 0; i < GBCAM_SENSOR_W; i++)
+		{
+			for (int j = 0; j < GBCAM_SENSOR_H; j++)
+			{
+				int mw = postprocessed[maxInt(0, i - 1)][j];
+				int me = postprocessed[minInt(i + 1, GBCAM_SENSOR_W - 1)][j];
+				int px = postprocessed[i][j];
+				temp_buf[i][j] = clampInt(0, (int)(px + ((2 * px - mw - me) * EDGE_alpha)), 255);
+			}
+		}
+		for (int i = 0; i < GBCAM_SENSOR_W; i++)
+		{
+			for (int j = 0; j < GBCAM_SENSOR_H; j++)
+			{
+				int ms = temp_buf[i][minInt(j + 1, GBCAM_SENSOR_H - 1)];
+				int px = temp_buf[i][j];
+				int value = 0;
+				if (P_bits & BIT(0)) value += px;
+				if (P_bits & BIT(1)) value += ms;
+				if (M_bits & BIT(0)) value -= px;
+				if (M_bits & BIT(1)) value -= ms;
+				postprocessed[i][j] = clampInt(-128, value, 127);
+			}
+		}
+		BREAK;
+	}
+	case 0xE: // 2D enhancement
+	{
+		for (int i = 0; i < GBCAM_SENSOR_W; i++)
+		{
+			for (int j = 0; j < GBCAM_SENSOR_H; j++)
+			{
+				int ms = postprocessed[i][minInt(j + 1, GBCAM_SENSOR_H - 1)];
+				int mn = postprocessed[i][maxInt(0, j - 1)];
+				int mw = postprocessed[maxInt(0, i - 1)][j];
+				int me = postprocessed[minInt(i + 1, GBCAM_SENSOR_W - 1)][j];
+				int px = postprocessed[i][j];
+				temp_buf[i][j] = clampInt(-128, (int)(px + ((4 * px - mw - me - mn - ms) * EDGE_alpha)), 127);
+			}
+		}
+		for (int i = 0; i < GBCAM_SENSOR_W; i++)
+			for (int j = 0; j < GBCAM_SENSOR_H; j++)
+				postprocessed[i][j] = temp_buf[i][j];
+		BREAK;
+	}
+	case 0x1:
+	{
+		// Pan Docs: real hardware always returns this color here --
+		// undocumented in the M64282FP datasheet, possibly a sensor bug.
+		for (int i = 0; i < GBCAM_SENSOR_W; i++)
+			for (int j = 0; j < GBCAM_SENSOR_H; j++)
+				postprocessed[i][j] = 0;
+		BREAK;
+	}
+	default:
+		DEBUG("Unsupported GB Cam filtering mode: 0x%X (reg0=%02X reg1=%02X reg2=%02X reg3=%02X reg4=%02X reg5=%02X)",
+			filtering_mode, cam.triggerStatus, cam.configuration[0], cam.configuration[1],
+			cam.configuration[2], cam.configuration[3], cam.configuration[4]);
+		BREAK;
+	}
+
+	if (show_gbc_capture_stages_window)
+	{
+		memcpy(dbg.postFilter, postprocessed, sizeof(dbg.postFilter));
+	}
+
+	// Make unsigned
+	for (int i = 0; i < GBCAM_SENSOR_W; i++)
+		for (int j = 0; j < GBCAM_SENSOR_H; j++)
+			postprocessed[i][j] += 128;
+
+	// --- Controller matrix: dither/contrast -> 2bpp Game Boy tiles ---
+	static BYTE fourcolorsbuffer[GBCAM_W][GBCAM_H];
+	for (int i = 0; i < GBCAM_W; i++)
+	{
+		for (int j = 0; j < GBCAM_H; j++)
+		{
+			int value = postprocessed[i][j + (GBCAM_SENSOR_EXTRA_LINES / 2)];
+			const BYTE* m = cam.matrix[j & 3][i & 3];
+
+			if (value < m[0])      fourcolorsbuffer[i][j] = 0x00;
+			else if (value < m[1]) fourcolorsbuffer[i][j] = 0x40;
+			else if (value < m[2]) fourcolorsbuffer[i][j] = 0x80;
+			else                   fourcolorsbuffer[i][j] = 0xC0;
+		}
+	}
+
+	if (show_gbc_capture_stages_window)
+	{
+		memcpy(dbg.fourColor, fourcolorsbuffer, sizeof(dbg.fourColor));
+	}
+
+	static BYTE finalbuffer[14][16][16];
+	memset(finalbuffer, 0, sizeof(finalbuffer));
+	for (int i = 0; i < GBCAM_W; i++)
+	{
+		for (int j = 0; j < GBCAM_H; j++)
+		{
+			BYTE outcolor = 3 - (fourcolorsbuffer[i][j] >> 6);
+			BYTE* tile_base = &finalbuffer[j >> 3][i >> 3][(j & 7) * 2];
+			if (outcolor & 1) tile_base[0] |= 1 << (7 - (7 & i));
+			if (outcolor & 2) tile_base[1] |= 1 << (7 - (7 & i));
+		}
+	}
+
+	if (show_gbc_capture_stages_window)
+	{
+		memcpy(dbg.finalTiles, finalbuffer, sizeof(dbg.finalTiles));
+		dbg.hasData = YES;
+	}
+
+	memcpy(&pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks[0][0x0100], finalbuffer, sizeof(finalbuffer));
+}
+
+void GBc_t::CreateGBCStageTextures()
+{
+	GLuint* texes[] = { &gbcStageTex_rawWebcam, &gbcStageTex_postExposure, &gbcStageTex_postInvert,
+		&gbcStageTex_postFilter, &gbcStageTex_fourColor, &gbcStageTex_finalOutput };
+	for (GLuint* t : texes)
+	{
+		if (*t != 0) CONTINUE;
+		glGenTextures(1, t);
+		glBindTexture(GL_TEXTURE_2D, *t);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST); // nearest: don't blur an 128px debug image
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glBindTexture(GL_TEXTURE_2D, 0);
+	}
+}
+
+// Uploads a WxH grayscale int buffer (values assumed 0-255) as an RGBA8 texture.
+// srcStride is the buffer's declared row length (source arrays are [W][H], column-major
+// vs. the row-major w/h ordering ImGui expects, so this also transposes on the way out).
+void GBc_t::UploadStageGrayscale(GLuint tex, const int* src, int w, int h, int srcColStride)
+{
+	static BYTE rgba[GBCAM_SENSOR_W * GBCAM_SENSOR_H * 4]; // big enough for every stage size used here
+	for (int y = 0; y < h; y++)
+	{
+		for (int x = 0; x < w; x++)
+		{
+			BYTE shade = (BYTE)clampInt(0, src[x * srcColStride + y], 255);
+			BYTE* px = &rgba[(y * w + x) * 4];
+			px[0] = px[1] = px[2] = shade;
+			px[3] = 255;
+		}
+	}
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+	glBindTexture(GL_TEXTURE_2D, tex);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+	glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+// Same, but for the already-quantized 4-color buffer (values are 0x00/0x40/0x80/0xC0).
+void GBc_t::UploadStageFourColor(GLuint tex, const BYTE* src, int w, int h, int srcColStride)
+{
+	static BYTE rgba[GBCAM_W * GBCAM_H * 4];
+	for (int y = 0; y < h; y++)
+	{
+		for (int x = 0; x < w; x++)
+		{
+			BYTE shade = src[x * srcColStride + y]; // already 0x00..0xC0, close enough to display raw
+			BYTE* px = &rgba[(y * w + x) * 4];
+			px[0] = px[1] = px[2] = shade;
+			px[3] = 255;
+		}
+	}
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+	glBindTexture(GL_TEXTURE_2D, tex);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+	glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+// Decodes the packed 2bpp tile buffer back into a displayable GBCAM_W x GBCAM_H
+// grayscale image -- i.e. exactly what the game will actually see. Color index 0
+// (from the packing: outcolor = 3 - (fourcolor>>6)) is the brightest bucket, 3 the
+// darkest, matching standard GB palette index ordering.
+void GBc_t::UploadStageFinalOutput(GLuint tex, const BYTE finalTiles[14][16][16])
+{
+	static BYTE rgba[GBCAM_W * GBCAM_H * 4];
+	for (int i = 0; i < GBCAM_W; i++)
+	{
+		for (int j = 0; j < GBCAM_H; j++)
+		{
+			const BYTE* tile_base = &finalTiles[j >> 3][i >> 3][(j & 7) * 2];
+			BYTE lo = (tile_base[0] >> (7 - (7 & i))) & 1;
+			BYTE hi = (tile_base[1] >> (7 - (7 & i))) & 1;
+			BYTE colorIndex = lo | (hi << 1); // 0=brightest .. 3=darkest
+			BYTE shade = (BYTE)(255 - (colorIndex * 85));
+			BYTE* px = &rgba[(j * GBCAM_W + i) * 4];
+			px[0] = px[1] = px[2] = shade;
+			px[3] = 255;
+		}
+	}
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+	glBindTexture(GL_TEXTURE_2D, tex);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, GBCAM_W, GBCAM_H, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+	glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+void GBc_t::RenderGBCCaptureStagesUI()
+{
+	if (show_gbc_capture_stages_window == NO) RETURN;
+
+	auto& dbg = pGBc_instance->GBc_state.cameraDebugStages;
+	if (dbg.hasData == NO)
+	{
+		ImGui::Begin("GBC Capture: All Stages", &show_gbc_capture_stages_window);
+		ImGui::Text("No capture triggered yet.");
+		ImGui::End();
+		RETURN;
+	}
+
+	CreateGBCStageTextures();
+
+	UploadStageGrayscale(gbcStageTex_rawWebcam, (const int*)dbg.rawWebcam, GBCAM_SENSOR_W, GBCAM_SENSOR_H, GBCAM_SENSOR_H);
+	UploadStageGrayscale(gbcStageTex_postExposure, (const int*)dbg.postExposure, GBCAM_SENSOR_W, GBCAM_SENSOR_H, GBCAM_SENSOR_H);
+	UploadStageGrayscale(gbcStageTex_postInvert, (const int*)dbg.postInvert, GBCAM_SENSOR_W, GBCAM_SENSOR_H, GBCAM_SENSOR_H);
+	UploadStageGrayscale(gbcStageTex_postFilter, (const int*)dbg.postFilter, GBCAM_SENSOR_W, GBCAM_SENSOR_H, GBCAM_SENSOR_H);
+	UploadStageFourColor(gbcStageTex_fourColor, (const BYTE*)dbg.fourColor, GBCAM_W, GBCAM_H, GBCAM_H);
+	UploadStageFinalOutput(gbcStageTex_finalOutput, dbg.finalTiles);
+
+	ImGui::SetNextWindowSize(ImVec2(900.0f, 520.0f), ImGuiCond_FirstUseEver);
+	if (ImGui::Begin("GBC Capture: All Stages", &show_gbc_capture_stages_window))
+	{
+		const ImVec2 thumb(200.0f, 200.0f * ((float)GBCAM_SENSOR_H / GBCAM_SENSOR_W));
+
+		struct {
+			const char* label; GLuint tex; ImVec2 size;
+		} stages[] = {
+			{ "1. Raw webcam capture",        gbcStageTex_rawWebcam,    thumb },
+			{ "2. Post-exposure",             gbcStageTex_postExposure, thumb },
+			{ "3. Post-invert",                gbcStageTex_postInvert,   thumb },
+			{ "4. Post-filter (sensor final)", gbcStageTex_postFilter,   thumb },
+			{ "5. Quantized (matrix)",        gbcStageTex_fourColor,    thumb },
+			{ "6. Final output (decoded tiles)", gbcStageTex_finalOutput, thumb },
+		};
+
+		ImGui::SeparatorText("Camera Status");
+		ImGui::Text("Start Capture: %s", pGBc_emuStatus->cameraUnit.startCapture ? "YES" : "NO");
+		ImGui::Text("Trigger Status: 0x%02X", pGBc_emuStatus->cameraUnit.triggerStatus);
+		ImGui::Text("Capture Ticks Remaining: %u", pGBc_emuStatus->cameraUnit.captureTicksRemaining);
+
+		ImGui::Separator();
+
+		int col = 0;
+		for (auto& s : stages)
+		{
+			ImGui::BeginGroup();
+			ImGui::Text("%s", s.label);
+			ImGui::Image((ImTextureID)(intptr_t)s.tex, s.size);
+			ImGui::EndGroup();
+			if (++col % 3 != 0) ImGui::SameLine();
+		}
+	}
+	ImGui::End();
+}
+#endif
+
 // =====================================================================================
 // GBC Serial Link
 // =====================================================================================
@@ -3824,7 +4296,7 @@ void GBc_t::renderGBCDebuggerUI()
 				ImGui::MenuItem("Palettes", NULL, (bool*)&gbcDebugger.ppu.showPaletteViewer);
 				ImGui::EndMenu();
 			}
-			break;
+			BREAK;
 		}
 
 		case DEBUGGER_TAB::CPU:
@@ -3835,7 +4307,7 @@ void GBc_t::renderGBCDebuggerUI()
 			if (ImGui::BeginMenu("Panels"))
 				ImGui::EndMenu();
 			ImGui::EndDisabled();
-			break;
+			BREAK;
 		}
 		}
 

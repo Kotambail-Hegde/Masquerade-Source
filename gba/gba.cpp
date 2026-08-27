@@ -365,7 +365,7 @@ GBA_t::~GBA_t()
 	; // Do nothing for now!
 }
 
-void GBA_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void* input, void* network)
+void GBA_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, void* input, void* network, void* camera)
 {
 	uint8_t indexToCheck = 0;
 

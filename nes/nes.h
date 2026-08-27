@@ -2356,9 +2356,24 @@ public:
 
 	~NES_t();
 
-	void setupTheCoreOfEmulation(void* masqueradeInstance = nullptr, void* audio = nullptr, void* input = nullptr, void* network = nullptr) override;
+	void setupTheCoreOfEmulation(void* masqueradeInstance = nullptr, void* audio = nullptr, void* input = nullptr, void* network = nullptr, void* camera = nullptr) override;
 
 	void sendBiosToEmulator(bios_t* bios = nullptr) override {};
+
+	FLAG resetAudio(void* audio = nullptr) override {
+		RETURN SUCCESS;
+	};
+	FLAG resetInput(void* input = nullptr) override {
+		RETURN SUCCESS;
+	};
+	FLAG resetNetwork(void* network = nullptr) override {
+		RETURN SUCCESS;
+	};
+	FLAG resetCamera(void* camera = nullptr) override {
+		RETURN SUCCESS;
+	};
+
+public:
 
 	float getVersion();
 
