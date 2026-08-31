@@ -375,6 +375,7 @@ Masquerade supports the following hardware accessories and peripherals used by s
 - Passes OAM stress tests
 - Passes Blargg and Bisqwit's ppu_open_bus tests
 - Passes Bisqwit's cpu_exec_space tests
+- Passes "holydiverbatman" test suite
 - Passes Blargg mmc3_irq_tests suite except:
   - 4-scanline_timing.nes
 

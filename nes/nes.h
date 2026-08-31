@@ -850,29 +850,80 @@ private:
 	enum SUB_MAPPER : int16_t
 	{
 		SUB_MAPPER_NOT_APPLICABLE = INVALID,
-		SEROM_SHROM_SH1ROM = FIVE,
-		SUROM = ONE,
-		MMC6 = ONE,
-		NINA = ONE,
-		SOROM = TWO,
-		BNROM = TWO,
-		SNROM = THREE,
-		SXROM = FOUR,
-		VRC4AC = TWENTYONE,
-		VRC2A = ZERO,
-		VRC2B = THREE,
-		VRC2C = THREE,
-		VRC4A = ONE,
-		VRC4B = ONE,
-		VRC4C = TWO,
-		VRC4D = TWO,
-		VRC4E = TWO,
-		VRC4F = ONE,
-		BANDAI_LZ93D50_24C01 = ONE, // 128-byte EEPROM
-		BANDAI_FCG_1_2 = FOUR, // Standard FCG-1 / FCG-2 (No EEPROM or standard size)
-		BANDAI_LZ93D50_24C02 = FIVE,  // 256-byte EEPROM
-		NAMCO175 = ONE,              // Mapper 210 sub 1 = Namco 175 (no audio)
-		NAMCO340 = TWO,              // Mapper 210 sub 2 = Namco 340 (no audio, mirroring)
+
+		// Official NES 2.0 Submappers
+		SEROM_SHROM_SH1ROM         = FIVE,       // Submapper 5
+		FAMICOM_NETWORK_SYSTEM_2ME = SIX,        // Submapper 6
+		KAISER_KS7058              = SEVEN,      // Submapper 7
+
+		SUROM                      = ONE,
+		MMC6                       = ONE,
+		NINA                       = ONE,
+		SOROM                      = TWO,
+		BNROM                      = TWO,
+		SNROM                      = THREE,
+		SXROM                      = FOUR,
+		VRC4AC                     = TWENTYONE,
+		VRC2A                      = ZERO,
+		VRC2B                      = THREE,
+		VRC2C                      = THREE,
+		VRC4A                      = ONE,
+		VRC4B                      = ONE,
+		VRC4C                      = TWO,
+		VRC4D                      = TWO,
+		VRC4E                      = TWO,
+		VRC4F                      = ONE,
+		BANDAI_LZ93D50_24C01       = ONE,        // 128-byte EEPROM
+		BANDAI_FCG_1_2             = FOUR,       // Standard FCG-1 / FCG-2 (No EEPROM or standard size)
+		BANDAI_LZ93D50_24C02       = FIVE,       // 256-byte EEPROM
+		NAMCO175                   = ONE,        // Mapper 210 sub 1 = Namco 175 (no audio)
+		NAMCO340                   = TWO,        // Mapper 210 sub 2 = Namco 340 (no audio, mirroring)
+
+		// Custom internal identifiers (counting down from INT16_MAX = 32767)
+		CUSTOM_SUBMAPPER_START     = 32767,
+		SGROM                      = 32767,      // 128/256 KB PRG, 8 KB CHR-RAM, No PRG-RAM
+		SAROM                      = 32766,      // 64 KB PRG, 8 KB PRG-RAM, 16-64 KB CHR-ROM
+		SBROM                      = 32765,      // 64 KB PRG, No PRG-RAM, 16-64 KB CHR-ROM
+		SCROM                      = 32764,      // 64 KB PRG, No PRG-RAM, 128 KB CHR-ROM
+		SC1ROM                     = 32763,      // 64 KB PRG (7432), No PRG-RAM, 128 KB CHR-ROM
+		SFROM                      = 32762,      // 128/256 KB PRG, No PRG-RAM, 16-64 KB CHR-ROM
+		SF1ROM                     = 32761,      // 256 KB PRG, No PRG-RAM, 64 KB CHR-ROM
+		SFEXPROM                   = 32760,      // 256 KB PRG (Runtime patch), No PRG-RAM, 64 KB CHR-ROM
+		SHROM                      = 32759,      // 32 KB PRG, No PRG-RAM, 128 KB CHR-ROM
+		SH1ROM                     = 32758,      // 32 KB PRG (7432), No PRG-RAM, 128 KB CHR-ROM
+		SIROM                      = 32757,      // 32 KB PRG, 8 KB PRG-RAM, 16-64 KB CHR-ROM
+		SIEPROM                    = 32756,      // 32 KB PRG (Proto), 8 KB PRG-RAM, 64 KB CHR-ROM
+		SJROM                      = 32755,      // 128/256 KB PRG, 8 KB PRG-RAM, 16-64 KB CHR-ROM
+		SKROM                      = 32754,      // 128/256 KB PRG, 8 KB PRG-RAM, 128 KB CHR-ROM
+		SKEPROM                    = 32753,      // 256 KB PRG (Proto), 8 KB PRG-RAM, 128 KB CHR-ROM
+		SLROM                      = 32752,      // 128/256 KB PRG, No PRG-RAM, 128 KB CHR-ROM
+		SL1ROM                     = 32751,      // 64/128/256 KB PRG (7432), No PRG-RAM, 128 KB CHR-ROM
+		SL2ROM                     = 32750,      // 128/256 KB PRG, No PRG-RAM, 128 KB CHR-ROM (EPROM pinout)
+		SL3ROM                     = 32749,      // 256 KB PRG (7432), No PRG-RAM, 128 KB CHR-ROM
+		SLRROM                     = 32748,      // 128/256 KB PRG, No PRG-RAM, 128 KB CHR-ROM
+		SMROM                      = 32747,      // 256 KB PRG (Dual 128KB), No PRG-RAM, 8 KB CHR-RAM
+		SNWEPROM                   = 32746,      // 512 KB PRG (Proto), 8 KB PRG-RAM, 8 KB CHR-RAM
+		SZROM                      = 32745,      // 128/256 KB PRG, 16 KB PRG-RAM, 16-64 KB CHR-ROM
+
+		// TxROM (MMC3) Custom Submappers
+		TBROM					   = 32744,      // 64 KB PRG, 16/32/64 KB CHR-ROM
+		TEROM					   = 32743,      // 32 KB PRG, 16/32/64 KB CHR-ROM (fixed mirroring)
+		TFROM					   = 32742,      // 128/256/512 KB PRG, 16/32/64 KB CHR-ROM (fixed mirroring)
+		TGROM					   = 32741,      // 128/256/512 KB PRG, 8 KB RAM/ROM
+		TKROM					   = 32740,      // 128/256/512 KB PRG, 8 KB RAM, 128/256 KB CHR-ROM
+		TK1ROM					   = 32739,      // 128 KB PRG, 8 KB RAM, 128 KB CHR-ROM (uses 7432)
+		TKSROM					   = 32738,      // 128/256/512 KB PRG, 8 KB RAM, 128 KB CHR-ROM (alt mirroring)
+		TKEPROM					   = 32737,      // Four 128KB ROMs, 8 KB RAM, two 128KB ROMs (proto)
+		TLROM					   = 32736,      // 128/256/512 KB PRG, 128/256 KB CHR-ROM
+		TL1ROM					   = 32735,      // 128 KB PRG, 128 KB CHR-ROM (uses 7432)
+		TL2ROM					   = 32734,      // Nonstandard pinout variant
+		TLBROM					   = 32733,      // 128 KB PRG, 128 KB CHR-ROM (uses 74541)
+		TLSROM					   = 32732,      // 128/256/512 KB PRG, 128 KB CHR-ROM (alt mirroring)
+		TNROM					   = 32731,      // 128/256/512 KB PRG, 8 KB RAM, 8 KB RAM/ROM (Famicom)
+		TQROM					   = 32730,      // 128 KB PRG, 16/32/64 KB CHR-ROM + 8 KB RAM
+		TR1ROM					   = 32729,      // 128/256/512 KB PRG, 64 KB ROM + 4 KB VRAM (4-screen)
+		TSROM					   = 32728,      // 128/256/512 KB PRG, 8 KB RAM (no battery), 128/256 KB CHR-ROM
+		TVROM					   = 32727       // 64 KB PRG, 16/32/64 KB CHR-ROM + 4 KB VRAM (4-screen)
 	};
 
 	enum PCBs : int32_t
@@ -926,6 +977,13 @@ private:
 		};
 		SUB_MAPPER subMapper;
 		NAMETABLE_MIRROR nameTblMir;
+		FLAG hasPrgRam;
+		FLAG hasChrRam;
+		FLAG hasBatteryBackedMemory;
+		uint64_t prgRamSizeBytes;
+		uint64_t chrRamSizeBytes;
+		uint64_t prgRomSizeBytes;
+		uint64_t chrRomSizeBytes;
 		struct
 		{
 			BYTE placeholder;
