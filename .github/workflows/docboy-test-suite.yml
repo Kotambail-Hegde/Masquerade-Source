@@ -1,0 +1,435 @@
+name: Docboy Tests
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  docboy:
+    name: Docboy Tests (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Export git commit hash
+        run: echo "GIT_COMMIT_HASH=$env:GITHUB_SHA" >> $env:GITHUB_ENV
+        shell: pwsh
+
+      # =========================================================================
+      # Cache all external dependencies
+      # =========================================================================
+
+      - name: Cache external dependencies
+        id: cache-external
+        uses: actions/cache@v4
+        with:
+          path: |
+            external/imgui
+            external/miniz
+            external/stb
+            external/rapidjson
+            external/boost
+            external/SDL
+            external/SDL_net
+            external/nativefiledialog-extended
+          key: windows-external-all-v20-${{ hashFiles('.github/workflows/*.yml') }}
+          restore-keys: |
+            windows-external-all-v20-
+
+      # =========================================================================
+      # Clone all dependencies
+      # =========================================================================
+
+      - name: Clone all dependencies
+        if: steps.cache-external.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $externalDir = "external"
+
+          if (-not (Test-Path $externalDir)) {
+              New-Item -ItemType Directory -Path $externalDir | Out-Null
+          }
+
+          cd external
+
+          if (-not (Test-Path "imgui")) {
+              git clone https://github.com/ocornut/imgui.git --branch docking --depth 1
+          }
+
+          if (-not (Test-Path "miniz")) {
+              Write-Host "=== MINIZ: not found, downloading ==="
+
+              $url = "https://github.com/richgel999/miniz/releases/download/3.0.2/miniz-3.0.2.zip"
+              $zip = "miniz-3.0.2.zip"
+              $tmpDir = "_miniz_extract"
+
+              Invoke-WebRequest -Uri $url -OutFile $zip
+
+              if (Test-Path $tmpDir) {
+                  Remove-Item -Recurse -Force $tmpDir
+              }
+
+              Expand-Archive $zip -DestinationPath $tmpDir -Force
+
+              if (Test-Path "miniz") {
+                  Remove-Item -Recurse -Force "miniz"
+              }
+
+              Move-Item -Path $tmpDir -Destination "miniz"
+              Remove-Item -Path $zip -Force
+
+              Write-Host "=== MINIZ setup complete ==="
+          }
+
+          if (-not (Test-Path "stb/stb")) {
+              git clone https://github.com/nothings/stb.git --depth 1 stb/stb
+          }
+
+          if (-not (Test-Path "rapidjson")) {
+              git clone https://github.com/Tencent/rapidjson.git --depth 1 rapidjson
+          }
+
+          if (-not (Test-Path "SDL")) {
+              git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL
+          }
+
+          if (-not (Test-Path "SDL_net")) {
+              git clone https://github.com/libsdl-org/SDL_net.git --depth 1 SDL_net
+          }
+
+          if (-not (Test-Path "nativefiledialog-extended")) {
+              git clone https://github.com/btzy/nativefiledialog-extended.git --depth 1 --shallow-submodules
+          }
+
+          if (-not (Test-Path "boost")) {
+              $boostZip = "boost_1_89_0.zip"
+              $boostUrl = "https://archives.boost.io/release/1.89.0/source/boost_1_89_0.zip"
+
+              Write-Host "Downloading Boost source..."
+
+              Invoke-WebRequest -Uri $boostUrl -OutFile $boostZip
+              Expand-Archive $boostZip -DestinationPath .
+              Rename-Item -Path "boost_1_89_0" -NewName "boost"
+              Remove-Item -Path $boostZip -Force
+          }
+
+      # =========================================================================
+      # Build Boost
+      # =========================================================================
+
+      - name: Build Boost
+        shell: cmd
+        run: |
+          @echo off
+
+          set VSWHERE="%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+
+          for /f "usebackq tokens=*" %%i in (`%VSWHERE% -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set VS_PATH=%%i
+
+          if not defined VS_PATH (
+              echo ERROR: VS not found via vswhere
+              exit /b 1
+          )
+
+          set VCVARS=%VS_PATH%\VC\Auxiliary\Build\vcvars64.bat
+
+          if not exist "%VCVARS%" (
+              echo ERROR: vcvars64.bat not found
+              exit /b 1
+          )
+
+          echo === Activating MSVC from: %VCVARS% ===
+
+          call "%VCVARS%"
+
+          if errorlevel 1 (
+              echo ERROR: vcvars64.bat failed
+              exit /b 1
+          )
+
+          for /f "usebackq tokens=*" %%i in (`where cl.exe`) do set CL_PATH=%%i
+
+          if not defined CL_PATH (
+              echo ERROR: cl.exe not found
+              exit /b 1
+          )
+
+          echo === cl.exe: %CL_PATH% ===
+
+          cd external\boost
+
+          if not exist b2.exe (
+              echo Bootstrapping Boost...
+
+              call bootstrap.bat msvc
+
+              if errorlevel 1 (
+                  echo ERROR: bootstrap failed
+                  exit /b 1
+              )
+          )
+
+          if exist bin.v2\standalone\msvc (
+              echo Removing stale b2 MSVC sentinel dir...
+              rmdir /s /q bin.v2\standalone\msvc
+          )
+
+          echo using msvc : 14.4 : "%CL_PATH%" ; > user-config.jam
+
+          echo === user-config.jam written ===
+          type user-config.jam
+
+          echo Building Boost...
+
+          b2.exe install ^
+              toolset=msvc-14.4 ^
+              variant=release ^
+              link=static,shared ^
+              threading=multi ^
+              runtime-link=shared ^
+              address-model=64 ^
+              --without-wave ^
+              --without-url ^
+              --without-stacktrace ^
+              --without-test ^
+              --user-config=user-config.jam ^
+              --prefix="%CD%" ^
+              -j%NUMBER_OF_PROCESSORS%
+
+          if errorlevel 1 (
+              echo ERROR: b2 build failed
+              exit /b 1
+          )
+
+          if not exist boost\config.hpp (
+              echo ERROR: Boost headers missing
+              exit /b 1
+          )
+
+          dir /b lib\*.lib >nul 2>&1
+
+          if errorlevel 1 (
+              echo ERROR: Boost libraries missing
+              exit /b 1
+          )
+
+          echo === Boost built successfully ===
+
+      # =========================================================================
+      # Build SDL3
+      # =========================================================================
+
+      - name: Build SDL3
+        shell: pwsh
+        run: |
+          cd external/SDL
+
+          if (-not (Test-Path "build")) {
+              New-Item -ItemType Directory -Path "build" | Out-Null
+          }
+
+          cd build
+
+          cmake .. -G "Visual Studio 18 2026" -A x64 `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_INSTALL_PREFIX="$($PWD.Path)" `
+            -DSDL_SHARED=ON `
+            -DSDL_STATIC=ON
+
+          cmake --build . --config Release --parallel
+          cmake --build . --config Release --target install
+
+      # =========================================================================
+      # Build SDL3_net
+      # =========================================================================
+
+      - name: Build SDL3_net
+        shell: pwsh
+        run: |
+          cd external/SDL_net
+
+          if (-not (Test-Path "build")) {
+              New-Item -ItemType Directory -Path "build" | Out-Null
+          }
+
+          cd build
+
+          cmake .. -G "Visual Studio 18 2026" -A x64 `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_INSTALL_PREFIX="$($PWD.Path)" `
+            -DCMAKE_PREFIX_PATH="$env:GITHUB_WORKSPACE/external/SDL/build" `
+            -DSDL3_DIR="$env:GITHUB_WORKSPACE/external/SDL/build/lib/cmake/SDL3"
+
+          cmake --build . --config Release --parallel
+          cmake --build . --config Release --target install
+
+      # =========================================================================
+      # Build NFD
+      # =========================================================================
+
+      - name: Build NFD
+        shell: pwsh
+        run: |
+          cd external/nativefiledialog-extended
+
+          if (-not (Test-Path "build")) {
+              New-Item -ItemType Directory -Path "build" | Out-Null
+          }
+
+          cd build
+
+          cmake .. -G "Visual Studio 18 2026" -A x64 `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_INSTALL_PREFIX="$($PWD.Path)"
+
+          cmake --build . --config Release --parallel
+          cmake --build . --config Release --target install
+
+      # =========================================================================
+      # Set dependency paths
+      # =========================================================================
+
+      - name: Set dependency paths
+        shell: pwsh
+        run: |
+          echo "IMGUI_ROOT=$env:GITHUB_WORKSPACE\external\imgui" >> $env:GITHUB_ENV
+          echo "MINIZ_ROOT=$env:GITHUB_WORKSPACE\external\miniz" >> $env:GITHUB_ENV
+          echo "STB_ROOT=$env:GITHUB_WORKSPACE\external\stb" >> $env:GITHUB_ENV
+          echo "RAPID_JSON_ROOT=$env:GITHUB_WORKSPACE\external\rapidjson" >> $env:GITHUB_ENV
+          echo "BOOST_ROOT=$env:GITHUB_WORKSPACE\external\boost" >> $env:GITHUB_ENV
+          echo "SDL3_ROOT=$env:GITHUB_WORKSPACE\external\SDL\build" >> $env:GITHUB_ENV
+          echo "SDL3_NET_ROOT=$env:GITHUB_WORKSPACE\external\SDL_net\build" >> $env:GITHUB_ENV
+          echo "NFD_ROOT=$env:GITHUB_WORKSPACE\external\nativefiledialog-extended" >> $env:GITHUB_ENV
+
+      # =========================================================================
+      # Configure CMake
+      # =========================================================================
+
+      - name: Configure CMake
+        shell: cmd
+        run: |
+          cmake -G "Visual Studio 18 2026" -A x64 ^
+                -DCMAKE_BUILD_TYPE=Release ^
+                -DGIT_COMMIT_HASH=%GIT_COMMIT_HASH% ^
+                -DIMGUI_ROOT=%IMGUI_ROOT% ^
+                -DMINIZ_ROOT=%MINIZ_ROOT% ^
+                -DSTB_ROOT=%STB_ROOT% ^
+                -DRAPID_JSON_ROOT=%RAPID_JSON_ROOT% ^
+                -DBOOST_ROOT=%BOOST_ROOT% ^
+                -DSDL3_ROOT=%SDL3_ROOT% ^
+                -DSDL3_NET_ROOT=%SDL3_NET_ROOT% ^
+                -DNFD_ROOT=%NFD_ROOT% ^
+                -S . -B build
+
+      # =========================================================================
+      # Build Masquerade
+      # =========================================================================
+
+      - name: Build Masquerade
+        shell: pwsh
+        run: cmake --build build --config Release --parallel
+
+      # =========================================================================
+      # Docboy test suite
+      # =========================================================================
+
+      - name: Clone Docboy test suite
+        shell: pwsh
+        run: |
+          git clone --depth 1 https://github.com/Docheinstein/docboy-test-suite.git docboy-test-suite
+
+      - name: Get Docboy revision
+        shell: pwsh
+        run: |
+          cd docboy-test-suite
+
+          $commit = git rev-parse HEAD
+
+          echo "DOCBOY_COMMIT=$commit" >> $env:GITHUB_ENV
+
+          Write-Host "Docboy commit: $commit"
+
+      # =========================================================================
+      # Cache generated Docboy ROMs
+      # =========================================================================
+
+      - name: Cache Docboy ROMs
+        id: cache-docboy
+        uses: actions/cache@v4
+        with:
+          path: docboy-test-suite/roms
+          key: docboy-roms-${{ env.DOCBOY_COMMIT }}
+
+      # =========================================================================
+      # RGBDS
+      # =========================================================================
+
+      - name: Install RGBDS
+        if: steps.cache-docboy.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $version = "v1.0.2"
+          $url = "https://github.com/gbdev/rgbds/releases/download/$version/rgbds-$version-windows-x86_64.zip"
+
+          Write-Host "Downloading RGBDS from:"
+          Write-Host $url
+
+          Invoke-WebRequest -Uri $url -OutFile rgbds.zip
+
+          Expand-Archive rgbds.zip -DestinationPath rgbds
+
+          echo "$env:GITHUB_WORKSPACE\rgbds" >> $env:GITHUB_PATH
+
+      # =========================================================================
+      # Build Docboy ROMs
+      # =========================================================================
+
+      - name: Build Docboy ROMs
+        if: steps.cache-docboy.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          cd docboy-test-suite
+
+          make
+
+      # =========================================================================
+      # Configure Docboy framework
+      # =========================================================================
+
+      - name: Configure Docboy framework
+        shell: pwsh
+        run: |
+          @"
+          [framework]
+          emulator = masquerade.exe
+          location = $env:GITHUB_WORKSPACE\build\bin\masquerade.exe
+          type = setup10
+          rom_dir = $env:GITHUB_WORKSPACE\docboy-test-suite\roms
+          default_timeout = 8
+          "@ | Set-Content docboy_test_framework.ini
+
+      # =========================================================================
+      # Run tests
+      # =========================================================================
+
+      - name: Run Docboy tests
+        shell: pwsh
+        run: |
+          python docboy_test_framework.py
+
+      # =========================================================================
+      # Upload report
+      # =========================================================================
+
+      - name: Upload Docboy report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docboy-test-report
+          path: docboy_test.report
+          if-no-files-found: warn
