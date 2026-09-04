@@ -1,0 +1,39 @@
+name: Nightly Windows Build
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # Runs daily at midnight UTC
+  workflow_dispatch:    # Allows manual triggering from the Actions tab
+
+jobs:
+  build-and-pr:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Source Repository
+        uses: actions/checkout@v4
+
+      - name: Set up CMake
+        uses: jwlawson/actions-setup-cmake@v4
+        with:
+          cmake-version: '3.25.x'
+
+      - name: Configure CMake
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build Project
+        run: cmake --build build --config Release
+
+      - name: Create or Update Pull Request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore(nightly): automated Windows nightly build update"
+          branch: nightly-automatic-updates
+          title: "Nightly Windows Build Updates"
+          body: |
+            Automated nightly Windows build generated from the `Masquerade-Source` repository. 
+            This PR continuously updates the target branch with the latest changes.
+          base: masquerade-Emulator
+          assignees: Kotambail-Hegde
+          delete-branch: true
