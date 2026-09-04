@@ -6750,6 +6750,19 @@ void GBc_t::displayCompleteScreen()
 	GL_CALL(glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, getScreenWidth(), getScreenHeight(), GL_RGBA, GL_UNSIGNED_BYTE,
 		(GLvoid*)pGBc_display->imGuiBuffer.imGuiBuffer1D));
 
+	if (fbSHA1Enabled == YES)
+	{
+		if (std::chrono::steady_clock::now() >= fbSHA1StartTime + std::chrono::seconds(fbSHA1TimeoutSeconds))
+		{
+			const size_t bufferSize = static_cast<size_t>(getScreenWidth()) * getScreenHeight() * sizeof(Pixel);
+			std::string frameHash = SHA1_CUSTOM::CalculateSHA1(pGBc_display->imGuiBuffer.imGuiBuffer1D, getScreenWidth(), getScreenHeight());
+			LOG("SHA1: %s", frameHash.c_str());
+			std::ofstream file("sha1.txt");
+			file << frameHash;
+			fbSHA1Enabled = NO;
+		}
+	}
+
 	// Choose filtering mode (NEAREST or LINEAR)
 	GLint filter = (currEnVFilter == VIDEO_FILTERS::BILINEAR_FILTER) ? GL_LINEAR : GL_NEAREST;
 

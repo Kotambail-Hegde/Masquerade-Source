@@ -71,6 +71,9 @@
 // --- Args
 int   gArgc = 0;
 char** gArgv = nullptr;
+FLAG fbSHA1Enabled = NO;
+uint64_t fbSHA1TimeoutSeconds = 5ULL;
+std::chrono::steady_clock::time_point fbSHA1StartTime;
 
 // --- Emscripten / desktop mode flag
 #ifdef __EMSCRIPTEN__
@@ -4837,6 +4840,18 @@ abstractEmulation_t* getType(int nFiles,
 		RETURN new defaults_t;
 #endif // !__RPI_PICO__
 
+	if ((rom[ZERO] == "--sha1") && (rom[TWO] == "--timeout") && (nFiles == DHASH_ROM_FILE))
+	{
+		rom[ZERO] = rom[ONE];
+		fbSHA1TimeoutSeconds = std::stoi(rom[THREE]);
+		rom[ONE].clear();
+		rom[TWO].clear();
+		rom[THREE].clear();
+		fbSHA1StartTime = std::chrono::steady_clock::now();
+		nFiles = SINGLE_ROM_FILE;
+		fbSHA1Enabled = YES;
+	}
+
 	if (nFiles == SINGLE_ROM_FILE) /* one file as input */
 	{
 		EMULATION_ID suspectedID = getPlatformFromPath(rom[ZERO]);
@@ -5265,11 +5280,55 @@ int main(int argc, char* argv[])
 		}
 		else if (arg == "--help" || arg == "-h")
 		{
-			LOG("Masquerade Multi-System Emulator v%.4f\n", VERSION);
-			LOG("\nUsage:\n");
-			LOG("  masquerade [ROM_FILE...]       - Load and run ROM(s)\n");
-			LOG("  masquerade --version           - Print version and exit\n");
-			LOG("  masquerade --help              - Show this help message\n");
+			LOG("Masquerade Multi-System Emulator v%.4f", VERSION);
+
+			LOG("\nUsage:");
+			LOG("  masquerade [ROM_FILE...]									Load and run ROM(s)");
+			LOG("  masquerade --sha1 [ROM_FILE...] --timeout <seconds>		Load and run ROM(s) and outputs dhash(screenbuffer) at <timeout>");
+			LOG("  masquerade --version										Print version and exit");
+			LOG("  masquerade --help										Show this help message");
+
+#ifndef __RPI_PICO__
+			LOG("\nCPU Test / SST Modes:");
+
+#if MASQ_ENABLE_SI
+			LOG("  masquerade -8080 <test.rom>								Run Intel 8080 test");
+			LOG("  masquerade -8080SST <rom> <test>							Run Intel 8080 SST");
+			LOG("  masquerade -I8080SST <rom> <test>						Run Intel 8080 SST");
+#endif
+
+#if MASQ_ENABLE_PACMAN
+			LOG("  masquerade -Z80 <test.rom>								Run Z80 test");
+			LOG("  masquerade -Z80SST <rom> <test>							Run Z80 SST");
+#endif
+
+#if MASQ_ENABLE_NES
+			LOG("  masquerade -6502 <test.rom>								Run 6502 test");
+			LOG("  masquerade -R6502SST <rom> <test>						Run Ricoh 2A03 / NES 6502 SST");
+			LOG("  masquerade -N6502SST <rom> <test>						Run Ricoh 2A03 / NES 6502 SST");
+#endif
+
+#if MASQ_ENABLE_GBC
+			LOG("  masquerade -SM83SST <rom> <test>							Run SM83 SST");
+#endif
+
+#if MASQ_ENABLE_GBA
+			LOG("  masquerade -ARM7TDMISST <rom> <test>						Run ARM7TDMI SST");
+#endif
+
+			LOG("\nGBA Compare / Replay:");
+
+#if MASQ_ENABLE_GBA
+			LOG("  masquerade -C <rom.gba> <reference>						Compare against reference");
+			LOG("  masquerade -R <rom.gba> <reference>						Replay mode (not supported)");
+#endif
+
+			LOG("\nMulti-ROM Systems:");
+			LOG("  masquerade <4 ROMs>										Space Invaders");
+			LOG("  masquerade <10 ROMs>										Pac-Man");
+			LOG("  masquerade <13 ROMs>										Ms. Pac-Man");
+#endif // !__RPI_PICO__
+
 			RETURN ZERO;
 		}
 	}

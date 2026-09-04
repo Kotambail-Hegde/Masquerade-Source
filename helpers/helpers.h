@@ -590,6 +590,7 @@ extern "C" {
 #define SINGLE_ROM_FILE                             ONE
 #define TEST_ROM_FILE                               TWO
 #define COMPARE_OR_REPLAY_ROM_FILE                  THREE
+#define DHASH_ROM_FILE                              FOUR
 #define MAX_NUMBER_ROMS_FOR_SI                      FOUR
 #define MAX_NUMBER_ROMS_FOR_PM                      TEN
 #define MAX_NUMBER_ROMS_FOR_MSPM                    THIRTEEN
@@ -1031,10 +1032,10 @@ private:
                 }
                 else if constexpr (std::is_same_v<T, std::string>)
                 {
-                    if (e.type == PicoType::STRING) return std::string(e.s);
-                    if (e.type == PicoType::BOOL)   return e.b ? std::string("true") : std::string("false");
-                    if (e.type == PicoType::INT)    return std::to_string(e.i);
-                    if (e.type == PicoType::FLOAT)  return std::to_string(e.f);
+                    if (e.type == PicoType::STRING) RETURN std::string(e.s);
+                    if (e.type == PicoType::BOOL)   RETURN e.b ? std::string("true") : std::string("false");
+                    if (e.type == PicoType::INT)    RETURN std::to_string(e.i);
+                    if (e.type == PicoType::FLOAT)  RETURN std::to_string(e.f);
                 }
 
                 RETURN defaultVal;
@@ -1057,6 +1058,9 @@ using MasqConfig_t = boost::property_tree::ptree;
 // GLOBAL EXTERNS
 // =========================================================
 extern MAP64 ENABLE_LOGS;
+extern FLAG fbSHA1Enabled;
+extern uint64_t fbSHA1TimeoutSeconds;
+extern std::chrono::steady_clock::time_point fbSHA1StartTime;
 
 #ifndef __RPI_PICO__
 // Desktop-only OpenGL / emulation window externs
@@ -1477,13 +1481,13 @@ struct ImGuiLogBuffer
             {
                 Clear();
             }
-            else if (command == "--help")
+            else if (command == "--help" || command == "-h")
             {
                 char vBuf[32];
                 std::snprintf(vBuf, sizeof(vBuf), "%.4f", VERSION);
 
                 // Precise Em-Space / Thin-Space pixel adjustment strictly inside this block
-                auto AlignLine = [](const char* cmd, const char* desc, float targetPixelWidth = 190.0f) {
+                auto AlignLine = [](const char* cmd, const char* desc, float targetPixelWidth = 200.0f) {
                     std::string line = "  " + std::string(cmd);
                     float width = ImGui::CalcTextSize(line.c_str()).x;
 
@@ -1491,21 +1495,18 @@ struct ImGuiLogBuffer
                     static const std::string EM_SPACE = "\xE2\x80\x83";
                     static const std::string THIN_SPACE = "\xE2\x80\x89";
 
-                    float emWidth = ImGui::CalcTextSize(EM_SPACE.c_str()).x;
-                    float thinWidth = ImGui::CalcTextSize(THIN_SPACE.c_str()).x;
-
                     // Fill majority distance using wide Em-Spaces
-                    while (width + emWidth <= targetPixelWidth)
+                    while (width + ImGui::CalcTextSize(EM_SPACE.c_str()).x <= targetPixelWidth)
                     {
                         line += EM_SPACE;
-                        width += emWidth;
+                        width += ImGui::CalcTextSize(EM_SPACE.c_str()).x;
                     }
 
                     // Fill remaining sub-pixel gap using Thin-Spaces
-                    while (width + thinWidth <= targetPixelWidth)
+                    while (width + ImGui::CalcTextSize(THIN_SPACE.c_str()).x <= targetPixelWidth)
                     {
                         line += THIN_SPACE;
-                        width += thinWidth;
+                        width += ImGui::CalcTextSize(THIN_SPACE.c_str()).x;
                     }
 
                     return line + " - " + desc;
@@ -1513,11 +1514,61 @@ struct ImGuiLogBuffer
 
                 std::lock_guard<std::mutex> lock(mutex);
                 lines.emplace_back(std::string("Masquerade Multi-System Emulator v") + vBuf);
+
+                lines.emplace_back("");
                 lines.emplace_back("Usage:");
                 lines.emplace_back(AlignLine("[ROM_FILE...]", "Load and run ROM(s)", 200.0f));
+                lines.emplace_back(AlignLine("--sha1 [ROM_FILE...] --timeout <seconds>", "Load and run ROM(s) and outputs sha1(screenbuffer) at <timeout>", 200.0f));
+
+                lines.emplace_back("");
+                lines.emplace_back("General:");
                 lines.emplace_back(AlignLine("--version", "Print version and exit", 200.0f));
                 lines.emplace_back(AlignLine("--help", "Show this help message", 200.0f));
                 lines.emplace_back(AlignLine("--about", "Show Masquerade information", 200.0f));
+
+                lines.emplace_back("");
+                lines.emplace_back("CPU Test / SST Modes:");
+
+#if MASQ_ENABLE_SI
+                lines.emplace_back(AlignLine("-8080 <test.rom>", "Run Intel 8080 test", 200.0f));
+                lines.emplace_back(AlignLine("-8080SST <rom> <test>", "Run Intel 8080 SST", 200.0f));
+                lines.emplace_back(AlignLine("-I8080SST <rom> <test>", "Run Intel 8080 SST", 200.0f));
+#endif
+
+#if MASQ_ENABLE_PACMAN
+                lines.emplace_back(AlignLine("-Z80 <test.rom>", "Run Z80 test", 200.0f));
+                lines.emplace_back(AlignLine("-Z80SST <rom> <test>", "Run Z80 SST", 200.0f));
+#endif
+
+#if MASQ_ENABLE_NES
+                lines.emplace_back(AlignLine("-6502 <test.rom>", "Run 6502 test", 200.0f));
+                lines.emplace_back(AlignLine("-R6502SST <rom> <test>", "Run Ricoh 2A03 / NES 6502 SST", 200.0f));
+                lines.emplace_back(AlignLine("-N6502SST <rom> <test>", "Run Ricoh 2A03 / NES 6502 SST", 200.0f));
+#endif
+
+#if MASQ_ENABLE_GBC
+                lines.emplace_back(AlignLine("-SM83SST <rom> <test>", "Run SM83 SST", 200.0f));
+#endif
+
+#if MASQ_ENABLE_GBA
+                lines.emplace_back(AlignLine("-ARM7TDMISST <rom> <test>", "Run ARM7TDMI SST", 200.0f));
+#endif
+
+#if MASQ_ENABLE_GBA
+                lines.emplace_back("");
+                lines.emplace_back("GBA Compare / Replay:");
+                lines.emplace_back(AlignLine("-C <rom.gba> <reference>", "Run GBA compare mode", 200.0f));
+                lines.emplace_back(AlignLine("-R <rom.gba> <reference>", "Replay mode (not supported)", 200.0f));
+#endif
+
+                lines.emplace_back("");
+                lines.emplace_back("Multi-ROM Systems:");
+                lines.emplace_back(AlignLine("<4 ROM files>", "Load Space Invaders ROM set", 200.0f));
+                lines.emplace_back(AlignLine("<10 ROM files>", "Load Pac-Man ROM set", 200.0f));
+                lines.emplace_back(AlignLine("<13 ROM files>", "Load Ms. Pac-Man ROM set", 200.0f));
+
+                lines.emplace_back("");
+                lines.emplace_back("Terminal Commands:");
                 lines.emplace_back(AlignLine("clear", "Clear terminal", 200.0f));
                 lines.emplace_back(AlignLine("ls", "List files", 200.0f));
                 lines.emplace_back(AlignLine("pwd", "Show current directory", 200.0f));
@@ -1586,7 +1637,7 @@ struct ImGuiLogBuffer
                 std::lock_guard<std::mutex> lock(mutex);
                 lines.emplace_back(std::string("Masquerade Multi-System Emulator v") + vBuf);
             }
-            else if (command == "about")
+            else if (command == "--about" || command == "about")
             {
                 std::lock_guard<std::mutex> lock(mutex);
                 lines.emplace_back("Masquerade Multi-Console Emulator");
@@ -3332,6 +3383,17 @@ public:
         for (uint8_t b : digest)
             ss << std::setw(2) << static_cast<int>(b);
         RETURN ss.str();
+    }
+
+    static std::string CalculateSHA1(const Pixel* buffer, int width, int height)
+    {
+        SHA1_CUSTOM sha1;
+
+        sha1.update(
+            reinterpret_cast<const uint8_t*>(buffer),
+            static_cast<size_t>(width) * height * sizeof(Pixel));
+
+        RETURN SHA1_CUSTOM::toHexString(sha1.digest());
     }
 
 private:
