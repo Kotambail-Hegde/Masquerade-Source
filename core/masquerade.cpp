@@ -1977,7 +1977,74 @@ private:
 #endif // !__EMSCRIPTEN__
 	}
 
-#endif // !__RPI_PICO__ (romSelect / bootRomSelect / loadSIAudioWAV)
+	FLAG barcodeUpload(BYTE* barcode)
+	{
+#ifdef __EMSCRIPTEN__
+		// TODO: Handle browser .bin upload
+#else // !__EMSCRIPTEN__
+		nfdu8char_t* outPath = nullptr;
+		const nfdpathset_t* outPaths = nullptr;
+		nfdu8filteritem_t     filters[1];
+		nfdopendialogu8args_t args = { 0 };
+
+		filters->name = "Binary";
+		filters->spec = "bin";
+
+		args.filterList = filters;
+		args.filterCount = ONE;
+
+		nfdresult_t result = NFD_OpenDialogU8_With(&outPath, &args);
+		if (result == NFD_OKAY)
+		{
+			INFO("Load Barcode : %s", outPath);
+
+			// Assumption (not confirmed against any hardware reference -- flagging
+			// per project convention): the .bin file is exactly the 13 raw ASCII
+			// digit bytes, no header/delimiter -- the same bytes the "Scan" button
+			// already builds by hand from typed input. barcodeScan()/the wire
+			// protocol expects ASCII digits (Shonumi's Barcode_Boy.txt, section 4:
+			// "the 'numbers' are represented as ASCII instead of hex"), so this
+			// reads the file as-is with no digit conversion.
+			std::ifstream file(outPath, std::ios::binary);
+			FLAG loadedOK = NO;
+
+			if (file.is_open())
+			{
+				BYTE fileBytes[13] = {};
+				file.read(reinterpret_cast<char*>(fileBytes), 13);
+
+				if (file.gcount() == 13)
+				{
+					memcpy(barcode, fileBytes, 13);
+					loadedOK = YES;
+				}
+				else
+				{
+					WARN("Barcode .bin file is not exactly 13 bytes: %s", outPath);
+				}
+			}
+			else
+			{
+				WARN("Could not open barcode .bin file: %s", outPath);
+			}
+
+			NFD_FreePathU8(outPath);
+
+			RETURN loadedOK;
+		}
+		else if (result == NFD_CANCEL)
+		{
+			RETURN NO;
+		}
+		else
+		{
+			FATAL("Error: %s", NFD_GetError());
+			RETURN NO;
+		}
+#endif // __EMSCRIPTEN__
+	}
+
+#endif // !__RPI_PICO__ (romSelect / bootRomSelect / loadSIAudioWAV / barcodeUpload)
 
 	// ---- Windows DWM title-bar colouring (desktop only) -----
 #if defined(_WIN32) && !defined(__RPI_PICO__) && (ENABLED_IMGUI_DEFAULT_THEME == NO)
@@ -2687,6 +2754,7 @@ public:
 #else
 							static const FLAG showBiosPrompt = NO;
 #endif
+							static FLAG barcodeWindowOpen = NO;
 
 							tickAtStart = SDL_GetTicksNS();
 
@@ -3098,6 +3166,17 @@ public:
 												if (ImGui::MenuItem("Enable Zapper##EnableZapper", NULL, enableZapper))
 												{
 													enableZapper = (enableZapper == YES ? NO : YES);
+												}
+												ImGui::EndMenu();
+											}
+											if (ImGui::BeginMenu("GBC", MASQ_ENABLE_GBC))
+											{
+												if (ImGui::MenuItem("Scan Barcode##ScanBarcode"))
+												{
+													if (current_instance->getEmulationID() == EMULATION_ID::GB_GBC_ID)
+													{
+														barcodeWindowOpen = YES;
+													}
 												}
 												ImGui::EndMenu();
 											}
@@ -4374,6 +4453,63 @@ public:
 									}
 									RenderCameraHardwareUI(camera);
 #endif // !__RPI_PICO__ && !ENABLE_OTA_EXECUTABLE && !ENABLE_SERVER_EXECUTABLE
+								}
+
+								if (barcodeWindowOpen == YES)
+								{
+									ImGui::OpenPopup("Scan Barcode Popup");
+									barcodeWindowOpen = NO;
+								}
+
+								if (ImGui::BeginPopupModal("Scan Barcode Popup", NULL, ImGuiWindowFlags_AlwaysAutoResize))
+								{
+									if (ImGui::Button("Load Barcode .bin"))
+									{
+										GBc_t* gbc = static_cast<GBc_t*>(current_instance);
+
+										BYTE barcode[13];
+
+										if (barcodeUpload(barcode))
+										{
+											gbc->barcodeScan(barcode);
+											ImGui::CloseCurrentPopup();
+										}
+									}
+
+									ImGui::Separator();
+
+									static char barcode[14] = {};
+
+									ImGui::Text("Enter 13-digit barcode:");
+
+									ImGui::InputText("##BarcodeInput", barcode, sizeof(barcode), ImGuiInputTextFlags_CharsDecimal);
+
+									if (ImGui::Button("Scan"))
+									{
+										if (std::strlen(barcode) == 13)
+										{
+											BYTE barcodeData[13];
+
+											for (BYTE i = ZERO; i < 13; i++)
+											{
+												barcodeData[i] = static_cast<BYTE>(barcode[i]);
+											}
+
+											GBc_t* gbc = static_cast<GBc_t*>(current_instance);
+											gbc->barcodeScan(barcodeData);
+
+											ImGui::CloseCurrentPopup();
+										}
+									}
+
+									ImGui::SameLine();
+
+									if (ImGui::Button("Cancel"))
+									{
+										ImGui::CloseCurrentPopup();
+									}
+
+									ImGui::EndPopup();
 								}
 
 #ifndef __EMSCRIPTEN__

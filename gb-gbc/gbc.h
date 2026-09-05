@@ -302,6 +302,88 @@ public:
 	int postprocessed[GBCAM_SENSOR_W][GBCAM_SENSOR_H];
 };
 
+class GBcBarcodeEngine_t
+{
+public:
+
+	void reset();
+
+	// Called by GBc_t::detectSerialDevice() the instant it identifies this
+	// peripheral (the GB has just sent the handshake's first two bytes,
+	// 0x10 and 0x07 -- that's the 0x1007 magic check). Those two bytes never
+	// reached sendBitToGB/receiveBitFromGB below -- this engine isn't
+	// invoked until serialDevice == GB_BARCODE_BOY, which only becomes true
+	// AFTER detection completes -- so this fast-forwards RX/TX state to
+	// line up with byte 3 of the real handshake instead of restarting from
+	// byte 1. Mirrors GBcPrinterEngine_t::startPacket() doing the same for
+	// the printer's 0x88/0x33 magic bytes.
+	void startHandshake();
+
+	FLAG receiveBitFromGB(BIT bitReceived);
+	FLAG sendBitToGB(BIT* bitToSend);
+	void tick();
+	void barcodeScan(const BYTE* barcode);
+	FLAG isClocking()
+	{
+		RETURN clocking;
+	}
+
+private:
+
+	BYTE rxByte = ZERO;
+
+	uint8_t txBitCount = ZERO;
+	uint8_t rxBitCount = ZERO;
+
+	BYTE status = ZERO;
+
+	BYTE barcode[13];
+	BYTE txData[30];
+	BYTE txDataIndex = ZERO;
+
+	FLAG clocking = NO;
+
+	// Fixed 4-byte handshake exchange -- reverse-engineered by Shonumi
+	// (shonumi.github.io/articles/art7.html) and verified against coffee-gb's
+	// tested implementation (github.com/trekawek/coffee-gb, commit 4789306):
+	// the GB, as clock master, always sends 0x10 0x07 0x10 0x07; the Barcode
+	// Boy always replies 0xFF 0xFF 0x10 0x07. The game only actually checks
+	// the reply's last two bytes, but real hardware (and coffee-gb) sends
+	// the same 4 bytes every single time -- every handshake, not just the
+	// first -- so this does too.
+	static constexpr BYTE HANDSHAKE_EXPECT_FROM_GB[4] = { 0x10, 0x07, 0x10, 0x07 };
+	static constexpr BYTE HANDSHAKE_REPLY_TO_GB[4] = { 0xFF, 0xFF, 0x10, 0x07 };
+	uint8_t handshakeIndex = ZERO;
+
+	// RX-side self-detection of the GB's own handshake bytes -- mirrors
+	// GBcPrinterEngine_t's GB_PRINTER_NONE/MAGIC_33 pattern exactly.
+	// GBc_t::detectSerialDevice() only ever runs ONCE per session (it stops
+	// dead as soon as serialDevice != GB_LINK_CABLE), so every handshake
+	// after the first -- the re-handshake this device requires after every
+	// scan -- has to be recognised by THIS engine from the raw bytes the GB
+	// sends, the same way the printer re-detects 0x88/0x33 itself for its
+	// 2nd+ print job.
+	enum class GB_BARCODE_STATE
+	{
+		GB_BARCODE_NONE,         // expecting byte 1 (0x10)
+		GB_BARCODE_MAGIC_DUMMY1, // byte 1 confirmed, expecting byte 2 (0x07)
+		GB_BARCODE_MAGIC_DUMMY2, // byte 2 confirmed, expecting byte 3 (0x10)
+		GB_BARCODE_MAGIC_10,     // byte 3 confirmed, expecting byte 4 (0x07)
+		GB_BARCODE_MAGIC_07      // full handshake confirmed
+	};
+
+	enum class GB_BARCODE_TX_STATE
+	{
+		GB_BARCODE_TX_HANDSHAKE, // driving HANDSHAKE_REPLY_TO_GB[handshakeIndex]
+		GB_BARCODE_TX_SEND       // driving txData[txDataIndex]
+	};
+
+	GB_BARCODE_STATE state = GB_BARCODE_STATE::GB_BARCODE_NONE;
+	GB_BARCODE_TX_STATE txState = GB_BARCODE_TX_STATE::GB_BARCODE_TX_HANDSHAKE;
+
+	void processReceivedByte(BYTE dataReceived);
+};
+
 class GBc_t : public abstractEmulation_t
 {
 #pragma region INFRASTRUCTURE_DECLARATIONS
@@ -2683,6 +2765,12 @@ private:
 	SDL_Camera* pCameraBackend = nullptr;
 #endif // !__RPI_PICO__
 
+private:
+
+#ifndef __RPI_PICO__
+	GBcBarcodeEngine_t gbBarcodeEngine;
+#endif // !__RPI_PICO__
+
 public:
 
 #ifndef __RPI_PICO__
@@ -3181,6 +3269,13 @@ public:
 	void translateGFX(PALETTE_ID from, PALETTE_ID to, PALETTE_ID colorCorrectionBefore, PALETTE_ID colorCorrectionAfter);
 	void displayCompleteScreen();
 	void OAMDMASTATModeGlitch();
+
+public:
+
+	MASQ_INLINE void barcodeScan(const BYTE* barcode)
+	{
+		gbBarcodeEngine.barcodeScan(barcode);
+	}
 
 private:
 
