@@ -358,13 +358,40 @@ jobs:
       # Cache generated Docboy ROMs
       # =========================================================================
 
-      - name: Cache Docboy ROMs
+      - name: Restore Docboy ROMs
         id: cache-docboy
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: docboy-test-suite/roms
           key: docboy-roms-${{ env.DOCBOY_COMMIT }}
 
+      - name: Install RGBDS
+        if: steps.cache-docboy.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $url = "https://github.com/gbdev/rgbds/releases/download/v0.9.4/rgbds-win64.zip"
+
+          Write-Host "Downloading RGBDS v0.9.4..."
+          Invoke-WebRequest -Uri $url -OutFile rgbds.zip
+
+          Expand-Archive rgbds.zip -DestinationPath rgbds -Force
+
+          $rgbdsPath = (Get-ChildItem rgbds -Recurse -Filter rgbasm.exe | Select-Object -First 1).DirectoryName
+          echo $rgbdsPath >> $env:GITHUB_PATH
+
+      - name: Build Docboy ROMs
+        if: steps.cache-docboy.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          cd docboy-test-suite
+          make -sj32
+
+      - name: Save Docboy ROMs
+        if: steps.cache-docboy.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: docboy-test-suite/roms
+          key: docboy-roms-${{ env.DOCBOY_COMMIT }}
       # =========================================================================
       # RGBDS
       # =========================================================================
@@ -373,17 +400,15 @@ jobs:
         if: steps.cache-docboy.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
-          $version = "v1.0.2"
-          $url = "https://github.com/gbdev/rgbds/releases/download/$version/rgbds-$version-windows-x86_64.zip"
+          $url = "https://github.com/gbdev/rgbds/releases/download/v0.9.4/rgbds-win64.zip"
 
-          Write-Host "Downloading RGBDS from:"
-          Write-Host $url
-
+          Write-Host "Downloading RGBDS v0.9.4..."
           Invoke-WebRequest -Uri $url -OutFile rgbds.zip
 
-          Expand-Archive rgbds.zip -DestinationPath rgbds
+          Expand-Archive rgbds.zip -DestinationPath rgbds -Force
 
-          echo "$env:GITHUB_WORKSPACE\rgbds" >> $env:GITHUB_PATH
+          $rgbdsPath = (Get-ChildItem rgbds -Recurse -Filter rgbasm.exe | Select-Object -First 1).DirectoryName
+          echo $rgbdsPath >> $env:GITHUB_PATH
 
       # =========================================================================
       # Build Docboy ROMs
@@ -395,7 +420,7 @@ jobs:
         run: |
           cd docboy-test-suite
 
-          make
+          make -sj
 
       # =========================================================================
       # Configure Docboy framework
@@ -407,11 +432,97 @@ jobs:
           @"
           [framework]
           emulator = masquerade.exe
-          location = $env:GITHUB_WORKSPACE\build\bin\masquerade.exe
+          location = $env:GITHUB_WORKSPACE\build\bin\Release\masquerade.exe
           type = setup10
           rom_dir = $env:GITHUB_WORKSPACE\docboy-test-suite\roms
           default_timeout = 8
-          "@ | Set-Content docboy_test_framework.ini
+          "@ | Set-Content tests\gb_gbc\docboy\docboy_test_framework.ini
+
+      # =========================================================================
+      # Prepare Docboy emulator dependencies
+      # =========================================================================
+
+      - name: Prepare Docboy emulator dependencies
+        shell: pwsh
+        run: |
+          $testDir = "tests\gb_gbc\docboy\EmulatorToTest\setup10"
+
+          New-Item -ItemType Directory -Path $testDir -Force | Out-Null
+
+          Copy-Item "build\bin\Release\SDL3.dll" $testDir -Force
+          Copy-Item "build\bin\Release\SDL3_net.dll" $testDir -Force
+          Copy-Item "build\bin\Release\assets" $testDir -Recurse -Force
+
+      # =========================================================================
+      # Download GB/GBC BIOS
+      # =========================================================================
+
+      - name: Download GB/GBC BIOS
+        shell: pwsh
+        run: |
+          $assetsDir = "tests\gb_gbc\docboy\EmulatorToTest\setup10\assets"
+
+          New-Item -ItemType Directory -Path "$assetsDir\gb\bios" -Force | Out-Null
+          New-Item -ItemType Directory -Path "$assetsDir\gbc\bios" -Force | Out-Null
+
+          Invoke-WebRequest -Uri "https://gbdev.gg8.se/files/roms/bootroms/cgb_boot.bin" -OutFile "$assetsDir\gbc\bios\cgb_boot.bin"
+          Invoke-WebRequest -Uri "https://gbdev.gg8.se/files/roms/bootroms/dmg_boot.bin" -OutFile "$assetsDir\gb\bios\dmg_rom.bin"
+
+          Copy-Item "$assetsDir\gb\bios\dmg_rom.bin" "$assetsDir\gb\bios\dmg_boot.bin" -Force
+
+      # =========================================================================
+      # Configure Docboy emulator
+      # =========================================================================
+
+      - name: Configure Docboy emulator
+        shell: pwsh
+        run: |
+          @"
+          [mods]
+          _ENABLE_AUDIO=true
+          _MUTE_AUDIO=false
+          _EMULATOR_THEME=LIGHT
+          _VIDEO_EFFECTS=NEAREST_FILTER
+          _MAINTAIN_ASPECT_RATIO=false
+          _XSCALE=1
+          _ENABLE_DEBUG_LOG=false
+          _ENABLE_FRAME_LIMIT=false
+          _XFPS=500
+          _ENABLE_NETWORK=false
+          _NETWORK_TIMEOUT_LIMIT=100
+          _ENABLE_QUICK_SAVE=true
+          _ENABLE_BESS_FORMAT=true
+          _ENABLE_REWIND=false
+          _REWIND_BUFFER_SIZE=5000
+          _ENABLE_ACCURATE_INPUT_SAMPLING=false
+          _X=345
+          _Y=200
+          _key=XXXXXXXXXX
+
+          [internal]
+          _working_directory=assets\internal
+          _ui_working_directory=assets\ui\config
+          _ui_sprites_directory=assets\ui\sprites
+          _first_boot_bios_prompt_done=true
+          _key=XXXXXXXXXX
+
+          [gb_gbc]
+          _id=5
+          _dmg_bios_location=assets\gb\bios\dmg_boot.bin
+          _cgb_bios_location=assets\gbc\bios\cgb_boot.bin
+          _force_gb_palette=GearBoy
+          _force_gb_gfx_for_gbc=false
+          _force_gb_for_gbc=false
+          _force_gbc_for_gb=false
+          _enable_cgb_color_correction=true
+          _enable_audio_hpf=true
+          _gb_ghosting=0.0
+          _gbc_ghosting=0.0
+          _accelerometer_sensitivity=0.3
+          _save_location=assets\saves
+          _volume=0.0
+          _key=XXXXXXXXXX
+          "@ | Set-Content tests\gb_gbc\docboy\EmulatorToTest\setup10\assets\CONFIG.ini
 
       # =========================================================================
       # Run tests
@@ -420,6 +531,7 @@ jobs:
       - name: Run Docboy tests
         shell: pwsh
         run: |
+          cd tests\gb_gbc\docboy
           python docboy_test_framework.py
 
       # =========================================================================
@@ -431,5 +543,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: docboy-test-report
-          path: docboy_test.report
+          path: tests/gb_gbc/docboy/results/
           if-no-files-found: warn
