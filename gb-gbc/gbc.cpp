@@ -1627,6 +1627,9 @@ void GBc_t::serialTick()
 
 			// extract the "bitToBeSent" over serial interface
 			BIT bitToBeSent = GETBIT(SEVEN, pGBc_peripherals->SB);
+			BYTE receivedByte = ZERO;
+			FLAG rxStatus = FALSE;
+			BIT bitReceived = ONE;
 
 			// GB_LINK_CABLE (real network multiplayer) is handled entirely
 			// separately from GB_PRINTER below. The printer always
@@ -1646,8 +1649,6 @@ void GBc_t::serialTick()
 			// duration, which is exactly what this redesign exists to fix.
 			if (pGBc_instance->GBc_state.emulatorStatus.serialDevice == GB_SERIAL_DEVICE::GB_LINK_CABLE && isSerialLinkConnected() == YES)
 			{
-				BYTE receivedByte = ZERO;
-
 #ifndef __EMSCRIPTEN__
 				if (abstractEmulation_t::getLinkSession().isAdapterLeader() == YES)
 				{
@@ -1656,21 +1657,15 @@ void GBc_t::serialTick()
 					// of passing SB straight through.
 				}
 #endif
-
 				if (tickSerialLink(pGBc_peripherals->SB, &receivedByte))
 				{
 					pGBc_peripherals->SB = receivedByte;
-
 					pGBc_instance->GBc_state.emulatorStatus.serialMasterByteShiftCount = RESET;
 					pGBc_peripherals->SC.scFields.TRANSFER_ENABLE = RESET;
 					requestInterrupts(INTERRUPTS::SERIAL_INTERRUPT);
 				}
-
 				RETURN;
 			}
-
-			FLAG rxStatus = FALSE;
-			BIT bitReceived = ZERO;
 
 			if (pGBc_instance->GBc_state.emulatorStatus.serialDevice == GB_SERIAL_DEVICE::GB_PRINTER)
 			{
@@ -1681,17 +1676,26 @@ void GBc_t::serialTick()
 				// current byte instead of starting cleanly on the next one.
 
 				// The printer is the sender from its own perspective.
-				while (!gbPrinterEngine.sendBitToGB(&bitReceived))
-				{
-					;
-				}
+				gbPrinterEngine.sendBitToGB(&bitReceived);
 
 				// The printer is the receiver from its own perspective.
 				// Although the Game Boy is sending this bit, the printer receives it.
-				while (!gbPrinterEngine.receiveBitFromGB(bitToBeSent))
-				{
-					;
-				}
+				gbPrinterEngine.receiveBitFromGB(bitToBeSent);
+			}
+
+			if (pGBc_instance->GBc_state.emulatorStatus.serialDevice == GB_SERIAL_DEVICE::GB_BARCODE_BOY)
+			{
+				// Barcode Boy is the sender from its own perspective.
+				gbBarcodeEngine.sendBitToGB(&bitReceived);
+
+				// Barcode Boy is the receiver from its own perspective --
+				// needed so it can self-detect the GB's handshake bytes for
+				// every re-handshake after the first (detectSerialDevice()
+				// only ever fires once per session). Same ordering as the
+				// printer block above: send this bit before consuming the
+				// incoming one, so a txState change triggered by THIS
+				// byte's confirmation can't leak into THIS byte's own reply.
+				gbBarcodeEngine.receiveBitFromGB(bitToBeSent);
 			}
 
 			// detect connected serial device from outgoing data
@@ -1706,7 +1710,7 @@ void GBc_t::serialTick()
 			// if all eight bits are shifted out...
 			if (pGBc_instance->GBc_state.emulatorStatus.serialMasterByteShiftCount == EIGHT)
 			{
-				//INFO("GB received byte: 0x%02X", pGBc_peripherals->SB);
+				INFO("GB[M] received byte: 0x%02X", pGBc_peripherals->SB);
 
 				// reset the shift counter
 				pGBc_instance->GBc_state.emulatorStatus.serialMasterByteShiftCount = RESET;
@@ -1728,6 +1732,8 @@ void GBc_t::serialTick()
 	if (pGBc_peripherals->SC.scFields.CLOCK_SELECT == SERIAL_SLAVE)
 	{
 		pGBc_instance->GBc_state.emulatorStatus.serialMasterByteShiftCount = ZERO;
+		BYTE receivedByte = ZERO;
+		BIT bitReceived = ZERO;
 
 		// GB_LINK_CABLE (network multiplayer): a slave has no clock of
 		// its own -- it purely reacts to whatever byte the remote peer
@@ -1738,8 +1744,6 @@ void GBc_t::serialTick()
 		// full-duplex exchange on a single clock edge).
 		if (pGBc_instance->GBc_state.emulatorStatus.serialDevice == GB_SERIAL_DEVICE::GB_LINK_CABLE && isSerialLinkConnected() == YES)
 		{
-			BYTE receivedByte = ZERO;
-
 #ifndef __EMSCRIPTEN__
 			// Slave branch, same idea, symmetric check:
 			if (abstractEmulation_t::getLinkSession().isFourPlayerAdapterActive() == YES
@@ -1750,17 +1754,51 @@ void GBc_t::serialTick()
 				// interpretation is built.
 			}
 #endif
-
 			if (tickSerialLinkAsSlave(pGBc_peripherals->SB, &receivedByte))
 			{
 				pGBc_peripherals->SB = receivedByte;
 
-				pGBc_instance->GBc_state.emulatorStatus.serialSlaveByteShiftCount = RESET;
-				pGBc_peripherals->SC.scFields.TRANSFER_ENABLE = RESET;
-				requestInterrupts(INTERRUPTS::SERIAL_INTERRUPT);
+				// reset the shift counter
+				pGBc_instance->GBc_state.emulatorStatus.serialSlaveByteShiftCount = EIGHT;
 			}
+		}
 
-			RETURN;
+		if (pGBc_instance->GBc_state.emulatorStatus.serialDevice == GB_SERIAL_DEVICE::GB_BARCODE_BOY)
+		{
+			if (gbBarcodeEngine.isClocking() == YES)
+			{
+				// Barcode Boy is the sender from its own perspective.
+				gbBarcodeEngine.sendBitToGB(&bitReceived);
+
+				// update the SB (after the MSB was transferred out and LSB was transferred in)
+				pGBc_peripherals->SB = (pGBc_peripherals->SB << ONE) | bitReceived;
+
+				// increment the shift counter
+				pGBc_instance->GBc_state.emulatorStatus.serialSlaveByteShiftCount++;
+			}
+		}
+
+		// if all eight bits are shifted in...
+		if (pGBc_instance->GBc_state.emulatorStatus.serialSlaveByteShiftCount == EIGHT)
+		{
+			INFO("GB[S] received byte: 0x%02X", pGBc_peripherals->SB);
+
+			// reset the shift counter
+			pGBc_instance->GBc_state.emulatorStatus.serialSlaveByteShiftCount = RESET;
+
+			// Per gbdev's Serial Data Transfer doc and GBE+'s own barcode_boy_process()
+			// (github.com/shonumi/gbe-plus, src/dmg/sio.cpp): on real hardware, the
+			// passive/slave side's interrupt fires unconditionally at the end of
+			// every completed shift-in -- whether or not TRANSFER_ENABLE was set on
+			// this side at all. TRANSFER_ENABLE only gates whether there's a bit
+			// left to clear, not whether the interrupt happens. (Already verified
+			// this doesn't crash link cable or barcode -- tested a few turns back.)
+
+			// request for serial interrupt
+			requestInterrupts(INTERRUPTS::SERIAL_INTERRUPT);
+
+			// transfer is complete, so set bit 7 of SC to zero
+			pGBc_peripherals->SC.scFields.TRANSFER_ENABLE = RESET;
 		}
 	}
 #endif // !__RPI_PICO__
@@ -3476,6 +3514,10 @@ void GBc_t::detectSerialDevice(BIT bitToSend)
 		case 0x8833:
 			serialStatus.serialDevice = GB_SERIAL_DEVICE::GB_PRINTER;
 			gbPrinterEngine.startPacket();
+			BREAK;
+		case 0x1007:
+			serialStatus.serialDevice = GB_SERIAL_DEVICE::GB_BARCODE_BOY;
+			gbBarcodeEngine.startHandshake();
 			BREAK;
 		default:
 			BREAK;

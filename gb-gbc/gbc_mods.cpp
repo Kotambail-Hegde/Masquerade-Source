@@ -2619,6 +2619,205 @@ FLAG GBc_t::tickSerialLinkAsSlave(BYTE outgoingByte, BYTE* outReceivedByte)
 }
 
 // =====================================================================================
+// GB/GBC Barcode Boy
+// =====================================================================================
+
+void GBcBarcodeEngine_t::reset()
+{
+	rxByte = ZERO;
+	txBitCount = ZERO;
+	rxBitCount = ZERO;
+	txDataIndex = ZERO;
+
+	clocking = NO;
+	handshakeIndex = ZERO;
+
+	state = GB_BARCODE_STATE::GB_BARCODE_NONE;
+	txState = GB_BARCODE_TX_STATE::GB_BARCODE_TX_HANDSHAKE;
+}
+
+void GBcBarcodeEngine_t::startHandshake()
+{
+	reset();
+
+	// See the declaration comment: GBc_t::detectSerialDevice() has already
+	// consumed the GB's first two handshake bytes (0x10, 0x07) itself, so
+	// fast-forward both RX and TX to byte 3 / reply index 2 instead of
+	// starting from byte 1.
+	state = GB_BARCODE_STATE::GB_BARCODE_MAGIC_DUMMY2;
+	handshakeIndex = TWO;
+}
+
+void GBcBarcodeEngine_t::barcodeScan(const BYTE* barcode)
+{
+	txData[ZERO] = 0x02;
+
+	for (BYTE i = ZERO; i < 13; i++)
+	{
+		txData[ONE + i] = barcode[i];
+	}
+
+	txData[14] = 0x03;
+
+	txData[15] = 0x02;
+
+	for (BYTE i = ZERO; i < 13; i++)
+	{
+		txData[16 + i] = barcode[i];
+	}
+
+	txData[29] = 0x03;
+
+	txDataIndex = ZERO;
+
+	clocking = YES;
+
+	// If the handshake already finished before this scan was queued, start
+	// streaming right away. Otherwise leave txState alone -- processReceivedByte()
+	// flips it to TX_SEND itself the moment the handshake's 4th byte is
+	// confirmed (GB_BARCODE_MAGIC_10 case below). This also fixes a bug in
+	// the previous version: barcodeScan() used to stomp txState to TX_SEND
+	// unconditionally, even mid-handshake.
+	if (state == GB_BARCODE_STATE::GB_BARCODE_MAGIC_07)
+	{
+		txState = GB_BARCODE_TX_STATE::GB_BARCODE_TX_SEND;
+	}
+}
+
+FLAG GBcBarcodeEngine_t::sendBitToGB(BIT* bitToSend)
+{
+	if (txState == GB_BARCODE_TX_STATE::GB_BARCODE_TX_SEND)
+	{
+		*bitToSend = GETBIT(SEVEN - txBitCount, txData[txDataIndex]);
+	}
+	else
+	{
+		*bitToSend = GETBIT(SEVEN - txBitCount, HANDSHAKE_REPLY_TO_GB[handshakeIndex]);
+	}
+
+	txBitCount++;
+
+	if (txBitCount == EIGHT)
+	{
+		txBitCount = ZERO;
+
+		if (txState == GB_BARCODE_TX_STATE::GB_BARCODE_TX_SEND)
+		{
+			txDataIndex++;
+
+			if (txDataIndex == 30)
+			{
+				// Full scan (both 15-byte JAN-13 copies) sent. Per Shonumi's
+				// write-up and coffee-gb's tested implementation, the device
+				// requires the handshake again after every scan -- reset()
+				// puts RX/TX back at the true start (byte 1 / reply index 0),
+				// since this time the GB's re-handshake bytes go through
+				// THIS engine's receiveBitFromGB in full, not through the
+				// top-level one-shot detector.
+				reset();
+			}
+		}
+		else if (handshakeIndex + ONE < sizeof(HANDSHAKE_REPLY_TO_GB))
+		{
+			handshakeIndex++;
+		}
+		// else: already on the last handshake reply byte (0x07) -- hold
+		// here. processReceivedByte() is what advances txState to TX_SEND,
+		// once the GB's own 4th handshake byte is confirmed AND a scan has
+		// been queued.
+	}
+
+	RETURN SUCCESS;
+}
+
+FLAG GBcBarcodeEngine_t::receiveBitFromGB(BIT bitReceived)
+{
+	rxByte <<= ONE;
+
+	if (bitReceived == ONE)
+	{
+		SETBIT(rxByte, ZERO);
+	}
+
+	rxBitCount++;
+
+	if (rxBitCount == EIGHT)
+	{
+		processReceivedByte(rxByte);
+
+		rxByte = ZERO;
+		rxBitCount = ZERO;
+	}
+
+	RETURN SUCCESS;
+}
+
+void GBcBarcodeEngine_t::processReceivedByte(BYTE dataReceived)
+{
+	switch (state)
+	{
+	case GB_BARCODE_STATE::GB_BARCODE_NONE:
+	{
+		state = (dataReceived == HANDSHAKE_EXPECT_FROM_GB[ZERO])
+			? GB_BARCODE_STATE::GB_BARCODE_MAGIC_DUMMY1
+			: GB_BARCODE_STATE::GB_BARCODE_NONE;
+		BREAK;
+	}
+
+	case GB_BARCODE_STATE::GB_BARCODE_MAGIC_DUMMY1:
+	{
+		state = (dataReceived == HANDSHAKE_EXPECT_FROM_GB[ONE])
+			? GB_BARCODE_STATE::GB_BARCODE_MAGIC_DUMMY2
+			: GB_BARCODE_STATE::GB_BARCODE_NONE;
+		BREAK;
+	}
+
+	case GB_BARCODE_STATE::GB_BARCODE_MAGIC_DUMMY2:
+	{
+		state = (dataReceived == HANDSHAKE_EXPECT_FROM_GB[TWO])
+			? GB_BARCODE_STATE::GB_BARCODE_MAGIC_10
+			: GB_BARCODE_STATE::GB_BARCODE_NONE;
+		BREAK;
+	}
+
+	case GB_BARCODE_STATE::GB_BARCODE_MAGIC_10:
+	{
+		if (dataReceived == HANDSHAKE_EXPECT_FROM_GB[3])
+		{
+			state = GB_BARCODE_STATE::GB_BARCODE_MAGIC_07;
+
+			// A scan may already have been queued (barcodeScan() called
+			// before the game got this far in the handshake) -- if so,
+			// start streaming now, since the GB is about to switch to
+			// external/slave clock and wait for exactly this.
+			if (clocking == YES)
+			{
+				txState = GB_BARCODE_TX_STATE::GB_BARCODE_TX_SEND;
+			}
+		}
+		else
+		{
+			state = GB_BARCODE_STATE::GB_BARCODE_NONE;
+		}
+		BREAK;
+	}
+
+	case GB_BARCODE_STATE::GB_BARCODE_MAGIC_07:
+	{
+		// Handshake already confirmed; nothing further expected from the GB
+		// until the next one (reset() at scan-end brings us back through
+		// this, or a desync re-sync above).
+		BREAK;
+	}
+	}
+}
+
+void GBcBarcodeEngine_t::tick()
+{
+	DO_NOTHING;
+}
+
+// =====================================================================================
 // GBC Debugger
 // =====================================================================================
 
