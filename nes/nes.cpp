@@ -3570,9 +3570,13 @@ void NES_t::writePpuRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE 
 		{
 			if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
 			{
-				const uint32_t bank8 = pNES_instance->NES_state.catridgeInfo.ines030.chrBank8;
-				const uint32_t index = (bank8 * 0x2000u) + (address & 0x1FFFu);
-				pNES_catridgeMemory->maxCatridgeCHRROM[index] = data;
+				const uint32_t chrRamSizeBytes = static_cast<uint32_t>(pNES_instance->NES_state.catridgeInfo.chrRamSizeBytes);
+				if (chrRamSizeBytes > ZERO)
+				{
+					const uint32_t bank8 = pNES_instance->NES_state.catridgeInfo.ines030.chrBank8;
+					const uint32_t index = ((bank8 * 0x2000u) + (address & 0x1FFFu)) % chrRamSizeBytes;
+					pNES_catridgeMemory->maxCatridgeCHRROM[index] = data;
+				}
 			}
 			BREAK;
 		}
