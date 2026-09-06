@@ -2541,7 +2541,7 @@ void GBc_t::RenderGBCCaptureStagesUI()
 FLAG GBc_t::isSerialLinkConnected()
 {
 #ifndef __EMSCRIPTEN__
-	RETURN linkSession.getConnectionState() == LinkConnectionState::CONNECTED ? YES : NO;
+	RETURN linkSession.getConnectionState() == LinkConnectionState::DISCONNECTED ? NO : YES;
 #endif
 	RETURN NO;
 }
