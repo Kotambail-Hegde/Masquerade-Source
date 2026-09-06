@@ -78,13 +78,14 @@ static uint32_t matrix_texture;
 static uint32_t matrix[16] = { 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0x000000FF, 0x000000FF, 0x000000FF, 0x000000FF };
 #pragma endregion PACMAN_SPECIFIC_DECLARATIONS
 
-pacMan_t::pacMan_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config)
+pacMan_t::pacMan_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config, FLAG headless)
 {
 	INC8 indexToCheck = RESET;
 
 	setEmulationID(EMULATION_ID::PACMAN_ID);
 
 	this->pt = config;
+	this->isHeadless = headless;
 
 	if (nFiles == TEST_ROMS)
 	{

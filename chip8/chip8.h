@@ -40,6 +40,7 @@ public:
 
 	std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom;
 	float myFPS = CHIP8_FPS;
+	FLAG isHeadless = NO;
 
 public:
 
@@ -400,7 +401,7 @@ private:
 #pragma region INFRASTRUCTURE_METHOD_DECLARATION
 public:
 
-	chip8_t(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config);
+	chip8_t(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config, FLAG headless = NO);
 	void setupTheCoreOfEmulation(void* masqueradeInstance = nullptr, void* audio = nullptr, void* input = nullptr, void* network = nullptr, void* camera = nullptr) override;
 	void sendBiosToEmulator(bios_t* bios = nullptr) override { MASQ_UNUSED(bios); };
 

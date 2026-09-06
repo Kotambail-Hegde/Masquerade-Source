@@ -251,6 +251,7 @@ class abstractEmulation_t
 public:
 
 	EMULATION_ID myID = EMULATION_ID::DEFAULT_ID;
+	FLAG isHeadless = NO;
 
 	const uint32_t screen_height = 500;
 	const uint32_t screen_width = 800;

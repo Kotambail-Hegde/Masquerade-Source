@@ -2839,9 +2839,6 @@ MASQ_INLINE void firFilter(const double* coeffs, double* input, double* output,
         (size_t)(filterLength - 1) * sizeof(double));
 }
 
-// =========================================================
-// isCLI — not meaningful on Pico (no CLI mode)
-// =========================================================
 extern ROM ROM_TYPE;
 
 // Needed by NES
@@ -2854,6 +2851,9 @@ extern float ntscPhaseOffsetDegrees;
 extern int ntscDebugPaletteIndex;
 #endif
 
+// =========================================================
+// isCLI — not meaningful on Pico (no CLI mode)
+// =========================================================
 MASQ_INLINE FLAG isCLI()
 {
 #ifdef __RPI_PICO__
