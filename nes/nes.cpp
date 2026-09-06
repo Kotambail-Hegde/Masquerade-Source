@@ -7462,8 +7462,14 @@ inline void NES_t::writeCpuRawMemoryInternal(uint16_t address, byte data, MEMORY
 							data &= readCpuRawMemory(address, MEMORY_ACCESS_SOURCE::DEBUG_PORT);
 						}
 
+						const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
+						const bool isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
+						const uint32_t totalPrg16kBanks = isNES2
+							? (hdr.sizeOfPrgRomIn16KB | (hdr.flags_8to15.nes2p0.flag9.fields.prgRomMSB << 8))
+							: hdr.sizeOfPrgRomIn16KB;
+
 						BYTE mask = 0x0F;
-						if (pINES->iNES_Fields.iNES_header.fields.flag7.fields.nes2p0 == 0x02)
+						if (totalPrg16kBanks >= 0x10)
 						{
 							mask = 0xFF;
 						}
@@ -7472,14 +7478,7 @@ inline void NES_t::writeCpuRawMemoryInternal(uint16_t address, byte data, MEMORY
 							mask = 0x07;
 						}
 
-						{
-							const auto& hdr = pINES->iNES_Fields.iNES_header.fields;
-							const bool isNES2 = ((hdr.flag7.raw & 0x0C) == 0x08);
-							const uint32_t totalPrg16kBanks = isNES2
-								? (hdr.sizeOfPrgRomIn16KB | (hdr.flags_8to15.nes2p0.flag9.fields.prgRomMSB << 8))
-								: hdr.sizeOfPrgRomIn16KB;
-							pNES_instance->NES_state.catridgeInfo.uxrom_002.prgBank16 = (data & mask) % totalPrg16kBanks;
-						}
+						pNES_instance->NES_state.catridgeInfo.uxrom_002.prgBank16 = (data & mask) % totalPrg16kBanks;
 					}
 					BREAK;
 				}
