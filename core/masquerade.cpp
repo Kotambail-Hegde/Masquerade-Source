@@ -2764,7 +2764,7 @@ public:
 							static FLAG focusEmuWindowOnStartup = YES;
 							static FLAG showUpdWin = NO;
 							static FLAG showAboutWin = NO;
-							static FLAG showLoggerWin = YES;
+							static FLAG showLoggerWin = NO;
 							static FLAG showCheatWin = NO;
 							static FLAG maintainAspectRatio = config.get<FLAG>("mods._MAINTAIN_ASPECT_RATIO", true);
 							static FLAG accurateInputSampling = config.get<FLAG>("mods._ENABLE_ACCURATE_INPUT_SAMPLING", false);

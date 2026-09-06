@@ -1712,7 +1712,7 @@ void GBc_t::serialTick()
 			// if all eight bits are shifted out...
 			if (pGBc_instance->GBc_state.emulatorStatus.serialMasterByteShiftCount == EIGHT)
 			{
-				INFO("GB[M] received byte: 0x%02X", pGBc_peripherals->SB);
+				//INFO("GB[M] received byte: 0x%02X", pGBc_peripherals->SB);
 
 				// reset the shift counter
 				pGBc_instance->GBc_state.emulatorStatus.serialMasterByteShiftCount = RESET;
@@ -1783,7 +1783,7 @@ void GBc_t::serialTick()
 		// if all eight bits are shifted in...
 		if (pGBc_instance->GBc_state.emulatorStatus.serialSlaveByteShiftCount == EIGHT)
 		{
-			INFO("GB[S] received byte: 0x%02X", pGBc_peripherals->SB);
+			//INFO("GB[S] received byte: 0x%02X", pGBc_peripherals->SB);
 
 			// reset the shift counter
 			pGBc_instance->GBc_state.emulatorStatus.serialSlaveByteShiftCount = RESET;
