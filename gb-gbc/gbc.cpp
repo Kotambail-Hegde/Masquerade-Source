@@ -202,11 +202,13 @@ static float _ACCELEROMETER_SENSITIVITY = 0.4f;
 #pragma endregion GB_GBC_SPECIFIC_DECLARATIONS
 
 #pragma region INFRASTRUCTURE_DEFINITIONS
-GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config, CheatEngine_t* ce)
+GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config, CheatEngine_t* ce, FLAG headless)
 {
 	setEmulationID(EMULATION_ID::GB_GBC_ID);
 
 	this->pt = config;
+
+	this->isHeadless = headless;
 
 	this->ceGBGBC = ce;
 
@@ -4216,6 +4218,11 @@ float GBc_t::finHPF(float sampleIn)
 
 void GBc_t::captureDownsampledAudioSamples()
 {
+	if (isHeadless == YES)
+	{
+		RETURN;
+	}
+
 	pGBc_instance->GBc_state.audio.downSamplingRatioCounter += ONE;
 
 	if (pGBc_instance->GBc_state.audio.downSamplingRatioCounter >= ((uint32_t)(GB_GBC_REFERENCE_CLOCK_HZ / EMULATED_AUDIO_SAMPLING_RATE_FOR_GB_GBC)))
@@ -6687,6 +6694,24 @@ void GBc_t::translateGFX(PALETTE_ID from, PALETTE_ID to, PALETTE_ID colorCorrect
 
 void GBc_t::displayCompleteScreen()
 {
+	if (fbSHA1Enabled == YES)
+	{
+		if (std::chrono::steady_clock::now() >= fbSHA1StartTime + std::chrono::seconds(fbSHA1TimeoutSeconds))
+		{
+			const size_t bufferSize = static_cast<size_t>(getScreenWidth()) * getScreenHeight() * sizeof(Pixel);
+			std::string frameHash = SHA1_CUSTOM::CalculateSHA1(pGBc_display->imGuiBuffer.imGuiBuffer1D, getScreenWidth(), getScreenHeight());
+			LOG("SHA1: %s", frameHash.c_str());
+			std::ofstream file("sha1.txt");
+			file << frameHash;
+			fbSHA1Enabled = NO;
+		}
+	}
+
+	if (isHeadless == YES)
+	{
+		RETURN;
+	}
+
 #if (GL_FIXED_FUNCTION_PIPELINE == YES) && !defined(IMGUI_IMPL_OPENGL_ES2) && !defined(IMGUI_IMPL_OPENGL_ES3)
 	glBindFramebuffer(GL_FRAMEBUFFER, frame_buffer);
 
@@ -6791,19 +6816,6 @@ void GBc_t::displayCompleteScreen()
 	GL_CALL(glBindTexture(GL_TEXTURE_2D, gameboy_texture));
 	GL_CALL(glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, getScreenWidth(), getScreenHeight(), GL_RGBA, GL_UNSIGNED_BYTE,
 		(GLvoid*)pGBc_display->imGuiBuffer.imGuiBuffer1D));
-
-	if (fbSHA1Enabled == YES)
-	{
-		if (std::chrono::steady_clock::now() >= fbSHA1StartTime + std::chrono::seconds(fbSHA1TimeoutSeconds))
-		{
-			const size_t bufferSize = static_cast<size_t>(getScreenWidth()) * getScreenHeight() * sizeof(Pixel);
-			std::string frameHash = SHA1_CUSTOM::CalculateSHA1(pGBc_display->imGuiBuffer.imGuiBuffer1D, getScreenWidth(), getScreenHeight());
-			LOG("SHA1: %s", frameHash.c_str());
-			std::ofstream file("sha1.txt");
-			file << frameHash;
-			fbSHA1Enabled = NO;
-		}
-	}
 
 	// Choose filtering mode (NEAREST or LINEAR)
 	GLint filter = (currEnVFilter == VIDEO_FILTERS::BILINEAR_FILTER) ? GL_LINEAR : GL_NEAREST;
@@ -7616,7 +7628,7 @@ FLAG GBc_t::initializeEmulator()
 	}
 	pGBc_instance->GBc_state.gbc_palette = currEnGbcPalette;
 
-	if (isCLI() == NO)
+	if (isCLI() == NO && isHeadless == NO)
 	{
 		// initialization specific to OpenGL
 #if (GL_FIXED_FUNCTION_PIPELINE == YES) && !defined(IMGUI_IMPL_OPENGL_ES2) && !defined(IMGUI_IMPL_OPENGL_ES3)
@@ -8788,6 +8800,11 @@ FLAG GBc_t::getRomLoadedStatus()
 
 void GBc_t::loadQuirks()
 {
+	if (isHeadless == YES)
+	{
+		RETURN;
+	}
+
 	if (pInputBackend->isPressed(EmuKey::KC) == true)
 	{
 		if (ROM_TYPE == ROM::GAME_BOY_COLOR)

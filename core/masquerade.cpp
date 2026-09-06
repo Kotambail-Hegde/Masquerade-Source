@@ -98,6 +98,7 @@ std::mutex               preImGuiLogMutex;
 //     Desktop : boost::property_tree::ptree (populated from CONFIG.ini)
 //     Pico    : PicoConfig_t stub (defaults come from pico_config.h)
 static MasqConfig_t config;
+static FLAG isMasqHeadless = NO;
 
 // --- Desktop-only UI / path / OpenGL state
 #ifndef __RPI_PICO__
@@ -166,7 +167,7 @@ void* camera = nullptr;
 // IMGUI default window settings
 const std::string imguiDefaultIni = R"(
 [Window][Debug##Default]
-ViewportPos=2367,1373
+ViewportPos=2541,1373
 ViewportId=0x16723995
 Size=32,36
 Collapsed=0
@@ -184,8 +185,8 @@ Collapsed=0
 DockId=0x00000001,0
 
 [Window][Emulation Window (GB-GBC)]
-Pos=0,20
-Size=336,300
+Pos=0,24
+Size=336,296
 Collapsed=0
 DockId=0x00000001,0
 
@@ -209,12 +210,12 @@ DockId=0x00000001,0
 
 [Window][WindowOverViewport_11111111]
 Pos=0,20
-Size=528,492
+Size=515,277
 Collapsed=0
 
 [Window][Emulation Window (Masquerade)]
 Pos=0,20
-Size=345,180
+Size=515,277
 Collapsed=0
 DockId=0x00000001,0
 
@@ -406,9 +407,33 @@ Size=589,943
 Collapsed=0
 DockId=0x00000011,0
 
+[Window][Console]
+Pos=0,20
+Size=2560,1349
+Collapsed=0
+DockId=0x00000001,1
+
+[Window][Console##standalone]
+ViewportPos=1548,503
+ViewportId=0xF62E641B
+Size=842,359
+Collapsed=0
+
+[Window][Hardware Camera Feed]
+ViewportPos=441,447
+ViewportId=0xE0638DF9
+Size=640,500
+Collapsed=0
+
+[Window][GBC Capture: All Stages]
+ViewportPos=480,410
+ViewportId=0x183AE5A0
+Size=630,563
+Collapsed=0
+
 [Docking][Data]
-DockSpace         ID=0x08BD597D Window=0x1BBC0F80 Pos=1016,460 Size=528,492 Split=X Selected=0x18F550F9
-  DockNode        ID=0x00000001 Parent=0x08BD597D SizeRef=2144,1352 CentralNode=1 HiddenTabBar=1 Selected=0x71542452
+DockSpace         ID=0x08BD597D Window=0x1BBC0F80 Pos=1022,567 Size=515,277 Split=X Selected=0x18F550F9
+  DockNode        ID=0x00000001 Parent=0x08BD597D SizeRef=2144,1352 CentralNode=1 HiddenTabBar=1 Selected=0x5F0147C1
   DockNode        ID=0x00000003 Parent=0x08BD597D SizeRef=414,1352 HiddenTabBar=1 Selected=0x97A6199F
 DockSpace         ID=0xCFDD4DDB Pos=433,216 Size=1722,943 Split=X
   DockNode        ID=0x0000000F Parent=0xCFDD4DDB SizeRef=567,600 Split=Y Selected=0xAC525BE4
@@ -705,6 +730,15 @@ FLAG LoadTextureFromFile(const char* file_name, GLuint* out_texture, int* out_wi
 #endif // !__RPI_PICO__
 
 #pragma endregion GLOBAL_INFRASTRUCTURE_DEFINITION
+
+MASQ_INLINE FLAG isHeadless()
+{
+#ifdef __RPI_PICO__
+	RETURN NO; // Pico always runs in emulation mode
+#else
+	RETURN isMasqHeadless;
+#endif
+}
 
 // --- Camera types (desktop only) -------------
 #if !defined(__RPI_PICO__) && !defined(ENABLE_OTA_EXECUTABLE) && !defined(ENABLE_SERVER_EXECUTABLE)
@@ -1375,39 +1409,42 @@ private:
 		FLAG status = SUCCESS;
 		status &= runEmulationSequence();
 
-		// ---- Rewind --------------------------------------------
-		if (_ENABLE_REWIND == YES)
+		if (isCLI() == NO && isHeadless() == NO)
 		{
-			current_instance->fillGamePlayStack();
+			// ---- Rewind --------------------------------------------
+			if (_ENABLE_REWIND == YES)
+			{
+				current_instance->fillGamePlayStack();
 
 #ifndef __RPI_PICO__
-			if (ImGui::IsKeyDown(ImGuiKey_R))
-				current_instance->rewindGamePlay();
+				if (ImGui::IsKeyDown(ImGuiKey_R))
+					current_instance->rewindGamePlay();
 #else
-			// TODO: wire Pico physical button → rewindGamePlay()
+				// TODO: wire Pico physical button → rewindGamePlay()
 #endif
-		}
+			}
 
-		// ---- Quick save / load (F1-F12) ------------------------
-		if (_ENABLE_QUICK_SAVE == YES)
-		{
+			// ---- Quick save / load (F1-F12) ------------------------
+			if (_ENABLE_QUICK_SAVE == YES)
+			{
 #ifndef __RPI_PICO__
-			if (ImGui::IsKeyDown(ImGuiKey_LeftShift) && ImGui::IsKeyDown(ImGuiKey_Tab) == false)
-			{
-				for (uint16_t ii = ((uint16_t)ImGuiKey_F1); ii <= ((uint16_t)ImGuiKey_F12); ii++)
-					if (ImGui::IsKeyPressed((ImGuiKey)ii))
-						current_instance->saveState((ii - ((uint16_t)ImGuiKey_F1)));
-			}
+				if (ImGui::IsKeyDown(ImGuiKey_LeftShift) && ImGui::IsKeyDown(ImGuiKey_Tab) == false)
+				{
+					for (uint16_t ii = ((uint16_t)ImGuiKey_F1); ii <= ((uint16_t)ImGuiKey_F12); ii++)
+						if (ImGui::IsKeyPressed((ImGuiKey)ii))
+							current_instance->saveState((ii - ((uint16_t)ImGuiKey_F1)));
+				}
 
-			if (ImGui::IsKeyDown(ImGuiKey_LeftShift) == false && ImGui::IsKeyDown(ImGuiKey_Tab) == false)
-			{
-				for (uint16_t ii = ((uint16_t)ImGuiKey_F1); ii <= ((uint16_t)ImGuiKey_F12); ii++)
-					if (ImGui::IsKeyPressed((ImGuiKey)ii))
-						current_instance->loadState((ii - ((uint16_t)ImGuiKey_F1)));
-			}
+				if (ImGui::IsKeyDown(ImGuiKey_LeftShift) == false && ImGui::IsKeyDown(ImGuiKey_Tab) == false)
+				{
+					for (uint16_t ii = ((uint16_t)ImGuiKey_F1); ii <= ((uint16_t)ImGuiKey_F12); ii++)
+						if (ImGui::IsKeyPressed((ImGuiKey)ii))
+							current_instance->loadState((ii - ((uint16_t)ImGuiKey_F1)));
+				}
 #else
-			// TODO: wire Pico physical buttons → saveState / loadState
+				// TODO: wire Pico physical buttons → saveState / loadState
 #endif
+			}
 		}
 
 		RETURN status;
@@ -1550,7 +1587,7 @@ private:
 	{
 		FLAG status = SUCCESS;
 
-		if (isCLI() == NO)
+		if (isCLI() == NO && isHeadless() == NO)
 		{
 			if (quitOnMenuClick == YES)
 			{
@@ -2417,6 +2454,17 @@ public:
 		{
 			OnUserCreate();
 			OnUserUpdate();
+			OnUserDestroy();
+		}
+		else if (isHeadless() == YES)
+		{
+			FLAG done = NO;
+			OnUserCreate();
+			while (!done)
+			{
+				OnUserUpdate(); // Run the emulation loop once per iteration, but don't render anything to a window.
+				// NOTE: Only way to exit a headless run is user needs to quit the application or end the process.
+			}
 			OnUserDestroy();
 		}
 		else
@@ -4933,6 +4981,13 @@ inline EMULATION_ID getPlatformFromPath(const std::string& path)
 #endif
 }
 
+#define DISABLE_HEADLESS_WITH_WARNING(msg) \
+    do { \
+        INFO(msg); \
+        isHeadlessMode = NO; \
+        isMasqHeadless = NO; \
+    } while (0)
+
 // Detect ROM type from file count / extension and instantiate
 // the correct emulator object.  Uses MasqConfig_t so it
 // compiles with either boost::property_tree::ptree (desktop)
@@ -4943,52 +4998,82 @@ abstractEmulation_t* getType(int nFiles,
 	CheatEngine_t* ce = nullptr)
 {
 #ifndef __RPI_PICO__
+	// Extract flags out of argument list regardless of order
+	std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> cleanRoms{};
+	int romCount = 0;
+	FLAG isHeadlessMode = NO;
+
+	for (int i = 0; i < nFiles; ++i)
+	{
+		if (rom[i] == "--headless")
+		{
+			isHeadlessMode = YES;
+		}
+		else if (rom[i] == "--sha1")
+		{
+			fbSHA1Enabled = YES;
+			fbSHA1StartTime = std::chrono::steady_clock::now();
+		}
+		else if (rom[i] == "--timeout")
+		{
+			if (i + 1 < nFiles)
+			{
+				fbSHA1TimeoutSeconds = std::stoi(rom[i + 1]);
+				i++; // Skip timeout value
+			}
+		}
+		else
+		{
+			cleanRoms[romCount++] = rom[i];
+		}
+	}
+
+	rom = cleanRoms;
+	nFiles = romCount;
+	isMasqHeadless = isHeadlessMode;
+
 	if (_numberOfRomsToEmulationPlatform.count(nFiles) == ZERO)
 		RETURN new defaults_t;
 #endif // !__RPI_PICO__
 
-	if ((rom[ZERO] == "--sha1") && (rom[TWO] == "--timeout") && (nFiles == DHASH_ROM_FILE))
-	{
-		rom[ZERO] = rom[ONE];
-		fbSHA1TimeoutSeconds = std::stoi(rom[THREE]);
-		rom[ONE].clear();
-		rom[TWO].clear();
-		rom[THREE].clear();
-		fbSHA1StartTime = std::chrono::steady_clock::now();
-		nFiles = SINGLE_ROM_FILE;
-		fbSHA1Enabled = YES;
-	}
-
 	if (nFiles == SINGLE_ROM_FILE) /* one file as input */
 	{
 		EMULATION_ID suspectedID = getPlatformFromPath(rom[ZERO]);
-
 #if MASQ_ENABLE_CHIP8
 		if (suspectedID == EMULATION_ID::CHIP8_ID)
-			RETURN new chip8_t(rom, config);
+		{
+			DISABLE_HEADLESS_WITH_WARNING("Headless mode is not supported for this platform; falling back to non-headless mode");  RETURN new chip8_t(rom, config, isHeadlessMode);
+		}
 #endif
 #if MASQ_ENABLE_NES
 		if (suspectedID == EMULATION_ID::NES_ID)
-			RETURN new NES_t(ONE, rom, config, ce);
+		{
+			DISABLE_HEADLESS_WITH_WARNING("Headless mode is not supported for this platform; falling back to non-headless mode");  RETURN new NES_t(ONE, rom, config, ce, isHeadlessMode);
+		}
 #endif
 #if MASQ_ENABLE_GBC
 		if (suspectedID == EMULATION_ID::GB_GBC_ID)
-			RETURN new GBc_t(ONE, rom, config, ce);
+		{
+			RETURN new GBc_t(ONE, rom, config, ce, isHeadlessMode);
+		}
 #endif
 #if MASQ_ENABLE_GBA
 		if (suspectedID == EMULATION_ID::GBA_ID)
-			RETURN new GBA_t(ONE, rom, config, ce);
+		{
+			DISABLE_HEADLESS_WITH_WARNING("Headless mode is not supported for this platform; falling back to non-headless mode");  RETURN new GBA_t(ONE, rom, config, ce, isHeadlessMode);
+		}
 #endif
 #if MASQ_ENABLE_GOL
 		if (suspectedID == EMULATION_ID::GAME_OF_LIFE_ID)
-			RETURN new gameOfLife_t(config);
+		{
+			DISABLE_HEADLESS_WITH_WARNING("Headless mode is not supported for this platform; falling back to non-headless mode");  RETURN new gameOfLife_t(config, isHeadlessMode);
+		}
 #endif
 	}
 #ifndef __RPI_PICO__
 	else if (nFiles == TEST_ROM_FILE)  /* two files as input  */
 	{
 		EMULATION_ID suspectedID = getPlatformFromPath(rom[ONE]);
-
 #if MASQ_ENABLE_SI
 		if ((rom[ZERO] == "-8080SST") || (toUpper(rom[ZERO]) == "-I8080SST"))
 		{
@@ -5091,18 +5176,17 @@ abstractEmulation_t* getType(int nFiles,
 		if (suspectedID == EMULATION_ID::SPACE_INVADERS_ID)
 		{
 			arrangeRoms(rom);
-			RETURN new spaceInvaders_t(nFiles, rom, config);
+			DISABLE_HEADLESS_WITH_WARNING("Headless mode is not supported for this platform; falling back to non-headless mode");  RETURN new spaceInvaders_t(nFiles, rom, config, isHeadlessMode);
 		}
 #endif
 #if MASQ_ENABLE_PACMAN
 		if (suspectedID == EMULATION_ID::PACMAN_ID)
 		{
 			arrangeRoms(rom);
-			RETURN new pacMan_t(nFiles, rom, config);
+			DISABLE_HEADLESS_WITH_WARNING("Headless mode is not supported for this platform; falling back to non-headless mode");  RETURN new pacMan_t(nFiles, rom, config, isHeadlessMode);
 		}
 #endif
 	}
-
 #endif // !__RPI_PICO__
 
 	MASQ_UNUSED(ce);
@@ -5391,7 +5475,8 @@ int main(int argc, char* argv[])
 
 			LOG("\nUsage:");
 			LOG("  masquerade [ROM_FILE...]									Load and run ROM(s)");
-			LOG("  masquerade --sha1 [ROM_FILE...] --timeout <seconds>		Load and run ROM(s) and outputs dhash(screenbuffer) at <timeout>");
+			LOG("  masquerade [ROM_FILE...] --headless						Load and run ROM(s) in headless mode");
+			LOG("  masquerade --sha1 [ROM_FILE...] --timeout <seconds>		Load and run ROM(s) and outputs sha1(screenbuffer) at <timeout>");
 			LOG("  masquerade --version										Print version and exit");
 			LOG("  masquerade --help										Show this help message");
 

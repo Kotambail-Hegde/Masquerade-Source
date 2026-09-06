@@ -15,11 +15,12 @@ static uint32_t matrix[16] = { 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0
 #endif // !__RPI_PICO__
 #pragma endregion CHIP8_SPECIFIC_DECLARATIONS
 
-chip8_t::chip8_t(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config)
+chip8_t::chip8_t(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config, FLAG headless)
 {
 	setEmulationID(EMULATION_ID::CHIP8_ID);
 
 	this->pt = config;
+	this->isHeadless = headless;
 
 #ifndef __RPI_PICO__
 	// Save state possible only on non-pico builds

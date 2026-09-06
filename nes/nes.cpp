@@ -52,7 +52,7 @@ static uint32_t matrix[16] = { 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0
 #pragma endregion NES_SPECIFIC_DECLARATIONS
 
 #pragma region INFRASTRUCTURE_DEFINITIONS
-NES_t::NES_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config, CheatEngine_t* ce)
+NES_t::NES_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config, CheatEngine_t* ce, FLAG headless)
 {
 	// set log level
 #if _DEBUG
@@ -120,6 +120,8 @@ NES_t::NES_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 	setEmulationID(EMULATION_ID::NES_ID);
 
 	this->pt = config;
+
+	this->isHeadless = headless;
 
 	this->ceNES = ce;
 

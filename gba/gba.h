@@ -326,6 +326,7 @@ private:
 
 	std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom;
 	const float myFPS = (float)GBA_FPS;
+	FLAG isHeadless = NO;
 
 private:
 
@@ -3857,7 +3858,7 @@ private:
 
 #pragma region INFRASTRUCTURE_DEFINITIONS
 public:
-	GBA_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config, CheatEngine_t* ce = nullptr);
+	GBA_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config, CheatEngine_t* ce = nullptr, FLAG headless = NO);
 
 	~GBA_t();
 

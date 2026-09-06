@@ -145,6 +145,7 @@ public:
 
 	std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom;
 	float myFPS = (float)NES_NTSC_FPS;
+	FLAG isHeadless = NO;
 
 	// TV System (region) support
 	// Refer : https://www.nesdev.org/wiki/Cycle_reference_chart#Clock_rates
@@ -2410,7 +2411,7 @@ private:
 
 #pragma region INFRASTRUCTURE_DEFINITIONS
 public:
-	NES_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config, CheatEngine_t* ce = nullptr);
+	NES_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config, CheatEngine_t* ce = nullptr, FLAG headless = NO);
 
 	~NES_t();
 

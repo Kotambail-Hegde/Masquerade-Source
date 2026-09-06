@@ -14,11 +14,12 @@ static uint32_t matrix_texture;
 static uint32_t matrix[16] = { 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0x00000000, 0x00000000, 0x00000000, 0x000000FF, 0x000000FF, 0x000000FF, 0x000000FF, 0x000000FF };
 #pragma endregion GOL_SPECIFIC_DECLARATIONS
 
-gameOfLife_t::gameOfLife_t(MasqConfig_t& config)
+gameOfLife_t::gameOfLife_t(MasqConfig_t& config, FLAG headless)
 {
 	setEmulationID(EMULATION_ID::GAME_OF_LIFE_ID);
 
 	this->pt = config;
+	this->isHeadless = headless;
 
 #ifndef __EMSCRIPTEN__
 	_SAVE_LOCATION = pt.get<std::string>("gameoflife._save_location");
