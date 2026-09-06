@@ -225,7 +225,8 @@ jobs:
   build_linux:
     name: Build Linux (Ninja)
     needs: prepare_nightly
-    if: ${{ github.event_name == 'schedule' || github.event.inputs.build_linux == 'true' }}
+    # TODO: Re-enable once Linux build issues are resolved
+    if: false && (github.event_name == 'schedule' || github.event.inputs.build_linux == 'true')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -351,7 +352,8 @@ jobs:
   build_emscripten:
     name: Build Emscripten (Web)
     needs: prepare_nightly
-    if: ${{ github.event_name == 'schedule' || github.event.inputs.build_emscripten == 'true' }}
+    # TODO: Re-enable once Emscripten build issues are resolved
+    if: false && (github.event_name == 'schedule' || github.event.inputs.build_emscripten == 'true')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -647,6 +649,28 @@ jobs:
             git push origin "$BRANCH" --force
           fi
 
+      - name: Update src/ submodule to latest Source HEAD
+        working-directory: emulator-repo
+        run: |
+          # Navigate into submodule and pull latest master from Masquerade-Source
+          cd src/Masquerade-Source
+          git fetch origin master
+          git checkout origin/master
+          cd ../..
+
+          # Commit the updated submodule pointer if it changed
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if [[ -n $(git status --porcelain src/) ]]; then
+            git add src/
+            git commit -m "chore(nightly): update src/ submodule to ${{ github.sha }}"
+            git push origin "$BRANCH"
+            echo "✅ Submodule pointer updated and pushed to $BRANCH"
+          else
+            echo "ℹ️ Submodule pointer is already up to date"
+          fi
+
       - name: Create or update PR
         env:
           GH_TOKEN: ${{ secrets.EMULATOR_REPO_PAT }}
@@ -664,5 +688,6 @@ jobs:
               --head "$BRANCH" \
               --assignee "Kotambail-Hegde"
           else
-            echo "PR #${EXISTING_PR} already active. Branch branch updated."
+            echo "PR #${EXISTING_PR} already active. Branch updated."
           fi
+
