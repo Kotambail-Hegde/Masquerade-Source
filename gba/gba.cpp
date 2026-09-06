@@ -89,7 +89,7 @@ static uint32_t gameboyAdvance_matrix[16] = { 0x00000000, 0x00000000, 0x00000000
 #pragma endregion GBA_SPECIFIC_DECLARATIONS
 
 #pragma region INFRASTRUCTURE_DEFINITIONS
-GBA_t::GBA_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config, CheatEngine_t* ce)
+GBA_t::GBA_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config, CheatEngine_t* ce, FLAG headless)
 {
 	// set log level
 #if _DEBUG
@@ -207,6 +207,8 @@ GBA_t::GBA_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 	}
 
 	this->pt = config;
+
+	this->isHeadless = headless;
 
 	this->ceGBA = ce;
 

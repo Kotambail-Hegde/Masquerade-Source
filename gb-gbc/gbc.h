@@ -392,6 +392,7 @@ public:
 
 	std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom;
 	const float myFPS = (float)GB_GBC_FPS;
+	FLAG isHeadless = NO;
 
 public:
 
@@ -2934,7 +2935,7 @@ PACK_END
 #pragma region INFRASTRUCTURE_METHOD_DECLARATION
 public:
 
-	GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config, CheatEngine_t* ce = nullptr);
+	GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config, CheatEngine_t* ce = nullptr, FLAG headless = NO);
 	void setupTheCoreOfEmulation(void* masqueradeInstance = nullptr, void* audio = nullptr, void* input = nullptr, void* network = nullptr, void* camera = nullptr) override;
 	void sendBiosToEmulator(bios_t* bios = nullptr) override {};
 

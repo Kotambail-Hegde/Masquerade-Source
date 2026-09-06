@@ -31,6 +31,7 @@ public:
 
 	std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom;
 	const float myFPS = (float)PACMAN_FPS;
+	FLAG isHeadless = NO;
 
 public:
 
@@ -685,7 +686,7 @@ private:
 #pragma region INFRASTRUCTURE_METHOD_DECLARATION
 public:
 
-	pacMan_t(int nfiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config);
+	pacMan_t(int nfiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config, FLAG headless = NO);
 	void setupTheCoreOfEmulation(void* masqueradeInstance = nullptr, void* audio = nullptr, void* input = nullptr, void* network = nullptr, void* camera = nullptr) override;
 	void sendBiosToEmulator(bios_t* bios = nullptr) override {};
 
