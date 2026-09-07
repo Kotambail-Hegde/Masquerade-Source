@@ -32,6 +32,11 @@
 #define GBCAM_H											(112)
 #pragma endregion MACROS
 
+#pragma region TYPEDEFS
+typedef uint8_t											COLOR_ID_2BPP;
+typedef uint16_t										COLOR_ID;
+#pragma endregion TYPEDEFS
+
 #pragma region CORE
 class GBcPrinterEngine_t
 {
@@ -402,11 +407,23 @@ public:
 	static const uint32_t screen_width = 160;
 	static const uint32_t pixel_height = 2;
 	static const uint32_t pixel_width = 2;
-	static const uint32_t debugger_screen_height = 560;
-	static const uint32_t debugger_screen_width = 456; // 880
-	static const uint32_t debugger_pixel_height = 1;
-	static const uint32_t debugger_pixel_width = 1;
 	const char* NAME = "GB-GBC";
+
+	static const uint32_t sgb_screen_height = 224;
+	static const uint32_t sgb_screen_width = 256;
+
+	FLAG _DISABLE_BG = NO;
+	FLAG _DISABLE_WIN = NO;
+	FLAG _DISABLE_OBJ = NO;
+	FLAG _ENABLE_AUDIO_HPF = NO;
+	FLAG _FORCE_GB_FOR_GBC = NO;
+	FLAG _FORCE_GB_GFX_FOR_GBC = NO;
+	FLAG _FORCE_GBC_FOR_GB = NO;
+	FLAG _FORCE_SGB = NO;
+	float  ghost_decay = 0.0f;  // 0.0 = off, ~0.6 = DMG feel, ~0.4 = GBC (less ghosting)
+	float _GB_GHOST_FACTOR = 0.6f;
+	float _GBC_GHOST_FACTOR = 0.4f;
+	float _ACCELEROMETER_SENSITIVITY = 0.4f;
 
 private:
 
@@ -1977,17 +1994,15 @@ private:
 		FLAG blockOAMW;
 		FLAG blockCGBPalette;
 		int16_t emulatedPPUCyclePerPPUMode;
-		// ---- TODO : Need Memory Optmization ----------------------------
-		uint16_t gfxVisibleColorMap_BG_WINDOW_OBJ[screen_height][screen_width];
-		COLOR_FORMAT gfxVisible_BG_WINDOW_OBJ[screen_height][screen_width];
+		// COLOR_ID (uint16_t) — CGB-only, raw gbcColor (RGB555) straight from CGB palette RAM, pre-color-correction
+		COLOR_ID cgbRawColorBuffer[screen_height][screen_width];
+		// COLOR_FORMAT — shared by both GB and GBC paths; the palette-resolved-but-not-yet-final-Pixel stage
+		COLOR_FORMAT resolvedColorBuffer[screen_height][screen_width];
 		union
 		{
 			Pixel imGuiBuffer1D[screen_width * screen_height];
 			Pixel imGuiBuffer2D[screen_height][screen_width];
 		} imGuiBuffer;
-		COLOR_FORMAT gfx_BG_WINDOW[256][256];
-		COLOR_FORMAT imGuiFullBuffer2D[256][256];
-		// ----------------------------------------------------------------
 		uint64_t filters;
 		uint64_t debugVariable;
 	} display_t;
@@ -2049,9 +2064,6 @@ private:
 
 	struct debugger_t
 	{
-		FLAG wasDebuggerJustTriggerred;
-		int64_t debuggerTriggerOnWhichLY;
-		int64_t lyChangePersistance;
 		struct
 		{
 			uint32_t testCount[TWOFIFTYSIX];

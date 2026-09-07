@@ -440,50 +440,22 @@ void GBA_t::setEmulationWindowOffsets(uint32_t x, uint32_t y, FLAG isEnabled)
 
 uint32_t GBA_t::getTotalScreenWidth()
 {
-	if (debugConfig._DEBUG_PPU_VIEWER_GUI == ENABLED)
-	{
-		RETURN this->debugger_screen_width;
-	}
-	else
-	{
-		RETURN this->total_screen_width;
-	}
+	RETURN this->total_screen_width;
 }
 
 uint32_t GBA_t::getTotalScreenHeight()
 {
-	if (debugConfig._DEBUG_PPU_VIEWER_GUI == ENABLED)
-	{
-		RETURN this->debugger_screen_height;
-	}
-	else
-	{
-		RETURN this->total_screen_height;
-	}
+	RETURN this->total_screen_height;
 }
 
 uint32_t GBA_t::getTotalPixelWidth()
 {
-	if (debugConfig._DEBUG_PPU_VIEWER_GUI == ENABLED)
-	{
-		RETURN this->debugger_pixel_width;
-	}
-	else
-	{
-		RETURN this->pixel_width;
-	}
+	RETURN this->pixel_width;
 }
 
 uint32_t GBA_t::getTotalPixelHeight()
 {
-	if (debugConfig._DEBUG_PPU_VIEWER_GUI == ENABLED)
-	{
-		RETURN this->debugger_pixel_height;
-	}
-	else
-	{
-		RETURN this->pixel_height;
-	}
+	RETURN this->pixel_height;
 }
 
 void GBA_t::setEmulationID(EMULATION_ID ID)

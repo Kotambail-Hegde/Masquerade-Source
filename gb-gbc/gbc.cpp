@@ -177,13 +177,6 @@ static uint32_t const BUFFER_LEN = (MAX_FLT_LEN - 1 + MAX_INPUT_LEN);
 static double doubleInput[(uint32_t)(EMULATED_AUDIO_SAMPLING_RATE_FOR_GB_GBC / CEIL(GB_GBC_FPS))];
 static double doubleOutput[(uint32_t)(EMULATED_AUDIO_SAMPLING_RATE_FOR_GB_GBC / CEIL(GB_GBC_FPS))];
 
-static FLAG _DISABLE_BG = NO;
-static FLAG _DISABLE_WIN = NO;
-static FLAG _DISABLE_OBJ = NO;
-static FLAG _ENABLE_AUDIO_HPF = NO;
-static FLAG _FORCE_GB_FOR_GBC = NO;
-static FLAG _FORCE_GB_GFX_FOR_GBC = NO;
-static FLAG _FORCE_GBC_FOR_GB = NO;
 static std::string _JSON_LOCATION;
 static MasqConfig_t testCase;
 
@@ -195,10 +188,6 @@ static GLuint ghost_texture[2];
 static uint32_t ghost_index = 0;
 static GLuint ghost_fbo;
 static GLuint shaderProgramGhost;
-static float  ghost_decay = 0.0f;  // 0.0 = off, ~0.6 = DMG feel, ~0.4 = GBC (less ghosting)
-static float _GB_GHOST_FACTOR = 0.6f;
-static float _GBC_GHOST_FACTOR = 0.4f;
-static float _ACCELEROMETER_SENSITIVITY = 0.4f;
 #pragma endregion GB_GBC_SPECIFIC_DECLARATIONS
 
 #pragma region INFRASTRUCTURE_DEFINITIONS
@@ -366,7 +355,7 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 						rewind(fp);
 						fread(dmg_cgb_bios.biosImage + 0x0000, sizeOfBios, 1, fp);
 
-#if ZERO
+#if DEACTIVATED
 						uint32_t scanner = 0;
 						uint32_t addressField = 0x10;
 						LOG("BIOS DUMP");
@@ -529,50 +518,22 @@ void GBc_t::setEmulationWindowOffsets(uint32_t x, uint32_t y, FLAG isEnabled)
 
 uint32_t GBc_t::getTotalScreenWidth()
 {
-	if (debugConfig._DEBUG_PPU_VIEWER_GUI == ENABLED)
-	{
-		RETURN this->debugger_screen_width;
-	}
-	else
-	{
-		RETURN this->screen_width;
-	}
+	RETURN this->screen_width;
 }
 
 uint32_t GBc_t::getTotalScreenHeight()
 {
-	if (debugConfig._DEBUG_PPU_VIEWER_GUI == ENABLED)
-	{
-		RETURN this->debugger_screen_height;
-	}
-	else
-	{
-		RETURN this->screen_height;
-	}
+	RETURN this->screen_height;
 }
 
 uint32_t GBc_t::getTotalPixelWidth()
 {
-	if (debugConfig._DEBUG_PPU_VIEWER_GUI == ENABLED)
-	{
-		RETURN this->debugger_pixel_width;
-	}
-	else
-	{
-		RETURN this->pixel_width;
-	}
+	RETURN this->pixel_width;
 }
 
 uint32_t GBc_t::getTotalPixelHeight()
 {
-	if (debugConfig._DEBUG_PPU_VIEWER_GUI == ENABLED)
-	{
-		RETURN this->debugger_pixel_height;
-	}
-	else
-	{
-		RETURN this->pixel_height;
-	}
+	RETURN this->pixel_height;
 }
 
 void GBc_t::setEmulationID(EMULATION_ID ID)
@@ -1583,19 +1544,17 @@ void GBc_t::serialTick()
 	{
 		shiftClockTick = YES;
 
-		// Pumped every raw tick, unconditionally -- regardless of local
-		// CLOCK_SELECT/TRANSFER_ENABLE state. An inbound request from the
-		// peer must get drained and answered even while THIS side is idle
-		// or mid-negotiation; gating this behind the master/slave branches
-		// below (as an earlier version did) meant a peer's request could sit
-		// unread in the socket buffer for as long as this side stayed idle
-		// -- a real deadlock if the peer was waiting on us. update() is
-		// self-throttled internally (see NETWORK_POLL_INTERVAL_MS), so
-		// calling it at raw tick rate costs a cheap early-return, not a
-		// syscall, on most calls. setLocalReplyByte() keeps whatever a
-		// same-tick inbound SERIAL_BYTE_REQUEST gets answered with fresh --
-		// this is GB's own concern (its SB register), not the session's,
-		// which is why update() itself no longer takes this as a parameter.
+		// Runs every tick, unconditionally, regardless of CLOCK_SELECT/TRANSFER_ENABLE:
+		// - A peer's request must be drained even while we're idle -- gating this on
+		//   our own state (like an earlier version did) could leave a peer's request
+		//   unread indefinitely, deadlocking them.
+		// - update() only reads the socket, never sends, and self-throttles internally
+		//   (NETWORK_POLL_INTERVAL_MS) -- calling it every tick is a cheap early-return,
+		//   not real socket traffic, on most calls.
+		// - setLocalReplyByte() just keeps SB's latest value ready in case a
+		//   SERIAL_BYTE_REQUEST arrives this exact tick.
+		// - The only call that actually sends is beginByteTransfer(), reached only from
+		//   tickSerialLink() below, gated on TRANSFER_ENABLE==1.
 		if (pGBc_instance->GBc_state.emulatorStatus.serialDevice == GB_SERIAL_DEVICE::GB_LINK_CABLE && isSerialLinkConnected() == YES)
 		{
 			// Neither of these two calls sends anything over the network --
@@ -1640,22 +1599,15 @@ void GBc_t::serialTick()
 			FLAG rxStatus = FALSE;
 			BIT bitReceived = ONE;
 
-			// GB_LINK_CABLE (real network multiplayer) is handled entirely
-			// separately from GB_PRINTER below. The printer always
-			// completes a byte transfer within the same 8 ticks that
-			// shift it -- true for our instant local device. A network
-			// peer can't promise that: a transfer may need to stay pending
-			// across many ticks (many frames, even) while waiting on the
-			// round trip. So on any tick where the transfer hasn't
-			// completed, we deliberately do NOT touch SB or
-			// serialMasterByteShiftCount, and leave TRANSFER_ENABLE set --
-			// from the ROM's perspective this looks exactly like talking
-			// to a real, slower-than-instant link peer, not a bug. CPU/
-			// PPU/APU all keep running normally regardless; only this one
-			// serial transfer is "slow." This replaces the old busy-wait
-			// sendOverSerialLink()/receiveOverSerialLink() pair entirely --
-			// those blocked the whole emulator thread for the RTT
-			// duration, which is exactly what this redesign exists to fix.
+			// GB_LINK_CABLE is handled separately from GB_PRINTER/GB_BARCODE_BOY below:
+			// - Those complete a byte within the same 8 ticks that shift it (instant
+			//   local devices). A network peer can't promise that -- a transfer may
+			//   stay pending across many ticks while waiting on the round trip.
+			// - So while pending, we don't touch SB/serialMasterByteShiftCount and
+			//   leave TRANSFER_ENABLE set -- to the ROM this looks like a real, slower
+			//   link peer, not a bug. CPU/PPU/APU keep running normally meanwhile.
+			// - This replaces the old busy-wait send/receive pair, which blocked the
+			//   whole emulator thread for the RTT duration.
 			if (pGBc_instance->GBc_state.emulatorStatus.serialDevice == GB_SERIAL_DEVICE::GB_LINK_CABLE && isSerialLinkConnected() == YES)
 			{
 #ifndef __EMSCRIPTEN__
@@ -1744,13 +1696,13 @@ void GBc_t::serialTick()
 		BYTE receivedByte = ZERO;
 		BIT bitReceived = ZERO;
 
-		// GB_LINK_CABLE (network multiplayer): a slave has no clock of
-		// its own -- it purely reacts to whatever byte the remote peer
-		// (master for this exchange) sends. No TRANSFER_ENABLE polling
-		// loop needed here; just check every tick whether an unsolicited
-		// byte has arrived, and if so, complete in one shot (echoing our
-		// own current SB back, same as real hardware's simultaneous
-		// full-duplex exchange on a single clock edge).
+		// GB_LINK_CABLE: a slave has no clock of its own -- it just reacts to
+		// whatever byte the remote master sends.
+		// - No TRANSFER_ENABLE check needed: per gbdev's doc, the slave's own bit
+		//   is optional and doesn't gate whether the master's transfer completes.
+		// - Just check each tick whether a byte has arrived, and complete in one
+		//   shot when it has -- same as real hardware's full-duplex exchange on a
+		//   single clock edge.
 		if (pGBc_instance->GBc_state.emulatorStatus.serialDevice == GB_SERIAL_DEVICE::GB_LINK_CABLE && isSerialLinkConnected() == YES)
 		{
 #ifndef __EMSCRIPTEN__
@@ -1776,12 +1728,11 @@ void GBc_t::serialTick()
 		{
 			if (gbBarcodeEngine.isClocking() == YES
 				&& shiftClockTick == YES
-				// NOTE: So real hardware can't sense TRANSFER_ENABLE, and
-				// just relies on a fixed slow clock rate instead. 
-				// In emulation, Barcode Boy has the luxury of know exactly how much
-				// this delay should as it can just check for the TRANSFER_ENABLE.
-				// For now this gate only holds back the NEXT byte until the GB re-arms
-				// TRANSFER_ENABLE
+				// Real hardware likely can't sense TRANSFER_ENABLE at all -- no such
+				// signal exists on the Link Cable pinout -- so it probably just relies
+				// on a fixed slow clock rate to leave enough delay. In emulation we
+				// have the luxury of knowing exactly when the GB is ready, so we check
+				// TRANSFER_ENABLE directly instead of guessing a delay.
 				// Refer https://gbdev.gg8.se/wiki/articles/Serial_Data_Transfer_(Link_Cable)#Delays_and_Synchronization
 				&& pGBc_peripherals->SC.scFields.TRANSFER_ENABLE == ONE)
 			{
@@ -4808,8 +4759,8 @@ void GBc_t::setPaletteColorForCGB(FLAG isThisForBackground, uint8_t value)
 * after getting y position, start from x position 0
 * read the corresponding 16 byte data from tile data region
 * get the color ID
-* based on the current palette, get the actual olc color
-* save this in the gfx_BG_WINDOW_OBJ
+* based on the current palette, get the actual color
+* save this in the resolvedColorBuffer
 *
 *
 *
@@ -6343,11 +6294,11 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 
 										if (pGBc_display->pixelRenderCounterPerScanLine >= ZERO)
 										{
-											pGBc_display->gfxVisibleColorMap_BG_WINDOW_OBJ
+											pGBc_display->cgbRawColorBuffer
 												[pGBc_peripherals->LY][pGBc_display->pixelRenderCounterPerScanLine]
 												= gbcColor;
 
-											pGBc_display->gfxVisible_BG_WINDOW_OBJ
+											pGBc_display->resolvedColorBuffer
 												[pGBc_peripherals->LY][pGBc_display->pixelRenderCounterPerScanLine]
 												= getColorFromColorIDForGBC(gbcColor, pGBc_instance->GBc_state.gbc_palette == PALETTE_ID::PALETTE_2);
 
@@ -6387,11 +6338,11 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 
 								if (pGBc_display->pixelRenderCounterPerScanLine >= ZERO)
 								{
-									pGBc_display->gfxVisibleColorMap_BG_WINDOW_OBJ
+									pGBc_display->cgbRawColorBuffer
 										[pGBc_peripherals->LY][pGBc_display->pixelRenderCounterPerScanLine]
 										= gbcColor;
 
-									pGBc_display->gfxVisible_BG_WINDOW_OBJ
+									pGBc_display->resolvedColorBuffer
 										[pGBc_peripherals->LY][pGBc_display->pixelRenderCounterPerScanLine]
 										= getColorFromColorIDForGBC(gbcColor, pGBc_instance->GBc_state.gbc_palette == PALETTE_ID::PALETTE_2);
 
@@ -6442,11 +6393,11 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 
 										if (pGBc_display->pixelRenderCounterPerScanLine >= ZERO)
 										{
-											pGBc_display->gfxVisibleColorMap_BG_WINDOW_OBJ
+											pGBc_display->cgbRawColorBuffer
 												[pGBc_peripherals->LY][pGBc_display->pixelRenderCounterPerScanLine]
 												= gbcColor;
 
-											pGBc_display->gfxVisible_BG_WINDOW_OBJ
+											pGBc_display->resolvedColorBuffer
 												[pGBc_peripherals->LY][pGBc_display->pixelRenderCounterPerScanLine]
 												= getColorFromColorIDForGBC(gbcColor, pGBc_instance->GBc_state.gbc_palette == PALETTE_ID::PALETTE_2);
 
@@ -6490,10 +6441,10 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 								{
 									if (pGBc_display->pixelRenderCounterPerScanLine >= ZERO)
 									{
-										pGBc_display->gfxVisibleColorMap_BG_WINDOW_OBJ[pGBc_peripherals->LY][pGBc_display->pixelRenderCounterPerScanLine]
+										pGBc_display->cgbRawColorBuffer[pGBc_peripherals->LY][pGBc_display->pixelRenderCounterPerScanLine]
 											= gbcColor;
 
-										pGBc_display->gfxVisible_BG_WINDOW_OBJ[pGBc_peripherals->LY][pGBc_display->pixelRenderCounterPerScanLine]
+										pGBc_display->resolvedColorBuffer[pGBc_peripherals->LY][pGBc_display->pixelRenderCounterPerScanLine]
 											= getColorFromColorIDForGBC(gbcColor, pGBc_instance->GBc_state.gbc_palette == PALETTE_ID::PALETTE_2);
 
 										// update the imgui buffer
@@ -6542,7 +6493,7 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 
 										if (pGBc_display->pixelRenderCounterPerScanLine >= ZERO)
 										{
-											pGBc_display->gfxVisible_BG_WINDOW_OBJ
+											pGBc_display->resolvedColorBuffer
 												[pGBc_peripherals->LY][pGBc_display->pixelRenderCounterPerScanLine]
 												= getColorFromColorIDForGB(palette, objPixelToBePushed.color);
 
@@ -6581,7 +6532,7 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 								{
 									if (pGBc_display->pixelRenderCounterPerScanLine >= ZERO)
 									{
-										pGBc_display->gfxVisible_BG_WINDOW_OBJ[pGBc_peripherals->LY][pGBc_display->pixelRenderCounterPerScanLine]
+										pGBc_display->resolvedColorBuffer[pGBc_peripherals->LY][pGBc_display->pixelRenderCounterPerScanLine]
 											= getColorFromColorIDForGB(palette, bgWinpixelToBePushed.color);
 
 										// update the imgui buffer
@@ -6597,7 +6548,7 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 								{
 									if (pGBc_display->pixelRenderCounterPerScanLine >= ZERO)
 									{
-										pGBc_display->gfxVisible_BG_WINDOW_OBJ[pGBc_peripherals->LY][pGBc_display->pixelRenderCounterPerScanLine]
+										pGBc_display->resolvedColorBuffer[pGBc_peripherals->LY][pGBc_display->pixelRenderCounterPerScanLine]
 											= getColorFromColorIDForGB(palette, COLOR_ID_ZERO);
 
 										// update the imgui buffer
@@ -6657,11 +6608,11 @@ void GBc_t::translateGFX(PALETTE_ID from, PALETTE_ID to, PALETTE_ID colorCorrect
 				{
 					for (uint32_t x = 0; x < getScreenWidth(); x++)
 					{
-						pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x] = getColorFromColorIDForGBC(pGBc_display->gfxVisibleColorMap_BG_WINDOW_OBJ[y][x], colorCorrectionAfter == PALETTE_ID::PALETTE_2); // Palette 2 has color correction enabled
+						pGBc_display->resolvedColorBuffer[y][x] = getColorFromColorIDForGBC(pGBc_display->cgbRawColorBuffer[y][x], colorCorrectionAfter == PALETTE_ID::PALETTE_2); // Palette 2 has color correction enabled
 
 						// update the imgui buffer
 
-						pGBc_display->imGuiBuffer.imGuiBuffer2D[y][x] = getColorFromColorIDForGBC(pGBc_display->gfxVisibleColorMap_BG_WINDOW_OBJ[y][x], colorCorrectionAfter == PALETTE_ID::PALETTE_2).COLOR;
+						pGBc_display->imGuiBuffer.imGuiBuffer2D[y][x] = getColorFromColorIDForGBC(pGBc_display->cgbRawColorBuffer[y][x], colorCorrectionAfter == PALETTE_ID::PALETTE_2).COLOR;
 					}
 				}
 			}
@@ -6672,33 +6623,33 @@ void GBc_t::translateGFX(PALETTE_ID from, PALETTE_ID to, PALETTE_ID colorCorrect
 			{
 				for (uint32_t x = 0; x < getScreenWidth(); x++)
 				{
-					switch (pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x].COLOR_ID)
+					switch (pGBc_display->resolvedColorBuffer[y][x].COLOR_ID)
 					{
 					case colorID::COLOR_000P:
 					{
-						pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x] = paletteIDToColor.at(to).COLOR_000P;
+						pGBc_display->resolvedColorBuffer[y][x] = paletteIDToColor.at(to).COLOR_000P;
 						BREAK;
 					}
 					case colorID::COLOR_033P:
 					{
-						pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x] = paletteIDToColor.at(to).COLOR_033P;
+						pGBc_display->resolvedColorBuffer[y][x] = paletteIDToColor.at(to).COLOR_033P;
 						BREAK;
 					}
 					case colorID::COLOR_066P:
 					{
-						pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x] = paletteIDToColor.at(to).COLOR_066P;
+						pGBc_display->resolvedColorBuffer[y][x] = paletteIDToColor.at(to).COLOR_066P;
 						BREAK;
 					}
 					case colorID::COLOR_099P:
 					{
-						pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x] = paletteIDToColor.at(to).COLOR_099P;
+						pGBc_display->resolvedColorBuffer[y][x] = paletteIDToColor.at(to).COLOR_099P;
 						BREAK;
 					}
 					}
 
 					// update the imgui buffer
 
-					pGBc_display->imGuiBuffer.imGuiBuffer2D[y][x] = pGBc_display->gfxVisible_BG_WINDOW_OBJ[y][x].COLOR;
+					pGBc_display->imGuiBuffer.imGuiBuffer2D[y][x] = pGBc_display->resolvedColorBuffer[y][x].COLOR;
 				}
 			}
 		}
@@ -6985,19 +6936,6 @@ void GBc_t::initializeGraphics()
 
 	pGBc_display->fetchDone = NO;
 	pGBc_display->pushDone = YES;
-
-	if (debugConfig._DEBUG_PPU_VIEWER_GUI == YES)
-	{
-		if ((debugConfig._DEBUG_PPU_VIEWER_GUI_TRIGGER < ZERO) || (debugConfig._DEBUG_PPU_VIEWER_GUI_TRIGGER > (getScreenHeight() + VBLANK_SCANLINES - ONE)))
-		{
-			// By default, let debugger trigger on LY == 144 (Vblank)
-			pGBc_instance->GBc_state.emulatorStatus.debugger.debuggerTriggerOnWhichLY = getScreenHeight();
-		}
-		else
-		{
-			pGBc_instance->GBc_state.emulatorStatus.debugger.debuggerTriggerOnWhichLY = debugConfig._DEBUG_PPU_VIEWER_GUI_TRIGGER;
-		}
-	}
 }
 
 float GBc_t::getEmulationVolume()
@@ -7063,8 +7001,6 @@ FLAG GBc_t::runEmulationLoopAtHostRate(uint32_t currentFrame)
 FLAG GBc_t::runEmulationAtFixedRate(uint32_t currentFrame)
 {
 	FLAG status = true;
-
-	pGBc_instance->GBc_state.emulatorStatus.debugger.wasDebuggerJustTriggerred = CLEAR;
 
 	loadQuirks();
 
@@ -8107,34 +8043,44 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 			// Display some of the Cartridge information
 			LOG_NEW_LINE;
 			LOG("Cartridge Loaded:");
+
+			// Pointer helper to eliminate long memory paths
+			auto& header = pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_fields;
+
 			if (ROM_TYPE == ROM::GAME_BOY)
 			{
-				LOG(" Title    : %s", pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_fields.title.title);
+				LOG(" Title    : %s", header.title.title);
 			}
 			else if (ROM_TYPE == ROM::GAME_BOY_COLOR)
 			{
-				LOG(" Title    : %s", pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_fields.title.tile_AND_cgbType_Fields.title);
+				LOG(" Title    : %s", header.title.tile_AND_cgbType_Fields.title);
 			}
+
 			LOG(" Type     : %s", cartridgeTypeName());
-			uint32_t romSizeInHeader = 32 << pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_fields.romSize;
+
+			uint32_t romSizeInHeader = 32 << header.romSize;
 			LOG(" ROM Size : %d KB", romSizeInHeader);
+
 			uint32_t actualRomSize = pAbsolute_GBc_instance->absolute_GBc_state.aboutRom.codeRomSize >> 10; // divide by 1024
 			if (actualRomSize > romSizeInHeader)
 			{
 				WARN("ROM size mentioned in header doesn't match the actual ROM size");
-				pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_fields.romSize = (BYTE)(ceil(log2(actualRomSize)) - FIVE);
-				LOG(" Actual ROM Size : %d KB\n", 32 << pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_fields.romSize);
+				header.romSize = static_cast<BYTE>(ceil(log2(actualRomSize)) - FIVE);
+				LOG(" Actual ROM Size : %d KB\n", 32 << header.romSize);
 			}
-			LOG(" RAM Size : %2.2X", pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_fields.ramSize);
+
+			LOG(" RAM Size : %2.2X", header.ramSize);
 			LOG(" LIC Code : %s", cartridgeLicName());
-			LOG(" ROM Vers : %2.2X", pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_fields.maskRomVersion);
+			LOG(" ROM Vers : %2.2X", header.maskRomVersion);
+
 			if (ROM_TYPE == ROM::GAME_BOY_COLOR)
 			{
-				if (pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_fields.title.tile_AND_cgbType_Fields.cgbType == 0x80)
+				uint8_t cgbType = header.title.tile_AND_cgbType_Fields.cgbType;
+				if (cgbType == 0x80)
 				{
 					LOG(" CGB Type : DMG and CGB");
 				}
-				else if (pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_fields.title.tile_AND_cgbType_Fields.cgbType == 0xC0)
+				else if (cgbType == 0xC0)
 				{
 					LOG(" CGB Type : Only CGB");
 				}
@@ -8153,7 +8099,7 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 
 			pGBc_instance->GBc_state.emulatorStatus.checksum = checksum;
 
-			LOG(" Checksum : %2.2X (%s)", checksum, (checksum == pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_fields.headerChecksum) ? "PASSED" : "FAILED");
+			LOG(" Checksum : %2.2X (%s)", checksum, (checksum == header.headerChecksum) ? "PASSED" : "FAILED");
 			LOG_NEW_LINE;
 
 			rewind(fp);
@@ -12307,8 +12253,13 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 		if (address == P1_JOYP_ADDRESS)
 		{
 			STATE8 previousJoyPadState = pGBc_peripherals->P1_JOYP.joyPadMemory & 0x0F;
+
+			// 1. Update selection bits in peripheral state FIRST
 			pGBc_peripherals->P1_JOYP.joyPadFields.P14_SEL_DIRECTION_KEYS = GETBIT(FOUR, data);
 			pGBc_peripherals->P1_JOYP.joyPadFields.P15_SEL_ACTION_KEYS = GETBIT(FIVE, data);
+
+			// 2. TODO: Process SGB clock edges & player cycling with new line states
+			// 3. Update memory state and fire interrupts
 			updateJOYP(previousJoyPadState);
 			RETURN;
 		}
