@@ -523,7 +523,11 @@ jobs:
   open_nightly_pr:
     name: Create Nightly PR in Masquerade-Emulator
     needs: [prepare_nightly, build_windows, build_linux, build_emscripten]
-    if: always() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
+    # Allow running if disabled jobs (if: false) were skipped, as long as active jobs succeeded
+    if: |
+      always() &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled')
     runs-on: ubuntu-latest
     env:
       EMULATOR_REPO: Kotambail-Hegde/Masquerade-Emulator
@@ -553,18 +557,21 @@ jobs:
         with:
           name: windows-build
           path: artifacts/windows
+          optional: true # Won't fail if job was skipped
 
       - name: Download Linux artifacts
         uses: actions/download-artifact@v4
         with:
           name: linux-build
           path: artifacts/linux
+          optional: true # Won't fail if job was skipped
 
       - name: Download Emscripten artifacts
         uses: actions/download-artifact@v4
         with:
           name: emscripten-build
           path: artifacts/emscripten
+          optional: true # Won't fail if job was skipped
 
       - name: Checkout Masquerade-Emulator
         uses: actions/checkout@v4
@@ -600,15 +607,16 @@ jobs:
               ../artifacts/assets/. "$DEST/"
           }
 
-          if [ -d "../artifacts/emscripten" ]; then
-            cp ../artifacts/emscripten/masquerade.data  hosting/wasm/
-            cp ../artifacts/emscripten/masquerade.html  hosting/wasm/
-            cp ../artifacts/emscripten/masquerade.js    hosting/wasm/
-            cp ../artifacts/emscripten/masquerade.wasm  hosting/wasm/
-            cp ../artifacts/emscripten/masquerade.data  emscripten/
-            cp ../artifacts/emscripten/masquerade.html  emscripten/
-            cp ../artifacts/emscripten/masquerade.js    emscripten/
-            cp ../artifacts/emscripten/masquerade.wasm  emscripten/
+          if [ -d "../artifacts/emscripten" ] && [ "$(ls -A ../artifacts/emscripten)" ]; then
+            mkdir -p hosting/wasm emscripten
+            cp ../artifacts/emscripten/masquerade.data  hosting/wasm/ || true
+            cp ../artifacts/emscripten/masquerade.html  hosting/wasm/ || true
+            cp ../artifacts/emscripten/masquerade.js    hosting/wasm/ || true
+            cp ../artifacts/emscripten/masquerade.wasm  hosting/wasm/ || true
+            cp ../artifacts/emscripten/masquerade.data  emscripten/   || true
+            cp ../artifacts/emscripten/masquerade.html  emscripten/   || true
+            cp ../artifacts/emscripten/masquerade.js    emscripten/   || true
+            cp ../artifacts/emscripten/masquerade.wasm  emscripten/   || true
           fi
 
           if [ -f "../artifacts/license/LICENSE.md" ]; then
@@ -619,7 +627,7 @@ jobs:
             cp ../artifacts/readme/README.md ./README.md
           fi
 
-          if [ -d "../artifacts/windows" ]; then
+          if [ -d "../artifacts/windows" ] && [ "$(ls -A ../artifacts/windows)" ]; then
             rsync -a \
               --exclude='*.pgc' \
               --exclude='*.pgd' \
@@ -629,7 +637,7 @@ jobs:
             place_assets windows/assets
           fi
 
-          if [ -d "../artifacts/linux" ]; then
+          if [ -d "../artifacts/linux" ] && [ "$(ls -A ../artifacts/linux)" ]; then
             rsync -a \
               --exclude='assets/' \
               ../artifacts/linux/. linux/
@@ -652,13 +660,11 @@ jobs:
       - name: Update src/ submodule to latest Source HEAD
         working-directory: emulator-repo
         run: |
-          # Navigate into submodule and pull latest master from Masquerade-Source
           cd src/Masquerade-Source
           git fetch origin master
           git checkout origin/master
           cd ../..
 
-          # Commit the updated submodule pointer if it changed
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
