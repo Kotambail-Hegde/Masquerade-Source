@@ -191,10 +191,6 @@ public:
 	static const uint32_t screen_width = 256;
 	static const uint32_t pixel_height = 2;
 	static const uint32_t pixel_width = 2;
-	static const uint32_t debugger_screen_height = 560;
-	static const uint32_t debugger_screen_width = 880;
-	static const uint32_t debugger_pixel_height = 1;
-	static const uint32_t debugger_pixel_width = 1;
 	const char* NAME = "NES";
 
 	// VIDEO_FILTERS::CRT_FILTER -- NTSC composite-artifact simulation. Refer : https://www.nesdev.org/wiki/NTSC_video

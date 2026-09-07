@@ -1657,8 +1657,9 @@ private:
 		{
 			int x = RESET, y = RESET;
 			SDL_GetWindowSize(window, &x, &y);
-			config.put("mods._X", std::uint16_t(x));
-			config.put("mods._Y", std::uint16_t(y));
+			uint32_t saveScale = (_XSCALE > RESET) ? _XSCALE : ONE;
+			config.put("mods._X", std::uint16_t(x / saveScale));
+			config.put("mods._Y", std::uint16_t(y / saveScale));
 			boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
 		}
 
@@ -2571,8 +2572,8 @@ public:
 			Uint32 window_flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN;
 			SDL_Window* window = SDL_CreateWindow(
 				"Masquerade Emulator",
-				(current_instance->getScreenWidth() * current_instance->getPixelWidth()) + WINDOW_PADDING,
-				(current_instance->getScreenHeight() * current_instance->getPixelHeight()) + WINDOW_PADDING + WINDOW_PADDING,
+				(current_instance->getTotalScreenWidth() * current_instance->getTotalPixelWidth()) + WINDOW_PADDING,
+				(current_instance->getTotalScreenHeight() * current_instance->getTotalPixelHeight()) + WINDOW_PADDING + WINDOW_PADDING,
 				window_flags);
 			if (window == nullptr)
 			{
@@ -2650,7 +2651,7 @@ public:
 			gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress);
 #endif
 
-			ImGui::SetNextWindowSize(ImVec2((float)current_instance->getScreenWidth(), (float)current_instance->getScreenHeight()));
+			ImGui::SetNextWindowSize(ImVec2((float)current_instance->getTotalScreenWidth(), (float)current_instance->getTotalScreenHeight()));
 			std::string emuWindow = "Emulation Window (" + std::string(current_instance->getEmulatorName()) + ")";
 
 			FlushEarlyLogsToImGui();
@@ -2803,8 +2804,21 @@ public:
 							static const FLAG showBiosPrompt = NO;
 #endif
 							static FLAG barcodeWindowOpen = NO;
+							static int  pendingWindowScale = RESET;
+							static int  appliedWindowScale = _XSCALE;
 
 							tickAtStart = SDL_GetTicksNS();
+
+							if (pendingWindowScale != RESET)
+							{
+								int curW = 0, curH = 0;
+								SDL_GetWindowSize(window, &curW, &curH);
+								int newW = (curW * pendingWindowScale) / appliedWindowScale;
+								int newH = (curH * pendingWindowScale) / appliedWindowScale;
+								SDL_SetWindowSize(window, newW, newH);
+								appliedWindowScale = pendingWindowScale;
+								pendingWindowScale = RESET;
+							}
 
 #if (ENABLED_IMGUI_DEFAULT_THEME == NO)
 							if (currentEmuTheme != previousEmuTheme)
@@ -3234,7 +3248,7 @@ public:
 										{
 											if (ImGui::MenuItem("GB/GBC##Reset", NULL, NO, NO))
 											{
-												nesReset = YES;
+												;
 											}
 											if (ImGui::MenuItem("NES##Reset", NULL, NO, MASQ_ENABLE_NES))
 											{
@@ -3242,7 +3256,7 @@ public:
 											}
 											if (ImGui::MenuItem("GBA##Reset", NULL, NO, NO))
 											{
-												nesReset = YES;
+												;
 											}
 											ImGui::EndMenu();
 										}
@@ -3308,13 +3322,37 @@ public:
 											}
 											if (ImGui::BeginMenu("GB##GBFamily", MASQ_ENABLE_GBC))
 											{
-												static FLAG isTicked = to_bool(config.get<std::string>("gb_gbc._force_gbc_for_gb", "false"));
-												if (ImGui::MenuItem("CGB Mode", NULL, isTicked))
+												static FLAG isCgbTicked = to_bool(config.get<std::string>("gb_gbc._force_gbc_for_gb", "false"));
+												if (ImGui::MenuItem("CGB Mode", NULL, isCgbTicked))
 												{
-													isTicked = !isTicked;
-													config.put("gb_gbc._force_gbc_for_gb", isTicked);
+													isCgbTicked = !isCgbTicked;
+													config.put("gb_gbc._force_gbc_for_gb", isCgbTicked);
 													boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
 												}
+												ImGui::EndMenu();
+											}
+											ImGui::Separator();
+											if (ImGui::BeginMenu("Scale", YES))
+											{
+												static int scaleSelection = _XSCALE;
+												const char* scaleLabels[FOUR] = { "1X", "2X", "3X", "4X" };
+												FLAG scaleChanged = NO;
+												for (INC8 ii = RESET; ii < FOUR; ii++)
+												{
+													if (ImGui::RadioButton(scaleLabels[ii], &scaleSelection, ii + 1))
+														scaleChanged = YES;
+												}
+#ifndef __EMSCRIPTEN__
+												if (scaleChanged == YES)
+												{
+													_XSCALE = scaleSelection;
+													config.put("mods._XSCALE", _XSCALE);
+													boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
+													pendingWindowScale = scaleSelection;
+												}
+#else
+												MASQ_UNUSED(scaleChanged);
+#endif
 												ImGui::EndMenu();
 											}
 											ImGui::EndMenu();
@@ -3774,8 +3812,8 @@ public:
 								{
 									// Aspect-ratio preserving display
 									ImVec2 avail_size = ImGui::GetContentRegionAvail();
-									float  fbWidth = (float)(current_instance->getScreenWidth() * FRAME_BUFFER_SCALE);
-									float  fbHeight = (float)(current_instance->getScreenHeight() * FRAME_BUFFER_SCALE);
+									float  fbWidth = (float)(current_instance->getTotalScreenWidth() * FRAME_BUFFER_SCALE);
+									float  fbHeight = (float)(current_instance->getTotalScreenHeight() * FRAME_BUFFER_SCALE);
 									float  fbAspect = fbWidth / fbHeight;
 
 									ImVec2 imageSize;
@@ -4497,6 +4535,8 @@ public:
 									if (current_instance->getEmulationID() == EMULATION_ID::GB_GBC_ID)
 									{
 										GBc_t* gbc = static_cast<GBc_t*>(current_instance);
+
+										// Draw Camera Capture Debugger
 										gbc->RenderGBCCaptureStagesUI();
 									}
 									RenderCameraHardwareUI(camera);
