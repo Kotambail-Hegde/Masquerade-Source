@@ -2,6 +2,17 @@ name: Docboy Tests
 
 on:
   workflow_dispatch:
+    inputs:
+      rom_sub_path:
+        description: 'Path after roms\ (e.g. dmg, cgb\ppu\file.gbc, or leave empty for all).'
+        required: false
+        default: 'dmg'
+        type: string
+      default_timeout:
+        description: 'Default timeout in seconds for each ROM test'
+        required: false
+        default: '5'
+        type: string
 
 permissions:
   contents: read
@@ -392,6 +403,7 @@ jobs:
         with:
           path: docboy-test-suite/roms
           key: docboy-roms-${{ env.DOCBOY_COMMIT }}
+
       # =========================================================================
       # RGBDS
       # =========================================================================
@@ -429,13 +441,37 @@ jobs:
       - name: Configure Docboy framework
         shell: pwsh
         run: |
+          $subPath = "${{ inputs.rom_sub_path }}".Trim()
+          $timeout = "${{ inputs.default_timeout }}".Trim()
+          
+          if ([string]::IsNullOrEmpty($timeout)) {
+              $timeout = "5"
+          }
+          
+          $romSubDir = if ([string]::IsNullOrEmpty($subPath)) { "" } else { "\$subPath" }
+          $romSubDir = $romSubDir -replace '\\+', '\'
+          
+          $targetPath = "$env:GITHUB_WORKSPACE\docboy-test-suite\roms$romSubDir"
+          
+          # Handles folders or specific files (.gb, .gbc, etc.) gracefully
+          if ((Test-Path $targetPath) -and (Get-Item $targetPath) -is [System.IO.FileInfo]) {
+              $fullRomPath = Split-Path $targetPath -Parent
+              Write-Host "Targeting single ROM file: $targetPath"
+              Write-Host "Setting framework rom_dir to parent directory: $fullRomPath"
+          } else {
+              $fullRomPath = $targetPath
+              Write-Host "Configuring framework with ROM dir: $fullRomPath"
+          }
+          
+          Write-Host "Configuring framework with timeout: $timeout seconds"
+          
           @"
           [framework]
           emulator = masquerade.exe
           location = $env:GITHUB_WORKSPACE\build\bin\Release\masquerade.exe
           type = setup10
-          rom_dir = $env:GITHUB_WORKSPACE\docboy-test-suite\roms
-          default_timeout = 8
+          rom_dir = $fullRomPath
+          default_timeout = $timeout
           "@ | Set-Content tests\gb_gbc\docboy\docboy_test_framework.ini
 
       # =========================================================================
@@ -510,11 +546,11 @@ jobs:
           _id=5
           _dmg_bios_location=assets\gb\bios\dmg_boot.bin
           _cgb_bios_location=assets\gbc\bios\cgb_boot.bin
-          _force_gb_palette=GearBoy
+          _force_gb_palette=Black/White
           _force_gb_gfx_for_gbc=false
           _force_gb_for_gbc=false
           _force_gbc_for_gb=false
-          _enable_cgb_color_correction=true
+          _enable_cgb_color_correction=false
           _enable_audio_hpf=true
           _gb_ghosting=0.0
           _gbc_ghosting=0.0
@@ -524,7 +560,7 @@ jobs:
           _key=XXXXXXXXXX
           "@ | Set-Content tests\gb_gbc\docboy\EmulatorToTest\setup10\assets\CONFIG.ini
 
-      # =========================================================================
+# =========================================================================
       # Run tests
       # =========================================================================
 
@@ -533,6 +569,25 @@ jobs:
         run: |
           cd tests\gb_gbc\docboy
           python docboy_test_framework.py
+
+      # =========================================================================
+      # Print Report Summary to Console
+      # =========================================================================
+
+      - name: Print Report Summary
+        if: always()
+        shell: pwsh
+        run: |
+          $reportPath = "tests\gb_gbc\docboy\results"
+          if (Test-Path $reportPath) {
+              $files = Get-ChildItem $reportPath -Filter *.report -Recurse
+              foreach ($file in $files) {
+                  Write-Host "=== REPORT FILE: $($file.Name) ==="
+                  Get-Content $file.FullName
+              }
+          } else {
+              Write-Host "Results directory not found."
+          }
 
       # =========================================================================
       # Upload report

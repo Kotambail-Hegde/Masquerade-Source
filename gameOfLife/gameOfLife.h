@@ -21,6 +21,7 @@ class gameOfLife_t : public abstractEmulation_t
 #pragma region INFRASTRUCTURE_DECLARATIONS
 public:
 
+	FLAG isHeadless = NO;
 	static const uint32_t screen_height = 1024; // Needs to be power of 2
 	static const uint32_t screen_width = 1024; // Needs to be power of 2
 	static const uint32_t pixel_height = 1;
@@ -154,7 +155,7 @@ private:
 #pragma region INFRASTRUCTURE_METHOD_DECLARATION
 public:
 
-	gameOfLife_t(MasqConfig_t& config);
+	gameOfLife_t(MasqConfig_t& config, FLAG headless = NO);
 	void setupTheCoreOfEmulation(void* masqueradeInstance = nullptr, void* audio = nullptr, void* input = nullptr, void* network = nullptr, void* camera = nullptr) override;
 	void sendBiosToEmulator(bios_t* bios = nullptr) override {};
 
