@@ -1985,8 +1985,6 @@ private:
 			Pixel imGuiBuffer1D[screen_width * screen_height];
 			Pixel imGuiBuffer2D[screen_height][screen_width];
 		} imGuiBuffer;
-		COLOR_FORMAT gfx_BG_WINDOW[256][256];
-		COLOR_FORMAT imGuiFullBuffer2D[256][256];
 		// ----------------------------------------------------------------
 		uint64_t filters;
 		uint64_t debugVariable;

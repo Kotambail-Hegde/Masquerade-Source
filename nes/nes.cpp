@@ -839,8 +839,6 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 					? (uint32_t)(pNES_instance->NES_state.catridgeInfo.mmc3.ines047.multicart & 0x01) << 17
 					: 0x00000u;
 
-				const uint32_t chrRomMask = (chrRomBytes > ZERO) ? (uint32_t)(chrRomBytes - ONE) : ZERO;
-
 				// RAM address mask for large CHR-RAM: mask to full declared size so upper banks are reachable.
 				// Not used for TQROM (always 0x1FFF there).
 				const uint32_t largeChrRamMask = (totalChrRam > ZERO) ? (uint32_t)(totalChrRam - ONE) : 0x1FFFu;
@@ -916,7 +914,7 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 						// Large CHR-RAM: maxCatridgeCHRROM reused as backing store (CHR ROM size is zero)
 						RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index & largeChrRamMask];
 					}
-					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[(chrBase + index) & chrRomMask];
+					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[(chrBase + index) % chrRomBytes];
 				}
 				if (IF_ADDRESS_WITHIN(address, startAddr2, endAddr2))
 				{
@@ -954,7 +952,7 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 						// Large CHR-RAM: maxCatridgeCHRROM reused as backing store (CHR ROM size is zero)
 						RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index & largeChrRamMask];
 					}
-					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[(chrBase + index) & chrRomMask];
+					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[(chrBase + index) % chrRomBytes];
 				}
 				if (IF_ADDRESS_WITHIN(address, startAddr3, endAddr3))
 				{
@@ -990,7 +988,7 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 						// Large CHR-RAM: maxCatridgeCHRROM reused as backing store (CHR ROM size is zero)
 						RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index & largeChrRamMask];
 					}
-					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[(chrBase + index) & chrRomMask];
+					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[(chrBase + index) % chrRomBytes];
 				}
 				if (IF_ADDRESS_WITHIN(address, startAddr4, endAddr4))
 				{
@@ -1026,7 +1024,7 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 						// Large CHR-RAM: maxCatridgeCHRROM reused as backing store (CHR ROM size is zero)
 						RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index & largeChrRamMask];
 					}
-					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[(chrBase + index) & chrRomMask];
+					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[(chrBase + index) % chrRomBytes];
 				}
 				if (IF_ADDRESS_WITHIN(address, startAddr5, endAddr5))
 				{
@@ -1064,7 +1062,7 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 						// Large CHR-RAM: maxCatridgeCHRROM reused as backing store (CHR ROM size is zero)
 						RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index & largeChrRamMask];
 					}
-					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[(chrBase + index) & chrRomMask];
+					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[(chrBase + index) % chrRomBytes];
 				}
 				if (IF_ADDRESS_WITHIN(address, startAddr6, endAddr6))
 				{
@@ -1102,7 +1100,7 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 						// Large CHR-RAM: maxCatridgeCHRROM reused as backing store (CHR ROM size is zero)
 						RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index & largeChrRamMask];
 					}
-					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[(chrBase + index) & chrRomMask];
+					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[(chrBase + index) % chrRomBytes];
 				}
 				FATAL("Invalid CHR ROM/RAM address in MMC3");
 			}

@@ -1583,19 +1583,17 @@ void GBc_t::serialTick()
 	{
 		shiftClockTick = YES;
 
-		// Pumped every raw tick, unconditionally -- regardless of local
-		// CLOCK_SELECT/TRANSFER_ENABLE state. An inbound request from the
-		// peer must get drained and answered even while THIS side is idle
-		// or mid-negotiation; gating this behind the master/slave branches
-		// below (as an earlier version did) meant a peer's request could sit
-		// unread in the socket buffer for as long as this side stayed idle
-		// -- a real deadlock if the peer was waiting on us. update() is
-		// self-throttled internally (see NETWORK_POLL_INTERVAL_MS), so
-		// calling it at raw tick rate costs a cheap early-return, not a
-		// syscall, on most calls. setLocalReplyByte() keeps whatever a
-		// same-tick inbound SERIAL_BYTE_REQUEST gets answered with fresh --
-		// this is GB's own concern (its SB register), not the session's,
-		// which is why update() itself no longer takes this as a parameter.
+		// Runs every tick, unconditionally, regardless of CLOCK_SELECT/TRANSFER_ENABLE:
+		// - A peer's request must be drained even while we're idle -- gating this on
+		//   our own state (like an earlier version did) could leave a peer's request
+		//   unread indefinitely, deadlocking them.
+		// - update() only reads the socket, never sends, and self-throttles internally
+		//   (NETWORK_POLL_INTERVAL_MS) -- calling it every tick is a cheap early-return,
+		//   not real socket traffic, on most calls.
+		// - setLocalReplyByte() just keeps SB's latest value ready in case a
+		//   SERIAL_BYTE_REQUEST arrives this exact tick.
+		// - The only call that actually sends is beginByteTransfer(), reached only from
+		//   tickSerialLink() below, gated on TRANSFER_ENABLE==1.
 		if (pGBc_instance->GBc_state.emulatorStatus.serialDevice == GB_SERIAL_DEVICE::GB_LINK_CABLE && isSerialLinkConnected() == YES)
 		{
 			// Neither of these two calls sends anything over the network --
@@ -1640,22 +1638,15 @@ void GBc_t::serialTick()
 			FLAG rxStatus = FALSE;
 			BIT bitReceived = ONE;
 
-			// GB_LINK_CABLE (real network multiplayer) is handled entirely
-			// separately from GB_PRINTER below. The printer always
-			// completes a byte transfer within the same 8 ticks that
-			// shift it -- true for our instant local device. A network
-			// peer can't promise that: a transfer may need to stay pending
-			// across many ticks (many frames, even) while waiting on the
-			// round trip. So on any tick where the transfer hasn't
-			// completed, we deliberately do NOT touch SB or
-			// serialMasterByteShiftCount, and leave TRANSFER_ENABLE set --
-			// from the ROM's perspective this looks exactly like talking
-			// to a real, slower-than-instant link peer, not a bug. CPU/
-			// PPU/APU all keep running normally regardless; only this one
-			// serial transfer is "slow." This replaces the old busy-wait
-			// sendOverSerialLink()/receiveOverSerialLink() pair entirely --
-			// those blocked the whole emulator thread for the RTT
-			// duration, which is exactly what this redesign exists to fix.
+			// GB_LINK_CABLE is handled separately from GB_PRINTER/GB_BARCODE_BOY below:
+			// - Those complete a byte within the same 8 ticks that shift it (instant
+			//   local devices). A network peer can't promise that -- a transfer may
+			//   stay pending across many ticks while waiting on the round trip.
+			// - So while pending, we don't touch SB/serialMasterByteShiftCount and
+			//   leave TRANSFER_ENABLE set -- to the ROM this looks like a real, slower
+			//   link peer, not a bug. CPU/PPU/APU keep running normally meanwhile.
+			// - This replaces the old busy-wait send/receive pair, which blocked the
+			//   whole emulator thread for the RTT duration.
 			if (pGBc_instance->GBc_state.emulatorStatus.serialDevice == GB_SERIAL_DEVICE::GB_LINK_CABLE && isSerialLinkConnected() == YES)
 			{
 #ifndef __EMSCRIPTEN__
@@ -1744,13 +1735,13 @@ void GBc_t::serialTick()
 		BYTE receivedByte = ZERO;
 		BIT bitReceived = ZERO;
 
-		// GB_LINK_CABLE (network multiplayer): a slave has no clock of
-		// its own -- it purely reacts to whatever byte the remote peer
-		// (master for this exchange) sends. No TRANSFER_ENABLE polling
-		// loop needed here; just check every tick whether an unsolicited
-		// byte has arrived, and if so, complete in one shot (echoing our
-		// own current SB back, same as real hardware's simultaneous
-		// full-duplex exchange on a single clock edge).
+		// GB_LINK_CABLE: a slave has no clock of its own -- it just reacts to
+		// whatever byte the remote master sends.
+		// - No TRANSFER_ENABLE check needed: per gbdev's doc, the slave's own bit
+		//   is optional and doesn't gate whether the master's transfer completes.
+		// - Just check each tick whether a byte has arrived, and complete in one
+		//   shot when it has -- same as real hardware's full-duplex exchange on a
+		//   single clock edge.
 		if (pGBc_instance->GBc_state.emulatorStatus.serialDevice == GB_SERIAL_DEVICE::GB_LINK_CABLE && isSerialLinkConnected() == YES)
 		{
 #ifndef __EMSCRIPTEN__
@@ -1776,12 +1767,11 @@ void GBc_t::serialTick()
 		{
 			if (gbBarcodeEngine.isClocking() == YES
 				&& shiftClockTick == YES
-				// NOTE: So real hardware can't sense TRANSFER_ENABLE, and
-				// just relies on a fixed slow clock rate instead. 
-				// In emulation, Barcode Boy has the luxury of know exactly how much
-				// this delay should as it can just check for the TRANSFER_ENABLE.
-				// For now this gate only holds back the NEXT byte until the GB re-arms
-				// TRANSFER_ENABLE
+				// Real hardware likely can't sense TRANSFER_ENABLE at all -- no such
+				// signal exists on the Link Cable pinout -- so it probably just relies
+				// on a fixed slow clock rate to leave enough delay. In emulation we
+				// have the luxury of knowing exactly when the GB is ready, so we check
+				// TRANSFER_ENABLE directly instead of guessing a delay.
 				// Refer https://gbdev.gg8.se/wiki/articles/Serial_Data_Transfer_(Link_Cable)#Delays_and_Synchronization
 				&& pGBc_peripherals->SC.scFields.TRANSFER_ENABLE == ONE)
 			{
@@ -4808,8 +4798,8 @@ void GBc_t::setPaletteColorForCGB(FLAG isThisForBackground, uint8_t value)
 * after getting y position, start from x position 0
 * read the corresponding 16 byte data from tile data region
 * get the color ID
-* based on the current palette, get the actual olc color
-* save this in the gfx_BG_WINDOW_OBJ
+* based on the current palette, get the actual color
+* save this in the gfxVisible_BG_WINDOW_OBJ
 *
 *
 *

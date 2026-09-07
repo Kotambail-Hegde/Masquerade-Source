@@ -1657,8 +1657,9 @@ private:
 		{
 			int x = RESET, y = RESET;
 			SDL_GetWindowSize(window, &x, &y);
-			config.put("mods._X", std::uint16_t(x));
-			config.put("mods._Y", std::uint16_t(y));
+			uint32_t saveScale = (_XSCALE > RESET) ? _XSCALE : ONE;
+			config.put("mods._X", std::uint16_t(x / saveScale));
+			config.put("mods._Y", std::uint16_t(y / saveScale));
 			boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
 		}
 
@@ -2803,8 +2804,21 @@ public:
 							static const FLAG showBiosPrompt = NO;
 #endif
 							static FLAG barcodeWindowOpen = NO;
+							static int  pendingWindowScale = RESET;
+							static int  appliedWindowScale = _XSCALE;
 
 							tickAtStart = SDL_GetTicksNS();
+
+							if (pendingWindowScale != RESET)
+							{
+								int curW = 0, curH = 0;
+								SDL_GetWindowSize(window, &curW, &curH);
+								int newW = (curW * pendingWindowScale) / appliedWindowScale;
+								int newH = (curH * pendingWindowScale) / appliedWindowScale;
+								SDL_SetWindowSize(window, newW, newH);
+								appliedWindowScale = pendingWindowScale;
+								pendingWindowScale = RESET;
+							}
 
 #if (ENABLED_IMGUI_DEFAULT_THEME == NO)
 							if (currentEmuTheme != previousEmuTheme)
@@ -3315,6 +3329,30 @@ public:
 													config.put("gb_gbc._force_gbc_for_gb", isTicked);
 													boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
 												}
+												ImGui::EndMenu();
+											}
+											ImGui::Separator();
+											if (ImGui::BeginMenu("Scale", YES))
+											{
+												static int scaleSelection = _XSCALE;
+												const char* scaleLabels[FOUR] = { "1X", "2X", "3X", "4X" };
+												FLAG scaleChanged = NO;
+												for (INC8 ii = RESET; ii < FOUR; ii++)
+												{
+													if (ImGui::RadioButton(scaleLabels[ii], &scaleSelection, ii + 1))
+														scaleChanged = YES;
+												}
+#ifndef __EMSCRIPTEN__
+												if (scaleChanged == YES)
+												{
+													_XSCALE = scaleSelection;
+													config.put("mods._XSCALE", _XSCALE);
+													boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
+													pendingWindowScale = scaleSelection;
+												}
+#else
+												MASQ_UNUSED(scaleChanged);
+#endif
 												ImGui::EndMenu();
 											}
 											ImGui::EndMenu();
