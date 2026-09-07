@@ -557,21 +557,18 @@ jobs:
         with:
           name: windows-build
           path: artifacts/windows
-          optional: true # Won't fail if job was skipped
 
-      - name: Download Linux artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: linux-build
-          path: artifacts/linux
-          optional: true # Won't fail if job was skipped
+      # - name: Download Linux artifacts
+      #   uses: actions/download-artifact@v4
+      #   with:
+      #     name: linux-build
+      #     path: artifacts/linux
 
-      - name: Download Emscripten artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: emscripten-build
-          path: artifacts/emscripten
-          optional: true # Won't fail if job was skipped
+      # - name: Download Emscripten artifacts
+      #   uses: actions/download-artifact@v4
+      #   with:
+      #     name: emscripten-build
+      #     path: artifacts/emscripten
 
       - name: Checkout Masquerade-Emulator
         uses: actions/checkout@v4
