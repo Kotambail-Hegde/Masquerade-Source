@@ -2162,6 +2162,24 @@ private:
 		BYTE header[SIXTEEN];
 	} iNES_header_t;
 
+	typedef struct
+	{
+		struct
+		{
+			char unif[4];
+			uint32_t version;
+			BYTE reserved[24];
+		} master_header;
+		uint32_t type;
+		uint32_t length;
+	} unif_header_t;
+
+	typedef struct 
+	{
+		char id[4];
+		uint32_t length;
+	} unif_chunk_header_t;
+
 	typedef union
 	{
 		struct
@@ -2180,14 +2198,34 @@ private:
 				} withoutTrainer;
 			} remaining;
 		} iNES_Fields;
+		struct
+		{
+			unif_header_t unif_header;
+			union
+			{
+				struct
+				{
+					BYTE romData[NES_MAX_ROM_SIZE - sizeof(unif_header_t)];
+				} withoutTrainer; // Kept the same name for consistency, even though UNIF doesn't have a trainer
+			} remaining; // Kept the same name for consistency with INES structure
+		} unif_Fields;
 		BYTE completeROM[NES_MAX_ROM_SIZE];	// Maximum rom size seen so far is 2049 KB
 	} iNES_t;
+
+	typedef struct {
+		MAPPER mapper;
+		SUB_MAPPER submapper;
+		NAMETABLE_MIRROR mirroring;
+		uint32_t prgRamSizeBytes; // in Bytes
+		uint32_t chrRamSizeBytes; // in Bytes
+	} unifNes20Map_t;
 
 	typedef struct
 	{
 		FLAG isRomLoaded;
 		uint32_t codeRomSize;
 		iNES_t iNES;
+		unifNes20Map_t unifNes20Map;
 	} aboutRom_t;
 
 	typedef struct
@@ -4107,6 +4145,100 @@ public:
 	FLAG loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom) override;
 
 	void dumpRom() override;
+
+public:
+
+	unifNes20Map_t GetUNIFToNES20Mapping(std::string_view mapr)
+	{
+		static const std::unordered_map<std::string_view, unifNes20Map_t> lut =
+		{
+			// ===================================================================
+			// Official Nintendo Standard Boards (SxROM / TxROM / UxROM / AxROM)
+			// ===================================================================
+
+			// NROM (Mapper 0) - Fixed mirroring depends on game dump, defaults to Horizontal
+			{ "NES-NROM-128",            { MAPPER::NROM, SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE, NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 0, 0 } },
+			{ "NES-NROM-256",            { MAPPER::NROM, SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE, NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 0, 0 } },
+			{ "NES-NROM",                { MAPPER::NROM, SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE, NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 0, 0 } },
+
+			// MMC1 / SxROM (Mapper 1) - Dynamically controlled by MMC1 registers
+			{ "NES-SAROM",               { MAPPER::MMC1, SUB_MAPPER::SAROM,  NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 8192, 0 } },
+			{ "NES-SBROM",               { MAPPER::MMC1, SUB_MAPPER::SBROM,  NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 0, 0 } },
+			{ "NES-SCROM",               { MAPPER::MMC1, SUB_MAPPER::SCROM,  NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 0, 0 } },
+			{ "NES-SEROM",               { MAPPER::MMC1, SUB_MAPPER::SEROM_SHROM_SH1ROM, NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 0, 0 } },
+			{ "NES-SGROM",               { MAPPER::MMC1, SUB_MAPPER::SGROM,  NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 0, 8192 } },
+			{ "NES-SKROM",               { MAPPER::MMC1, SUB_MAPPER::SKROM,  NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 8192, 0 } },
+			{ "NES-SLROM",               { MAPPER::MMC1, SUB_MAPPER::SLROM,  NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 0, 0 } },
+			{ "NES-SNROM",               { MAPPER::MMC1, SUB_MAPPER::SNROM,  NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 8192, 8192 } },
+			{ "NES-SOROM",               { MAPPER::MMC1, SUB_MAPPER::SOROM,  NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 16384, 0 } },
+			{ "NES-SUROM",               { MAPPER::MMC1, SUB_MAPPER::SUROM,  NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 8192, 0 } },
+			{ "NES-SXROM",               { MAPPER::MMC1, SUB_MAPPER::SXROM,  NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 32768, 8192 } },
+
+			// UxROM (Mapper 2)
+			{ "NES-UNROM",               { MAPPER::UxROM_002, SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE, NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 0, 8192 } },
+			{ "NES-UOROM",               { MAPPER::UxROM_002, SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE, NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 0, 8192 } },
+
+			// CNROM (Mapper 3)
+			{ "NES-CNROM",               { MAPPER::CNROM, SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE, NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 0, 0 } },
+
+			// MMC3 / TxROM (Mapper 4)
+			{ "NES-TBROM",               { MAPPER::MMC3, SUB_MAPPER::TBROM,  NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 0, 0 } },
+			{ "NES-TEROM",               { MAPPER::MMC3, SUB_MAPPER::TEROM,  NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 0, 0 } },
+			{ "NES-TFROM",               { MAPPER::MMC3, SUB_MAPPER::TFROM,  NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 0, 0 } },
+			{ "NES-TGROM",               { MAPPER::MMC3, SUB_MAPPER::TGROM,  NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 0, 8192 } },
+			{ "NES-TKROM",               { MAPPER::MMC3, SUB_MAPPER::TKROM,  NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 8192, 0 } },
+			{ "NES-TLROM",               { MAPPER::MMC3, SUB_MAPPER::TLROM,  NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 0, 0 } },
+			{ "NES-TLSROM",              { MAPPER::MMC3, SUB_MAPPER::TLSROM, NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 0, 0 } },
+			{ "NES-TNROM",               { MAPPER::MMC3, SUB_MAPPER::TNROM,  NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 8192, 8192 } },
+			{ "NES-TQROM",               { MAPPER::MMC3, SUB_MAPPER::TQROM,  NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 0, 8192 } },
+			{ "NES-TSROM",               { MAPPER::MMC3, SUB_MAPPER::TSROM,  NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 8192, 0 } },
+
+			// MMC5 (Mapper 5)
+			{ "NES-ELROM",               { MAPPER::MMC5, SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE, NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 0, 0 } },
+			{ "NES-EKROM",               { MAPPER::MMC5, SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE, NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 8192, 0 } },
+			{ "NES-ETROM",               { MAPPER::MMC5, SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE, NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 16384, 0 } },
+			{ "NES-EWROM",               { MAPPER::MMC5, SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE, NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 32768, 0 } },
+
+			// AxROM (Mapper 7) - Fixed single screen
+			{ "NES-AOROM",               { MAPPER::AxROM, SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE, NAMETABLE_MIRROR::ONESCREEN_LO_MIRROR, 0, 8192 } },
+			{ "NES-AMROM",               { MAPPER::AxROM, SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE, NAMETABLE_MIRROR::ONESCREEN_LO_MIRROR, 0, 8192 } },
+			{ "NES-ANROM",               { MAPPER::AxROM, SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE, NAMETABLE_MIRROR::ONESCREEN_LO_MIRROR, 0, 8192 } },
+
+			// MMC2 / MMC4 (Mappers 9 & 10)
+			{ "NES-PNROM",               { MAPPER::MMC2, SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE, NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 0, 0 } },
+			{ "NES-FJROM",               { MAPPER::MMC4, SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE, NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 0, 0 } },
+			{ "NES-FKROM",               { MAPPER::MMC4, SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE, NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 8192, 0 } },
+
+			// GxROM (Mapper 66)
+			{ "NES-GNROM",               { MAPPER::GxROM, SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE, NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 0, 0 } },
+			{ "NES-MHROM",               { MAPPER::GxROM, SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE, NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 0, 0 } },
+
+			// ===================================================================
+			// Unlicensed / Pirate / Multicart Boards
+			// ===================================================================
+
+			{ "BMC-42in1ResetSwitch",     { MAPPER::MAPPER_NOT_APPLICABLE, SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE, NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 0, 0 } },
+			{ "BMC-FK23C",                { MAPPER::MAPPER_NOT_APPLICABLE, SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE, NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 8192, 8192 } },
+			{ "BMC-NovelDiamond",         { MAPPER::MAPPER_NOT_APPLICABLE, SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE, NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 0, 8192 } },
+			{ "BMC-Super24in1SC01",       { MAPPER::MAPPER_NOT_APPLICABLE, SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE, NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 0, 8192 } },
+			{ "BTL-MARIO1-MALEE2",        { MAPPER::MAPPER_NOT_APPLICABLE, SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE, NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 0, 0 } },
+
+			{ "UNL-N32",                  { MAPPER::MAPPER_NOT_APPLICABLE, SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE, NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 0, 8192 } },
+			{ "UNL-KS7037",               { MAPPER::MAPPER_NOT_APPLICABLE, SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE, NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 0, 8192 } },
+			{ "UNL-DRIPGAME",             { MAPPER::MAPPER_NOT_APPLICABLE, SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE, NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 2048, 8192 } },
+			{ "UNL-SL1632",				  { MAPPER::INES_MAPPER_014,       SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE, NAMETABLE_MIRROR::VERTICAL_MIRROR, 0, 0 } },
+			{ "UNIF-COOLBOY",             { MAPPER::INES_MAPPER_268,       SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE, NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 0, 32768 } },
+			{ "UNIF-NJ0602",              { MAPPER::NANJING_FC001,         SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE, NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 8192, 0 } }
+		};
+
+		auto it = lut.find(mapr);
+		if (it != lut.end())
+		{
+			RETURN it->second;
+		}
+
+		RETURN { MAPPER::MAPPER_NOT_APPLICABLE, SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE, NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 0, 0 };
+	}
 #pragma endregion EMULATION_DEFINITIONS
 };
 #pragma endregion CORE

@@ -13857,6 +13857,247 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 					}
 				}
 
+				// check whether the rom is in UNIF format
+				if (std::strncmp(pINES->unif_Fields.unif_header.master_header.unif, "UNIF", 4) == 0)
+				{
+					const uint8_t* raw_buffer = reinterpret_cast<const uint8_t*>(pINES);
+					uint32_t romBufferSize = TO_UINT32(pAbsolute_NES_instance->absolute_NES_state.aboutRom.codeRomSize);
+
+					uint32_t offset = 32; // Skip 32-byte UNIF Header
+					char mapr_name[64] = { 0 };
+					bool found_mapr = false;
+
+					// Fixed arrays for ordered chunk indexing (UNIF supports 0..9, A..F -> 16 slots)
+					struct ChunkInfo {
+						const uint8_t* ptr = nullptr;
+						uint32_t length = 0;
+					};
+					ChunkInfo prg_chunks[16]{};
+					ChunkInfo chr_chunks[16]{};
+
+					uint32_t total_prg_size = 0;
+					uint32_t total_chr_size = 0;
+
+					uint8_t tv_system = 0;
+					uint8_t ctrl_mask = 0;
+					bool has_battery = false;
+					bool vror_present = false;
+
+					// MIRR chunk override tracking
+					uint8_t mirr_byte = 0xFF;
+					bool has_mirr_chunk = false;
+
+					LOG("[UNIF Parser] Starting UNIF parsing. Total file buffer size: %u bytes", romBufferSize);
+
+					// --- Pass 1: Parse and Index Chunks ---
+					while (offset + TO_UINT32(sizeof(unif_chunk_header_t)) <= romBufferSize)
+					{
+						const auto* chunk = reinterpret_cast<const unif_chunk_header_t*>(raw_buffer + offset);
+						uint32_t chunk_data_offset = TO_UINT32(offset + sizeof(unif_chunk_header_t));
+
+						LOG("[UNIF Parser] Chunk found at offset 0x%08X: ID = '%.4s', Length = %u bytes",
+							offset, chunk->id, chunk->length);
+
+						if (chunk_data_offset + chunk->length > romBufferSize)
+						{
+							LOG("[UNIF Parser] ERROR: Chunk '%.4s' data extends past buffer boundary! Data offset: %u, Length: %u, Buffer Size: %u",
+								chunk->id, chunk_data_offset, chunk->length, romBufferSize);
+							break;
+						}
+
+						if (std::memcmp(chunk->id, "MAPR", 4) == 0)
+						{
+							size_t copy_len = std::min<size_t>(chunk->length, sizeof(mapr_name) - 1);
+							std::memcpy(mapr_name, raw_buffer + chunk_data_offset, copy_len);
+							mapr_name[copy_len] = '\0';
+							found_mapr = true;
+							LOG("[UNIF Parser] MAPR Chunk parsed: '%s'", mapr_name);
+						}
+						else if (std::memcmp(chunk->id, "PRG", 3) == 0)
+						{
+							uint8_t idx = chunk->id[3];
+							size_t slot = (idx >= '0' && idx <= '9') ? static_cast<size_t>(idx - '0') :
+								(idx >= 'A' && idx <= 'F') ? static_cast<size_t>(10 + idx - 'A') : 0;
+
+							prg_chunks[slot] = { raw_buffer + chunk_data_offset, chunk->length };
+							total_prg_size += chunk->length;
+							LOG("[UNIF Parser] Indexed PRG chunk slot %zu (ID: %.4s), length: %u bytes", slot, chunk->id, chunk->length);
+						}
+						else if (std::memcmp(chunk->id, "CHR", 3) == 0)
+						{
+							uint8_t idx = chunk->id[3];
+							size_t slot = (idx >= '0' && idx <= '9') ? static_cast<size_t>(idx - '0') :
+								(idx >= 'A' && idx <= 'F') ? static_cast<size_t>(10 + idx - 'A') : 0;
+
+							chr_chunks[slot] = { raw_buffer + chunk_data_offset, chunk->length };
+							total_chr_size += chunk->length;
+							LOG("[UNIF Parser] Indexed CHR chunk slot %zu (ID: %.4s), length: %u bytes", slot, chunk->id, chunk->length);
+						}
+						else if (std::memcmp(chunk->id, "MIRR", 4) == 0 && chunk->length >= 1)
+						{
+							mirr_byte = raw_buffer[chunk_data_offset];
+							has_mirr_chunk = true;
+							LOG("[UNIF Parser] MIRR Chunk parsed: 0x%02X", mirr_byte);
+						}
+						else if (std::memcmp(chunk->id, "TVCI", 4) == 0 && chunk->length >= 1)
+						{
+							tv_system = raw_buffer[chunk_data_offset];
+							LOG("[UNIF Parser] TVCI Chunk parsed: %u", tv_system);
+						}
+						else if (std::memcmp(chunk->id, "CTRL", 4) == 0 && chunk->length >= 1)
+						{
+							ctrl_mask = raw_buffer[chunk_data_offset];
+							LOG("[UNIF Parser] CTRL Chunk parsed: 0x%02X", ctrl_mask);
+						}
+						else if (std::memcmp(chunk->id, "BATR", 4) == 0 && chunk->length >= 1)
+						{
+							has_battery = (raw_buffer[chunk_data_offset] != 0);
+							LOG("[UNIF Parser] BATR Chunk parsed: Battery = %s", has_battery ? "YES" : "NO");
+						}
+						else if (std::memcmp(chunk->id, "VROR", 4) == 0)
+						{
+							vror_present = true;
+							LOG("[UNIF Parser] VROR Chunk present.");
+						}
+
+						// Direct standard stride calculation (No alignment padding)
+						offset = TO_UINT32(chunk_data_offset + chunk->length);
+					}
+
+					LOG("[UNIF Parser] Pass 1 complete. Total PRG: %u bytes, Total CHR: %u bytes", total_prg_size, total_chr_size);
+
+					// --- Resolve Mapping ---
+					unifNes20Map_t mapping = found_mapr
+						? GetUNIFToNES20Mapping(mapr_name)
+						: unifNes20Map_t{ MAPPER::MAPPER_NOT_APPLICABLE, SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE, NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 0, 0 };
+
+					pAbsolute_NES_instance->absolute_NES_state.aboutRom.unifNes20Map = mapping;
+
+					LOG("[UNIF Parser] Mapping resolved for MAPR '%s': Mapper %u, Submapper %d",
+						mapr_name, static_cast<uint16_t>(mapping.mapper), static_cast<int>(mapping.submapper));
+
+					// --- Mirroring Resolution ---
+					NAMETABLE_MIRROR effective_mirroring = mapping.mirroring;
+					bool explicit_4screen = false;
+
+					if (has_mirr_chunk)
+					{
+						switch (mirr_byte)
+						{
+						case 0: effective_mirroring = NAMETABLE_MIRROR::HORIZONTAL_MIRROR; break;
+						case 1: effective_mirroring = NAMETABLE_MIRROR::VERTICAL_MIRROR; break;
+						case 2: effective_mirroring = NAMETABLE_MIRROR::ONESCREEN_LO_MIRROR; break;
+						case 3: effective_mirroring = NAMETABLE_MIRROR::ONESCREEN_HI_MIRROR; break;
+						case 4: explicit_4screen = true; break;
+						default: break;
+						}
+						LOG("[UNIF Parser] MIRR Chunk override applied: %d (4-Screen: %s)",
+							static_cast<int>(effective_mirroring), explicit_4screen ? "YES" : "NO");
+					}
+
+					// --- Build NES 2.0 Header ---
+					iNES_header_t header{};
+					header.fields.constant[0] = 'N';
+					header.fields.constant[1] = 'E';
+					header.fields.constant[2] = 'S';
+					header.fields.constant[3] = 0x1A;
+
+					uint16_t mapper_num = static_cast<uint16_t>(mapping.mapper);
+					uint8_t submapper_num = static_cast<uint8_t>(std::max(0, static_cast<int>(mapping.submapper)));
+
+					uint16_t prg_units = static_cast<uint16_t>(total_prg_size / 16384);
+					uint16_t chr_units = static_cast<uint16_t>(total_chr_size / 8192);
+
+					header.fields.sizeOfPrgRomIn16KB = static_cast<BYTE>(prg_units & 0xFF);
+					header.fields.sizeOfChrRomIn8KB = static_cast<BYTE>(chr_units & 0xFF);
+
+					// Flag 6 Bit 0: 0 = Horizontal/OneScreen, 1 = Vertical
+					header.fields.flag6.fields.nametableArrangement = (effective_mirroring == NAMETABLE_MIRROR::VERTICAL_MIRROR) ? 1 : 0;
+
+					// Flag 6 Bit 3: 4-Screen VRAM explicitly declared
+					if (explicit_4screen)
+					{
+						header.fields.flag6.raw |= 0x08;
+					}
+
+					header.fields.flag6.fields.hasPersistantMemory = has_battery ? 1 : 0;
+					header.fields.flag6.fields.mapperLo = static_cast<BYTE>(mapper_num & 0x0F);
+
+					header.fields.flag7.fields.nes2p0 = 2; // NES 2.0 Identifier
+					header.fields.flag7.fields.mapperHi = static_cast<BYTE>((mapper_num >> 4) & 0x0F);
+
+					header.fields.flags_8to15.nes2p0.flag8.fields.mapperNBHi = static_cast<BYTE>((mapper_num >> 8) & 0x0F);
+					header.fields.flags_8to15.nes2p0.flag8.fields.subMapper = static_cast<BYTE>(submapper_num & 0x0F);
+
+					header.fields.flags_8to15.nes2p0.flag9.fields.prgRomMSB = static_cast<BYTE>((prg_units >> 8) & 0x0F);
+					header.fields.flags_8to15.nes2p0.flag9.fields.chrRomMSB = static_cast<BYTE>((chr_units >> 8) & 0x0F);
+
+					// RAM size exponent calculator
+					auto get_ram_exponent = [](uint32_t size_bytes) -> uint8_t {
+						if (size_bytes == 0) return 0;
+						uint8_t shift = 0;
+						uint32_t base = 64;
+						while (base < size_bytes && shift < 15)
+						{
+							base <<= 1; shift++;
+						}
+						return shift;
+						};
+
+					if (mapping.prgRamSizeBytes > 0)
+					{
+						uint8_t exp_val = get_ram_exponent(mapping.prgRamSizeBytes);
+						if (has_battery)
+						{
+							header.fields.flags_8to15.nes2p0.flag10.fields.prgNonVolRam = exp_val;
+						}
+						else
+						{
+							header.fields.flags_8to15.nes2p0.flag10.fields.prgVolRam = exp_val;
+						}
+					}
+
+					if (vror_present || (mapping.chrRamSizeBytes > 0 && total_chr_size == 0))
+					{
+						uint32_t ram_size = mapping.chrRamSizeBytes ? mapping.chrRamSizeBytes : 8192;
+						header.fields.flags_8to15.nes2p0.flag11.fields.chrVolRam = get_ram_exponent(ram_size);
+					}
+
+					// --- Pass 2: Reconstruct Payload ---
+					std::vector<uint8_t> payload;
+					payload.reserve(total_prg_size + total_chr_size);
+
+					for (size_t i = 0; i < 16; ++i)
+					{
+						if (prg_chunks[i].ptr && prg_chunks[i].length)
+						{
+							LOG("[UNIF Parser] Writing PRG chunk %zu to payload (%u bytes)", i, prg_chunks[i].length);
+							payload.insert(payload.end(), prg_chunks[i].ptr, prg_chunks[i].ptr + prg_chunks[i].length);
+						}
+					}
+					for (size_t i = 0; i < 16; ++i)
+					{
+						if (chr_chunks[i].ptr && chr_chunks[i].length)
+						{
+							LOG("[UNIF Parser] Writing CHR chunk %zu to payload (%u bytes)", i, chr_chunks[i].length);
+							payload.insert(payload.end(), chr_chunks[i].ptr, chr_chunks[i].ptr + chr_chunks[i].length);
+						}
+					}
+
+					uint32_t total_ines_size = 16 + TO_UINT32(payload.size());
+					uint8_t* write_buffer = reinterpret_cast<uint8_t*>(pINES);
+
+					std::memcpy(write_buffer, header.header, 16);
+					if (!payload.empty())
+					{
+						std::memcpy(write_buffer + 16, payload.data(), payload.size());
+					}
+
+					pAbsolute_NES_instance->absolute_NES_state.aboutRom.codeRomSize = total_ines_size;
+
+					LOG("[UNIF Parser] Conversion complete. Reconstructed NES 2.0 total size: %u bytes", total_ines_size);
+				}
+
 				// decode mapper information
 				pNES_instance->NES_state.catridgeInfo.mapperID
 					= pINES->iNES_Fields.iNES_header.fields.flag6.fields.mapperLo
