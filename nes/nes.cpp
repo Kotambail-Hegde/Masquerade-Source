@@ -13560,6 +13560,26 @@ bool NES_t::initializeEmulator()
 	memset(pNES_catridgeMemory->maxCatridgePRGROM, RESET, sizeof(pNES_catridgeMemory->maxCatridgePRGROM));
 	memset(pNES_catridgeMemory->maxCatridgeCHRROM, RESET, sizeof(pNES_catridgeMemory->maxCatridgeCHRROM));
 
+	// initialize the palette memory
+	// Refer to https://forums.nesdev.org/viewtopic.php?p=4574&sid=5b643b16b2b08df41d162151a429fc45#p4574
+	const BYTE palettePowerUp[] =
+	{
+		0x09, 0x01, 0x00, 0x01,
+		0x00, 0x02, 0x02, 0x0D,
+		0x08, 0x10, 0x08, 0x24,
+		0x00, 0x00, 0x04, 0x2C,
+		0x09, 0x01, 0x34, 0x03,
+		0x00, 0x04, 0x00, 0x14,
+		0x08, 0x3A, 0x00, 0x02,
+		0x00, 0x20, 0x2C, 0x08
+	};
+
+	memcpy(pNES_ppuMemory->NESMemoryMap.paletteRamIndex, palettePowerUp, sizeof(palettePowerUp));
+	for (size_t i = 0; i < sizeof(pNES_ppuMemory->NESMemoryMap.paletteRamIndexMir); ++i)
+	{
+		pNES_ppuMemory->NESMemoryMap.paletteRamIndexMir[i] = palettePowerUp[i & 0x1F];
+	}
+
 	// check whether to enable the db or not
 	pAbsolute_NES_instance->absolute_NES_state.enable_nes_db = to_bool(pt.get<std::string>("nes._enable_nes_db", "false"));
 
