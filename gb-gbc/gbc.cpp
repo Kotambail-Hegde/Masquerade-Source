@@ -2075,7 +2075,7 @@ void GBc_t::ppuTick()
 						{
 							COLOR = paletteIDToColor.at(pGBc_instance->GBc_state.gb_palette).COLOR_000P.COLOR;
 						}
-						std::fill_n(pGBc_display->imGuiBuffer.imGuiBuffer1D, (getScreenWidth() * getScreenHeight()), COLOR);
+						std::ranges::fill(pGBc_display->imGuiBuffer.imGuiBuffer1D, COLOR);
 						pGBc_instance->GBc_state.emulatorStatus.stopLCDDone = YES;
 					}
 
@@ -4413,7 +4413,7 @@ void GBc_t::freezeLCD()
 		FROZEN = paletteIDToColor.at(pGBc_instance->GBc_state.gb_palette).COLOR_000P.COLOR;
 	}
 
-	std::fill_n(pGBc_display->imGuiBuffer.imGuiBuffer1D, sizeof(pGBc_display->imGuiBuffer.imGuiBuffer1D), FROZEN);
+	std::ranges::fill(pGBc_display->imGuiBuffer.imGuiBuffer1D, FROZEN);
 }
 
 void GBc_t::setPPULCDMode(LCD_MODES lcdMode)
