@@ -2670,17 +2670,13 @@ private:
 		}
 	}
 
-	// Bits per the wiki's supervisor register: bit4=mode (0:VRC2,1:MMC3),
-	// bit5=CHR A18 for $0000-$0FFF, bit6=CHR A18 for $1000-$17FF,
-	// bit7=CHR A18 for $1800-$1FFF. Applies identically regardless of which
-	// chip (VRC2 or MMC3) supplied the native <=256KB bank value.
 	static MASQ_INLINE uint32_t mapper014ChrA18Offset(BYTE supervisorReg, uint16_t ppuAddr)
 	{
 		BIT bit;
-		if (ppuAddr < 0x1000)      bit = (supervisorReg >> 5) & 0x01;
-		else if (ppuAddr < 0x1800) bit = (supervisorReg >> 6) & 0x01;
+		if (ppuAddr < 0x1000)      bit = (supervisorReg >> 3) & 0x01;
+		else if (ppuAddr < 0x1800) bit = (supervisorReg >> 5) & 0x01;
 		else                       bit = (supervisorReg >> 7) & 0x01;
-		RETURN bit ? 0x40000u : 0x00u; // 256 KiB
+		RETURN bit ? 0x40000u : 0x00u;
 	}
 
 	// Returns the 8KB PRG bank number for `slot` (0-3, i.e. $8000/$A000/$C000/$E000)

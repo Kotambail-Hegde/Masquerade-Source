@@ -359,7 +359,7 @@ void NES_t::clockMMC3IRQ(uint16_t address, MEMORY_ACCESS_SOURCE source, FLAG isW
 	// Mapper 014 only runs the MMC3 IRQ counter while its supervisor
 	// register has switched the chip into MMC3 mode -- in VRC2 mode there
 	// is no IRQ hardware active at all, and this counter must stay frozen.
-	if (mapper == MAPPER::INES_MAPPER_014 && (pNES_instance->NES_state.catridgeInfo.ines014.supervisorReg & 0x10) == ZERO)
+	if (mapper == MAPPER::INES_MAPPER_014 && (pNES_instance->NES_state.catridgeInfo.ines014.supervisorReg & 0x02) == ZERO)
 	{
 		RETURN;
 	}
@@ -410,21 +410,26 @@ void NES_t::clockMMC3IRQ(uint16_t address, MEMORY_ACCESS_SOURCE source, FLAG isW
 				pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.filteredA12RiseEvent = YES;
 
 				// --- RAMBO-1 scanline mode IRQ ---
+				// Same reload/decrement rules as clockRambo1CpuIRQ (NESdev
+				// wiki "RAMBO-1", "IRQ counter operation" — the algorithm is
+				// explicitly shared between scanline and cycle mode). Reload
+				// (via $C001) / reload-from-zero / decrement are mutually
+				// exclusive outcomes of a single clock.
 				if (mapper == MAPPER::RAMBO1 || mapper == MAPPER::INES_MAPPER_158)
 				{
 					auto& rb = pNES_instance->NES_state.catridgeInfo.mmc3.rambo1;
 					if (rb.needReload)
 					{
-						rb.irqCounter = (rb.irqReloadValue <= 1)
-							? (rb.irqReloadValue + 1)
-							: (rb.irqReloadValue + 2);
+						rb.irqCounter = (rb.irqReloadValue != RESET)
+							? (BYTE)(rb.irqReloadValue | 1)
+							: RESET;
 						rb.needReload = NO;
 					}
 					else if (rb.irqCounter == RESET)
 					{
-						rb.irqCounter = rb.irqReloadValue + 1;
+						rb.irqCounter = rb.irqReloadValue;
 					}
-					if (rb.irqCounter > RESET)
+					else
 					{
 						--rb.irqCounter;
 					}
@@ -517,20 +522,23 @@ void NES_t::clockRambo1CpuIRQ()
 		rb.cpuClockCounter = (rb.cpuClockCounter + 1) & 0x03;
 		if (rb.cpuClockCounter == RESET)
 		{
-			// Clock the IRQ counter
+			// Clock the IRQ counter — per NESdev wiki "RAMBO-1", section
+			// "IRQ counter operation": reload (via $C001) and reload-from-zero
+			// and decrement are three MUTUALLY EXCLUSIVE outcomes of a single
+			// clock, never combined. A $C001-triggered reload of a nonzero
+			// latch value is ORed with 1, not incremented.
 			if (rb.needReload)
 			{
-				rb.irqCounter = (rb.irqReloadValue <= 1)
-					? (rb.irqReloadValue + 1)
-					: (rb.irqReloadValue + 2);
+				rb.irqCounter = (rb.irqReloadValue != RESET)
+					? (BYTE)(rb.irqReloadValue | 1)
+					: RESET;
 				rb.needReload = NO;
 			}
 			else if (rb.irqCounter == RESET)
 			{
-				rb.irqCounter = rb.irqReloadValue + 1;
+				rb.irqCounter = rb.irqReloadValue;
 			}
-
-			if (rb.irqCounter > RESET)
+			else
 			{
 				--rb.irqCounter;
 			}
@@ -1610,7 +1618,7 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 			if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
 			{
 				auto& reg014 = pNES_instance->NES_state.catridgeInfo.ines014;
-				const bool isMMC3Mode = (reg014.supervisorReg & 0x10) != ZERO;
+				const bool isMMC3Mode = (reg014.supervisorReg & 0x02) != ZERO;
 				const uint32_t chrA18Offset = mapper014ChrA18Offset(reg014.supervisorReg, (uint16_t)address);
 
 				uint16_t nativeV1k = ZERO;
@@ -5395,7 +5403,7 @@ inline byte NES_t::readCpuRawMemoryInternal(uint16_t address, MEMORY_ACCESS_SOUR
 				{
 					auto& reg014 = pNES_instance->NES_state.catridgeInfo.ines014;
 					auto& vrc24 = pNES_instance->NES_state.catridgeInfo.vrc24;
-					const bool isMMC3Mode = (reg014.supervisorReg & 0x10) != ZERO;
+					const bool isMMC3Mode = (reg014.supervisorReg & 0x02) != ZERO;
 
 					if (IF_ADDRESS_WITHIN(address, UNMAPPED_START_ADDRESS, CATRIDGE_RAM_END_ADDRESS))
 					{
@@ -8535,7 +8543,7 @@ inline void NES_t::writeCpuRawMemoryInternal(uint16_t address, byte data, MEMORY
 						reg014.supervisorReg = data;
 					}
 
-					const bool isMMC3Mode = (reg014.supervisorReg & 0x10) != ZERO;
+					const bool isMMC3Mode = (reg014.supervisorReg & 0x02) != ZERO;
 
 					if (IF_ADDRESS_WITHIN(address, UNMAPPED_START_ADDRESS, CATRIDGE_RAM_END_ADDRESS))
 					{
@@ -8577,29 +8585,86 @@ inline void NES_t::writeCpuRawMemoryInternal(uint16_t address, byte data, MEMORY
 					{
 						if (isMMC3Mode)
 						{
-							// Identical to your shared MMC3 $8000-$FFFF register-write case
-							// body (bank select, mirroring, PRG-RAM protect, IRQ) -- paste
-							// that block here unmodified; $A131 itself also lands in the
-							// $A000/$B000 branch of that same switch and is handled fine
-							// since it only cares about IS_EVEN(address), which $A131 (odd) is not.
 							switch (address & 0xF000)
 							{
 							case 0x8000:
 							case 0x9000:
-								/* ... same as your MMC3 case body ... */
+							{
+								if (IS_EVEN(address))
+								{
+									pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.bankRegisterSelect_even8k.raw = data;
+								}
+								else
+								{
+									pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.bankData_odd8k = data;
+
+									switch (pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.bankRegisterSelect_even8k.fields.bankRegSel)
+									{
+									case ZERO:  pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank2a = data & 0xFE; BREAK;
+									case ONE:   pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank2b = data & 0xFE; BREAK;
+									case TWO:   pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1a = data; BREAK;
+									case THREE: pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1b = data; BREAK;
+									case FOUR:  pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1c = data; BREAK;
+									case FIVE:  pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1d = data; BREAK;
+									case SIX:   pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.prgBank8a = data; BREAK;
+									case SEVEN: pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.prgBank8b = data; BREAK;
+									default: FATAL("Invalid MMC3 Bank Select"); BREAK;
+									}
+								}
 								BREAK;
+							}
 							case 0xA000:
 							case 0xB000:
-								/* ... same as your MMC3 case body ... */
+							{
+								if (IS_EVEN(address))
+								{
+									// NOTE: the wiki's mapper 014 page cites Nestopia's source
+									// as saying mirroring is only controllable in VRC2 mode on
+									// this board, and flags that as unverified/contradicted by
+									// other emulators. Standard MMC3 behavior applied here —
+									// flip this if Samurai Spirits still mis-mirrors after the
+									// rest of this fix.
+									pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.mirroring_evenAk.raw = data;
+									pNES_instance->NES_state.catridgeInfo.nameTblMir =
+										(data & 0x01) ? NAMETABLE_MIRROR::HORIZONTAL_MIRROR : NAMETABLE_MIRROR::VERTICAL_MIRROR;
+								}
+								else
+								{
+									pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.prgRamProtect_oddAk.raw = data;
+								}
 								BREAK;
+							}
 							case 0xC000:
 							case 0xD000:
-								/* ... same as your MMC3 case body ... */
+							{
+								if (IS_EVEN(address))
+								{
+									pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.irqReload_evenCk = data;
+								}
+								else
+								{
+									pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.irqReload_oddCk = data;
+									pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.currentMMC3IrqCounter = RESET;
+									pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.mmc3IrqCounterReloadEnabled = YES;
+								}
 								BREAK;
+							}
 							case 0xE000:
 							case 0xF000:
-								/* ... same as your MMC3 case body ... */
+							{
+								if (IS_EVEN(address))
+								{
+									pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.irqDisable_evenEk = data;
+									pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.mmc3IrqEnable = DISABLED;
+									pNES_instance->NES_state.interrupts.isIRQ.fields.IRQ_SRC_MMC3 = RESET;
+								}
+								else
+								{
+									pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.irqEnable_oddEk = data;
+									pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.mmc3IrqEnable = ENABLED;
+								}
 								BREAK;
+							}
 							default:
 								FATAL("Invalid Address");
 							}
@@ -11164,17 +11229,19 @@ void NES_t::ppuTick()
 #endif
 
 			// Refer "Tile and attribute fetching" in https://www.nesdev.org/wiki/PPU_scrolling#PPU_internal_registers
-			// NOTE: when "((cycle >= THREETWENTYONE) && (cycle <= THREETHIRTYSIX))" is triggerred, "Y" of v is already incremented
+			// NOTE: when "((cycle >= THREETWENTYONE) && (cycle <= THREETHIRTYSIX))" is triggered, "Y" of v is already incremented
 			// So, we are fetching the first 2 tiles of the next scanline!
 			if (checkIfRenderring() == YES && (((cycle >= ONE) && (cycle <= TWOFIFTYSIX)) || ((cycle >= THREETWENTYONE) && (cycle <= THREETHIRTYSIX))))
 			{
-				PPU_BG_FSM fsmState = (PPU_BG_FSM)((cycle - ONE) & SEVEN);	// ((cycle - 1) % 8)
+				PPU_BG_FSM fsmState = (PPU_BG_FSM)((cycle - ONE) & SEVEN);    // ((cycle - 1) % 8)
 				switch (fsmState)
 				{
-				case PPU_BG_FSM::RELOAD_SHIFTERS:
+				case PPU_BG_FSM::RELOAD_SHIFTERS: // Offset 0 -> Dot 1 (Cycles 1, 9, 17 ... 257, 321, 329)
 				{
 					// Refer "Cycles 1-256" in https://www.nesdev.org/wiki/PPU_rendering
-					// "The shifters are reloaded during ticks 9, 17, 25, ..., 257"
+					// The shifters are reloaded during ticks 9, 17, 25, ..., 257.
+					// Cycle 1: Start of line; no tile has been fetched yet -> do NOT reload.
+					// Cycles 9..257: Reload shifters with the fetched background tiles.
 					if (cycle >= NINE && cycle < TWOFIFTYSEVEN)
 					{
 						populatePixelShiftRegisters();
@@ -11182,7 +11249,7 @@ void NES_t::ppuTick()
 
 					BREAK;
 				}
-				case PPU_BG_FSM::FETCH_NAMETABLE_BYTE:
+				case PPU_BG_FSM::FETCH_NAMETABLE_BYTE: // Offset 1 -> Dot 2 (Cycles 2, 10, 18 ...)
 				{
 					// Refer to https://www.nesdev.org/wiki/PPU_scrolling#Tile_and_attribute_fetching
 					pNES_instance->NES_state.display.bg.nameTblAddr
@@ -11191,9 +11258,10 @@ void NES_t::ppuTick()
 
 					pNES_instance->NES_state.display.bg.nameTblByte
 						= readPpuRawMemory(pNES_instance->NES_state.display.bg.nameTblAddr, MEMORY_ACCESS_SOURCE::PPU);
+
 					BREAK;
 				}
-				case PPU_BG_FSM::FETCH_ATTRTABLE_BYTE:
+				case PPU_BG_FSM::FETCH_ATTRTABLE_BYTE: // Offset 3 -> Dot 4 (Cycles 4, 12, 20 ...)
 				{
 					// Refer to https://www.nesdev.org/wiki/PPU_scrolling#Tile_and_attribute_fetching
 					pNES_instance->NES_state.display.bg.attrTblAddr
@@ -11236,7 +11304,7 @@ void NES_t::ppuTick()
 
 					BREAK;
 				}
-				case PPU_BG_FSM::FETCH_PATTTABLE_LBYTE:
+				case PPU_BG_FSM::FETCH_PATTTABLE_LBYTE: // Offset 5 -> Dot 6 (Cycles 6, 14, 22 ...)
 				{
 					pNES_instance->NES_state.display.bg.patternTableLAddr
 						= (PATTERN_TABLE0_START_ADDRESS + (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUCTRL.ppuctrl.BG_PATTERN_TABLE_ADDR << TWELVE)) // Xlied by 0x1000 using shift 12
@@ -11283,7 +11351,7 @@ void NES_t::ppuTick()
 
 					BREAK;
 				}
-				case PPU_BG_FSM::FETCH_PATTTABLE_HBYTE:
+				case PPU_BG_FSM::FETCH_PATTTABLE_HBYTE: // Offset 7 -> Dot 8 (Cycles 8, 16, 24 ... 256, 328, 336)
 				{
 					pNES_instance->NES_state.display.bg.patternTableMAddr
 						= pNES_instance->NES_state.display.bg.patternTableLAddr + EIGHT;
@@ -11292,9 +11360,9 @@ void NES_t::ppuTick()
 						= readPpuRawMemory(pNES_instance->NES_state.display.bg.patternTableMAddr, MEMORY_ACCESS_SOURCE::PPU);
 
 					// Refer to "Between dot 328 of a scanline, and 256 of the next scanline" of https://www.nesdev.org/wiki/PPU_scrolling
-					// Increment X and populate the shift registers @ cycles 8, 16, 24... 240, 248, 256
-					// Also, since this if condition also runs from cycles 321 to 336 AND (321 - 1) % 8 == 7 and (326 - 1) % 8 == 7
-					// All the conditions mentioned in above link is satisfied!
+					// Increment X at cycles 8, 16, 24, ..., 240, 248, 256.
+					// During the 321..336 prefetch period, this also runs at cycles 328 and 336,
+					// which performs the two X increments needed for the first two tiles of the next scanline.
 					if (checkIfRenderring() == YES)
 					{
 						xInc();
@@ -11316,7 +11384,7 @@ void NES_t::ppuTick()
 				FLAG isSpriteZeroPixel = NO;
 				ID finalPixelID = ZERO;
 				ID finalPaletteID = ZERO;
-				uint16_t paletteRamAddress = RESET;
+				FLAG isBgOpaque = NO;
 
 				// Start rendering
 				if (
@@ -11339,24 +11407,40 @@ void NES_t::ppuTick()
 					// Render sprites
 					if (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.ENABLE_SPRITE_RENDERING == SET)
 					{
+						// Per NESdev wiki "PPU registers": sprite 0 hit fires when sprite 0's
+						// own opaque pixel overlaps an opaque BG pixel, REGARDLESS of sprite
+						// priority — i.e. even if a higher-priority sprite is drawn in front
+						// of it and wins the displayed pixel. So "which sprite wins the pixel"
+						// and "is sprite 0 opaque here" must be tracked independently; we can
+						// no longer stop the scan at the first opaque (winning) sprite.
+						FLAG foundOpaqueSprite = NO;
+
 						for (COUNTER8 spriteI = ZERO; spriteI < pNES_instance->NES_state.display.obj.spriteCountPerScanline; spriteI++)
 						{
 							if (pNES_instance->NES_state.display.obj.shifter[spriteI].xSubtractor == ZERO)
 							{
-								spriteColorID
+								ID thisColorID
 									= (GETBIT(SEVEN, pNES_instance->NES_state.display.obj.shifter[spriteI].hiPatternShifter) << ONE)
 									| GETBIT(SEVEN, pNES_instance->NES_state.display.obj.shifter[spriteI].loPatternShifter);
-								spritePaletteID = pNES_instance->NES_state.display.obj.shifter[spriteI].spriteAttribute.fields.palette;
-								bgOverSprite = pNES_instance->NES_state.display.obj.shifter[spriteI].spriteAttribute.fields.priority;
-								isSpriteZeroPixel = pNES_instance->NES_state.display.obj.shifter[spriteI].isSpriteZero;
 
-								if (spriteColorID != ZERO)
+								if (thisColorID != ZERO && pNES_instance->NES_state.display.obj.shifter[spriteI].isSpriteZero == YES)
 								{
-									BREAK;
+									isSpriteZeroPixel = YES;
+								}
+
+								if (foundOpaqueSprite == NO && thisColorID != ZERO)
+								{
+									spriteColorID = thisColorID;
+									spritePaletteID = pNES_instance->NES_state.display.obj.shifter[spriteI].spriteAttribute.fields.palette;
+									bgOverSprite = pNES_instance->NES_state.display.obj.shifter[spriteI].spriteAttribute.fields.priority;
+									foundOpaqueSprite = YES;
 								}
 							}
 						}
 					}
+
+					// Preserve unmasked raw BG opacity for sprite 0 hit detection
+					isBgOpaque = (bgColorID != ZERO);
 
 					// Handle left most 8 pixels for bg
 					if (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.BG_IN_LEFTMOST_8PIXELS == NO && cycle < NINE)
@@ -11382,7 +11466,6 @@ void NES_t::ppuTick()
 						// No winner, draw "backdrop" colour
 						finalPixelID = ZERO;
 						finalPaletteID = ZERO;
-						isSpriteZeroPixel = CLEAR;
 					}
 					else if (bgColorID == ZERO && spriteColorID > ZERO)
 					{
@@ -11392,7 +11475,6 @@ void NES_t::ppuTick()
 						finalPixelID = spriteColorID;
 						finalPaletteID = spritePaletteID;
 						spritePaletteOffset = SIXTEEN;
-						isSpriteZeroPixel = CLEAR;
 					}
 					else if (bgColorID > ZERO && spriteColorID == ZERO)
 					{
@@ -11401,7 +11483,6 @@ void NES_t::ppuTick()
 						// Background wins!
 						finalPixelID = bgColorID;
 						finalPaletteID = bgPaletteID;
-						isSpriteZeroPixel = CLEAR;
 					}
 					else if (bgColorID > ZERO && spriteColorID > ZERO)
 					{
@@ -11416,31 +11497,19 @@ void NES_t::ppuTick()
 							finalPixelID = bgColorID;
 							finalPaletteID = bgPaletteID;
 						}
+					}
 
-						// Handle sprite 0 hit
-						if (isSpriteZeroPixel == YES
-							&&
-							pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.ENABLE_BG_RENDERING == SET
-							&&
-							pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.ENABLE_SPRITE_RENDERING == SET
-							)
-						{
-							if (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.BG_IN_LEFTMOST_8PIXELS == YES
-								&& pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.SPRITE_IN_LEFTMOST_8PIXELS == YES)
-							{
-								if (cycle >= ONE && cycle <= TWOFIFTYFIVE)
-								{
-									pNES_ppuRegisters->sprite0hit = YES;
-								}
-							}
-							else
-							{
-								if (cycle >= NINE && cycle <= TWOFIFTYFIVE)
-								{
-									pNES_ppuRegisters->sprite0hit = YES;
-								}
-							}
-						}
+					// Handle sprite 0 hit
+					if (isBgOpaque
+						&& isSpriteZeroPixel == YES
+						&& pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.ENABLE_BG_RENDERING == SET
+						&& pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.ENABLE_SPRITE_RENDERING == SET
+						&& ((pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.BG_IN_LEFTMOST_8PIXELS == YES
+							&& pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.SPRITE_IN_LEFTMOST_8PIXELS == YES)
+							|| cycle >= NINE)
+						&& cycle <= TWOFIFTYFIVE)
+					{
+						pNES_ppuRegisters->sprite0hit = YES;
 					}
 
 					uint16_t paletteRamAddress
@@ -11855,16 +11924,16 @@ void NES_t::ppuTick()
 							auto normNameTblAddr = ((pNES_instance->NES_state.display.bg.nameTblAddr - NAME_TABLE0_START_ADDRESS) & 1023); // & 1023 == % 1024 == % 0x400 (size of single nametable memory)
 							if (normNameTblAddr <= 0x1FF)
 							{
-								if (pNES_instance->NES_state.display.bg.patternTableLAddr >= 0x1000)
+								if (pNES_instance->NES_state.display.obj.patternTableLAddr >= 0x1000)
 								{
-									pNES_instance->NES_state.display.bg.patternTableLAddr -= 0x1000;
+									pNES_instance->NES_state.display.obj.patternTableLAddr -= 0x1000;
 								}
 							}
 							else if (normNameTblAddr <= 0x3FF)
 							{
-								if (pNES_instance->NES_state.display.bg.patternTableLAddr < 0x1000)
+								if (pNES_instance->NES_state.display.obj.patternTableLAddr < 0x1000)
 								{
-									pNES_instance->NES_state.display.bg.patternTableLAddr += 0x1000;
+									pNES_instance->NES_state.display.obj.patternTableLAddr += 0x1000;
 								}
 							}
 							else
@@ -14150,7 +14219,8 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 					}
 					else
 					{
-						FATAL("Unknown TV system variant in NES 2.0 header");
+						WARN("Unknown TV system variant in NES 2.0 header");
+						setTVSystem(NES_TV_SYSTEM::NTSC);
 					}
 				}
 				// Must run before anything below derives timing from cpuClockHz/ppuClockHz/nesLastPpuScanline/nesTotalPpuScanline/nesFrameDots/myFPS.
@@ -15185,9 +15255,12 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 						}
 					}
 
-					// Heuristic TxROM Board Identification (runs if submapper isn't explicitly set)
-					if (pNES_instance->NES_state.catridgeInfo.subMapper == SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE ||
-						pNES_instance->NES_state.catridgeInfo.subMapper == SUB_MAPPER::VRC2A) // 0
+					// Heuristic TxROM Board Identification (runs if submapper isn't explicitly set).
+										// Never applies to Mapper 268: its submapper value (COOLBOY/MINDKIDS family +
+										// wiring variant) is functional register-decode data, not a display-only board
+										// name, and 0 is a real, meaningful value for it — not "unspecified".
+					if (pNES_instance->NES_state.catridgeInfo.mapper != MAPPER::INES_MAPPER_268 &&
+						(pNES_instance->NES_state.catridgeInfo.subMapper == SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE || pNES_instance->NES_state.catridgeInfo.subMapper == SUB_MAPPER::VRC2A)) // 0
 					{
 						const uint32_t prgRomSizeBytes = prg16kBanks * 0x4000U;
 
@@ -15622,6 +15695,21 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 					memset(&pNES_instance->NES_state.catridgeInfo.ines014, 0, sizeof(pNES_instance->NES_state.catridgeInfo.ines014));
 					memset(&pNES_instance->NES_state.catridgeInfo.vrc24, 0, sizeof(pNES_instance->NES_state.catridgeInfo.vrc24));
 					memset(&pNES_instance->NES_state.catridgeInfo.mmc3, 0, sizeof(pNES_instance->NES_state.catridgeInfo.mmc3));
+
+					pNES_instance->NES_state.catridgeInfo.mmc3
+						.exRegisters.prgRamProtect_oddAk.fields.prgRamEnable = hasPrgRam ? YES : NO;
+
+					// CHR Bank Registers (R0 - R5)
+					pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank2a = 0; // R0 (2KB bank at $0000)
+					pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank2b = 2; // R1 (2KB bank at $0800)
+					pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1a = 4; // R2 (1KB bank at $1000)
+					pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1b = 5; // R3 (1KB bank at $1100)
+					pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1c = 6; // R4 (1KB bank at $1200)
+					pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1d = 7; // R5 (1KB bank at $1300)
+
+					// PRG Bank Registers (R6 - R7)
+					pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.prgBank8a = 0; // R6 (8KB bank at $8000)
+					pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.prgBank8b = 1; // R7 (8KB bank at $A000)
 
 					// Cold-boot: supervisorReg=0 -> VRC2 mode, CHR A18=0 for all three
 					// regions. The wiki doesn't document mapper 014's own reset state, but
