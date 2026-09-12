@@ -840,16 +840,32 @@ extern "C" {
 #define PACK_BEGIN __pragma(pack(push, 1))
 #define PACK_END   __pragma(pack(pop))
 #elif defined(__GNUC__) || defined(__clang__)
-#if defined(__EMSCRIPTEN__) || defined(__RPI_PICO__)
+    // 1. Check if we are running in standard non-Windows ARM/Wasm environments
+#if (defined(__EMSCRIPTEN__) || defined(__RPI_PICO__) || defined(__arm__) || defined(__aarch64__)) && !defined(_WIN32)
 #define PACK_BEGIN _Pragma("pack(push, 1)")
 #define PACK_END   _Pragma("pack(pop)")
 #else
+    // 2. Safely apply to standard x86/x86_64 Linux or MinGW Windows targets
+#if defined(__clang__)
+    // Deconstruct into a single unified execution string to guarantee Clang execution order
 #define PACK_BEGIN \
-        _Pragma("pack(push, 1)") \
-        _Pragma("ms_struct on")
+                _Pragma("clang diagnostic push") \
+                _Pragma("clang diagnostic ignored \"-Wunknown-pragmas\"") \
+                _Pragma("pack(push, 1)") \
+                _Pragma("ms_struct on")
 #define PACK_END \
-        _Pragma("ms_struct off") \
-        _Pragma("pop")
+                _Pragma("ms_struct reset") \
+                _Pragma("pack(pop)") \
+                _Pragma("clang diagnostic pop")
+#else
+    // Pure GCC target (GCC ignores unknown pragmas by default unless -Wall is hyper-strict, but doesn't trip on ms_struct on x86)
+#define PACK_BEGIN \
+                _Pragma("pack(push, 1)") \
+                _Pragma("ms_struct on")
+#define PACK_END \
+                _Pragma("ms_struct reset") \
+                _Pragma("pack(pop)")
+#endif
 #endif
 #else
 #define PACK_BEGIN
