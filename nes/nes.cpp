@@ -15972,8 +15972,6 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 
 						pNES_instance->NES_state.catridgeInfo.nameTblMir = NAMETABLE_MIRROR::HORIZONTAL_MIRROR; // arbitrary -- "rest of state is unspecified"
 					}
-
-					nesReset = CLEAR;
 					BREAK;
 				}
 				case MAPPER::INES_MAPPER_029:
@@ -16435,6 +16433,8 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 	{
 		RETURN FAILURE;
 	}
+
+	nesReset = CLEAR;
 
 	RETURN SUCCESS;
 }
