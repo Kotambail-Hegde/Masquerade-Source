@@ -64,6 +64,12 @@ extern uint32_t fullscreenVBO;
 extern uint32_t FRAME_BUFFER_SCALE;
 
 using InputHintCallback = std::function<void()>;
+
+// Menu-click control flags
+extern FLAG quitOnMenuClick;
+extern FLAG rebootNeededOnMenuClick;
+extern FLAG saveContextOnReboot;
+extern FLAG startFromBoot;
 #endif // !__RPI_PICO__
 
 #pragma endregion GLOBAL_INFRASTRUCTURE_DECLARATIONS
