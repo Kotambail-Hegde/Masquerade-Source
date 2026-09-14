@@ -30,6 +30,8 @@
 #define GBCAM_SENSOR_H									(112 + GBCAM_SENSOR_EXTRA_LINES)
 #define GBCAM_W											(128)
 #define GBCAM_H											(112)
+// SGB
+#define SGB_WAVEFORM_HISTORY_SIZE						(256)
 #pragma endregion MACROS
 
 #pragma region TYPEDEFS
@@ -420,10 +422,12 @@ public:
 	FLAG _FORCE_GB_GFX_FOR_GBC = NO;
 	FLAG _FORCE_GBC_FOR_GB = NO;
 	FLAG _FORCE_SGB = NO;
+	FLAG _IF_SGB_THEN_SGB2 = YES;
 	float  ghost_decay = 0.0f;  // 0.0 = off, ~0.6 = DMG feel, ~0.4 = GBC (less ghosting)
 	float _GB_GHOST_FACTOR = 0.6f;
 	float _GBC_GHOST_FACTOR = 0.4f;
 	float _ACCELEROMETER_SENSITIVITY = 0.4f;
+	std::string _SGB_DEFAULT_BORDER_LOCATION;
 
 private:
 
@@ -1994,15 +1998,43 @@ private:
 		FLAG blockOAMW;
 		FLAG blockCGBPalette;
 		int16_t emulatedPPUCyclePerPPUMode;
-		// COLOR_ID (uint16_t) — CGB-only, raw gbcColor (RGB555) straight from CGB palette RAM, pre-color-correction
+		// =====================================================================
+		// Per-pixel PPU output buffers. Written directly inside
+		// processPixelPipelineAndRender's pixel-push, once per pixel, every
+		// scanline
+		// =====================================================================
+
+		// CGB-only: raw gbcColor (15-bit RGB555) straight from CGB palette RAM,
+		// pre-color-correction. Not used when isSGBCompatible()==YES (that path
+		// writes sgbScreenBuffer below instead).
 		COLOR_ID cgbRawColorBuffer[screen_height][screen_width];
-		// COLOR_FORMAT — shared by both GB and GBC paths; the palette-resolved-but-not-yet-final-Pixel stage
+
+		// Shared by both GB and GBC (non-SGB) paths: the palette-resolved but
+		// not-yet-final-Pixel stage. Not used when isSGBCompatible()==YES.
 		COLOR_FORMAT resolvedColorBuffer[screen_height][screen_width];
+
+		// Final displayed frame for a plain (non-SGB) GB/GBC session.
 		union
 		{
 			Pixel imGuiBuffer1D[screen_width * screen_height];
 			Pixel imGuiBuffer2D[screen_height][screen_width];
 		} imGuiBuffer;
+
+		// SGB only: post-BGP 2-bit GB shade (0-3) per pixel of the live game
+		// window. Written unconditionally, every pixel, regardless of mask state.
+		uint8_t sgbScreenBuffer[screen_height][screen_width];
+
+		// Final displayed frame for an SGB session (border + game window
+		// composited together). Border region: written once per transfer by
+		// drawSGBBorderTiles. Interior (SGB_GB_OFFSET_X/Y, 160x144): written
+		// once per non-frozen frame by the resolve pass in
+		// displayCompleteScreen's CANCEL_MASK case, from sgbScreenBuffer below.
+		union
+		{
+			Pixel imGuiSgbBuffer1D[sgb_screen_width * sgb_screen_height];
+			Pixel imGuiSgbBuffer2D[sgb_screen_height][sgb_screen_width];
+		} imGuiSgbBuffer;
+
 		uint64_t filters;
 		uint64_t debugVariable;
 	} display_t;
@@ -2061,6 +2093,785 @@ private:
 		STATInterruptSources_t STATInterruptSources;
 		BYTE aggregateSignal;
 	} STATInterruptSignal_t;
+
+	// SGB Handling
+
+	enum class SGB_STATE
+	{
+		IDLE,        // Waiting for START pulse (0x00)
+		DATA,        // Waiting for P14 or P15 to go low (Bit setup)
+		LATCH,       // Waiting for return to standby 0x30 (Bit sample)
+		END          // Processing 129th Stop Bit & packet completion
+	};
+
+	SGB_STATE sgbState = SGB_STATE::IDLE;
+	uint8_t  sgbPacketBuffer[112]; // Max 7 packets * 16 bytes
+	uint16_t sgbBitCounter = 0;   // 0 to 127 data bits
+	uint8_t  sgbPacketIndex = 0;  // 0 to sgbPacketCount - 1
+	uint8_t  sgbPacketCount = 1;  // Extracted from Header byte
+	uint8_t  sgbCurrentBit = 0;   // Samples 0 or 1 during DATA phase
+
+	// =============================================================================
+	// SGB Command Reference
+	// Per gbdev.io/pandocs/SGB_Command_Summary.html and related SGB_Command_*.html
+	// =============================================================================
+	//
+	// +----------+--------+--------------------------------------------------------+
+	// | Command  | Opcode | What it does											|
+	// +----------+--------+--------------------------------------------------------+
+	// | BORDER																		|
+	// +----------+--------+--------------------------------------------------------+
+	// | CHR_TRN  | $13    | Loads 4KiB of border tile bitmaps (2 halves: tiles		|
+	// |          |        | $00-$7F / $80-$FF)										|
+	// | PCT_TRN  | $14    | Loads border tilemap (32x28) + border's 3 palettes,	|
+	// |          |        | one combined transfer									|
+	// +----------+--------+--------------------------------------------------------+
+	// | GAME-SCREEN PALETTES														|
+	// +----------+--------+--------------------------------------------------------+
+	// | PAL01    | $00    | Directly loads game-screen palettes 0 & 1				|
+	// | PAL23    | $01    | Directly loads game-screen palettes 2 & 3				|
+	// | PAL03    | $02    | Directly loads game-screen palettes 0 & 3				|
+	// | PAL12    | $03    | Directly loads game-screen palettes 1 & 2				|
+	// | PAL_TRN  | $0B    | Stages 512-entry system palette pool (no visible		|
+	// |          |        | effect until PAL_SET copies from it)					|
+	// | PAL_SET  | $0A    | Copies pool entries into active game-screen palettes	|
+	// +----------+--------+--------------------------------------------------------+
+	// | GAME-SCREEN ATTRIBUTE (PALETTE-PER-TILE) MAP								|
+	// +----------+--------+--------------------------------------------------------+
+	// | ATTR_BLK | $04    | Palette for a rectangular block (inside/line/outside)	|
+	// | ATTR_LIN | $05    | Palette for one row or column							|
+	// | ATTR_DIV | $06    | Splits grid into 2 regions + a divider line			|
+	// | ATTR_CHR | $07    | Palette per-tile, in a run from a start position		|
+	// | ATTR_TRN | $15    | Stages a pool of up to 4 saved attribute files			|
+	// | ATTR_SET | $16    | Loads one saved attribute file into the live map		|
+	// +----------+--------+--------------------------------------------------------+
+	// | INPUT																		|
+	// +----------+--------+--------------------------------------------------------+
+	// | MLT_REQ  | $11    | Enables/disables multiplayer joypad-ID cycling			|
+	// +----------+--------+--------------------------------------------------------+
+	// | SCREEN MASKING  (game-screen interior only -- never the border)			|
+	// +----------+--------+--------------------------------------------------------+
+	// | MASK_EN  | $17    | Freeze / blank-black / blank-color0 / unmask			|
+	// +----------+--------+--------------------------------------------------------+
+	// | SNES-SIDE SPRITES															|
+	// +----------+--------+--------------------------------------------------------+
+	// | OBJ_TRN  | $18    | Loads up to 24 SNES-side 16-color sprite overlays		|
+	// +----------+--------+--------------------------------------------------------+
+	// | COMPOSITE PRIORITY															|
+	// +----------+--------+--------------------------------------------------------+
+	// | PAL_PRI  | $19    | BG-vs-border draw priority								|
+	// +----------+--------+--------------------------------------------------------+
+	// | SOUND																		|
+	// +----------+--------+--------------------------------------------------------+
+	// | SOUND    | $08    | Triggers a pre-defined SNES sound effect				|
+	// | SOU_TRN  | $09    | Transfers custom sound program/data					|
+	// +----------+--------+--------------------------------------------------------+
+	// | SNES CPU CONTROL															|
+	// +----------+--------+--------------------------------------------------------+
+	// | JUMP     | $12    | SNES-side program jump									|
+	// +----------+--------+--------------------------------------------------------+
+	// | MISC / LEGACY																|
+	// +----------+--------+--------------------------------------------------------+
+	// | ATRC_EN  | $0C    | Attraction mode enable									|
+	// | TEST_EN  | $0D    | Test mode enable										|
+	// | ICON_EN  | $0E    | Icon enable											|
+	// | DATA_SND | $0F    | Sound program/data variant								|
+	// | DATA_TRN | $10    | General data transfer to SNES memory					|
+	// +----------+--------+--------------------------------------------------------+
+	//
+	// No command writes to both border storage (tile data / tilemap / border
+	// palettes) and game-screen storage (BG palettes / attribute map) -- every
+	// command belongs to exactly one section above.
+	// =============================================================================
+	// SGB Command Codes (Header Byte >> 3)
+	enum class SGB_COMMAND : uint8_t
+	{
+		SGB_CMD_PAL01 = 0x00, // Set SGB Palettes 0 & 1
+		SGB_CMD_PAL23 = 0x01, // Set SGB Palettes 2 & 3
+		SGB_CMD_PAL03 = 0x02, // Set SGB Palettes 0 & 3
+		SGB_CMD_PAL12 = 0x03, // Set SGB Palettes 1 & 2
+		SGB_CMD_ATTR_BLK = 0x04, // Set Palette Attribute Blocks
+		SGB_CMD_ATTR_LIN = 0x05, // Set Palette Attribute Lines
+		SGB_CMD_ATTR_DIV = 0x06, // Set Palette Attribute Division
+		SGB_CMD_ATTR_CHR = 0x07, // Set Palette Attribute Characters
+		SGB_CMD_SOUND = 0x08, // Play SNES Sound Effect
+		SGB_CMD_SND_PRG = 0x09, // Program SNES Sound Data
+		SGB_CMD_PAL_SET = 0x0A, // Copy 4 palettes from PAL_TRN's system pool into active game-screen palettes
+		SGB_CMD_PAL_TRN = 0x0B, // Transfer Data to SNES Memory
+		SGB_CMD_MLT_REQ = 0x11, // Controller Multiplex Request
+		SGB_CMD_JUMP = 0x12, // Jump to SNES Code Exec
+		SGB_CMD_CHR_TRN = 0x13, // Transfer Tile Data to SNES VRAM (Border Tiles)
+		SGB_CMD_PCT_TRN = 0x14, // Transfer Tile Map & Palettes to SNES VRAM (Border Map)
+		SGB_CMD_ATTR_TRN = 0x15, // Transfer Palette Attributes to SNES VRAM
+		SGB_CMD_ATTR_SET = 0x16, // Apply Pre-defined Palette Set
+		SGB_CMD_MASK_EN = 0x17, // Screen Masking Control
+		SGB_CMD_OBJ_TRN = 0x18  // Transfer OBJ (Sprite) Attributes to SNES VRAM
+	};
+
+	// In GBc_t class definition:
+	typedef struct {
+		uint8_t mltReqMode;      // 0 = 1P, 1 = 2P, 3 = 4P
+		uint8_t numPlayers;      // Derived total players (1, 2, or 4)
+		uint8_t activePlayer;    // Active player index (0 to numPlayers - 1)
+		bool p15WasLow;      // Clock edge detector for automatic player cycling
+	} sgbJoypad_t;
+
+	sgbJoypad_t sgbJoypad;
+
+	enum class SGB_MASK_MODE : uint8_t
+	{
+		CANCEL_MASK = 0, // Display screen normally
+		FREEZE_SCREEN = 1, // Freeze current picture
+		BLANK_BLACK = 2, // Blank screen to Black
+		BLANK_COLOR_0 = 3  // Blank screen to Color 0 (Palette 0)
+	};
+
+	SGB_MASK_MODE currentScreenMask = SGB_MASK_MODE::CANCEL_MASK;
+	SGB_MASK_MODE previousScreenMask = SGB_MASK_MODE::CANCEL_MASK;
+	std::vector<Pixel> frozenFrameBuffer; // Cached frame for FREEZE_SCREEN
+
+	// =========================================================================
+	// SGB BORDER & MEMORY MAPPING ARCHITECTURE OVERVIEW:
+	// 
+	// 1. GAME BOY MEMORY STAGING ($8000–$9FFF):
+	//    - $8000–$97FF is the traditional GB tile data area (normally storing 2bpp 
+	//      graphics at 16 bytes per tile).
+	//    - $9800–$9FFF holds the standard 32x32 tile maps. In standard GB operation, 
+	//      these are 8-bit bytes containing only Tile IDs (with CGB using a separate 
+	//      8-bit attribute map).
+	//    - For SGB borders, games temporarily repurpose this entire $8000–$9FFF 
+	//      VRAM space as a staging window to pack custom 4bpp SNES border graphics 
+	//      (32 bytes per tile) and combined 16-bit SNES tile map entries (where Tile IDs, 
+	//      Palettes, and Flips are packed together into a single word).
+	//
+	// 2. HOW DATA IS TRANSFERRED (CHR_TRN / PCT_TRN):
+	//    - The SGB hardware completely bypasses standard GB rendering rules. It 
+	//      just bulk-transfers the raw binary contents straight out of the GB VRAM window.
+	//    - Those raw bytes are then consumed on the SNES side to populate the 
+	//      character data (CHR_TRN) and background map structures (PCT_TRN).
+	// =========================================================================
+
+	// --- SGB / SNES Dimension Constants ---
+	static constexpr int SCREEN_WIDTH = 256;
+	static constexpr int SCREEN_HEIGHT = 224;
+	static constexpr int TILE_WIDTH_PIXELS = 8;
+	static constexpr int TILE_HEIGHT_PIXELS = 8;
+	static constexpr int SGB_BPP = 4;
+
+	static constexpr int VISIBLE_TILES_X = SCREEN_WIDTH / TILE_WIDTH_PIXELS;   // 32 tiles wide
+	static constexpr int VISIBLE_TILES_Y = SCREEN_HEIGHT / TILE_HEIGHT_PIXELS; // 28 tiles high
+
+	// SNES background maps are natively structured as 32x32 tile grids in VRAM. 
+	// While the visible screen is VISIBLE_TILES_X wide by VISIBLE_TILES_Y high, 
+	// the SNES hardware map configuration requires a full 32x32 tile grid layout.
+	static constexpr int TILEMAP_WIDTH = 32; // 32 tiles
+	static constexpr int TILEMAP_HEIGHT = 32; // 32 tiles
+
+	static constexpr int BYTES_PER_ROW_OF_TILE = (TILE_WIDTH_PIXELS * SGB_BPP) / 8; // 4 bytes per row
+	static constexpr int BYTES_PER_TILE = TILE_HEIGHT_PIXELS * BYTES_PER_ROW_OF_TILE; // 32 bytes per tile
+
+	// Total tiles: 256 => 8192 bytes ($8000–$9FFF) / 32 bytes (BYTES_PER_TILE) = 256 tiles
+	static constexpr int TOTAL_SGB_TILES = 256;
+
+	// --- SNES Tile Map Entry Layout (16-bit packed word) ---
+	struct snesTileMapEntry_t
+	{
+		uint16_t tileID : 9;      // Bits 0–8:   Tile ID (0 to 511, mapped into 256 tiles)
+		uint16_t bgPriority : 1;  // Bit 9:      BG priority flag
+		uint16_t paletteNum : 3;  // Bits 10–12: Palette number (0 to 7)
+		uint16_t reserved : 1;    // Bit 13:     Unused / SNES sub-palette
+		uint16_t xFlip : 1;       // Bit 14:     Horizontal flip (X_FLIP)
+		uint16_t yFlip : 1;       // Bit 15:     Vertical flip (Y_FLIP)
+	};
+
+	// =========================================================================
+	// SGB Border & Palette Storage
+	//
+	// Three independent data sets, each written by a disjoint set of SGB
+	// commands and read by a disjoint consumer. No storage below is shared
+	// between border and game-screen data -- see the SGB Command Reference
+	// comment (near executeSGBCommand) for the full command-to-storage map.
+	// =========================================================================
+
+	// --- BORDER: tile bitmaps ---
+	// WRITTEN BY : CHR_TRN (handleSGB_CHR_TRN)
+	// READ BY    : drawSGBBorderTiles
+	// 256 unique 4bpp (4-bit-per-pixel) tiles, 32 bytes each, 8KB total. The
+	// graphics dictionary the border tilemap below indexes into.
+	BYTE snesTileData[TOTAL_SGB_TILES * BYTES_PER_TILE];
+
+	// --- BORDER: tilemap layout ---
+	// WRITTEN BY : PCT_TRN (handleSGB_PCT_TRN)
+	// READ BY    : drawSGBBorderTiles
+	// 32x32 grid (1024 entries, only the first 32x28 are ever rendered). Each
+	// 16-bit entry packs a Tile ID (indexing into snesTileData above), a
+	// palette number (indexing into sgbBorderPalettes[4-6] below), and X/Y flip.
+	union
+	{
+		uint16_t raw[TILEMAP_WIDTH * TILEMAP_HEIGHT];
+		snesTileMapEntry_t fields[TILEMAP_WIDTH * TILEMAP_HEIGHT];
+	} snesTileMap;
+
+	// --- BORDER: the 3 border palettes ---
+	// WRITTEN BY : PCT_TRN (handleSGB_PCT_TRN) -- indices 4-6 ONLY, as part of
+	//              the same combined tilemap+palette transfer above.
+	// READ BY    : drawSGBBorderTiles, via snesTileMap's palette-number field
+	// Indices 0-3 and 7 are unused/reserved by this array; nothing ever writes
+	// to them (border only ever uses palettes 4-6, per
+	// gbdev.io/pandocs/SGB_Command_Border.html).
+	uint16_t sgbBorderPalettes[8][16] = {};
+
+	// --- GAME SCREEN: the 4 active background palettes ---
+	// WRITTEN BY : PAL01/PAL23/PAL03/PAL12 (handleSGB_PAL_XX)
+	// READ BY    : resolveSGBPixel, via sgbAttributeMap below
+	// 4 palettes, 4 colors each (RGB555). These are the ONLY palettes that
+	// ever color the live game screen today. Color 0 is shared across all 4
+	// palettes by every PAL01/23/03/12 call (see handleSGB_PAL_XX comment).
+	uint16_t sgbBGPalettes[4][4] = {};
+
+	// --- GAME SCREEN: per-tile palette assignment ---
+	// WRITTEN BY : ATTR_BLK/ATTR_LIN/ATTR_DIV/ATTR_CHR (handleSGB_ATTR)
+	// READ BY    : resolveSGBPixel
+	// Which of the 4 sgbBGPalettes above applies to each 8x8 tile of the
+	// 20x18 visible game window. [row][col], row 0-17, col 0-19. All-zero
+	// (palette 0 everywhere) until the game sends an ATTR_* command.
+	uint8_t sgbAttributeMap[18][20] = {};
+
+	// --- PAL_TRN's 512-entry system palette pool ---
+	// WRITTEN BY : PAL_TRN (handleSGB_PAL_TRN)
+	// READ BY    : NOBODY YET. PAL_SET (the command that copies specific pool
+	//              entries into sgbBGPalettes above) is not implemented. This
+	//              array is currently populated correctly on every boot but
+	//              has zero effect on anything shown on screen. Implement
+	//              PAL_SET before relying on this for anything visible.
+	uint16_t sgbSystemPalettePool[512][4] = {};
+
+	// Mirrors the ROM_TYPE branch in the real VRAM read path: GAME_BOY_COLOR
+	// carts (including DMG/CGB dual-compatible titles like Pokemon
+	// Silver/Gold/Crystal) store live VRAM in entireVram.vramMemoryBanks, not
+	// GBcMemory.GBcRawMemory -- that array is only authoritative for
+	// ROM_TYPE::GAME_BOY. SGB border transfers must read whichever one the
+	// cart actually writes to.
+	MASQ_INLINE uint8_t readSGBVramByte(uint16_t address)
+	{
+		if (ROM_TYPE == ROM::GAME_BOY_COLOR)
+		{
+			// SGB is a DMG-era protocol with no concept of CGB VRAM banking --
+			// border transfer data always lives in the DMG-equivalent bank
+			// (0), regardless of whatever bank the game's own CGB background
+			// rendering currently has active. Must NOT use getVRAMBankNumber()
+			// (the live/current bank), or a bank switch elsewhere in the game
+			// silently points this at unrelated, likely-uninitialized memory.
+			uint16_t vramOffset = address - 0x8000;
+			RETURN pGBc_instance->GBc_state.entireVram.vramMemoryBanks.mVRAMBanks[ZERO][vramOffset];
+		}
+		else // ROM::GAME_BOY
+		{
+			RETURN pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[address];
+		}
+	}
+
+	static constexpr int SGB_GB_OFFSET_X = 48;
+	static constexpr int SGB_GB_OFFSET_Y = 40;
+
+	// Resolves one live GB pixel through the SGB attribute map + active BG
+	// palettes -- direct-write replacement for a raw-buffer + separate-pass
+	// design. screenX/screenY are GB-native coordinates (0-159 / 0-143), NOT
+	// SGB canvas coordinates.
+	MASQ_INLINE Pixel resolveSGBPixel(uint8_t colorId, uint8_t screenX, uint8_t screenY)
+	{
+		uint8_t tileX = screenX / 8;
+		uint8_t tileY = screenY / 8;
+		uint8_t paletteNum = sgbAttributeMap[tileY][tileX];
+		uint16_t rgb15 = sgbBGPalettes[paletteNum][colorId];
+		if (colorId == 0) rgb15 = sgbSystemPalettePool[0][0];
+		RETURN snesColorToPixel(rgb15);
+	}
+
+	MASQ_INLINE uint8_t readSGBTransferByte(uint16_t byteOffset)
+	{
+		static const uint16_t pixelToBits[4] = { 0x0000, 0x0080, 0x8000, 0x8080 };
+
+		int screenTile = byteOffset / 16;
+		int byteWithinTile = byteOffset % 16;
+		int row = byteWithinTile / 2;
+		bool highByte = (byteWithinTile % 2) != 0;
+
+		int tileOriginX = (screenTile % 20) * 8;
+		int tileOriginY = (screenTile / 20) * 8;
+
+		uint16_t rowBits = 0;
+		for (int col = 0; col < 8; ++col)
+		{
+			uint8_t shade = pGBc_display->sgbScreenBuffer[tileOriginY + row][tileOriginX + col] & 0x03;
+			rowBits |= pixelToBits[shade] >> col;
+		}
+
+		RETURN highByte ? ((rowBits >> 8) & 0xFF) : (rowBits & 0xFF);
+	}
+
+	MASQ_INLINE void handleSGB_MLT_REQ(const uint8_t* packetData)
+	{
+		uint8_t mode = packetData[1] & 0x03;
+		sgbJoypad.mltReqMode = mode;
+
+		switch (mode)
+		{
+		case 0: sgbJoypad.numPlayers = 1; BREAK; // 1 Player
+		case 1: sgbJoypad.numPlayers = 2; BREAK; // 2 Players
+		case 3: sgbJoypad.numPlayers = 4; BREAK; // 4 Players
+		default: sgbJoypad.numPlayers = 1; BREAK;
+		}
+
+		// Reset active player to Player 1 (0-indexed)
+		sgbJoypad.activePlayer = 0;
+		sgbJoypad.p15WasLow = false;
+
+		DEBUG("[SGB] MLT_REQ Executed: Mode %d (%d Players enabled)", mode, sgbJoypad.numPlayers);
+	}
+
+	MASQ_INLINE void handleSGB_MASK_EN(const uint8_t* packetData)
+	{
+		uint8_t mode = packetData[1] & 0x03;
+		currentScreenMask = static_cast<SGB_MASK_MODE>(mode);
+
+		DEBUG("[SGB] MASK_EN Executed: Mode %d", mode);
+	}
+
+	MASQ_INLINE void handleSGB_CHR_TRN(const uint8_t* packetData)
+	{
+		int targetOffset = (packetData[1] & 0x01) ? (128 * 32) : 0;
+
+		DEBUG("[SGB] CHR_TRN Executed: Target offset in snesTileData = %d (Block %d)", targetOffset, (packetData[1] & 0x01));
+
+		for (int i = 0; i < 4096; ++i)
+		{
+			snesTileData[targetOffset + i] = readSGBTransferByte(TO_UINT16(i));
+		}
+
+		DEBUG("[SGB] CHR_TRN Completed: Reconstructed 4096 bytes from rendered calibration screen");
+	}
+
+	MASQ_INLINE void handleSGB_PCT_TRN(const uint8_t* packetData)
+	{
+		DEBUG("[SGB] PCT_TRN Executed: Transferring border tile map + palette data from rendered calibration screen");
+
+		for (int i = 0; i < (32 * 28); ++i)
+		{
+			uint16_t lo = readSGBTransferByte(TO_UINT16(i * 2));
+			uint16_t hi = readSGBTransferByte(TO_UINT16(i * 2 + 1));
+			snesTileMap.raw[i] = lo | (hi << 8);
+		}
+
+		for (int p = 0; p < 3; ++p)
+		{
+			for (int c = 0; c < 16; ++c)
+			{
+				uint16_t addr = 0x800 + (p * 16 + c) * 2;
+				uint16_t lo = readSGBTransferByte(addr);
+				uint16_t hi = readSGBTransferByte(addr + 1);
+				sgbBorderPalettes[4 + p][c] = lo | (hi << 8);
+			}
+		}
+
+		DEBUG("[SGB] PCT_TRN Completed: Loaded 32x28 tile map and 3 border palettes (slots 4-6)");
+	}
+
+	MASQ_INLINE void handleSGB_PAL_TRN()
+	{
+		DEBUG("[SGB] PAL_TRN Executed: Transferring 512-entry system palette pool from rendered calibration screen");
+
+		for (int p = 0; p < 512; ++p)
+		{
+			for (int c = 0; c < 4; ++c)
+			{
+				uint16_t addr = TO_UINT16((p * 4 + c) * 2);
+				uint16_t lo = readSGBTransferByte(addr);
+				uint16_t hi = readSGBTransferByte(addr + 1);
+				sgbSystemPalettePool[p][c] = lo | (hi << 8);
+			}
+		}
+
+		DEBUG("[SGB] PAL_TRN Completed: Loaded 512-entry system palette pool");
+	}
+
+	MASQ_INLINE void handleSGB_ATTR_TRN()
+	{
+		DEBUG("[SGB] ATTR_TRN Executed: Transferring attribute data from rendered calibration screen");
+	}
+
+	// PAL01/PAL23/PAL03/PAL12 -- direct load of 2 of the 4 active BG palettes.
+	// Per gbdev.io/pandocs/SGB_Command_Palettes.html: byte layout is a SHARED
+	// color #0 for both palettes, then 3 more colors for palette A, then 3
+	// more for palette B.
+	MASQ_INLINE void handleSGB_PAL_XX(uint8_t commandCode, const uint8_t* packetData)
+	{
+		uint8_t paletteA = 0, paletteB = 0;
+		switch (static_cast<SGB_COMMAND>(commandCode))
+		{
+		case SGB_COMMAND::SGB_CMD_PAL01: paletteA = 0; paletteB = 1; BREAK;
+		case SGB_COMMAND::SGB_CMD_PAL23: paletteA = 2; paletteB = 3; BREAK;
+		case SGB_COMMAND::SGB_CMD_PAL03: paletteA = 0; paletteB = 3; BREAK;
+		case SGB_COMMAND::SGB_CMD_PAL12: paletteA = 1; paletteB = 2; BREAK;
+		default: RETURN;
+		}
+
+		auto readColor = [&](int byteOffset) -> uint16_t
+			{
+				RETURN static_cast<uint16_t>(packetData[byteOffset]) | (static_cast<uint16_t>(packetData[byteOffset + 1]) << 8);
+			};
+
+		// Per SameBoy Core/sgb.c pal_command: color 0 is shared globally across
+		// ALL FOUR palettes on real hardware, not just the two this command
+		// names. Every PAL01/23/03/12 call updates color 0 everywhere,
+		// regardless of which palettes it otherwise targets.
+		uint16_t sharedColor0 = readColor(1);
+		for (int i = 0; i < 4; ++i)
+		{
+			sgbBGPalettes[i][0] = sharedColor0;
+		}
+
+		sgbBGPalettes[paletteA][1] = readColor(3);
+		sgbBGPalettes[paletteA][2] = readColor(5);
+		sgbBGPalettes[paletteA][3] = readColor(7);
+
+		sgbBGPalettes[paletteB][1] = readColor(9);
+		sgbBGPalettes[paletteB][2] = readColor(11);
+		sgbBGPalettes[paletteB][3] = readColor(13);
+
+		DEBUG("[SGB] PAL_XX Executed: Loaded palettes %d and %d", paletteA, paletteB);
+	}
+
+	// PAL_SET ($0A) - Copies 4 palettes from the 512-entry PAL_TRN pool into
+	// the active game-screen palettes. Per
+	// gbdev.io/pandocs/SGB_Command_Palettes.html and SameBoy Core/sgb.c: each
+	// palette ID is 9 bits (low byte + bit0 of the following byte as the high
+	// bit), little-endian pairs for palettes 0-3. Color 0 is then forced
+	// identical across all 4 active palettes -- same global-color-0 rule as
+	// PAL01/23/03/12 (see handleSGB_PAL_XX).
+	MASQ_INLINE void handleSGB_PAL_SET(const uint8_t* packetData)
+	{
+		uint16_t paletteID[4];
+		paletteID[0] = TO_UINT16(packetData[1]) | (TO_UINT16(packetData[2] & 0x01) << 8);
+		paletteID[1] = TO_UINT16(packetData[3]) | (TO_UINT16(packetData[4] & 0x01) << 8);
+		paletteID[2] = TO_UINT16(packetData[5]) | (TO_UINT16(packetData[6] & 0x01) << 8);
+		paletteID[3] = TO_UINT16(packetData[7]) | (TO_UINT16(packetData[8] & 0x01) << 8);
+
+		for (int p = 0; p < 4; ++p)
+		{
+			for (int c = 0; c < 4; ++c)
+			{
+				sgbBGPalettes[p][c] = sgbSystemPalettePool[paletteID[p]][c];
+			}
+		}
+
+		for (int p = 1; p < 4; ++p)
+		{
+			sgbBGPalettes[p][0] = sgbBGPalettes[0][0];
+		}
+
+		uint8_t flags = packetData[9];
+
+		if (flags & 0x40)
+		{
+			currentScreenMask = SGB_MASK_MODE::CANCEL_MASK;
+		}
+
+		if (flags & 0x80)
+		{
+			// Apply-ATF requires ATTR_TRN/ATTR_SET's saved attribute-file pool,
+			// which isn't implemented. Flagged rather than silently dropped.
+			FATAL("[SGB] PAL_SET: Apply-ATF flag set (file %d) but ATTR_TRN/ATTR_SET are not implemented -- ignored", flags & 0x3F);
+		}
+
+		DEBUG("[SGB] PAL_SET Executed: Loaded palettes %d,%d,%d,%d from system pool", paletteID[0], paletteID[1], paletteID[2], paletteID[3]);
+	}
+
+	MASQ_INLINE void handleSGB_ATTR_SET(const uint8_t* packetData)
+	{
+		FATAL("[SGB] ATTR_SET Executed: Processed attribute data");
+	}
+
+	// ATTR_BLK/LIN/DIV/CHR -- direct writes into sgbAttributeMap.
+	// Per gbdev.io/pandocs/SGB_Command_Attribute.html. packetData is already
+	// the full reassembled multi-packet buffer (sgbPacketBuffer, up to 112
+	// bytes) by the time executeSGBCommand hands it here.
+	MASQ_INLINE void handleSGB_ATTR(uint8_t commandCode, const uint8_t* packetData)
+	{
+		switch (static_cast<SGB_COMMAND>(commandCode))
+		{
+		case SGB_COMMAND::SGB_CMD_ATTR_BLK:
+		{
+			uint8_t numDataSets = packetData[1];
+			for (uint8_t set = 0; set < numDataSets; ++set)
+			{
+				int base = 2 + set * 6;
+				uint8_t controlCode = packetData[base + 0];
+				uint8_t paletteDesignation = packetData[base + 1];
+				int x1 = packetData[base + 2];
+				int y1 = packetData[base + 3];
+				int x2 = packetData[base + 4];
+				int y2 = packetData[base + 5];
+
+				bool changeInside = (controlCode & 0x01) != 0;
+				bool changeLine = (controlCode & 0x02) != 0;
+				bool changeOutside = (controlCode & 0x04) != 0;
+
+				uint8_t insidePalette = paletteDesignation & 0x03;
+				uint8_t linePalette = (paletteDesignation >> 2) & 0x03;
+				uint8_t outsidePalette = (paletteDesignation >> 4) & 0x03;
+
+				// Per spec: changing only Inside or only Outside auto-changes
+				// the surrounding line to the same color.
+				if (changeInside && !changeLine && !changeOutside)
+				{
+					changeLine = true;
+					linePalette = insidePalette;
+				}
+				else if (changeOutside && !changeLine && !changeInside)
+				{
+					changeLine = true;
+					linePalette = outsidePalette;
+				}
+
+				for (int y = 0; y < 18; ++y)
+				{
+					for (int x = 0; x < 20; ++x)
+					{
+						bool inRect = (x >= x1 && x <= x2 && y >= y1 && y <= y2);
+						bool onBorder = inRect && (x == x1 || x == x2 || y == y1 || y == y2);
+
+						if (onBorder && changeLine)
+						{
+							sgbAttributeMap[y][x] = linePalette;
+						}
+						else if (inRect && !onBorder && changeInside)
+						{
+							sgbAttributeMap[y][x] = insidePalette;
+						}
+						else if (!inRect && changeOutside)
+						{
+							sgbAttributeMap[y][x] = outsidePalette;
+						}
+					}
+				}
+			}
+			DEBUG("[SGB] ATTR_BLK Executed: %d data set(s)", numDataSets);
+			BREAK;
+		}
+
+		case SGB_COMMAND::SGB_CMD_ATTR_LIN:
+		{
+			uint8_t numDataSets = packetData[1];
+			for (uint8_t set = 0; set < numDataSets; ++set)
+			{
+				uint8_t data = packetData[2 + set];
+				uint8_t lineNumber = data & 0x1F;
+				uint8_t palette = (data >> 5) & 0x03;
+				bool horizontal = (data & 0x80) != 0;
+
+				if (horizontal && lineNumber < 18)
+				{
+					for (int x = 0; x < 20; ++x)
+					{
+						sgbAttributeMap[lineNumber][x] = palette;
+					}
+				}
+				else if (!horizontal && lineNumber < 20)
+				{
+					for (int y = 0; y < 18; ++y)
+					{
+						sgbAttributeMap[y][lineNumber] = palette;
+					}
+				}
+			}
+			DEBUG("[SGB] ATTR_LIN Executed: %d data set(s)", numDataSets);
+			BREAK;
+		}
+
+		case SGB_COMMAND::SGB_CMD_ATTR_DIV:
+		{
+			uint8_t flags = packetData[1];
+			uint8_t paletteBelowRight = flags & 0x03;
+			uint8_t paletteAboveLeft = (flags >> 2) & 0x03;
+			uint8_t paletteDivLine = (flags >> 4) & 0x03;
+			bool horizontalSplit = (flags & 0x40) != 0;
+			uint8_t coord = packetData[2];
+
+			for (int y = 0; y < 18; ++y)
+			{
+				for (int x = 0; x < 20; ++x)
+				{
+					int pos = horizontalSplit ? y : x;
+					if (pos < coord)
+					{
+						sgbAttributeMap[y][x] = paletteAboveLeft;
+					}
+					else if (pos > coord)
+					{
+						sgbAttributeMap[y][x] = paletteBelowRight;
+					}
+					else
+					{
+						sgbAttributeMap[y][x] = paletteDivLine;
+					}
+				}
+			}
+			DEBUG("[SGB] ATTR_DIV Executed: %s split at %d", horizontalSplit ? "horizontal" : "vertical", coord);
+			BREAK;
+		}
+
+		case SGB_COMMAND::SGB_CMD_ATTR_CHR:
+		{
+			uint8_t beginX = packetData[1];
+			uint8_t beginY = packetData[2];
+			uint16_t numDataSets = static_cast<uint16_t>(packetData[3]) | (static_cast<uint16_t>(packetData[4]) << 8);
+			bool topToBottom = (packetData[5] & 0x01) != 0;
+
+			int x = beginX;
+			int y = beginY;
+
+			for (uint16_t i = 0; i < numDataSets; ++i)
+			{
+				int byteIdx = 6 + (i / 4);
+				int shiftAmount = 6 - 2 * (i % 4); // Set1 in MSBs, Set4 in LSBs
+				uint8_t palette = (packetData[byteIdx] >> shiftAmount) & 0x03;
+
+				if (x >= 0 && x < 20 && y >= 0 && y < 18)
+				{
+					sgbAttributeMap[y][x] = palette;
+				}
+
+				if (topToBottom)
+				{
+					y++;
+					if (y >= 18)
+					{
+						y = 0; x++; if (x >= 20)
+						{
+							x = 0;
+						}
+					}
+				}
+				else
+				{
+					x++;
+					if (x >= 20)
+					{
+						x = 0; y++; if (y >= 18)
+						{
+							y = 0;
+						}
+					}
+				}
+			}
+			DEBUG("[SGB] ATTR_CHR Executed: %d data set(s), start (%d,%d)", numDataSets, beginX, beginY);
+			BREAK;
+		}
+
+		default:
+			BREAK;
+		}
+	}
+
+	struct PendingSGBTrn_t
+	{
+		SGB_COMMAND command;
+		uint8_t     packetData[16];
+		uint8_t     framesRemaining;
+	};
+	static constexpr int SGB_TRN_QUEUE_SIZE = 16;
+	PendingSGBTrn_t pendingTrnQueue[SGB_TRN_QUEUE_SIZE] = {};
+	uint8_t pendingTrnQueueCount = 0;
+
+	MASQ_INLINE void requestDeferredSGBTrn(SGB_COMMAND command, const uint8_t* packetData)
+	{
+		if (pendingTrnQueueCount >= SGB_TRN_QUEUE_SIZE)
+		{
+			DEBUG("[SGB] TRN queue full -- dropping transfer, command=%u", TO_UINT8(command));
+			RETURN;
+		}
+		PendingSGBTrn_t& slot = pendingTrnQueue[pendingTrnQueueCount++];
+		slot.command = command;
+		std::memcpy(slot.packetData, packetData, sizeof(slot.packetData));
+		slot.framesRemaining = 3;	// Per SameBoy Core/sgb.c: vram_transfer_countdown = 3
+	}
+
+	MASQ_INLINE void resolvePendingSGBTrnIfDue()
+	{
+		bool borderDataChanged = false;
+		uint8_t writeIndex = 0;
+
+		for (uint8_t i = 0; i < pendingTrnQueueCount; ++i)
+		{
+			if (--pendingTrnQueue[i].framesRemaining == 0)
+			{
+				switch (pendingTrnQueue[i].command)
+				{
+				case SGB_COMMAND::SGB_CMD_CHR_TRN: handleSGB_CHR_TRN(pendingTrnQueue[i].packetData); borderDataChanged = true; BREAK;
+				case SGB_COMMAND::SGB_CMD_PCT_TRN: handleSGB_PCT_TRN(pendingTrnQueue[i].packetData); borderDataChanged = true; BREAK;
+				case SGB_COMMAND::SGB_CMD_PAL_TRN: handleSGB_PAL_TRN(); BREAK;
+				case SGB_COMMAND::SGB_CMD_ATTR_TRN: handleSGB_ATTR_TRN(); BREAK;
+				default: BREAK;
+				}
+			}
+			else
+			{
+				if (writeIndex != i)
+				{
+					pendingTrnQueue[writeIndex] = pendingTrnQueue[i];
+				}
+				++writeIndex;
+			}
+		}
+		pendingTrnQueueCount = writeIndex;
+
+		if (borderDataChanged)
+		{
+			drawSGBBorderTiles();
+		}
+	}
+
+	// Converts a 15-bit SNES RGB color to your emulator's 32-bit Pixel format
+	MASQ_INLINE Pixel snesColorToPixel(uint16_t snesColor)
+	{
+		// SNES color format: 0bbbbbgg gggrrrrr (5 bits per channel)
+		const uint8_t r = (snesColor & 0x1F) << 3;
+		const uint8_t g = ((snesColor >> 5) & 0x1F) << 3;
+		const uint8_t b = ((snesColor >> 10) & 0x1F) << 3;
+
+		RETURN(static_cast<uint32_t>(0xFF) << 24) |
+			(static_cast<uint32_t>(b) << 16) |
+			(static_cast<uint32_t>(g) << 8) |
+			static_cast<uint32_t>(r);
+	}
+
+	void drawSGBBorderTiles();
+
+	typedef struct
+	{
+		uint64_t cycle;      // CPU M-cycle timestamp
+		uint8_t  p14;        // Line state (0 or 1)
+		uint8_t  p15;        // Line state (0 or 1)
+		uint8_t  latchedBit; // 0, 1, or 0xFF (no bit latched at this sample)
+		SGB_STATE state;     // FSM State at this event
+	} SgbSignalSample_t;
+
+	// Store the last 256 signal transitions for visualization
+	std::array<SgbSignalSample_t, SGB_WAVEFORM_HISTORY_SIZE> sgbSignalHistory{};
+	size_t sgbSignalHead = 0;
+
+	void recordSgbSample(uint8_t p14, uint8_t p15, uint8_t latchedBit, SGB_STATE currentState)
+	{
+		sgbSignalHistory[sgbSignalHead] = {
+			.cycle = pGBc_instance->GBc_state.emulatorStatus.ticks.cpuCounter,
+			.p14 = p14,
+			.p15 = p15,
+			.latchedBit = latchedBit,
+			.state = currentState
+		};
+		sgbSignalHead = (sgbSignalHead + 1) % SGB_WAVEFORM_HISTORY_SIZE;
+	}
 
 	struct debugger_t
 	{
@@ -2695,6 +3506,8 @@ public:
 	void debugEventViewerCheck();
 	void renderGBCDebuggerEventViewerTab();
 
+	void renderSGBTimingDiagramWindow(FLAG* pOpen);
+
 private:
 
 	void renderGBCDebuggerPPUTab();
@@ -3057,6 +3870,18 @@ private:
 	FLAG isCGBDoubleSpeedEnabled();
 	void toggleCGBSpeedMode();
 	FLAG isCGBCompatibilityModeEnabled();
+	MASQ_INLINE FLAG isSGBCompatible()
+	{
+		auto& header = pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_fields;
+		if ((_FORCE_SGB == YES) && (header.sgbFlag == 0x03) && (header.oldLicCode == 0x33))
+		{
+			RETURN YES;
+		}
+		else
+		{
+			RETURN NO;
+		}
+	}
 
 private:
 
@@ -3225,6 +4050,8 @@ public:
 
 public:
 
+	void updateSGBJOYP(BIT P14, BIT P15);
+	void executeSGBCommand(uint8_t commandCode, const uint8_t* packetData);
 	void updateJOYP(STATE8 prevState);
 	void captureIO();
 
@@ -3319,6 +4146,7 @@ public:
 
 public:
 
+	void initDefaultSGBBorder();
 	void initializeGraphics();
 	void initializeAudio();
 	void reInitializeAudio();
