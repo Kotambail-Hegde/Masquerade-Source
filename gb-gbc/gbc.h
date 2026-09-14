@@ -30,6 +30,8 @@
 #define GBCAM_SENSOR_H									(112 + GBCAM_SENSOR_EXTRA_LINES)
 #define GBCAM_W											(128)
 #define GBCAM_H											(112)
+// SGB
+#define SGB_WAVEFORM_HISTORY_SIZE						(256)
 #pragma endregion MACROS
 
 #pragma region TYPEDEFS
@@ -2003,6 +2005,23 @@ private:
 			Pixel imGuiBuffer1D[screen_width * screen_height];
 			Pixel imGuiBuffer2D[screen_height][screen_width];
 		} imGuiBuffer;
+		// SGB analogue of cgbRawColorBuffer. GB tile data/tilemap are
+		// never altered by SGB
+		// The DMG PPU renders completely normally. The only
+		// difference is the final index->color step: instead of BGP/OBP mapping to
+		// fixed DMG green shades, SGB maps through its own uploaded palette memory
+		// (PAL01-PAL_SET, per-tile-block assignment via ATTR_BLK/LIN/DIV/CHR/SET).
+		// Stores the raw 2-bit color ID (0-3), captured at pixel-push time, same
+		// moment the DMG shade lookup happens (not yet colorized). A later
+		// SGB-palette-resolve pass reads this and writes the recolored Pixel
+		// directly into imGuiBuffer.
+		// COLOR_ID_2BPP (uint8_t) — SGB only, raw 2 - bit DMG color ID(0 - 3), pre - SGB - palette - resolution
+		COLOR_ID_2BPP sgbRawColorBuffer[screen_height][screen_width];
+		union
+		{
+			Pixel imGuiSgbBuffer1D[sgb_screen_width * sgb_screen_height];
+			Pixel imGuiSgbBuffer2D[sgb_screen_height][sgb_screen_width];
+		} imGuiSgbBuffer;
 		uint64_t filters;
 		uint64_t debugVariable;
 	} display_t;
@@ -2061,6 +2080,371 @@ private:
 		STATInterruptSources_t STATInterruptSources;
 		BYTE aggregateSignal;
 	} STATInterruptSignal_t;
+
+	// SGB Handling
+
+	enum class SGB_STATE
+	{
+		IDLE,        // Waiting for START pulse (0x00)
+		DATA,        // Waiting for P14 or P15 to go low (Bit setup)
+		LATCH,       // Waiting for return to standby 0x30 (Bit sample)
+		END          // Processing 129th Stop Bit & packet completion
+	};
+
+	SGB_STATE sgbState = SGB_STATE::IDLE;
+	uint8_t  sgbPacketBuffer[112]; // Max 7 packets * 16 bytes
+	uint16_t sgbBitCounter = 0;   // 0 to 127 data bits
+	uint8_t  sgbPacketIndex = 0;  // 0 to sgbPacketCount - 1
+	uint8_t  sgbPacketCount = 1;  // Extracted from Header byte
+	uint8_t  sgbCurrentBit = 0;   // Samples 0 or 1 during DATA phase
+
+	// SGB Command Codes (Header Byte >> 3)
+	enum class SGB_COMMAND : uint8_t
+	{
+		SGB_CMD_PAL01 = 0x00, // Set SGB Palettes 0 & 1
+		SGB_CMD_PAL23 = 0x01, // Set SGB Palettes 2 & 3
+		SGB_CMD_PAL03 = 0x02, // Set SGB Palettes 0 & 3
+		SGB_CMD_PAL12 = 0x03, // Set SGB Palettes 1 & 2
+		SGB_CMD_ATTR_BLK = 0x04, // Set Palette Attribute Blocks
+		SGB_CMD_ATTR_LIN = 0x05, // Set Palette Attribute Lines
+		SGB_CMD_ATTR_DIV = 0x06, // Set Palette Attribute Division
+		SGB_CMD_ATTR_CHR = 0x07, // Set Palette Attribute Characters
+		SGB_CMD_SOUND = 0x08, // Play SNES Sound Effect
+		SGB_CMD_SND_PRG = 0x09, // Program SNES Sound Data
+		SGB_CMD_DATA_SND = 0x0A, // Set SNES Sound Information
+		SGB_CMD_DATA_TRN = 0x0B, // Transfer Data to SNES Memory
+		SGB_CMD_MLT_REQ = 0x11, // Controller Multiplex Request
+		SGB_CMD_JUMP = 0x12, // Jump to SNES Code Exec
+		SGB_CMD_CHR_TRN = 0x13, // Transfer Tile Data to SNES VRAM (Border Tiles)
+		SGB_CMD_PCT_TRN = 0x14, // Transfer Tile Map & Palettes to SNES VRAM (Border Map)
+		SGB_CMD_ATTR_TRN = 0x15, // Transfer Palette Attributes to SNES VRAM
+		SGB_CMD_PAL_SET = 0x16, // Apply Pre-defined Palette Set
+		SGB_CMD_MASK_EN = 0x17, // Screen Masking Control
+		SGB_CMD_OBJ_TRN = 0x18  // Transfer OBJ (Sprite) Attributes to SNES VRAM
+	};
+
+	// In GBc_t class definition:
+	typedef struct {
+		uint8_t mltReqMode;      // 0 = 1P, 1 = 2P, 3 = 4P
+		uint8_t numPlayers;      // Derived total players (1, 2, or 4)
+		uint8_t activePlayer;    // Active player index (0 to numPlayers - 1)
+		bool p15WasLow;      // Clock edge detector for automatic player cycling
+	} sgbJoypad_t;
+
+	sgbJoypad_t sgbJoypad;
+
+	enum class SGB_MASK_MODE : uint8_t
+	{
+		CANCEL_MASK = 0, // Display screen normally
+		FREEZE_SCREEN = 1, // Freeze current picture
+		BLANK_BLACK = 2, // Blank screen to Black
+		BLANK_COLOR_0 = 3  // Blank screen to Color 0 (Palette 0)
+	};
+
+	SGB_MASK_MODE currentScreenMask = SGB_MASK_MODE::CANCEL_MASK;
+	SGB_MASK_MODE previousScreenMask = SGB_MASK_MODE::CANCEL_MASK;
+	std::vector<Pixel> frozenFrameBuffer; // Cached frame for FREEZE_SCREEN
+
+	// =========================================================================
+	// SGB BORDER & MEMORY MAPPING ARCHITECTURE OVERVIEW:
+	// 
+	// 1. GAME BOY MEMORY STAGING ($8000–$9FFF):
+	//    - $8000–$97FF is the traditional GB tile data area (normally storing 2bpp 
+	//      graphics at 16 bytes per tile).
+	//    - $9800–$9FFF holds the standard 32x32 tile maps. In standard GB operation, 
+	//      these are 8-bit bytes containing only Tile IDs (with CGB using a separate 
+	//      8-bit attribute map).
+	//    - For SGB borders, games temporarily repurpose this entire $8000–$9FFF 
+	//      VRAM space as a staging window to pack custom 4bpp SNES border graphics 
+	//      (32 bytes per tile) and combined 16-bit SNES tile map entries (where Tile IDs, 
+	//      Palettes, and Flips are packed together into a single word).
+	//
+	// 2. HOW DATA IS TRANSFERRED (CHR_TRN / PCT_TRN):
+	//    - The SGB hardware completely bypasses standard GB rendering rules. It 
+	//      just bulk-transfers the raw binary contents straight out of the GB VRAM window.
+	//    - Those raw bytes are then consumed on the SNES side to populate the 
+	//      character data (CHR_TRN) and background map structures (PCT_TRN).
+	// =========================================================================
+
+	// --- SGB / SNES Dimension Constants ---
+	static constexpr int SCREEN_WIDTH = 256;
+	static constexpr int SCREEN_HEIGHT = 224;
+	static constexpr int TILE_WIDTH_PIXELS = 8;
+	static constexpr int TILE_HEIGHT_PIXELS = 8;
+	static constexpr int SGB_BPP = 4;
+
+	static constexpr int VISIBLE_TILES_X = SCREEN_WIDTH / TILE_WIDTH_PIXELS;   // 32 tiles wide
+	static constexpr int VISIBLE_TILES_Y = SCREEN_HEIGHT / TILE_HEIGHT_PIXELS; // 28 tiles high
+
+	// SNES background maps are natively structured as 32x32 tile grids in VRAM. 
+	// While the visible screen is VISIBLE_TILES_X wide by VISIBLE_TILES_Y high, 
+	// the SNES hardware map configuration requires a full 32x32 tile grid layout.
+	static constexpr int TILEMAP_WIDTH = 32; // 32 tiles
+	static constexpr int TILEMAP_HEIGHT = 32; // 32 tiles
+
+	static constexpr int BYTES_PER_ROW_OF_TILE = (TILE_WIDTH_PIXELS * SGB_BPP) / 8; // 4 bytes per row
+	static constexpr int BYTES_PER_TILE = TILE_HEIGHT_PIXELS * BYTES_PER_ROW_OF_TILE; // 32 bytes per tile
+
+	static constexpr int SGB_PALETTE_COUNT = 8;
+	static constexpr int COLORS_PER_PALETTE = 16;
+
+	// Total tiles: 256 => 8192 bytes ($8000–$9FFF) / 32 bytes (BYTES_PER_TILE) = 256 tiles
+	static constexpr int TOTAL_SGB_TILES = 256;
+
+	// --- SNES Tile Map Entry Layout (16-bit packed word) ---
+	struct snesTileMapEntry_t
+	{
+		uint16_t tileID : 9;      // Bits 0–8:   Tile ID (0 to 511, mapped into 256 tiles)
+		uint16_t bgPriority : 1;  // Bit 9:      BG priority flag
+		uint16_t paletteNum : 3;  // Bits 10–12: Palette number (0 to 7)
+		uint16_t reserved : 1;    // Bit 13:     Unused / SNES sub-palette
+		uint16_t xFlip : 1;       // Bit 14:     Horizontal flip (X_FLIP)
+		uint16_t yFlip : 1;       // Bit 15:     Vertical flip (Y_FLIP)
+	};
+
+	// --- SGB Border & Palette Storage ---
+
+	// SGB Tile Data (Border CHR)
+	// SGB border tile data consists of 256 unique 4bpp (4 bits per pixel) tiles. 
+	// With each tile taking 32 bytes, this 8 KB memory area defines the unique graphics dictionary.
+	BYTE snesTileData[TOTAL_SGB_TILES * BYTES_PER_TILE];
+
+	// SGB Tile Maps (Border PCT)
+	// The Super Game Boy border contains a 32x32 tile map grid in VRAM (1,024 total entries). 
+	// Each entry is a 16-bit word packing the Tile ID, Palette index, and X/Y flip attributes.
+	union 
+	{
+		uint16_t raw[TILEMAP_WIDTH * TILEMAP_HEIGHT];
+		snesTileMapEntry_t fields[TILEMAP_WIDTH * TILEMAP_HEIGHT];
+	} snesTileMap;
+
+	// PAL Buffer: SNES 15-bit RGB Palettes 
+	// SNES supports 8 palettes of 16 colors each (Palettes 4–7 are typically used for the border).
+	uint16_t snesPalettes[SGB_PALETTE_COUNT][COLORS_PER_PALETTE];
+
+	// Mirrors the ROM_TYPE branch in the real VRAM read path: GAME_BOY_COLOR
+	// carts (including DMG/CGB dual-compatible titles like Pokemon
+	// Silver/Gold/Crystal) store live VRAM in entireVram.vramMemoryBanks, not
+	// GBcMemory.GBcRawMemory -- that array is only authoritative for
+	// ROM_TYPE::GAME_BOY. SGB border transfers must read whichever one the
+	// cart actually writes to.
+	MASQ_INLINE uint8_t readSGBVramByte(uint16_t address)
+	{
+		if (ROM_TYPE == ROM::GAME_BOY_COLOR)
+		{
+			// SGB is a DMG-era protocol with no concept of CGB VRAM banking --
+			// border transfer data always lives in the DMG-equivalent bank
+			// (0), regardless of whatever bank the game's own CGB background
+			// rendering currently has active. Must NOT use getVRAMBankNumber()
+			// (the live/current bank), or a bank switch elsewhere in the game
+			// silently points this at unrelated, likely-uninitialized memory.
+			uint16_t vramOffset = address - 0x8000;
+			RETURN pGBc_instance->GBc_state.entireVram.vramMemoryBanks.mVRAMBanks[ZERO][vramOffset];
+		}
+		else // ROM::GAME_BOY
+		{
+			RETURN pGBc_instance->GBc_state.GBcMemory.GBcRawMemory[address];
+		}
+	}
+
+	MASQ_INLINE void handleSGB_MLT_REQ(const uint8_t* packetData)
+	{
+		uint8_t mode = packetData[1] & 0x03;
+		sgbJoypad.mltReqMode = mode;
+
+		switch (mode)
+		{
+		case 0: sgbJoypad.numPlayers = 1; BREAK; // 1 Player
+		case 1: sgbJoypad.numPlayers = 2; BREAK; // 2 Players
+		case 3: sgbJoypad.numPlayers = 4; BREAK; // 4 Players
+		default: sgbJoypad.numPlayers = 1; BREAK;
+		}
+
+		// Reset active player to Player 1 (0-indexed)
+		sgbJoypad.activePlayer = 0;
+		sgbJoypad.p15WasLow = false;
+
+		LOG("[SGB] MLT_REQ Executed: Mode %d (%d Players enabled)", mode, sgbJoypad.numPlayers);
+	}
+
+	MASQ_INLINE void handleSGB_MASK_EN(const uint8_t* packetData)
+	{
+		uint8_t mode = packetData[1] & 0x03;
+		currentScreenMask = static_cast<SGB_MASK_MODE>(mode);
+
+		LOG("[SGB] MASK_EN Executed: Mode %d", mode);
+	}
+
+	MASQ_INLINE void handleSGB_CHR_TRN(const uint8_t* packetData)
+	{
+		int targetOffset = (packetData[1] & 0x01) ? (128 * 32) : 0;
+
+		LOG("[SGB] CHR_TRN Executed: Target offset in snesTileData = %d (Block %d)", targetOffset, (packetData[1] & 0x01));
+
+		for (int i = 0; i < 4096; ++i)
+		{
+			snesTileData[targetOffset + i] = readSGBVramByte(0x8000 + i);
+		}
+
+		LOG("[SGB] CHR_TRN Completed: Copied 4096 bytes from GB VRAM to SNES Tile VRAM");
+	}
+
+	// PCT_TRN ($14): two INDEPENDENT fixed addresses, per
+	// gbdev.io/guides/sgb_border.html#uploading-borders -- picture data at
+	// $8000-$873f, palette data at $8800-$885f. Not one offset from the other.
+	MASQ_INLINE void handleSGB_PCT_TRN(const uint8_t* packetData)
+	{
+		LOG("[SGB] PCT_TRN Executed: Transferring border tile map + palette data from GB VRAM");
+
+		for (int i = 0; i < (32 * 28); ++i)
+		{
+			uint16_t lo = readSGBVramByte(0x8000 + i * 2);
+			uint16_t hi = readSGBVramByte(0x8000 + i * 2 + 1);
+			snesTileMap.raw[i] = lo | (hi << 8);
+		}
+
+		for (int p = 0; p < 3; ++p)
+		{
+			for (int c = 0; c < 16; ++c)
+			{
+				uint16_t addr = 0x8800 + (p * 16 + c) * 2;
+				uint16_t lo = readSGBVramByte(addr);
+				uint16_t hi = readSGBVramByte(addr + 1);
+				snesPalettes[4 + p][c] = lo | (hi << 8);
+			}
+		}
+
+		LOG("[SGB] PCT_TRN Completed: Loaded 32x28 tile map and 3 border palettes (slots 4-6)");
+	}
+
+	// PAL_TRN ($0B) - Loads the SGB "system color palette" table.
+	// Per gbdev.io/pandocs/SGB_Command_Palettes.html, real PAL_TRN populates a
+	// separate 512-entry system palette pool that PAL_SET later copies specific
+	// entries FROM into the 8 physical/visible palettes -- it is NOT itself a
+	// direct write to the physical palettes. This emulator doesn't yet have that
+	// separate 512-entry store and treats snesPalettes[8][16] as the physical
+	// slots directly, so until that's built properly we must at minimum never
+	// let this stomp palettes 4-6, which are exclusively owned by PCT_TRN
+	// (SGB_Command_Border.html) for the border. Slots 0-3/7 are left as before
+	// pending a real system-palette-table implementation.
+	MASQ_INLINE void handleSGB_PAL_TRN()
+	{
+		LOG("[SGB] PAL_TRN Executed: Transferring palette data from GB VRAM");
+
+		for (int i = 0; i < 8; ++i)
+		{
+			if (i >= 4 && i <= 6)
+			{
+				continue; // border palettes -- owned by PCT_TRN, never by PAL_TRN
+			}
+			for (int j = 0; j < 16; ++j)
+			{
+				uint16_t addr = 0x8000 + (i * 16 + j) * 2;
+				uint16_t lo = readSGBVramByte(addr);
+				uint16_t hi = readSGBVramByte(addr + 1);
+				snesPalettes[i][j] = lo | (hi << 8);
+			}
+		}
+
+		LOG("[SGB] PAL_TRN Completed: Loaded palettes (border slots 4-6 preserved)");
+	}
+
+	MASQ_INLINE void handleSGB_PAL_XX(uint8_t commandCode, const uint8_t* packetData)
+	{
+		LOG("[SGB] PAL_XX Executed");
+	}
+
+	MASQ_INLINE void handleSGB_ATTR(uint8_t commandCode, const uint8_t* packetData)
+	{
+		LOG("[SGB] SGB_ATTR Executed");
+	}
+
+	// --- Deferred VRAM Transfer (CHR_TRN / PCT_TRN) ---
+	// Per gbdev.io/pandocs/SGB_VRAM_Transfer.html "Transfer Time": the real
+	// capture starts at the beginning of the frame AFTER the command packet
+	// finishes, not the instant the 129th bit is clocked. We defer the capture
+	// to the next VBlank instead of reading VRAM synchronously mid-packet.
+	// Queue (not a single slot): a ROM firing two TRN packets inside one frame
+	// (e.g. two CHR_TRN halves back-to-back) would otherwise silently clobber
+	// the earlier one before it's resolved. 4 slots is generous headroom --
+	// spec-compliant ROMs wait ~8 frames between TRNs
+	// (gbdev.io/guides/sgb_border.html#trn), so 1-2 queued is the realistic max.
+	struct PendingSGBTrn_t
+	{
+		SGB_COMMAND command;
+		uint8_t     packetData[16];
+	};
+	static constexpr int SGB_TRN_QUEUE_SIZE = 16;
+	PendingSGBTrn_t pendingTrnQueue[SGB_TRN_QUEUE_SIZE] = {};
+	uint8_t pendingTrnQueueCount = 0;
+
+	MASQ_INLINE void requestDeferredSGBTrn(SGB_COMMAND command, const uint8_t* packetData)
+	{
+		if (pendingTrnQueueCount >= SGB_TRN_QUEUE_SIZE)
+		{
+			LOG("[SGB] TRN queue full -- dropping transfer, command=%u", TO_UINT8(command));
+			RETURN;
+		}
+		PendingSGBTrn_t& slot = pendingTrnQueue[pendingTrnQueueCount++];
+		slot.command = command;
+		std::memcpy(slot.packetData, packetData, sizeof(slot.packetData));
+	}
+
+	MASQ_INLINE void resolvePendingSGBTrnIfDue()
+	{
+		for (uint8_t i = 0; i < pendingTrnQueueCount; ++i)
+		{
+			switch (pendingTrnQueue[i].command)
+			{
+			case SGB_COMMAND::SGB_CMD_CHR_TRN: handleSGB_CHR_TRN(pendingTrnQueue[i].packetData); BREAK;
+			case SGB_COMMAND::SGB_CMD_PCT_TRN: handleSGB_PCT_TRN(pendingTrnQueue[i].packetData); BREAK;
+			case SGB_COMMAND::SGB_CMD_DATA_TRN: handleSGB_PAL_TRN(); BREAK;
+			default: BREAK;
+			}
+		}
+		pendingTrnQueueCount = 0;
+	}
+
+	// Converts a 15-bit SNES RGB color to your emulator's 32-bit Pixel format
+	MASQ_INLINE Pixel snesColorToPixel(uint16_t snesColor)
+	{
+		// SNES color format: 0bbbbbgg gggrrrrr (5 bits per channel)
+		const uint8_t r = (snesColor & 0x1F) << 3;
+		const uint8_t g = ((snesColor >> 5) & 0x1F) << 3;
+		const uint8_t b = ((snesColor >> 10) & 0x1F) << 3;
+
+		RETURN(static_cast<uint32_t>(0xFF) << 24) |
+			(static_cast<uint32_t>(b) << 16) |
+			(static_cast<uint32_t>(g) << 8) |
+			static_cast<uint32_t>(r);
+	}
+
+	void renderSGBBorder(Pixel* targetBuffer);
+
+	typedef struct
+	{
+		uint64_t cycle;      // CPU M-cycle timestamp
+		uint8_t  p14;        // Line state (0 or 1)
+		uint8_t  p15;        // Line state (0 or 1)
+		uint8_t  latchedBit; // 0, 1, or 0xFF (no bit latched at this sample)
+		SGB_STATE state;     // FSM State at this event
+	} SgbSignalSample_t;
+
+	// Store the last 256 signal transitions for visualization
+	std::array<SgbSignalSample_t, SGB_WAVEFORM_HISTORY_SIZE> sgbSignalHistory{};
+	size_t sgbSignalHead = 0;
+
+	void recordSgbSample(uint8_t p14, uint8_t p15, uint8_t latchedBit, SGB_STATE currentState)
+	{
+		sgbSignalHistory[sgbSignalHead] = {
+			.cycle = pGBc_instance->GBc_state.emulatorStatus.ticks.cpuCounter,
+			.p14 = p14,
+			.p15 = p15,
+			.latchedBit = latchedBit,
+			.state = currentState
+		};
+		sgbSignalHead = (sgbSignalHead + 1) % SGB_WAVEFORM_HISTORY_SIZE;
+	}
 
 	struct debugger_t
 	{
@@ -2695,6 +3079,8 @@ public:
 	void debugEventViewerCheck();
 	void renderGBCDebuggerEventViewerTab();
 
+	void renderSGBTimingDiagramWindow(FLAG* pOpen);
+
 private:
 
 	void renderGBCDebuggerPPUTab();
@@ -3057,6 +3443,18 @@ private:
 	FLAG isCGBDoubleSpeedEnabled();
 	void toggleCGBSpeedMode();
 	FLAG isCGBCompatibilityModeEnabled();
+	MASQ_INLINE FLAG isSGBCompatible()
+	{
+		auto& header = pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_fields;
+		if ((_FORCE_SGB == YES) && (header.sgbFlag == 0x03) && (header.oldLicCode == 0x33))
+		{
+			RETURN YES;
+		}
+		else
+		{
+			RETURN NO;
+		}
+	}
 
 private:
 
@@ -3230,6 +3628,8 @@ public:
 
 public:
 
+	void updateSGBJOYP(BIT P14, BIT P15);
+	void executeSGBCommand(uint8_t commandCode, const uint8_t* packetData);
 	void updateJOYP(STATE8 prevState);
 	void captureIO();
 
@@ -3324,6 +3724,7 @@ public:
 
 public:
 
+	void initDefaultSGBBorder();
 	void initializeGraphics();
 	void initializeAudio();
 	void reInitializeAudio();
