@@ -2304,20 +2304,24 @@ MASQ_INLINE FLAG getMouseRelPosIfDocked(float* xpos, float* ypos,
     uint32_t emuScreenWidth,
     uint32_t emuScreenHeight)
 {
-    FLAG inside = YES;
-    static const float upperborder = 8, otherborder = 8;
-    float maxX = emuWindowMaxX - otherborder;
-    float maxY = emuWindowMaxY - otherborder;
-    *xpos = ImGui::GetMousePos().x - emuWindowX - otherborder;
-    *ypos = ImGui::GetMousePos().y - emuWindowY - upperborder;
-    if ((*xpos + otherborder > maxX) || (*ypos + upperborder > maxY) ||
-        (*xpos < 0 || *ypos < 0))
+    // emuWindowX/Y/MaxX/MaxY now hold the EXACT screen-space rect of the
+    // rendered emu framebuffer (already accounts for aspect-ratio letterboxing),
+    // so no fudge-factor border is needed here.
+    const float relX = ImGui::GetMousePos().x - emuWindowX;
+    const float relY = ImGui::GetMousePos().y - emuWindowY;
+
+    if (emuWindowMaxX <= 0.0f || emuWindowMaxY <= 0.0f ||
+        relX < 0.0f || relY < 0.0f ||
+        relX >= emuWindowMaxX || relY >= emuWindowMaxY)
     {
-        *xpos = *ypos = 0; inside = NO;
+        *xpos = *ypos = 0;
+        RETURN NO;
     }
-    *xpos = *xpos * emuScreenWidth / maxX;
-    *ypos = *ypos * emuScreenHeight / maxY;
-    RETURN inside;
+
+    *xpos = relX * emuScreenWidth / emuWindowMaxX;
+    *ypos = relY * emuScreenHeight / emuWindowMaxY;
+
+    RETURN YES;
 }
 #endif // !__RPI_PICO__
 
@@ -2860,6 +2864,23 @@ extern ROM ROM_TYPE;
 
 // Needed by NES
 extern FLAG enableZapper;
+// NOTE: Zapper light detection:
+// - Check a small radius around the cursor (real sensor isn't a single pixel)
+// - Beam must have already passed the target pixel (scanline+cycle check)
+// - Scanline window: 30 lines behind beam
+// - Brightness threshold: luminance >= 85/255 on rendered RGB
+// Refer https://www.nesdev.org/wiki/Zapper
+constexpr int32_t ZAPPER_SCANLINE_WINDOW = 30;
+constexpr uint8_t ZAPPER_BRIGHTNESS = 85;
+constexpr int32_t ZAPPER_RADIUS = 3;
+constexpr int32_t ZAPPER_DEBUG_SIZE = (ZAPPER_RADIUS * 2) + 1;
+extern int32_t zapperDebugX;
+extern int32_t zapperDebugY;
+extern int32_t zapperDebugLy;
+extern int32_t zapperDebugCy;
+extern bool zapperDebugBeam[ZAPPER_DEBUG_SIZE][ZAPPER_DEBUG_SIZE];
+extern bool zapperDebugLight[ZAPPER_DEBUG_SIZE][ZAPPER_DEBUG_SIZE];
+extern FLAG showZapperDebugOverlay;
 extern FLAG nesReset;
 extern FLAG forceNTSC;
 extern FLAG forcePAL;

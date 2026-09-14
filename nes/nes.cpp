@@ -4384,6 +4384,7 @@ inline byte NES_t::readCpuRawMemoryInternal(uint16_t address, MEMORY_ACCESS_SOUR
 						FLAG isInsideScreen = getMouseRelPosIfDocked(&x, &y, getScreenWidth(), getScreenHeight());
 
 						zapper.fields.W = SET; // default: no light
+
 						if (isInsideScreen == YES)
 						{
 							const int32_t cursorX = (int32_t)x;
@@ -4391,17 +4392,30 @@ inline byte NES_t::readCpuRawMemoryInternal(uint16_t address, MEMORY_ACCESS_SOUR
 							const int32_t currentLy = (int32_t)pNES_instance->NES_state.display.currentScanline;
 							const int32_t currentCy = (int32_t)pNES_instance->NES_state.emulatorStatus.ticks.ppuCounterPerLY;
 
-							// NOTE: Zapper light detection matches Mesen's logic:
-							// - Check a small radius around the cursor (real sensor isn't a single pixel)
-							// - Beam must have already passed the target pixel (scanline+cycle check)
-							// - Scanline window: 20 lines behind beam
-							// - Brightness threshold: luminance >= 85/255 on rendered RGB
-							// Refer https://www.nesdev.org/wiki/Zapper
-							static constexpr int32_t ZAPPER_SCANLINE_WINDOW = 20;
-							static constexpr int32_t ZAPPER_RADIUS = 2;
-							static constexpr uint8_t ZAPPER_BRIGHTNESS = 85;
+							static FLAG zapperMouseWasDown = NO;
+							const FLAG mouseDownNow = ImGui::IsMouseDown(ImGuiMouseButton_Left) ? YES : NO;
+							const FLAG mouseClicked = (mouseDownNow == YES && zapperMouseWasDown == NO) ? YES : NO;
+							zapperMouseWasDown = mouseDownNow;
+
+							if (mouseClicked == YES)
+							{
+								zapperDebugX = cursorX;
+								zapperDebugY = cursorY;
+								zapperDebugLy = currentLy;
+								zapperDebugCy = currentCy;
+
+								for (int32_t debugY = ZERO; debugY < ZAPPER_DEBUG_SIZE; ++debugY)
+								{
+									for (int32_t debugX = ZERO; debugX < ZAPPER_DEBUG_SIZE; ++debugX)
+									{
+										zapperDebugBeam[debugY][debugX] = false;
+										zapperDebugLight[debugY][debugX] = false;
+									}
+								}
+							}
 
 							bool lightFound = false;
+
 							for (int32_t yOffset = -ZAPPER_RADIUS; yOffset <= ZAPPER_RADIUS && !lightFound; ++yOffset)
 							{
 								const int32_t yPos = cursorY + yOffset;
@@ -4409,6 +4423,7 @@ inline byte NES_t::readCpuRawMemoryInternal(uint16_t address, MEMORY_ACCESS_SOUR
 								{
 									continue;
 								}
+
 								for (int32_t xOffset = -ZAPPER_RADIUS; xOffset <= ZAPPER_RADIUS && !lightFound; ++xOffset)
 								{
 									const int32_t xPos = cursorX + xOffset;
@@ -4416,24 +4431,44 @@ inline byte NES_t::readCpuRawMemoryInternal(uint16_t address, MEMORY_ACCESS_SOUR
 									{
 										continue;
 									}
+
 									// Beam must have already passed this pixel:
 									// scanline must be at or past yPos, within window,
-									// and if on the same scanline the cycle must be past xPos
-									const bool beamPastPixel = (currentLy >= yPos)
+									// and if on the same scanline the cycle must be past xPos.
+									const bool beamPastPixel =
+										(currentLy >= yPos)
 										&& ((currentLy - yPos) <= ZAPPER_SCANLINE_WINDOW)
-										&& (currentLy != yPos || currentCy > xPos);
+										&& (currentLy != yPos || currentCy > xPos + ONE);
+
+									bool lightAtPixel = false;
+
 									if (beamPastPixel)
 									{
 										const Pixel& p = pNES_instance->NES_state.display.imGuiBuffer.imGuiBuffer2D[yPos][xPos];
+
 										// Standard luminance formula (BT.601)
 										const uint8_t luminance = (uint8_t)(0.299f * p.r + 0.587f * p.g + 0.114f * p.b);
-										if (luminance >= ZAPPER_BRIGHTNESS)
+
+										lightAtPixel = luminance >= ZAPPER_BRIGHTNESS;
+
+										if (lightAtPixel == true)
 										{
 											lightFound = true;
 										}
 									}
+
+									// Save the exact radius + beam result from the click.
+									if (mouseClicked == YES)
+									{
+										const int32_t debugX = xOffset + ZAPPER_RADIUS;
+										const int32_t debugY = yOffset + ZAPPER_RADIUS;
+
+										zapperDebugBeam[debugY][debugX] = beamPastPixel;
+										zapperDebugLight[debugY][debugX] = beamPastPixel && lightAtPixel;
+									}
 								}
 							}
+
 							zapper.fields.W = lightFound ? RESET : SET;
 						}
 
@@ -11203,150 +11238,158 @@ void NES_t::ppuTick()
 			// Refer "Tile and attribute fetching" in https://www.nesdev.org/wiki/PPU_scrolling#PPU_internal_registers
 			// NOTE: when "((cycle >= THREETWENTYONE) && (cycle <= THREETHIRTYSIX))" is triggered, "Y" of v is already incremented
 			// So, we are fetching the first 2 tiles of the next scanline!
-			if (checkIfRenderring() == YES && (((cycle >= ONE) && (cycle <= TWOFIFTYSIX)) || ((cycle >= THREETWENTYONE) && (cycle <= THREETHIRTYSIX))))
+			if ((((cycle >= ONE) && (cycle <= TWOFIFTYSIX)) || ((cycle >= THREETWENTYONE) && (cycle <= THREETHIRTYSIX))))
 			{
-				PPU_BG_FSM fsmState = (PPU_BG_FSM)((cycle - ONE) & SEVEN);    // ((cycle - 1) % 8)
-				switch (fsmState)
+				// Tile/attribute/pattern-table fetches only happen while actively rendering — this
+				// matches real HW (PPU bus is idle here otherwise) and also matters for mapper IRQ
+				// clocking off PPU bus activity (e.g. MMC3 A12). Restored from the pre-regression
+				// behavior, but scoped to ONLY the fetch FSM now (see note below on why the pixel
+				// output section must NOT be gated the same way).
+				if (checkIfRenderring() == YES)
 				{
-				case PPU_BG_FSM::RELOAD_SHIFTERS: // Offset 0 -> Dot 1 (Cycles 1, 9, 17 ... 257, 321, 329)
-				{
-					// Refer "Cycles 1-256" in https://www.nesdev.org/wiki/PPU_rendering
-					// The shifters are reloaded during ticks 9, 17, 25, ..., 257.
-					// Cycle 1: Start of line; no tile has been fetched yet -> do NOT reload.
-					// Cycles 9..257: Reload shifters with the fetched background tiles.
-					if (cycle >= NINE && cycle < TWOFIFTYSEVEN)
+					PPU_BG_FSM fsmState = (PPU_BG_FSM)((cycle - ONE) & SEVEN);    // ((cycle - 1) % 8)
+					switch (fsmState)
 					{
-						populatePixelShiftRegisters();
-					}
-
-					BREAK;
-				}
-				case PPU_BG_FSM::FETCH_NAMETABLE_BYTE: // Offset 1 -> Dot 2 (Cycles 2, 10, 18 ...)
-				{
-					// Refer to https://www.nesdev.org/wiki/PPU_scrolling#Tile_and_attribute_fetching
-					pNES_instance->NES_state.display.bg.nameTblAddr
-						= NAME_TABLE0_START_ADDRESS
-						| (pNES_ppuRegisters->ppuInternalRegisters.v.raw & 0x0FFF);
-
-					pNES_instance->NES_state.display.bg.nameTblByte
-						= readPpuRawMemory(pNES_instance->NES_state.display.bg.nameTblAddr, MEMORY_ACCESS_SOURCE::PPU);
-
-					BREAK;
-				}
-				case PPU_BG_FSM::FETCH_ATTRTABLE_BYTE: // Offset 3 -> Dot 4 (Cycles 4, 12, 20 ...)
-				{
-					// Refer to https://www.nesdev.org/wiki/PPU_scrolling#Tile_and_attribute_fetching
-					pNES_instance->NES_state.display.bg.attrTblAddr
-						= (NAME_TABLE0_START_ADDRESS + 0x03C0)
-						| (pNES_ppuRegisters->ppuInternalRegisters.v.raw & 0x0C00)
-						| ((pNES_ppuRegisters->ppuInternalRegisters.v.raw >> FOUR) & 0x0038)
-						| ((pNES_ppuRegisters->ppuInternalRegisters.v.raw >> TWO) & 0x0007);
-
-					pNES_instance->NES_state.display.bg.attrTblByte
-						= readPpuRawMemory(pNES_instance->NES_state.display.bg.attrTblAddr, MEMORY_ACCESS_SOURCE::PPU);
-
-					// To deduce the quadrant
-					// 
-					// Basics:
-					// Assume an n bit number, and lets assume we increment this number for every event E
-					// so, bit 0 of this number will toggle at every 1 E
-					// bit 1 of this number will toggle at every 2 E's
-					// bit 2 of this number will toggle at every 4 E's
-					// bit 3 of this number will toggle at every 8 E's
-					// bit 4 of this number will toggle at every 16 E's
-					// bit 5 of this number will toggle at every 32 E's
-					// bit 6 of this number will toggle at every 64 E's
-					// 
-					// coarseXScroll is incremented one tile
-					// We need to figure when it transitions of every 2 tiles, so we consider bit 1 of coarseXScroll
-					// coarseYScroll is incremented at every 8 increment of fineYScroll which itself is incremented every scanline
-					// We need to figure out every 16 increments of fineyScoll so as to detect 16 scanline increments
-					// So we consider bit 1 of coarseYScroll 
-
-					if (pNES_ppuRegisters->ppuInternalRegisters.v.fields.coarseYScroll & 0x02)
+					case PPU_BG_FSM::RELOAD_SHIFTERS: // Offset 0 -> Dot 1 (Cycles 1, 9, 17 ... 257, 321, 329)
 					{
-						pNES_instance->NES_state.display.bg.attrTblByte >>= FOUR;
-					}
-					if (pNES_ppuRegisters->ppuInternalRegisters.v.fields.coarseXScroll & 0x02)
-					{
-						pNES_instance->NES_state.display.bg.attrTblByte >>= TWO;
-					}
-
-					pNES_instance->NES_state.display.bg.paletteID = (pNES_instance->NES_state.display.bg.attrTblByte & 0x03);
-
-					BREAK;
-				}
-				case PPU_BG_FSM::FETCH_PATTTABLE_LBYTE: // Offset 5 -> Dot 6 (Cycles 6, 14, 22 ...)
-				{
-					pNES_instance->NES_state.display.bg.patternTableLAddr
-						= (PATTERN_TABLE0_START_ADDRESS + (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUCTRL.ppuctrl.BG_PATTERN_TABLE_ADDR << TWELVE)) // Xlied by 0x1000 using shift 12
-						| (pNES_instance->NES_state.display.bg.nameTblByte << FOUR) // Xlied by 16 using shift 4
-						| pNES_ppuRegisters->ppuInternalRegisters.v.fields.fineYScroll; // fine y basically represents "y per tile" (ly % 8)
-
-					if (pNES_instance->NES_state.catridgeInfo.nanjing_fc001.chrRamAutoSwitch == YES
-						&& pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::NANJING_FC001)
-					{
-						// Refer to https://www.nesdev.org/wiki/INES_Mapper_163#Feedback_Write_($5100-$5101,_write)
-						// NOTE : 
-						// Left pattern table refers to patternTable0
-						// Right pattern table refers to patternTable1
-						// And also since we are hardwired to be in vertical name table mirroring
-						// https://www.nesdev.org/wiki/Mirroring#Nametable_Mirroring
-						// top left block is nameTable0
-						// top right block is nameTable1
-						// bottom left block is nameTable0
-						// botton right block is nameTable1
-
-						auto normNameTblAddr = ((pNES_instance->NES_state.display.bg.nameTblAddr - NAME_TABLE0_START_ADDRESS) & 1023); // & 1023 == % 1024 == % 0x400 (size of single nametable memory)
-						if (normNameTblAddr <= 0x1FF)
+						// Refer "Cycles 1-256" in https://www.nesdev.org/wiki/PPU_rendering
+						// The shifters are reloaded during ticks 9, 17, 25, ..., 257.
+						// Cycle 1: Start of line; no tile has been fetched yet -> do NOT reload.
+						// Cycles 9..257: Reload shifters with the fetched background tiles.
+						if (cycle >= NINE && cycle < TWOFIFTYSEVEN)
 						{
-							if (pNES_instance->NES_state.display.bg.patternTableLAddr >= 0x1000)
+							populatePixelShiftRegisters();
+						}
+
+						BREAK;
+					}
+					case PPU_BG_FSM::FETCH_NAMETABLE_BYTE: // Offset 1 -> Dot 2 (Cycles 2, 10, 18 ...)
+					{
+						// Refer to https://www.nesdev.org/wiki/PPU_scrolling#Tile_and_attribute_fetching
+						pNES_instance->NES_state.display.bg.nameTblAddr
+							= NAME_TABLE0_START_ADDRESS
+							| (pNES_ppuRegisters->ppuInternalRegisters.v.raw & 0x0FFF);
+
+						pNES_instance->NES_state.display.bg.nameTblByte
+							= readPpuRawMemory(pNES_instance->NES_state.display.bg.nameTblAddr, MEMORY_ACCESS_SOURCE::PPU);
+
+						BREAK;
+					}
+					case PPU_BG_FSM::FETCH_ATTRTABLE_BYTE: // Offset 3 -> Dot 4 (Cycles 4, 12, 20 ...)
+					{
+						// Refer to https://www.nesdev.org/wiki/PPU_scrolling#Tile_and_attribute_fetching
+						pNES_instance->NES_state.display.bg.attrTblAddr
+							= (NAME_TABLE0_START_ADDRESS + 0x03C0)
+							| (pNES_ppuRegisters->ppuInternalRegisters.v.raw & 0x0C00)
+							| ((pNES_ppuRegisters->ppuInternalRegisters.v.raw >> FOUR) & 0x0038)
+							| ((pNES_ppuRegisters->ppuInternalRegisters.v.raw >> TWO) & 0x0007);
+
+						pNES_instance->NES_state.display.bg.attrTblByte
+							= readPpuRawMemory(pNES_instance->NES_state.display.bg.attrTblAddr, MEMORY_ACCESS_SOURCE::PPU);
+
+						// To deduce the quadrant
+						// 
+						// Basics:
+						// Assume an n bit number, and lets assume we increment this number for every event E
+						// so, bit 0 of this number will toggle at every 1 E
+						// bit 1 of this number will toggle at every 2 E's
+						// bit 2 of this number will toggle at every 4 E's
+						// bit 3 of this number will toggle at every 8 E's
+						// bit 4 of this number will toggle at every 16 E's
+						// bit 5 of this number will toggle at every 32 E's
+						// bit 6 of this number will toggle at every 64 E's
+						// 
+						// coarseXScroll is incremented one tile
+						// We need to figure when it transitions of every 2 tiles, so we consider bit 1 of coarseXScroll
+						// coarseYScroll is incremented at every 8 increment of fineYScroll which itself is incremented every scanline
+						// We need to figure out every 16 increments of fineyScoll so as to detect 16 scanline increments
+						// So we consider bit 1 of coarseYScroll 
+
+						if (pNES_ppuRegisters->ppuInternalRegisters.v.fields.coarseYScroll & 0x02)
+						{
+							pNES_instance->NES_state.display.bg.attrTblByte >>= FOUR;
+						}
+						if (pNES_ppuRegisters->ppuInternalRegisters.v.fields.coarseXScroll & 0x02)
+						{
+							pNES_instance->NES_state.display.bg.attrTblByte >>= TWO;
+						}
+
+						pNES_instance->NES_state.display.bg.paletteID = (pNES_instance->NES_state.display.bg.attrTblByte & 0x03);
+
+						BREAK;
+					}
+					case PPU_BG_FSM::FETCH_PATTTABLE_LBYTE: // Offset 5 -> Dot 6 (Cycles 6, 14, 22 ...)
+					{
+						pNES_instance->NES_state.display.bg.patternTableLAddr
+							= (PATTERN_TABLE0_START_ADDRESS + (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUCTRL.ppuctrl.BG_PATTERN_TABLE_ADDR << TWELVE)) // Xlied by 0x1000 using shift 12
+							| (pNES_instance->NES_state.display.bg.nameTblByte << FOUR) // Xlied by 16 using shift 4
+							| pNES_ppuRegisters->ppuInternalRegisters.v.fields.fineYScroll; // fine y basically represents "y per tile" (ly % 8)
+
+						if (pNES_instance->NES_state.catridgeInfo.nanjing_fc001.chrRamAutoSwitch == YES
+							&& pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::NANJING_FC001)
+						{
+							// Refer to https://www.nesdev.org/wiki/INES_Mapper_163#Feedback_Write_($5100-$5101,_write)
+							// NOTE : 
+							// Left pattern table refers to patternTable0
+							// Right pattern table refers to patternTable1
+							// And also since we are hardwired to be in vertical name table mirroring
+							// https://www.nesdev.org/wiki/Mirroring#Nametable_Mirroring
+							// top left block is nameTable0
+							// top right block is nameTable1
+							// bottom left block is nameTable0
+							// botton right block is nameTable1
+
+							auto normNameTblAddr = ((pNES_instance->NES_state.display.bg.nameTblAddr - NAME_TABLE0_START_ADDRESS) & 1023); // & 1023 == % 1024 == % 0x400 (size of single nametable memory)
+							if (normNameTblAddr <= 0x1FF)
 							{
-								pNES_instance->NES_state.display.bg.patternTableLAddr -= 0x1000;
+								if (pNES_instance->NES_state.display.bg.patternTableLAddr >= 0x1000)
+								{
+									pNES_instance->NES_state.display.bg.patternTableLAddr -= 0x1000;
+								}
+							}
+							else if (normNameTblAddr <= 0x3FF)
+							{
+								if (pNES_instance->NES_state.display.bg.patternTableLAddr < 0x1000)
+								{
+									pNES_instance->NES_state.display.bg.patternTableLAddr += 0x1000;
+								}
+							}
+							else
+							{
+								FATAL("Invalid name table address encountered in mapper 163 when in automatic chrram switch mode");
 							}
 						}
-						else if (normNameTblAddr <= 0x3FF)
-						{
-							if (pNES_instance->NES_state.display.bg.patternTableLAddr < 0x1000)
-							{
-								pNES_instance->NES_state.display.bg.patternTableLAddr += 0x1000;
-							}
-						}
-						else
-						{
-							FATAL("Invalid name table address encountered in mapper 163 when in automatic chrram switch mode");
-						}
+
+						pNES_instance->NES_state.display.bg.patternTblLByte
+							= readPpuRawMemory(pNES_instance->NES_state.display.bg.patternTableLAddr, MEMORY_ACCESS_SOURCE::PPU);
+
+						BREAK;
 					}
-
-					pNES_instance->NES_state.display.bg.patternTblLByte
-						= readPpuRawMemory(pNES_instance->NES_state.display.bg.patternTableLAddr, MEMORY_ACCESS_SOURCE::PPU);
-
-					BREAK;
-				}
-				case PPU_BG_FSM::FETCH_PATTTABLE_HBYTE: // Offset 7 -> Dot 8 (Cycles 8, 16, 24 ... 256, 328, 336)
-				{
-					pNES_instance->NES_state.display.bg.patternTableMAddr
-						= pNES_instance->NES_state.display.bg.patternTableLAddr + EIGHT;
-
-					pNES_instance->NES_state.display.bg.patternTblMByte
-						= readPpuRawMemory(pNES_instance->NES_state.display.bg.patternTableMAddr, MEMORY_ACCESS_SOURCE::PPU);
-
-					// Refer to "Between dot 328 of a scanline, and 256 of the next scanline" of https://www.nesdev.org/wiki/PPU_scrolling
-					// Increment X at cycles 8, 16, 24, ..., 240, 248, 256.
-					// During the 321..336 prefetch period, this also runs at cycles 328 and 336,
-					// which performs the two X increments needed for the first two tiles of the next scanline.
-					if (checkIfRenderring() == YES)
+					case PPU_BG_FSM::FETCH_PATTTABLE_HBYTE: // Offset 7 -> Dot 8 (Cycles 8, 16, 24 ... 256, 328, 336)
 					{
-						xInc();
-					}
+						pNES_instance->NES_state.display.bg.patternTableMAddr
+							= pNES_instance->NES_state.display.bg.patternTableLAddr + EIGHT;
 
-					BREAK;
-				}
-				default:
-				{
-					BREAK;
-				}
-				}
+						pNES_instance->NES_state.display.bg.patternTblMByte
+							= readPpuRawMemory(pNES_instance->NES_state.display.bg.patternTableMAddr, MEMORY_ACCESS_SOURCE::PPU);
+
+						// Refer to "Between dot 328 of a scanline, and 256 of the next scanline" of https://www.nesdev.org/wiki/PPU_scrolling
+						// Increment X at cycles 8, 16, 24, ..., 240, 248, 256.
+						// During the 321..336 prefetch period, this also runs at cycles 328 and 336,
+						// which performs the two X increments needed for the first two tiles of the next scanline.
+						if (checkIfRenderring() == YES)
+						{
+							xInc();
+						}
+
+						BREAK;
+					}
+					default:
+					{
+						BREAK;
+					}
+					}
+				} // end if (checkIfRenderring() == YES) -- fetch FSM only
 
 				ID bgColorID = RESET;
 				ID bgPaletteID = RESET;
@@ -11359,6 +11402,15 @@ void NES_t::ppuTick()
 				FLAG isBgOpaque = NO;
 
 				// Start rendering
+				// NOTE: intentionally NOT gated on checkIfRenderring(). Real hardware outputs a pixel
+				// every dot regardless — backdrop color when rendering is off, composited BG/sprite
+				// pixel when it's on. bgColorID/spriteColorID naturally stay 0 when rendering is
+				// disabled (both ENABLE_BG_RENDERING/ENABLE_SPRITE_RENDERING checks below are
+				// unaffected), which already falls through to the backdrop palette entry below.
+				// Gating this section (as the checkIfRenderring() commit briefly did) freezes
+				// imGuiBuffer2D on stale pixels whenever rendering toggles off mid-game, which broke
+				// Zapper hit detection since Duck Hunt's flash/hit-test frame relies on the buffer
+				// reflecting the current (blanked) frame, not several-frames-old gameplay pixels.
 				if (
 					((cycle >= ONE) && (cycle <= TWOFIFTYSIX))
 					&&
