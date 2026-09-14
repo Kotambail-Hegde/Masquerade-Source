@@ -511,6 +511,9 @@ VIDEO_FILTERS currEnVFilter = VIDEO_FILTERS::NEAREST_FILTER;
 PALETTE_ID    currEnGbPalette = PALETTE_ID::PALETTE_1;
 PALETTE_ID    currEnGbcPalette = PALETTE_ID::PALETTE_1;
 
+// GB/GBC Support
+FLAG _DISABLE_SGB_IN_NEXT_RUN = NO;
+
 // NES Support
 FLAG enableZapper = NO;
 int32_t zapperDebugX = ZERO;
@@ -2918,6 +2921,7 @@ public:
 							static FLAG barcodeWindowOpen = NO;
 							static int  pendingWindowScale = RESET;
 							static int  appliedWindowScale = _XSCALE;
+							static FLAG showSgbTimingViewer = NO;
 
 							tickAtStart = SDL_GetTicksNS();
 
@@ -3440,12 +3444,31 @@ public:
 											if (ImGui::BeginMenu("GB##GBFamily", MASQ_ENABLE_GBC))
 											{
 												static FLAG isCgbTicked = to_bool(config.get<std::string>("gb_gbc._force_gbc_for_gb", "false"));
+												static FLAG isSgbTicked = to_bool(config.get<std::string>("gb_gbc._force_sgb", "false"));
+
 												if (ImGui::MenuItem("CGB Mode", NULL, isCgbTicked))
 												{
 													isCgbTicked = !isCgbTicked;
 													config.put("gb_gbc._force_gbc_for_gb", isCgbTicked);
 													boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
 												}
+												if (ImGui::MenuItem("SGB Mode", NULL, isSgbTicked))
+												{
+													isSgbTicked = !isSgbTicked;
+													config.put("gb_gbc._force_sgb", isSgbTicked);
+													boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
+												}
+
+												if (current_instance && current_instance->getEmulationID() == EMULATION_ID::GB_GBC_ID)
+												{
+													ImGui::Separator();
+													FLAG showViewer = (showSgbTimingViewer == YES);
+													if (ImGui::MenuItem("SGB Timing Diagram Viewer", NULL, &showViewer))
+													{
+														showSgbTimingViewer = showViewer ? YES : NO;
+													}
+												}
+
 												ImGui::EndMenu();
 											}
 											ImGui::Separator();
@@ -4680,6 +4703,17 @@ public:
 
 										// Draw Camera Capture Debugger
 										gbc->RenderGBCCaptureStagesUI();
+
+										// Draw SGB Timing Diagram Viewer
+										if (showSgbTimingViewer == YES)
+										{
+											bool open = true;
+											gbc->renderSGBTimingDiagramWindow(&open);
+											if (!open)
+											{
+												showSgbTimingViewer = NO; // Handle close button click (X)
+											}
+										}
 									}
 									RenderCameraHardwareUI(camera);
 #endif // !__RPI_PICO__ && !ENABLE_OTA_EXECUTABLE && !ENABLE_SERVER_EXECUTABLE
@@ -5630,6 +5664,7 @@ void postPrimaryBootLoader()
 	BYTE bootType = BOOT;
 
 BOOT_AGAIN:
+
 	if ((dynamicDragNDropAndMenuSelect.size() != ZERO) || (saveContextOnReboot == NO))
 		romsToRun.fill("");
 
@@ -5654,6 +5689,7 @@ BOOT_AGAIN:
 		else if (rebootNeededOnMenuClick == YES)
 		{
 			rebootNeededOnMenuClick = NO;
+			saveContextOnReboot = NO;
 			secondaryBootLoader(numberOfRomsSelected, romsToRun, bootType);
 		}
 	}
@@ -5661,6 +5697,15 @@ BOOT_AGAIN:
 	if (dynamicDragNDropAndMenuSelect.size() != ZERO || rebootNeededOnMenuClick == YES)
 	{
 		bootType = REBOOT;
+
+		// TODO: Need a better way to handle this, platform agnostic...
+		if (_DISABLE_SGB_IN_NEXT_RUN == YES)
+		{
+			_DISABLE_SGB_IN_NEXT_RUN = NO;
+			config.put("gb_gbc._force_sgb", false);
+			boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
+		}
+
 		goto BOOT_AGAIN;
 	}
 }

@@ -4548,4 +4548,127 @@ void GBc_t::renderGBCDebuggerUI()
 	ImGui::End();
 }
 
+// ----- SGB Debug ------
+
+void GBc_t::renderSGBTimingDiagramWindow(FLAG* pOpen)
+{
+	// Convert FLAG pointer to boolean for ImGui signature safety
+	bool open = (pOpen && *pOpen == YES);
+	if (!ImGui::Begin("SGB JOYP Timing Diagram", pOpen ? &open : nullptr))
+	{
+		if (pOpen) *pOpen = open ? YES : NO;
+		ImGui::End();
+		RETURN;
+	}
+	if (pOpen) *pOpen = open ? YES : NO;
+
+	// Toolbar Controls
+	static float zoom = 1.0f;
+	static bool showGrid = true;
+	static bool showMarkers = false;
+
+	ImGui::SetNextItemWidth(120.0f);
+	ImGui::SliderFloat("Zoom", &zoom, 0.5f, 5.0f, "%.1fx");
+	ImGui::SameLine(); ImGui::Checkbox("Grid", &showGrid);
+	ImGui::SameLine(); ImGui::Checkbox("Markers", &showMarkers);
+	ImGui::Separator();
+
+	ImDrawList* drawList = ImGui::GetWindowDrawList();
+	ImVec2 canvasPos = ImGui::GetCursorScreenPos();
+	ImVec2 canvasSize = ImGui::GetContentRegionAvail();
+
+	if (canvasSize.x < 300.0f) canvasSize.x = 300.0f;
+	if (canvasSize.y < 160.0f) canvasSize.y = 160.0f;
+
+	ImVec2 canvasMax = ImVec2(canvasPos.x + canvasSize.x, canvasPos.y + canvasSize.y);
+
+	// Scope Background (Dark CRT LCD)
+	drawList->AddRectFilled(canvasPos, canvasMax, IM_COL32(10, 14, 18, 255));
+	drawList->AddRect(canvasPos, canvasMax, IM_COL32(50, 65, 80, 255));
+
+	// 1. Oscilloscope Division Grid
+	if (showGrid)
+	{
+		const float gridStepX = 35.0f * zoom;
+		const float gridStepY = 25.0f;
+
+		for (float x = canvasPos.x + 90.0f; x < canvasMax.x; x += gridStepX)
+			drawList->AddLine(ImVec2(x, canvasPos.y), ImVec2(x, canvasMax.y), IM_COL32(25, 40, 35, 180), 1.0f);
+
+		for (float y = canvasPos.y; y < canvasMax.y; y += gridStepY)
+			drawList->AddLine(ImVec2(canvasPos.x, y), ImVec2(canvasMax.x, y), IM_COL32(25, 40, 35, 180), 1.0f);
+	}
+
+	// Channel Y Level Coordinates
+	float laneHeight = (canvasSize.y - 30.0f) * 0.5f;
+	float p14HighY = canvasPos.y + 20.0f;
+	float p14LowY = p14HighY + (laneHeight * 0.6f);
+	float p15HighY = canvasPos.y + laneHeight + 20.0f;
+	float p15LowY = p15HighY + (laneHeight * 0.6f);
+
+	// Channel Badges
+	drawList->AddRectFilled(ImVec2(canvasPos.x + 5, p14HighY - 2), ImVec2(canvasPos.x + 82, p14LowY + 2), IM_COL32(0, 180, 100, 35));
+	drawList->AddText(ImVec2(canvasPos.x + 10, p14HighY + 5), IM_COL32(50, 255, 120, 255), "CH1: P14");
+
+	drawList->AddRectFilled(ImVec2(canvasPos.x + 5, p15HighY - 2), ImVec2(canvasPos.x + 82, p15LowY + 2), IM_COL32(220, 200, 0, 35));
+	drawList->AddText(ImVec2(canvasPos.x + 10, p15HighY + 5), IM_COL32(255, 230, 40, 255), "CH2: P15");
+
+	// Step X calculations scaled by zoom
+	float baseStepX = (canvasSize.x - 100.0f) / static_cast<float>(SGB_WAVEFORM_HISTORY_SIZE - 1);
+	float stepX = baseStepX * zoom;
+
+	// Hover Mouse Cursor Line
+	ImVec2 mousePos = ImGui::GetMousePos();
+	bool isHovered = ImGui::IsWindowHovered() && mousePos.x >= (canvasPos.x + 90.0f) && mousePos.x <= canvasMax.x && mousePos.y >= canvasPos.y && mousePos.y <= canvasMax.y;
+	if (isHovered)
+	{
+		drawList->AddLine(ImVec2(mousePos.x, canvasPos.y), ImVec2(mousePos.x, canvasMax.y), IM_COL32(200, 200, 200, 100), 1.0f);
+	}
+
+	// 2. Waveform Plotting Pass
+	for (size_t i = 0; i < SGB_WAVEFORM_HISTORY_SIZE - 1; i++)
+	{
+		size_t idx0 = (sgbSignalHead + i) % SGB_WAVEFORM_HISTORY_SIZE;
+		size_t idx1 = (sgbSignalHead + i + 1) % SGB_WAVEFORM_HISTORY_SIZE;
+
+		const auto& s0 = sgbSignalHistory[idx0];
+		const auto& s1 = sgbSignalHistory[idx1];
+
+		float x0 = canvasPos.x + 90.0f + (i * stepX);
+		float x1 = canvasPos.x + 90.0f + ((i + 1) * stepX);
+
+		// Off-screen right clipping optimization
+		if (x0 > canvasMax.x) BREAK;
+
+		// --- P14 Signal Line (Neon Green) ---
+		float y0_p14 = s0.p14 ? p14HighY : p14LowY;
+		float y1_p14 = s1.p14 ? p14HighY : p14LowY;
+		drawList->AddLine(ImVec2(x0, y0_p14), ImVec2(x1, y0_p14), IM_COL32(50, 255, 120, 255), 2.0f);
+		if (y0_p14 != y1_p14)
+			drawList->AddLine(ImVec2(x1, y0_p14), ImVec2(x1, y1_p14), IM_COL32(50, 255, 120, 255), 2.0f);
+
+		// --- P15 Signal Line (Neon Yellow) ---
+		float y0_p15 = s0.p15 ? p15HighY : p15LowY;
+		float y1_p15 = s1.p15 ? p15HighY : p15LowY;
+		drawList->AddLine(ImVec2(x0, y0_p15), ImVec2(x1, y0_p15), IM_COL32(255, 230, 40, 255), 2.0f);
+		if (y0_p15 != y1_p15)
+			drawList->AddLine(ImVec2(x1, y0_p15), ImVec2(x1, y1_p15), IM_COL32(255, 230, 40, 255), 2.0f);
+
+		// --- 3. Latch Event Trigger Lines and Bit Labels ---
+		if (showMarkers && s1.latchedBit != 0xFF)
+		{
+			// Vertical Red Trigger Line
+			drawList->AddLine(ImVec2(x1, canvasPos.y), ImVec2(x1, canvasMax.y - 20.0f), IM_COL32(255, 60, 60, 180), 1.0f);
+
+			// Latched Bit Value Tag
+			char bitBuf[8];
+			snprintf(bitBuf, sizeof(bitBuf), "%d", s1.latchedBit);
+			drawList->AddRectFilled(ImVec2(x1 - 6, canvasMax.y - 18.0f), ImVec2(x1 + 6, canvasMax.y - 2.0f), IM_COL32(30, 30, 40, 220));
+			drawList->AddText(ImVec2(x1 - 3, canvasMax.y - 17.0f), IM_COL32(255, 255, 255, 255), bitBuf);
+		}
+	}
+
+	ImGui::Dummy(canvasSize);
+	ImGui::End();
+}
 #endif // !__RPI_PICO__

@@ -2868,6 +2868,9 @@ MASQ_INLINE void firFilter(const double* coeffs, double* input, double* output,
 
 extern ROM ROM_TYPE;
 
+// Needed by GB/GBC
+extern FLAG _DISABLE_SGB_IN_NEXT_RUN;
+
 // Needed by NES
 extern FLAG enableZapper;
 // NOTE: Zapper light detection:
