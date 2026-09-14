@@ -4384,6 +4384,7 @@ inline byte NES_t::readCpuRawMemoryInternal(uint16_t address, MEMORY_ACCESS_SOUR
 						FLAG isInsideScreen = getMouseRelPosIfDocked(&x, &y, getScreenWidth(), getScreenHeight());
 
 						zapper.fields.W = SET; // default: no light
+
 						if (isInsideScreen == YES)
 						{
 							const int32_t cursorX = (int32_t)x;
@@ -4391,17 +4392,30 @@ inline byte NES_t::readCpuRawMemoryInternal(uint16_t address, MEMORY_ACCESS_SOUR
 							const int32_t currentLy = (int32_t)pNES_instance->NES_state.display.currentScanline;
 							const int32_t currentCy = (int32_t)pNES_instance->NES_state.emulatorStatus.ticks.ppuCounterPerLY;
 
-							// NOTE: Zapper light detection matches Mesen's logic:
-							// - Check a small radius around the cursor (real sensor isn't a single pixel)
-							// - Beam must have already passed the target pixel (scanline+cycle check)
-							// - Scanline window: 20 lines behind beam
-							// - Brightness threshold: luminance >= 85/255 on rendered RGB
-							// Refer https://www.nesdev.org/wiki/Zapper
-							static constexpr int32_t ZAPPER_SCANLINE_WINDOW = 20;
-							static constexpr int32_t ZAPPER_RADIUS = 2;
-							static constexpr uint8_t ZAPPER_BRIGHTNESS = 85;
+							static FLAG zapperMouseWasDown = NO;
+							const FLAG mouseDownNow = ImGui::IsMouseDown(ImGuiMouseButton_Left) ? YES : NO;
+							const FLAG mouseClicked = (mouseDownNow == YES && zapperMouseWasDown == NO) ? YES : NO;
+							zapperMouseWasDown = mouseDownNow;
+
+							if (mouseClicked == YES)
+							{
+								zapperDebugX = cursorX;
+								zapperDebugY = cursorY;
+								zapperDebugLy = currentLy;
+								zapperDebugCy = currentCy;
+
+								for (int32_t debugY = ZERO; debugY < ZAPPER_DEBUG_SIZE; ++debugY)
+								{
+									for (int32_t debugX = ZERO; debugX < ZAPPER_DEBUG_SIZE; ++debugX)
+									{
+										zapperDebugBeam[debugY][debugX] = false;
+										zapperDebugLight[debugY][debugX] = false;
+									}
+								}
+							}
 
 							bool lightFound = false;
+
 							for (int32_t yOffset = -ZAPPER_RADIUS; yOffset <= ZAPPER_RADIUS && !lightFound; ++yOffset)
 							{
 								const int32_t yPos = cursorY + yOffset;
@@ -4409,6 +4423,7 @@ inline byte NES_t::readCpuRawMemoryInternal(uint16_t address, MEMORY_ACCESS_SOUR
 								{
 									continue;
 								}
+
 								for (int32_t xOffset = -ZAPPER_RADIUS; xOffset <= ZAPPER_RADIUS && !lightFound; ++xOffset)
 								{
 									const int32_t xPos = cursorX + xOffset;
@@ -4416,24 +4431,44 @@ inline byte NES_t::readCpuRawMemoryInternal(uint16_t address, MEMORY_ACCESS_SOUR
 									{
 										continue;
 									}
+
 									// Beam must have already passed this pixel:
 									// scanline must be at or past yPos, within window,
-									// and if on the same scanline the cycle must be past xPos
-									const bool beamPastPixel = (currentLy >= yPos)
+									// and if on the same scanline the cycle must be past xPos.
+									const bool beamPastPixel =
+										(currentLy >= yPos)
 										&& ((currentLy - yPos) <= ZAPPER_SCANLINE_WINDOW)
-										&& (currentLy != yPos || currentCy > xPos);
+										&& (currentLy != yPos || currentCy > xPos + ONE);
+
+									bool lightAtPixel = false;
+
 									if (beamPastPixel)
 									{
 										const Pixel& p = pNES_instance->NES_state.display.imGuiBuffer.imGuiBuffer2D[yPos][xPos];
+
 										// Standard luminance formula (BT.601)
 										const uint8_t luminance = (uint8_t)(0.299f * p.r + 0.587f * p.g + 0.114f * p.b);
-										if (luminance >= ZAPPER_BRIGHTNESS)
+
+										lightAtPixel = luminance >= ZAPPER_BRIGHTNESS;
+
+										if (lightAtPixel == true)
 										{
 											lightFound = true;
 										}
 									}
+
+									// Save the exact radius + beam result from the click.
+									if (mouseClicked == YES)
+									{
+										const int32_t debugX = xOffset + ZAPPER_RADIUS;
+										const int32_t debugY = yOffset + ZAPPER_RADIUS;
+
+										zapperDebugBeam[debugY][debugX] = beamPastPixel;
+										zapperDebugLight[debugY][debugX] = beamPastPixel && lightAtPixel;
+									}
 								}
 							}
+
 							zapper.fields.W = lightFound ? RESET : SET;
 						}
 

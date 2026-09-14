@@ -509,6 +509,13 @@ PALETTE_ID    currEnGbcPalette = PALETTE_ID::PALETTE_1;
 
 // NES Support
 FLAG enableZapper = NO;
+int32_t zapperDebugX = ZERO;
+int32_t zapperDebugY = ZERO;
+int32_t zapperDebugLy = ZERO;
+int32_t zapperDebugCy = ZERO;
+bool zapperDebugBeam[ZAPPER_DEBUG_SIZE][ZAPPER_DEBUG_SIZE] = {};
+bool zapperDebugLight[ZAPPER_DEBUG_SIZE][ZAPPER_DEBUG_SIZE] = {};
+FLAG showZapperDebugOverlay = NO;
 FLAG nesReset = NO;
 FLAG forceNTSC = NO;
 FLAG forcePAL = NO;
@@ -2454,6 +2461,84 @@ public:
 
 #endif // !__RPI_PICO__ (setupThemes)
 
+public:
+#ifndef  __RPI_PICO__
+	MASQ_INLINE void drawZapperDebugOverlay(ImVec2 imagePos, ImVec2 imageSize, uint32_t width, uint32_t height)
+	{
+		if (showZapperDebugOverlay == NO)
+		{
+			RETURN;
+		}
+
+		ImDrawList* drawList = ImGui::GetWindowDrawList();
+
+		const float pixelWidth = imageSize.x / (float)width;
+		const float pixelHeight = imageSize.y / (float)height;
+
+		// ---- Every cell the light-detection loop scanned this click ----
+		for (int32_t gy = ZERO; gy < ZAPPER_DEBUG_SIZE; ++gy)
+		{
+			const int32_t yPos = zapperDebugY + (gy - ZAPPER_RADIUS);
+			if (yPos < ZERO || yPos >= (int32_t)height)
+			{
+				CONTINUE;
+			}
+
+			for (int32_t gx = ZERO; gx < ZAPPER_DEBUG_SIZE; ++gx)
+			{
+				const int32_t xPos = zapperDebugX + (gx - ZAPPER_RADIUS);
+				if (xPos < ZERO || xPos >= (int32_t)width)
+				{
+					CONTINUE;
+				}
+
+				const float cellX = imagePos.x + (float)xPos * pixelWidth;
+				const float cellY = imagePos.y + (float)yPos * pixelHeight;
+
+				ImU32 cellColor;
+				if (zapperDebugLight[gy][gx])
+				{
+					cellColor = IM_COL32(0, 255, 0, 200);     // beam passed + bright enough: this is the hit
+				}
+				else if (zapperDebugBeam[gy][gx])
+				{
+					cellColor = IM_COL32(80, 140, 255, 160);  // beam already passed, but too dark
+				}
+				else
+				{
+					cellColor = IM_COL32(255, 60, 60, 120);   // beam hasn't reached this pixel yet this frame
+				}
+
+				drawList->AddRect(
+					ImVec2(cellX, cellY),
+					ImVec2(cellX + pixelWidth, cellY + pixelHeight),
+					cellColor, 0.0f, 0, 2.0f);
+			}
+		}
+
+		// ---- Exact click pixel, drawn last so it's on top of the grid ----
+		const float debugX = imagePos.x + (float)zapperDebugX * pixelWidth;
+		const float debugY = imagePos.y + (float)zapperDebugY * pixelHeight;
+
+		drawList->AddRect(
+			ImVec2(debugX, debugY),
+			ImVec2(debugX + pixelWidth, debugY + pixelHeight),
+			IM_COL32(255, 255, 0, 255),
+			0.0f, 0, 3.0f);
+
+		const std::string label =
+			std::to_string(zapperDebugX) + ", " + std::to_string(zapperDebugY) +
+			"  (Ly=" + std::to_string(zapperDebugLy) +
+			" dot=" + std::to_string(zapperDebugCy) + ")";
+
+		drawList->AddText(
+			ImVec2(imagePos.x, imagePos.y),
+			IM_COL32(255, 255, 0, 255),
+			label.c_str());
+	}
+
+#endif // ! __RPI_PICO__
+
 	// ---- Start: two complete versions for clarity -----------
 public:
 
@@ -3230,6 +3315,10 @@ public:
 												{
 													enableZapper = (enableZapper == YES ? NO : YES);
 												}
+												if (ImGui::MenuItem("Zapper Debug Overlay##ZapperDebugOverlay", NULL, showZapperDebugOverlay, enableZapper))
+												{
+													showZapperDebugOverlay = (showZapperDebugOverlay == YES ? NO : YES);
+												}
 												ImGui::EndMenu();
 											}
 											if (ImGui::BeginMenu("GBC", MASQ_ENABLE_GBC))
@@ -3647,10 +3736,15 @@ public:
 									ImGui::SetNextWindowFocus();
 									focusEmuWindowOnStartup = NO;
 								}
+
 								ImGui::Begin(emuWindow.c_str(), &showEmuWin,
 									ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove |
 									ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoScrollbar |
 									ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_AlwaysAutoResize);
+
+								// Exact screen-space rect of the rendered emu framebuffer (used for zapper mouse mapping)
+								ImVec2 renderedImagePos = ImVec2(0.0f, 0.0f);
+								ImVec2 renderedImageSize = ImVec2(0.0f, 0.0f);
 
 								if (maintainAspectRatio == NO || current_instance->getEmulationID() == EMULATION_ID::DEFAULT_ID)
 								{
@@ -3825,7 +3919,12 @@ public:
 									}
 									else
 									{
-										ImGui::Image((ImTextureID)(uintptr_t)masquerade_texture, (ImVec2)ImGui::GetContentRegionAvail());
+										const ImVec2 imagePos = ImGui::GetCursorScreenPos();
+										const ImVec2 imageSize = ImGui::GetContentRegionAvail();
+										ImGui::Image((ImTextureID)(uintptr_t)masquerade_texture, imageSize);
+										drawZapperDebugOverlay(imagePos, imageSize, current_instance->getTotalScreenWidth(), current_instance->getTotalScreenHeight());
+										renderedImagePos = imagePos;
+										renderedImageSize = imageSize;
 									}
 								}
 								else
@@ -3849,13 +3948,17 @@ public:
 									ImVec2 cursor_pos = ImGui::GetCursorPos();
 									ImVec2 offset = { (avail_size.x - imageSize.x) * 0.5f, (avail_size.y - imageSize.y) * 0.5f };
 									ImGui::SetCursorPos(ImVec2(cursor_pos.x + offset.x, cursor_pos.y + offset.y));
+									const ImVec2 imagePos = ImGui::GetCursorScreenPos();
 									ImGui::Image((ImTextureID)(uintptr_t)masquerade_texture, imageSize);
-								}
+									drawZapperDebugOverlay(imagePos, imageSize, current_instance->getTotalScreenWidth(), current_instance->getTotalScreenHeight());
+									renderedImagePos = imagePos;
+									renderedImageSize = imageSize;
+							}
 
-								emuWindowX = ImGui::GetWindowPos().x;
-								emuWindowY = ImGui::GetWindowPos().y;
-								emuWindowMaxX = ImGui::GetWindowWidth();
-								emuWindowMaxY = ImGui::GetWindowHeight();
+							emuWindowX = renderedImagePos.x;
+							emuWindowY = renderedImagePos.y;
+							emuWindowMaxX = renderedImageSize.x;
+							emuWindowMaxY = renderedImageSize.y;
 
 								ImGui::End();
 								ImGui::PopStyleVar(); // WindowPadding
