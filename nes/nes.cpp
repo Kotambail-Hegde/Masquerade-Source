@@ -284,50 +284,22 @@ void NES_t::setEmulationWindowOffsets(uint32_t x, uint32_t y, bool isEnabled)
 
 uint32_t NES_t::getTotalScreenWidth()
 {
-	if (debugConfig._DEBUG_PPU_VIEWER_GUI == ENABLED)
-	{
-		RETURN this->debugger_screen_width;
-	}
-	else
-	{
-		RETURN this->screen_width;
-	}
+	RETURN this->screen_width;
 }
 
 uint32_t NES_t::getTotalScreenHeight()
 {
-	if (debugConfig._DEBUG_PPU_VIEWER_GUI == ENABLED)
-	{
-		RETURN this->debugger_screen_height;
-	}
-	else
-	{
-		RETURN this->screen_height;
-	}
+	RETURN this->screen_height;
 }
 
 uint32_t NES_t::getTotalPixelWidth()
 {
-	if (debugConfig._DEBUG_PPU_VIEWER_GUI == ENABLED)
-	{
-		RETURN this->debugger_pixel_width;
-	}
-	else
-	{
-		RETURN this->pixel_width;
-	}
+	RETURN this->pixel_width;
 }
 
 uint32_t NES_t::getTotalPixelHeight()
 {
-	if (debugConfig._DEBUG_PPU_VIEWER_GUI == ENABLED)
-	{
-		RETURN this->debugger_pixel_height;
-	}
-	else
-	{
-		RETURN this->pixel_height;
-	}
+	RETURN this->pixel_height;
 }
 
 void NES_t::setEmulationID(EMULATION_ID ID)
@@ -359,7 +331,7 @@ void NES_t::clockMMC3IRQ(uint16_t address, MEMORY_ACCESS_SOURCE source, FLAG isW
 	// Mapper 014 only runs the MMC3 IRQ counter while its supervisor
 	// register has switched the chip into MMC3 mode -- in VRC2 mode there
 	// is no IRQ hardware active at all, and this counter must stay frozen.
-	if (mapper == MAPPER::INES_MAPPER_014 && (pNES_instance->NES_state.catridgeInfo.ines014.supervisorReg & 0x10) == ZERO)
+	if (mapper == MAPPER::INES_MAPPER_014 && (pNES_instance->NES_state.catridgeInfo.ines014.supervisorReg & 0x02) == ZERO)
 	{
 		RETURN;
 	}
@@ -410,21 +382,26 @@ void NES_t::clockMMC3IRQ(uint16_t address, MEMORY_ACCESS_SOURCE source, FLAG isW
 				pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.filteredA12RiseEvent = YES;
 
 				// --- RAMBO-1 scanline mode IRQ ---
+				// Same reload/decrement rules as clockRambo1CpuIRQ (NESdev
+				// wiki "RAMBO-1", "IRQ counter operation" — the algorithm is
+				// explicitly shared between scanline and cycle mode). Reload
+				// (via $C001) / reload-from-zero / decrement are mutually
+				// exclusive outcomes of a single clock.
 				if (mapper == MAPPER::RAMBO1 || mapper == MAPPER::INES_MAPPER_158)
 				{
 					auto& rb = pNES_instance->NES_state.catridgeInfo.mmc3.rambo1;
 					if (rb.needReload)
 					{
-						rb.irqCounter = (rb.irqReloadValue <= 1)
-							? (rb.irqReloadValue + 1)
-							: (rb.irqReloadValue + 2);
+						rb.irqCounter = (rb.irqReloadValue != RESET)
+							? (BYTE)(rb.irqReloadValue | 1)
+							: RESET;
 						rb.needReload = NO;
 					}
 					else if (rb.irqCounter == RESET)
 					{
-						rb.irqCounter = rb.irqReloadValue + 1;
+						rb.irqCounter = rb.irqReloadValue;
 					}
-					if (rb.irqCounter > RESET)
+					else
 					{
 						--rb.irqCounter;
 					}
@@ -517,20 +494,23 @@ void NES_t::clockRambo1CpuIRQ()
 		rb.cpuClockCounter = (rb.cpuClockCounter + 1) & 0x03;
 		if (rb.cpuClockCounter == RESET)
 		{
-			// Clock the IRQ counter
+			// Clock the IRQ counter — per NESdev wiki "RAMBO-1", section
+			// "IRQ counter operation": reload (via $C001) and reload-from-zero
+			// and decrement are three MUTUALLY EXCLUSIVE outcomes of a single
+			// clock, never combined. A $C001-triggered reload of a nonzero
+			// latch value is ORed with 1, not incremented.
 			if (rb.needReload)
 			{
-				rb.irqCounter = (rb.irqReloadValue <= 1)
-					? (rb.irqReloadValue + 1)
-					: (rb.irqReloadValue + 2);
+				rb.irqCounter = (rb.irqReloadValue != RESET)
+					? (BYTE)(rb.irqReloadValue | 1)
+					: RESET;
 				rb.needReload = NO;
 			}
 			else if (rb.irqCounter == RESET)
 			{
-				rb.irqCounter = rb.irqReloadValue + 1;
+				rb.irqCounter = rb.irqReloadValue;
 			}
-
-			if (rb.irqCounter > RESET)
+			else
 			{
 				--rb.irqCounter;
 			}
@@ -839,8 +819,6 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 					? (uint32_t)(pNES_instance->NES_state.catridgeInfo.mmc3.ines047.multicart & 0x01) << 17
 					: 0x00000u;
 
-				const uint32_t chrRomMask = (chrRomBytes > ZERO) ? (uint32_t)(chrRomBytes - ONE) : ZERO;
-
 				// RAM address mask for large CHR-RAM: mask to full declared size so upper banks are reachable.
 				// Not used for TQROM (always 0x1FFF there).
 				const uint32_t largeChrRamMask = (totalChrRam > ZERO) ? (uint32_t)(totalChrRam - ONE) : 0x1FFFu;
@@ -916,7 +894,7 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 						// Large CHR-RAM: maxCatridgeCHRROM reused as backing store (CHR ROM size is zero)
 						RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index & largeChrRamMask];
 					}
-					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[(chrBase + index) & chrRomMask];
+					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[(chrBase + index) % chrRomBytes];
 				}
 				if (IF_ADDRESS_WITHIN(address, startAddr2, endAddr2))
 				{
@@ -954,7 +932,7 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 						// Large CHR-RAM: maxCatridgeCHRROM reused as backing store (CHR ROM size is zero)
 						RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index & largeChrRamMask];
 					}
-					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[(chrBase + index) & chrRomMask];
+					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[(chrBase + index) % chrRomBytes];
 				}
 				if (IF_ADDRESS_WITHIN(address, startAddr3, endAddr3))
 				{
@@ -990,7 +968,7 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 						// Large CHR-RAM: maxCatridgeCHRROM reused as backing store (CHR ROM size is zero)
 						RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index & largeChrRamMask];
 					}
-					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[(chrBase + index) & chrRomMask];
+					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[(chrBase + index) % chrRomBytes];
 				}
 				if (IF_ADDRESS_WITHIN(address, startAddr4, endAddr4))
 				{
@@ -1026,7 +1004,7 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 						// Large CHR-RAM: maxCatridgeCHRROM reused as backing store (CHR ROM size is zero)
 						RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index & largeChrRamMask];
 					}
-					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[(chrBase + index) & chrRomMask];
+					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[(chrBase + index) % chrRomBytes];
 				}
 				if (IF_ADDRESS_WITHIN(address, startAddr5, endAddr5))
 				{
@@ -1064,7 +1042,7 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 						// Large CHR-RAM: maxCatridgeCHRROM reused as backing store (CHR ROM size is zero)
 						RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index & largeChrRamMask];
 					}
-					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[(chrBase + index) & chrRomMask];
+					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[(chrBase + index) % chrRomBytes];
 				}
 				if (IF_ADDRESS_WITHIN(address, startAddr6, endAddr6))
 				{
@@ -1102,7 +1080,7 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 						// Large CHR-RAM: maxCatridgeCHRROM reused as backing store (CHR ROM size is zero)
 						RETURN pNES_catridgeMemory->maxCatridgeCHRROM[index & largeChrRamMask];
 					}
-					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[(chrBase + index) & chrRomMask];
+					RETURN pNES_catridgeMemory->maxCatridgeCHRROM[(chrBase + index) % chrRomBytes];
 				}
 				FATAL("Invalid CHR ROM/RAM address in MMC3");
 			}
@@ -1612,7 +1590,7 @@ byte NES_t::readPpuRawMemory(uint16_t address, MEMORY_ACCESS_SOURCE source)
 			if (IF_ADDRESS_WITHIN(address, PATTERN_TABLE0_START_ADDRESS, PATTERN_TABLE1_END_ADDRESS))
 			{
 				auto& reg014 = pNES_instance->NES_state.catridgeInfo.ines014;
-				const bool isMMC3Mode = (reg014.supervisorReg & 0x10) != ZERO;
+				const bool isMMC3Mode = (reg014.supervisorReg & 0x02) != ZERO;
 				const uint32_t chrA18Offset = mapper014ChrA18Offset(reg014.supervisorReg, (uint16_t)address);
 
 				uint16_t nativeV1k = ZERO;
@@ -4406,6 +4384,7 @@ inline byte NES_t::readCpuRawMemoryInternal(uint16_t address, MEMORY_ACCESS_SOUR
 						FLAG isInsideScreen = getMouseRelPosIfDocked(&x, &y, getScreenWidth(), getScreenHeight());
 
 						zapper.fields.W = SET; // default: no light
+
 						if (isInsideScreen == YES)
 						{
 							const int32_t cursorX = (int32_t)x;
@@ -4413,17 +4392,30 @@ inline byte NES_t::readCpuRawMemoryInternal(uint16_t address, MEMORY_ACCESS_SOUR
 							const int32_t currentLy = (int32_t)pNES_instance->NES_state.display.currentScanline;
 							const int32_t currentCy = (int32_t)pNES_instance->NES_state.emulatorStatus.ticks.ppuCounterPerLY;
 
-							// NOTE: Zapper light detection matches Mesen's logic:
-							// - Check a small radius around the cursor (real sensor isn't a single pixel)
-							// - Beam must have already passed the target pixel (scanline+cycle check)
-							// - Scanline window: 20 lines behind beam
-							// - Brightness threshold: luminance >= 85/255 on rendered RGB
-							// Refer https://www.nesdev.org/wiki/Zapper
-							static constexpr int32_t ZAPPER_SCANLINE_WINDOW = 20;
-							static constexpr int32_t ZAPPER_RADIUS = 2;
-							static constexpr uint8_t ZAPPER_BRIGHTNESS = 85;
+							static FLAG zapperMouseWasDown = NO;
+							const FLAG mouseDownNow = ImGui::IsMouseDown(ImGuiMouseButton_Left) ? YES : NO;
+							const FLAG mouseClicked = (mouseDownNow == YES && zapperMouseWasDown == NO) ? YES : NO;
+							zapperMouseWasDown = mouseDownNow;
+
+							if (mouseClicked == YES)
+							{
+								zapperDebugX = cursorX;
+								zapperDebugY = cursorY;
+								zapperDebugLy = currentLy;
+								zapperDebugCy = currentCy;
+
+								for (int32_t debugY = ZERO; debugY < ZAPPER_DEBUG_SIZE; ++debugY)
+								{
+									for (int32_t debugX = ZERO; debugX < ZAPPER_DEBUG_SIZE; ++debugX)
+									{
+										zapperDebugBeam[debugY][debugX] = false;
+										zapperDebugLight[debugY][debugX] = false;
+									}
+								}
+							}
 
 							bool lightFound = false;
+
 							for (int32_t yOffset = -ZAPPER_RADIUS; yOffset <= ZAPPER_RADIUS && !lightFound; ++yOffset)
 							{
 								const int32_t yPos = cursorY + yOffset;
@@ -4431,6 +4423,7 @@ inline byte NES_t::readCpuRawMemoryInternal(uint16_t address, MEMORY_ACCESS_SOUR
 								{
 									continue;
 								}
+
 								for (int32_t xOffset = -ZAPPER_RADIUS; xOffset <= ZAPPER_RADIUS && !lightFound; ++xOffset)
 								{
 									const int32_t xPos = cursorX + xOffset;
@@ -4438,24 +4431,44 @@ inline byte NES_t::readCpuRawMemoryInternal(uint16_t address, MEMORY_ACCESS_SOUR
 									{
 										continue;
 									}
+
 									// Beam must have already passed this pixel:
 									// scanline must be at or past yPos, within window,
-									// and if on the same scanline the cycle must be past xPos
-									const bool beamPastPixel = (currentLy >= yPos)
+									// and if on the same scanline the cycle must be past xPos.
+									const bool beamPastPixel =
+										(currentLy >= yPos)
 										&& ((currentLy - yPos) <= ZAPPER_SCANLINE_WINDOW)
-										&& (currentLy != yPos || currentCy > xPos);
+										&& (currentLy != yPos || currentCy > xPos + ONE);
+
+									bool lightAtPixel = false;
+
 									if (beamPastPixel)
 									{
 										const Pixel& p = pNES_instance->NES_state.display.imGuiBuffer.imGuiBuffer2D[yPos][xPos];
+
 										// Standard luminance formula (BT.601)
 										const uint8_t luminance = (uint8_t)(0.299f * p.r + 0.587f * p.g + 0.114f * p.b);
-										if (luminance >= ZAPPER_BRIGHTNESS)
+
+										lightAtPixel = luminance >= ZAPPER_BRIGHTNESS;
+
+										if (lightAtPixel == true)
 										{
 											lightFound = true;
 										}
 									}
+
+									// Save the exact radius + beam result from the click.
+									if (mouseClicked == YES)
+									{
+										const int32_t debugX = xOffset + ZAPPER_RADIUS;
+										const int32_t debugY = yOffset + ZAPPER_RADIUS;
+
+										zapperDebugBeam[debugY][debugX] = beamPastPixel;
+										zapperDebugLight[debugY][debugX] = beamPastPixel && lightAtPixel;
+									}
 								}
 							}
+
 							zapper.fields.W = lightFound ? RESET : SET;
 						}
 
@@ -5397,7 +5410,7 @@ inline byte NES_t::readCpuRawMemoryInternal(uint16_t address, MEMORY_ACCESS_SOUR
 				{
 					auto& reg014 = pNES_instance->NES_state.catridgeInfo.ines014;
 					auto& vrc24 = pNES_instance->NES_state.catridgeInfo.vrc24;
-					const bool isMMC3Mode = (reg014.supervisorReg & 0x10) != ZERO;
+					const bool isMMC3Mode = (reg014.supervisorReg & 0x02) != ZERO;
 
 					if (IF_ADDRESS_WITHIN(address, UNMAPPED_START_ADDRESS, CATRIDGE_RAM_END_ADDRESS))
 					{
@@ -8537,7 +8550,7 @@ inline void NES_t::writeCpuRawMemoryInternal(uint16_t address, byte data, MEMORY
 						reg014.supervisorReg = data;
 					}
 
-					const bool isMMC3Mode = (reg014.supervisorReg & 0x10) != ZERO;
+					const bool isMMC3Mode = (reg014.supervisorReg & 0x02) != ZERO;
 
 					if (IF_ADDRESS_WITHIN(address, UNMAPPED_START_ADDRESS, CATRIDGE_RAM_END_ADDRESS))
 					{
@@ -8579,29 +8592,86 @@ inline void NES_t::writeCpuRawMemoryInternal(uint16_t address, byte data, MEMORY
 					{
 						if (isMMC3Mode)
 						{
-							// Identical to your shared MMC3 $8000-$FFFF register-write case
-							// body (bank select, mirroring, PRG-RAM protect, IRQ) -- paste
-							// that block here unmodified; $A131 itself also lands in the
-							// $A000/$B000 branch of that same switch and is handled fine
-							// since it only cares about IS_EVEN(address), which $A131 (odd) is not.
 							switch (address & 0xF000)
 							{
 							case 0x8000:
 							case 0x9000:
-								/* ... same as your MMC3 case body ... */
+							{
+								if (IS_EVEN(address))
+								{
+									pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.bankRegisterSelect_even8k.raw = data;
+								}
+								else
+								{
+									pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.bankData_odd8k = data;
+
+									switch (pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.bankRegisterSelect_even8k.fields.bankRegSel)
+									{
+									case ZERO:  pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank2a = data & 0xFE; BREAK;
+									case ONE:   pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank2b = data & 0xFE; BREAK;
+									case TWO:   pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1a = data; BREAK;
+									case THREE: pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1b = data; BREAK;
+									case FOUR:  pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1c = data; BREAK;
+									case FIVE:  pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1d = data; BREAK;
+									case SIX:   pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.prgBank8a = data; BREAK;
+									case SEVEN: pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.prgBank8b = data; BREAK;
+									default: FATAL("Invalid MMC3 Bank Select"); BREAK;
+									}
+								}
 								BREAK;
+							}
 							case 0xA000:
 							case 0xB000:
-								/* ... same as your MMC3 case body ... */
+							{
+								if (IS_EVEN(address))
+								{
+									// NOTE: the wiki's mapper 014 page cites Nestopia's source
+									// as saying mirroring is only controllable in VRC2 mode on
+									// this board, and flags that as unverified/contradicted by
+									// other emulators. Standard MMC3 behavior applied here —
+									// flip this if Samurai Spirits still mis-mirrors after the
+									// rest of this fix.
+									pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.mirroring_evenAk.raw = data;
+									pNES_instance->NES_state.catridgeInfo.nameTblMir =
+										(data & 0x01) ? NAMETABLE_MIRROR::HORIZONTAL_MIRROR : NAMETABLE_MIRROR::VERTICAL_MIRROR;
+								}
+								else
+								{
+									pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.prgRamProtect_oddAk.raw = data;
+								}
 								BREAK;
+							}
 							case 0xC000:
 							case 0xD000:
-								/* ... same as your MMC3 case body ... */
+							{
+								if (IS_EVEN(address))
+								{
+									pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.irqReload_evenCk = data;
+								}
+								else
+								{
+									pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.irqReload_oddCk = data;
+									pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.currentMMC3IrqCounter = RESET;
+									pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.mmc3IrqCounterReloadEnabled = YES;
+								}
 								BREAK;
+							}
 							case 0xE000:
 							case 0xF000:
-								/* ... same as your MMC3 case body ... */
+							{
+								if (IS_EVEN(address))
+								{
+									pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.irqDisable_evenEk = data;
+									pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.mmc3IrqEnable = DISABLED;
+									pNES_instance->NES_state.interrupts.isIRQ.fields.IRQ_SRC_MMC3 = RESET;
+								}
+								else
+								{
+									pNES_instance->NES_state.catridgeInfo.mmc3.exRegisters.irqEnable_oddEk = data;
+									pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.mmc3IrqEnable = ENABLED;
+								}
 								BREAK;
+							}
 							default:
 								FATAL("Invalid Address");
 							}
@@ -11166,149 +11236,160 @@ void NES_t::ppuTick()
 #endif
 
 			// Refer "Tile and attribute fetching" in https://www.nesdev.org/wiki/PPU_scrolling#PPU_internal_registers
-			// NOTE: when "((cycle >= THREETWENTYONE) && (cycle <= THREETHIRTYSIX))" is triggerred, "Y" of v is already incremented
+			// NOTE: when "((cycle >= THREETWENTYONE) && (cycle <= THREETHIRTYSIX))" is triggered, "Y" of v is already incremented
 			// So, we are fetching the first 2 tiles of the next scanline!
-			if (checkIfRenderring() == YES && (((cycle >= ONE) && (cycle <= TWOFIFTYSIX)) || ((cycle >= THREETWENTYONE) && (cycle <= THREETHIRTYSIX))))
+			if ((((cycle >= ONE) && (cycle <= TWOFIFTYSIX)) || ((cycle >= THREETWENTYONE) && (cycle <= THREETHIRTYSIX))))
 			{
-				PPU_BG_FSM fsmState = (PPU_BG_FSM)((cycle - ONE) & SEVEN);	// ((cycle - 1) % 8)
-				switch (fsmState)
+				// Tile/attribute/pattern-table fetches only happen while actively rendering — this
+				// matches real HW (PPU bus is idle here otherwise) and also matters for mapper IRQ
+				// clocking off PPU bus activity (e.g. MMC3 A12). Restored from the pre-regression
+				// behavior, but scoped to ONLY the fetch FSM now (see note below on why the pixel
+				// output section must NOT be gated the same way).
+				if (checkIfRenderring() == YES)
 				{
-				case PPU_BG_FSM::RELOAD_SHIFTERS:
-				{
-					// Refer "Cycles 1-256" in https://www.nesdev.org/wiki/PPU_rendering
-					// "The shifters are reloaded during ticks 9, 17, 25, ..., 257"
-					if (cycle >= NINE && cycle < TWOFIFTYSEVEN)
+					PPU_BG_FSM fsmState = (PPU_BG_FSM)((cycle - ONE) & SEVEN);    // ((cycle - 1) % 8)
+					switch (fsmState)
 					{
-						populatePixelShiftRegisters();
-					}
-
-					BREAK;
-				}
-				case PPU_BG_FSM::FETCH_NAMETABLE_BYTE:
-				{
-					// Refer to https://www.nesdev.org/wiki/PPU_scrolling#Tile_and_attribute_fetching
-					pNES_instance->NES_state.display.bg.nameTblAddr
-						= NAME_TABLE0_START_ADDRESS
-						| (pNES_ppuRegisters->ppuInternalRegisters.v.raw & 0x0FFF);
-
-					pNES_instance->NES_state.display.bg.nameTblByte
-						= readPpuRawMemory(pNES_instance->NES_state.display.bg.nameTblAddr, MEMORY_ACCESS_SOURCE::PPU);
-					BREAK;
-				}
-				case PPU_BG_FSM::FETCH_ATTRTABLE_BYTE:
-				{
-					// Refer to https://www.nesdev.org/wiki/PPU_scrolling#Tile_and_attribute_fetching
-					pNES_instance->NES_state.display.bg.attrTblAddr
-						= (NAME_TABLE0_START_ADDRESS + 0x03C0)
-						| (pNES_ppuRegisters->ppuInternalRegisters.v.raw & 0x0C00)
-						| ((pNES_ppuRegisters->ppuInternalRegisters.v.raw >> FOUR) & 0x0038)
-						| ((pNES_ppuRegisters->ppuInternalRegisters.v.raw >> TWO) & 0x0007);
-
-					pNES_instance->NES_state.display.bg.attrTblByte
-						= readPpuRawMemory(pNES_instance->NES_state.display.bg.attrTblAddr, MEMORY_ACCESS_SOURCE::PPU);
-
-					// To deduce the quadrant
-					// 
-					// Basics:
-					// Assume an n bit number, and lets assume we increment this number for every event E
-					// so, bit 0 of this number will toggle at every 1 E
-					// bit 1 of this number will toggle at every 2 E's
-					// bit 2 of this number will toggle at every 4 E's
-					// bit 3 of this number will toggle at every 8 E's
-					// bit 4 of this number will toggle at every 16 E's
-					// bit 5 of this number will toggle at every 32 E's
-					// bit 6 of this number will toggle at every 64 E's
-					// 
-					// coarseXScroll is incremented one tile
-					// We need to figure when it transitions of every 2 tiles, so we consider bit 1 of coarseXScroll
-					// coarseYScroll is incremented at every 8 increment of fineYScroll which itself is incremented every scanline
-					// We need to figure out every 16 increments of fineyScoll so as to detect 16 scanline increments
-					// So we consider bit 1 of coarseYScroll 
-
-					if (pNES_ppuRegisters->ppuInternalRegisters.v.fields.coarseYScroll & 0x02)
+					case PPU_BG_FSM::RELOAD_SHIFTERS: // Offset 0 -> Dot 1 (Cycles 1, 9, 17 ... 257, 321, 329)
 					{
-						pNES_instance->NES_state.display.bg.attrTblByte >>= FOUR;
-					}
-					if (pNES_ppuRegisters->ppuInternalRegisters.v.fields.coarseXScroll & 0x02)
-					{
-						pNES_instance->NES_state.display.bg.attrTblByte >>= TWO;
-					}
-
-					pNES_instance->NES_state.display.bg.paletteID = (pNES_instance->NES_state.display.bg.attrTblByte & 0x03);
-
-					BREAK;
-				}
-				case PPU_BG_FSM::FETCH_PATTTABLE_LBYTE:
-				{
-					pNES_instance->NES_state.display.bg.patternTableLAddr
-						= (PATTERN_TABLE0_START_ADDRESS + (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUCTRL.ppuctrl.BG_PATTERN_TABLE_ADDR << TWELVE)) // Xlied by 0x1000 using shift 12
-						| (pNES_instance->NES_state.display.bg.nameTblByte << FOUR) // Xlied by 16 using shift 4
-						| pNES_ppuRegisters->ppuInternalRegisters.v.fields.fineYScroll; // fine y basically represents "y per tile" (ly % 8)
-
-					if (pNES_instance->NES_state.catridgeInfo.nanjing_fc001.chrRamAutoSwitch == YES
-						&& pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::NANJING_FC001)
-					{
-						// Refer to https://www.nesdev.org/wiki/INES_Mapper_163#Feedback_Write_($5100-$5101,_write)
-						// NOTE : 
-						// Left pattern table refers to patternTable0
-						// Right pattern table refers to patternTable1
-						// And also since we are hardwired to be in vertical name table mirroring
-						// https://www.nesdev.org/wiki/Mirroring#Nametable_Mirroring
-						// top left block is nameTable0
-						// top right block is nameTable1
-						// bottom left block is nameTable0
-						// botton right block is nameTable1
-
-						auto normNameTblAddr = ((pNES_instance->NES_state.display.bg.nameTblAddr - NAME_TABLE0_START_ADDRESS) & 1023); // & 1023 == % 1024 == % 0x400 (size of single nametable memory)
-						if (normNameTblAddr <= 0x1FF)
+						// Refer "Cycles 1-256" in https://www.nesdev.org/wiki/PPU_rendering
+						// The shifters are reloaded during ticks 9, 17, 25, ..., 257.
+						// Cycle 1: Start of line; no tile has been fetched yet -> do NOT reload.
+						// Cycles 9..257: Reload shifters with the fetched background tiles.
+						if (cycle >= NINE && cycle < TWOFIFTYSEVEN)
 						{
-							if (pNES_instance->NES_state.display.bg.patternTableLAddr >= 0x1000)
+							populatePixelShiftRegisters();
+						}
+
+						BREAK;
+					}
+					case PPU_BG_FSM::FETCH_NAMETABLE_BYTE: // Offset 1 -> Dot 2 (Cycles 2, 10, 18 ...)
+					{
+						// Refer to https://www.nesdev.org/wiki/PPU_scrolling#Tile_and_attribute_fetching
+						pNES_instance->NES_state.display.bg.nameTblAddr
+							= NAME_TABLE0_START_ADDRESS
+							| (pNES_ppuRegisters->ppuInternalRegisters.v.raw & 0x0FFF);
+
+						pNES_instance->NES_state.display.bg.nameTblByte
+							= readPpuRawMemory(pNES_instance->NES_state.display.bg.nameTblAddr, MEMORY_ACCESS_SOURCE::PPU);
+
+						BREAK;
+					}
+					case PPU_BG_FSM::FETCH_ATTRTABLE_BYTE: // Offset 3 -> Dot 4 (Cycles 4, 12, 20 ...)
+					{
+						// Refer to https://www.nesdev.org/wiki/PPU_scrolling#Tile_and_attribute_fetching
+						pNES_instance->NES_state.display.bg.attrTblAddr
+							= (NAME_TABLE0_START_ADDRESS + 0x03C0)
+							| (pNES_ppuRegisters->ppuInternalRegisters.v.raw & 0x0C00)
+							| ((pNES_ppuRegisters->ppuInternalRegisters.v.raw >> FOUR) & 0x0038)
+							| ((pNES_ppuRegisters->ppuInternalRegisters.v.raw >> TWO) & 0x0007);
+
+						pNES_instance->NES_state.display.bg.attrTblByte
+							= readPpuRawMemory(pNES_instance->NES_state.display.bg.attrTblAddr, MEMORY_ACCESS_SOURCE::PPU);
+
+						// To deduce the quadrant
+						// 
+						// Basics:
+						// Assume an n bit number, and lets assume we increment this number for every event E
+						// so, bit 0 of this number will toggle at every 1 E
+						// bit 1 of this number will toggle at every 2 E's
+						// bit 2 of this number will toggle at every 4 E's
+						// bit 3 of this number will toggle at every 8 E's
+						// bit 4 of this number will toggle at every 16 E's
+						// bit 5 of this number will toggle at every 32 E's
+						// bit 6 of this number will toggle at every 64 E's
+						// 
+						// coarseXScroll is incremented one tile
+						// We need to figure when it transitions of every 2 tiles, so we consider bit 1 of coarseXScroll
+						// coarseYScroll is incremented at every 8 increment of fineYScroll which itself is incremented every scanline
+						// We need to figure out every 16 increments of fineyScoll so as to detect 16 scanline increments
+						// So we consider bit 1 of coarseYScroll 
+
+						if (pNES_ppuRegisters->ppuInternalRegisters.v.fields.coarseYScroll & 0x02)
+						{
+							pNES_instance->NES_state.display.bg.attrTblByte >>= FOUR;
+						}
+						if (pNES_ppuRegisters->ppuInternalRegisters.v.fields.coarseXScroll & 0x02)
+						{
+							pNES_instance->NES_state.display.bg.attrTblByte >>= TWO;
+						}
+
+						pNES_instance->NES_state.display.bg.paletteID = (pNES_instance->NES_state.display.bg.attrTblByte & 0x03);
+
+						BREAK;
+					}
+					case PPU_BG_FSM::FETCH_PATTTABLE_LBYTE: // Offset 5 -> Dot 6 (Cycles 6, 14, 22 ...)
+					{
+						pNES_instance->NES_state.display.bg.patternTableLAddr
+							= (PATTERN_TABLE0_START_ADDRESS + (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUCTRL.ppuctrl.BG_PATTERN_TABLE_ADDR << TWELVE)) // Xlied by 0x1000 using shift 12
+							| (pNES_instance->NES_state.display.bg.nameTblByte << FOUR) // Xlied by 16 using shift 4
+							| pNES_ppuRegisters->ppuInternalRegisters.v.fields.fineYScroll; // fine y basically represents "y per tile" (ly % 8)
+
+						if (pNES_instance->NES_state.catridgeInfo.nanjing_fc001.chrRamAutoSwitch == YES
+							&& pNES_instance->NES_state.catridgeInfo.mapper == MAPPER::NANJING_FC001)
+						{
+							// Refer to https://www.nesdev.org/wiki/INES_Mapper_163#Feedback_Write_($5100-$5101,_write)
+							// NOTE : 
+							// Left pattern table refers to patternTable0
+							// Right pattern table refers to patternTable1
+							// And also since we are hardwired to be in vertical name table mirroring
+							// https://www.nesdev.org/wiki/Mirroring#Nametable_Mirroring
+							// top left block is nameTable0
+							// top right block is nameTable1
+							// bottom left block is nameTable0
+							// botton right block is nameTable1
+
+							auto normNameTblAddr = ((pNES_instance->NES_state.display.bg.nameTblAddr - NAME_TABLE0_START_ADDRESS) & 1023); // & 1023 == % 1024 == % 0x400 (size of single nametable memory)
+							if (normNameTblAddr <= 0x1FF)
 							{
-								pNES_instance->NES_state.display.bg.patternTableLAddr -= 0x1000;
+								if (pNES_instance->NES_state.display.bg.patternTableLAddr >= 0x1000)
+								{
+									pNES_instance->NES_state.display.bg.patternTableLAddr -= 0x1000;
+								}
+							}
+							else if (normNameTblAddr <= 0x3FF)
+							{
+								if (pNES_instance->NES_state.display.bg.patternTableLAddr < 0x1000)
+								{
+									pNES_instance->NES_state.display.bg.patternTableLAddr += 0x1000;
+								}
+							}
+							else
+							{
+								FATAL("Invalid name table address encountered in mapper 163 when in automatic chrram switch mode");
 							}
 						}
-						else if (normNameTblAddr <= 0x3FF)
-						{
-							if (pNES_instance->NES_state.display.bg.patternTableLAddr < 0x1000)
-							{
-								pNES_instance->NES_state.display.bg.patternTableLAddr += 0x1000;
-							}
-						}
-						else
-						{
-							FATAL("Invalid name table address encountered in mapper 163 when in automatic chrram switch mode");
-						}
+
+						pNES_instance->NES_state.display.bg.patternTblLByte
+							= readPpuRawMemory(pNES_instance->NES_state.display.bg.patternTableLAddr, MEMORY_ACCESS_SOURCE::PPU);
+
+						BREAK;
 					}
-
-					pNES_instance->NES_state.display.bg.patternTblLByte
-						= readPpuRawMemory(pNES_instance->NES_state.display.bg.patternTableLAddr, MEMORY_ACCESS_SOURCE::PPU);
-
-					BREAK;
-				}
-				case PPU_BG_FSM::FETCH_PATTTABLE_HBYTE:
-				{
-					pNES_instance->NES_state.display.bg.patternTableMAddr
-						= pNES_instance->NES_state.display.bg.patternTableLAddr + EIGHT;
-
-					pNES_instance->NES_state.display.bg.patternTblMByte
-						= readPpuRawMemory(pNES_instance->NES_state.display.bg.patternTableMAddr, MEMORY_ACCESS_SOURCE::PPU);
-
-					// Refer to "Between dot 328 of a scanline, and 256 of the next scanline" of https://www.nesdev.org/wiki/PPU_scrolling
-					// Increment X and populate the shift registers @ cycles 8, 16, 24... 240, 248, 256
-					// Also, since this if condition also runs from cycles 321 to 336 AND (321 - 1) % 8 == 7 and (326 - 1) % 8 == 7
-					// All the conditions mentioned in above link is satisfied!
-					if (checkIfRenderring() == YES)
+					case PPU_BG_FSM::FETCH_PATTTABLE_HBYTE: // Offset 7 -> Dot 8 (Cycles 8, 16, 24 ... 256, 328, 336)
 					{
-						xInc();
-					}
+						pNES_instance->NES_state.display.bg.patternTableMAddr
+							= pNES_instance->NES_state.display.bg.patternTableLAddr + EIGHT;
 
-					BREAK;
-				}
-				default:
-				{
-					BREAK;
-				}
-				}
+						pNES_instance->NES_state.display.bg.patternTblMByte
+							= readPpuRawMemory(pNES_instance->NES_state.display.bg.patternTableMAddr, MEMORY_ACCESS_SOURCE::PPU);
+
+						// Refer to "Between dot 328 of a scanline, and 256 of the next scanline" of https://www.nesdev.org/wiki/PPU_scrolling
+						// Increment X at cycles 8, 16, 24, ..., 240, 248, 256.
+						// During the 321..336 prefetch period, this also runs at cycles 328 and 336,
+						// which performs the two X increments needed for the first two tiles of the next scanline.
+						if (checkIfRenderring() == YES)
+						{
+							xInc();
+						}
+
+						BREAK;
+					}
+					default:
+					{
+						BREAK;
+					}
+					}
+				} // end if (checkIfRenderring() == YES) -- fetch FSM only
 
 				ID bgColorID = RESET;
 				ID bgPaletteID = RESET;
@@ -11318,9 +11399,18 @@ void NES_t::ppuTick()
 				FLAG isSpriteZeroPixel = NO;
 				ID finalPixelID = ZERO;
 				ID finalPaletteID = ZERO;
-				uint16_t paletteRamAddress = RESET;
+				FLAG isBgOpaque = NO;
 
 				// Start rendering
+				// NOTE: intentionally NOT gated on checkIfRenderring(). Real hardware outputs a pixel
+				// every dot regardless — backdrop color when rendering is off, composited BG/sprite
+				// pixel when it's on. bgColorID/spriteColorID naturally stay 0 when rendering is
+				// disabled (both ENABLE_BG_RENDERING/ENABLE_SPRITE_RENDERING checks below are
+				// unaffected), which already falls through to the backdrop palette entry below.
+				// Gating this section (as the checkIfRenderring() commit briefly did) freezes
+				// imGuiBuffer2D on stale pixels whenever rendering toggles off mid-game, which broke
+				// Zapper hit detection since Duck Hunt's flash/hit-test frame relies on the buffer
+				// reflecting the current (blanked) frame, not several-frames-old gameplay pixels.
 				if (
 					((cycle >= ONE) && (cycle <= TWOFIFTYSIX))
 					&&
@@ -11341,24 +11431,40 @@ void NES_t::ppuTick()
 					// Render sprites
 					if (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.ENABLE_SPRITE_RENDERING == SET)
 					{
+						// Per NESdev wiki "PPU registers": sprite 0 hit fires when sprite 0's
+						// own opaque pixel overlaps an opaque BG pixel, REGARDLESS of sprite
+						// priority — i.e. even if a higher-priority sprite is drawn in front
+						// of it and wins the displayed pixel. So "which sprite wins the pixel"
+						// and "is sprite 0 opaque here" must be tracked independently; we can
+						// no longer stop the scan at the first opaque (winning) sprite.
+						FLAG foundOpaqueSprite = NO;
+
 						for (COUNTER8 spriteI = ZERO; spriteI < pNES_instance->NES_state.display.obj.spriteCountPerScanline; spriteI++)
 						{
 							if (pNES_instance->NES_state.display.obj.shifter[spriteI].xSubtractor == ZERO)
 							{
-								spriteColorID
+								ID thisColorID
 									= (GETBIT(SEVEN, pNES_instance->NES_state.display.obj.shifter[spriteI].hiPatternShifter) << ONE)
 									| GETBIT(SEVEN, pNES_instance->NES_state.display.obj.shifter[spriteI].loPatternShifter);
-								spritePaletteID = pNES_instance->NES_state.display.obj.shifter[spriteI].spriteAttribute.fields.palette;
-								bgOverSprite = pNES_instance->NES_state.display.obj.shifter[spriteI].spriteAttribute.fields.priority;
-								isSpriteZeroPixel = pNES_instance->NES_state.display.obj.shifter[spriteI].isSpriteZero;
 
-								if (spriteColorID != ZERO)
+								if (thisColorID != ZERO && pNES_instance->NES_state.display.obj.shifter[spriteI].isSpriteZero == YES)
 								{
-									BREAK;
+									isSpriteZeroPixel = YES;
+								}
+
+								if (foundOpaqueSprite == NO && thisColorID != ZERO)
+								{
+									spriteColorID = thisColorID;
+									spritePaletteID = pNES_instance->NES_state.display.obj.shifter[spriteI].spriteAttribute.fields.palette;
+									bgOverSprite = pNES_instance->NES_state.display.obj.shifter[spriteI].spriteAttribute.fields.priority;
+									foundOpaqueSprite = YES;
 								}
 							}
 						}
 					}
+
+					// Preserve unmasked raw BG opacity for sprite 0 hit detection
+					isBgOpaque = (bgColorID != ZERO);
 
 					// Handle left most 8 pixels for bg
 					if (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.BG_IN_LEFTMOST_8PIXELS == NO && cycle < NINE)
@@ -11384,7 +11490,6 @@ void NES_t::ppuTick()
 						// No winner, draw "backdrop" colour
 						finalPixelID = ZERO;
 						finalPaletteID = ZERO;
-						isSpriteZeroPixel = CLEAR;
 					}
 					else if (bgColorID == ZERO && spriteColorID > ZERO)
 					{
@@ -11394,7 +11499,6 @@ void NES_t::ppuTick()
 						finalPixelID = spriteColorID;
 						finalPaletteID = spritePaletteID;
 						spritePaletteOffset = SIXTEEN;
-						isSpriteZeroPixel = CLEAR;
 					}
 					else if (bgColorID > ZERO && spriteColorID == ZERO)
 					{
@@ -11403,7 +11507,6 @@ void NES_t::ppuTick()
 						// Background wins!
 						finalPixelID = bgColorID;
 						finalPaletteID = bgPaletteID;
-						isSpriteZeroPixel = CLEAR;
 					}
 					else if (bgColorID > ZERO && spriteColorID > ZERO)
 					{
@@ -11418,31 +11521,19 @@ void NES_t::ppuTick()
 							finalPixelID = bgColorID;
 							finalPaletteID = bgPaletteID;
 						}
+					}
 
-						// Handle sprite 0 hit
-						if (isSpriteZeroPixel == YES
-							&&
-							pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.ENABLE_BG_RENDERING == SET
-							&&
-							pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.ENABLE_SPRITE_RENDERING == SET
-							)
-						{
-							if (pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.BG_IN_LEFTMOST_8PIXELS == YES
-								&& pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.SPRITE_IN_LEFTMOST_8PIXELS == YES)
-							{
-								if (cycle >= ONE && cycle <= TWOFIFTYFIVE)
-								{
-									pNES_ppuRegisters->sprite0hit = YES;
-								}
-							}
-							else
-							{
-								if (cycle >= NINE && cycle <= TWOFIFTYFIVE)
-								{
-									pNES_ppuRegisters->sprite0hit = YES;
-								}
-							}
-						}
+					// Handle sprite 0 hit
+					if (isBgOpaque
+						&& isSpriteZeroPixel == YES
+						&& pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.ENABLE_BG_RENDERING == SET
+						&& pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.ENABLE_SPRITE_RENDERING == SET
+						&& ((pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.BG_IN_LEFTMOST_8PIXELS == YES
+							&& pNES_cpuMemory->NESMemoryMap.ppuCtrl.ppuCtrl.PPUMASK.ppumask.SPRITE_IN_LEFTMOST_8PIXELS == YES)
+							|| cycle >= NINE)
+						&& cycle <= TWOFIFTYFIVE)
+					{
+						pNES_ppuRegisters->sprite0hit = YES;
 					}
 
 					uint16_t paletteRamAddress
@@ -11857,16 +11948,16 @@ void NES_t::ppuTick()
 							auto normNameTblAddr = ((pNES_instance->NES_state.display.bg.nameTblAddr - NAME_TABLE0_START_ADDRESS) & 1023); // & 1023 == % 1024 == % 0x400 (size of single nametable memory)
 							if (normNameTblAddr <= 0x1FF)
 							{
-								if (pNES_instance->NES_state.display.bg.patternTableLAddr >= 0x1000)
+								if (pNES_instance->NES_state.display.obj.patternTableLAddr >= 0x1000)
 								{
-									pNES_instance->NES_state.display.bg.patternTableLAddr -= 0x1000;
+									pNES_instance->NES_state.display.obj.patternTableLAddr -= 0x1000;
 								}
 							}
 							else if (normNameTblAddr <= 0x3FF)
 							{
-								if (pNES_instance->NES_state.display.bg.patternTableLAddr < 0x1000)
+								if (pNES_instance->NES_state.display.obj.patternTableLAddr < 0x1000)
 								{
-									pNES_instance->NES_state.display.bg.patternTableLAddr += 0x1000;
+									pNES_instance->NES_state.display.obj.patternTableLAddr += 0x1000;
 								}
 							}
 							else
@@ -13457,10 +13548,10 @@ bool NES_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 	else
 #endif
 	{
-	processSOC();
+		processSOC();
 
 #if (DISABLED)
-	runDebugger();
+		runDebugger();
 #endif
 	}
 
@@ -13561,6 +13652,26 @@ bool NES_t::initializeEmulator()
 	memset(pAbsolute_NES_instance->NES_absoluteMemoryState, RESET, sizeof(pAbsolute_NES_instance->NES_absoluteMemoryState));
 	memset(pNES_catridgeMemory->maxCatridgePRGROM, RESET, sizeof(pNES_catridgeMemory->maxCatridgePRGROM));
 	memset(pNES_catridgeMemory->maxCatridgeCHRROM, RESET, sizeof(pNES_catridgeMemory->maxCatridgeCHRROM));
+
+	// initialize the palette memory
+	// Refer to https://forums.nesdev.org/viewtopic.php?p=4574&sid=5b643b16b2b08df41d162151a429fc45#p4574
+	const BYTE palettePowerUp[] =
+	{
+		0x09, 0x01, 0x00, 0x01,
+		0x00, 0x02, 0x02, 0x0D,
+		0x08, 0x10, 0x08, 0x24,
+		0x00, 0x00, 0x04, 0x2C,
+		0x09, 0x01, 0x34, 0x03,
+		0x00, 0x04, 0x00, 0x14,
+		0x08, 0x3A, 0x00, 0x02,
+		0x00, 0x20, 0x2C, 0x08
+	};
+
+	memcpy(pNES_ppuMemory->NESMemoryMap.paletteRamIndex, palettePowerUp, sizeof(palettePowerUp));
+	for (size_t i = 0; i < sizeof(pNES_ppuMemory->NESMemoryMap.paletteRamIndexMir); ++i)
+	{
+		pNES_ppuMemory->NESMemoryMap.paletteRamIndexMir[i] = palettePowerUp[i & 0x1F];
+	}
 
 	// check whether to enable the db or not
 	pAbsolute_NES_instance->absolute_NES_state.enable_nes_db = to_bool(pt.get<std::string>("nes._enable_nes_db", "false"));
@@ -13839,6 +13950,247 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 					}
 				}
 
+				// check whether the rom is in UNIF format
+				if (std::strncmp(pINES->unif_Fields.unif_header.master_header.unif, "UNIF", 4) == 0)
+				{
+					const uint8_t* raw_buffer = reinterpret_cast<const uint8_t*>(pINES);
+					uint32_t romBufferSize = TO_UINT32(pAbsolute_NES_instance->absolute_NES_state.aboutRom.codeRomSize);
+
+					uint32_t offset = 32; // Skip 32-byte UNIF Header
+					char mapr_name[64] = { 0 };
+					bool found_mapr = false;
+
+					// Fixed arrays for ordered chunk indexing (UNIF supports 0..9, A..F -> 16 slots)
+					struct ChunkInfo {
+						const uint8_t* ptr = nullptr;
+						uint32_t length = 0;
+					};
+					ChunkInfo prg_chunks[16]{};
+					ChunkInfo chr_chunks[16]{};
+
+					uint32_t total_prg_size = 0;
+					uint32_t total_chr_size = 0;
+
+					uint8_t tv_system = 0;
+					uint8_t ctrl_mask = 0;
+					bool has_battery = false;
+					bool vror_present = false;
+
+					// MIRR chunk override tracking
+					uint8_t mirr_byte = 0xFF;
+					bool has_mirr_chunk = false;
+
+					LOG("[UNIF Parser] Starting UNIF parsing. Total file buffer size: %u bytes", romBufferSize);
+
+					// --- Pass 1: Parse and Index Chunks ---
+					while (offset + TO_UINT32(sizeof(unif_chunk_header_t)) <= romBufferSize)
+					{
+						const auto* chunk = reinterpret_cast<const unif_chunk_header_t*>(raw_buffer + offset);
+						uint32_t chunk_data_offset = TO_UINT32(offset + sizeof(unif_chunk_header_t));
+
+						LOG("[UNIF Parser] Chunk found at offset 0x%08X: ID = '%.4s', Length = %u bytes",
+							offset, chunk->id, chunk->length);
+
+						if (chunk_data_offset + chunk->length > romBufferSize)
+						{
+							LOG("[UNIF Parser] ERROR: Chunk '%.4s' data extends past buffer boundary! Data offset: %u, Length: %u, Buffer Size: %u",
+								chunk->id, chunk_data_offset, chunk->length, romBufferSize);
+							break;
+						}
+
+						if (std::memcmp(chunk->id, "MAPR", 4) == 0)
+						{
+							size_t copy_len = std::min<size_t>(chunk->length, sizeof(mapr_name) - 1);
+							std::memcpy(mapr_name, raw_buffer + chunk_data_offset, copy_len);
+							mapr_name[copy_len] = '\0';
+							found_mapr = true;
+							LOG("[UNIF Parser] MAPR Chunk parsed: '%s'", mapr_name);
+						}
+						else if (std::memcmp(chunk->id, "PRG", 3) == 0)
+						{
+							uint8_t idx = chunk->id[3];
+							size_t slot = (idx >= '0' && idx <= '9') ? static_cast<size_t>(idx - '0') :
+								(idx >= 'A' && idx <= 'F') ? static_cast<size_t>(10 + idx - 'A') : 0;
+
+							prg_chunks[slot] = { raw_buffer + chunk_data_offset, chunk->length };
+							total_prg_size += chunk->length;
+							LOG("[UNIF Parser] Indexed PRG chunk slot %zu (ID: %.4s), length: %u bytes", slot, chunk->id, chunk->length);
+						}
+						else if (std::memcmp(chunk->id, "CHR", 3) == 0)
+						{
+							uint8_t idx = chunk->id[3];
+							size_t slot = (idx >= '0' && idx <= '9') ? static_cast<size_t>(idx - '0') :
+								(idx >= 'A' && idx <= 'F') ? static_cast<size_t>(10 + idx - 'A') : 0;
+
+							chr_chunks[slot] = { raw_buffer + chunk_data_offset, chunk->length };
+							total_chr_size += chunk->length;
+							LOG("[UNIF Parser] Indexed CHR chunk slot %zu (ID: %.4s), length: %u bytes", slot, chunk->id, chunk->length);
+						}
+						else if (std::memcmp(chunk->id, "MIRR", 4) == 0 && chunk->length >= 1)
+						{
+							mirr_byte = raw_buffer[chunk_data_offset];
+							has_mirr_chunk = true;
+							LOG("[UNIF Parser] MIRR Chunk parsed: 0x%02X", mirr_byte);
+						}
+						else if (std::memcmp(chunk->id, "TVCI", 4) == 0 && chunk->length >= 1)
+						{
+							tv_system = raw_buffer[chunk_data_offset];
+							LOG("[UNIF Parser] TVCI Chunk parsed: %u", tv_system);
+						}
+						else if (std::memcmp(chunk->id, "CTRL", 4) == 0 && chunk->length >= 1)
+						{
+							ctrl_mask = raw_buffer[chunk_data_offset];
+							LOG("[UNIF Parser] CTRL Chunk parsed: 0x%02X", ctrl_mask);
+						}
+						else if (std::memcmp(chunk->id, "BATR", 4) == 0 && chunk->length >= 1)
+						{
+							has_battery = (raw_buffer[chunk_data_offset] != 0);
+							LOG("[UNIF Parser] BATR Chunk parsed: Battery = %s", has_battery ? "YES" : "NO");
+						}
+						else if (std::memcmp(chunk->id, "VROR", 4) == 0)
+						{
+							vror_present = true;
+							LOG("[UNIF Parser] VROR Chunk present.");
+						}
+
+						// Direct standard stride calculation (No alignment padding)
+						offset = TO_UINT32(chunk_data_offset + chunk->length);
+					}
+
+					LOG("[UNIF Parser] Pass 1 complete. Total PRG: %u bytes, Total CHR: %u bytes", total_prg_size, total_chr_size);
+
+					// --- Resolve Mapping ---
+					unifNes20Map_t mapping = found_mapr
+						? GetUNIFToNES20Mapping(mapr_name)
+						: unifNes20Map_t{ MAPPER::MAPPER_NOT_APPLICABLE, SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE, NAMETABLE_MIRROR::HORIZONTAL_MIRROR, 0, 0 };
+
+					pAbsolute_NES_instance->absolute_NES_state.aboutRom.unifNes20Map = mapping;
+
+					LOG("[UNIF Parser] Mapping resolved for MAPR '%s': Mapper %u, Submapper %d",
+						mapr_name, static_cast<uint16_t>(mapping.mapper), static_cast<int>(mapping.submapper));
+
+					// --- Mirroring Resolution ---
+					NAMETABLE_MIRROR effective_mirroring = mapping.mirroring;
+					bool explicit_4screen = false;
+
+					if (has_mirr_chunk)
+					{
+						switch (mirr_byte)
+						{
+						case 0: effective_mirroring = NAMETABLE_MIRROR::HORIZONTAL_MIRROR; break;
+						case 1: effective_mirroring = NAMETABLE_MIRROR::VERTICAL_MIRROR; break;
+						case 2: effective_mirroring = NAMETABLE_MIRROR::ONESCREEN_LO_MIRROR; break;
+						case 3: effective_mirroring = NAMETABLE_MIRROR::ONESCREEN_HI_MIRROR; break;
+						case 4: explicit_4screen = true; break;
+						default: break;
+						}
+						LOG("[UNIF Parser] MIRR Chunk override applied: %d (4-Screen: %s)",
+							static_cast<int>(effective_mirroring), explicit_4screen ? "YES" : "NO");
+					}
+
+					// --- Build NES 2.0 Header ---
+					iNES_header_t header{};
+					header.fields.constant[0] = 'N';
+					header.fields.constant[1] = 'E';
+					header.fields.constant[2] = 'S';
+					header.fields.constant[3] = 0x1A;
+
+					uint16_t mapper_num = static_cast<uint16_t>(mapping.mapper);
+					uint8_t submapper_num = static_cast<uint8_t>(std::max(0, static_cast<int>(mapping.submapper)));
+
+					uint16_t prg_units = static_cast<uint16_t>(total_prg_size / 16384);
+					uint16_t chr_units = static_cast<uint16_t>(total_chr_size / 8192);
+
+					header.fields.sizeOfPrgRomIn16KB = static_cast<BYTE>(prg_units & 0xFF);
+					header.fields.sizeOfChrRomIn8KB = static_cast<BYTE>(chr_units & 0xFF);
+
+					// Flag 6 Bit 0: 0 = Horizontal/OneScreen, 1 = Vertical
+					header.fields.flag6.fields.nametableArrangement = (effective_mirroring == NAMETABLE_MIRROR::VERTICAL_MIRROR) ? 1 : 0;
+
+					// Flag 6 Bit 3: 4-Screen VRAM explicitly declared
+					if (explicit_4screen)
+					{
+						header.fields.flag6.raw |= 0x08;
+					}
+
+					header.fields.flag6.fields.hasPersistantMemory = has_battery ? 1 : 0;
+					header.fields.flag6.fields.mapperLo = static_cast<BYTE>(mapper_num & 0x0F);
+
+					header.fields.flag7.fields.nes2p0 = 2; // NES 2.0 Identifier
+					header.fields.flag7.fields.mapperHi = static_cast<BYTE>((mapper_num >> 4) & 0x0F);
+
+					header.fields.flags_8to15.nes2p0.flag8.fields.mapperNBHi = static_cast<BYTE>((mapper_num >> 8) & 0x0F);
+					header.fields.flags_8to15.nes2p0.flag8.fields.subMapper = static_cast<BYTE>(submapper_num & 0x0F);
+
+					header.fields.flags_8to15.nes2p0.flag9.fields.prgRomMSB = static_cast<BYTE>((prg_units >> 8) & 0x0F);
+					header.fields.flags_8to15.nes2p0.flag9.fields.chrRomMSB = static_cast<BYTE>((chr_units >> 8) & 0x0F);
+
+					// RAM size exponent calculator
+					auto get_ram_exponent = [](uint32_t size_bytes) -> uint8_t {
+						if (size_bytes == 0) return 0;
+						uint8_t shift = 0;
+						uint32_t base = 64;
+						while (base < size_bytes && shift < 15)
+						{
+							base <<= 1; shift++;
+						}
+						return shift;
+						};
+
+					if (mapping.prgRamSizeBytes > 0)
+					{
+						uint8_t exp_val = get_ram_exponent(mapping.prgRamSizeBytes);
+						if (has_battery)
+						{
+							header.fields.flags_8to15.nes2p0.flag10.fields.prgNonVolRam = exp_val;
+						}
+						else
+						{
+							header.fields.flags_8to15.nes2p0.flag10.fields.prgVolRam = exp_val;
+						}
+					}
+
+					if (vror_present || (mapping.chrRamSizeBytes > 0 && total_chr_size == 0))
+					{
+						uint32_t ram_size = mapping.chrRamSizeBytes ? mapping.chrRamSizeBytes : 8192;
+						header.fields.flags_8to15.nes2p0.flag11.fields.chrVolRam = get_ram_exponent(ram_size);
+					}
+
+					// --- Pass 2: Reconstruct Payload ---
+					std::vector<uint8_t> payload;
+					payload.reserve(total_prg_size + total_chr_size);
+
+					for (size_t i = 0; i < 16; ++i)
+					{
+						if (prg_chunks[i].ptr && prg_chunks[i].length)
+						{
+							LOG("[UNIF Parser] Writing PRG chunk %zu to payload (%u bytes)", i, prg_chunks[i].length);
+							payload.insert(payload.end(), prg_chunks[i].ptr, prg_chunks[i].ptr + prg_chunks[i].length);
+						}
+					}
+					for (size_t i = 0; i < 16; ++i)
+					{
+						if (chr_chunks[i].ptr && chr_chunks[i].length)
+						{
+							LOG("[UNIF Parser] Writing CHR chunk %zu to payload (%u bytes)", i, chr_chunks[i].length);
+							payload.insert(payload.end(), chr_chunks[i].ptr, chr_chunks[i].ptr + chr_chunks[i].length);
+						}
+					}
+
+					uint32_t total_ines_size = 16 + TO_UINT32(payload.size());
+					uint8_t* write_buffer = reinterpret_cast<uint8_t*>(pINES);
+
+					std::memcpy(write_buffer, header.header, 16);
+					if (!payload.empty())
+					{
+						std::memcpy(write_buffer + 16, payload.data(), payload.size());
+					}
+
+					pAbsolute_NES_instance->absolute_NES_state.aboutRom.codeRomSize = total_ines_size;
+
+					LOG("[UNIF Parser] Conversion complete. Reconstructed NES 2.0 total size: %u bytes", total_ines_size);
+				}
+
 				// decode mapper information
 				pNES_instance->NES_state.catridgeInfo.mapperID
 					= pINES->iNES_Fields.iNES_header.fields.flag6.fields.mapperLo
@@ -13891,7 +14243,8 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 					}
 					else
 					{
-						FATAL("Unknown TV system variant in NES 2.0 header");
+						WARN("Unknown TV system variant in NES 2.0 header");
+						setTVSystem(NES_TV_SYSTEM::NTSC);
 					}
 				}
 				// Must run before anything below derives timing from cpuClockHz/ppuClockHz/nesLastPpuScanline/nesTotalPpuScanline/nesFrameDots/myFPS.
@@ -14926,9 +15279,12 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 						}
 					}
 
-					// Heuristic TxROM Board Identification (runs if submapper isn't explicitly set)
-					if (pNES_instance->NES_state.catridgeInfo.subMapper == SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE ||
-						pNES_instance->NES_state.catridgeInfo.subMapper == SUB_MAPPER::VRC2A) // 0
+					// Heuristic TxROM Board Identification (runs if submapper isn't explicitly set).
+										// Never applies to Mapper 268: its submapper value (COOLBOY/MINDKIDS family +
+										// wiring variant) is functional register-decode data, not a display-only board
+										// name, and 0 is a real, meaningful value for it — not "unspecified".
+					if (pNES_instance->NES_state.catridgeInfo.mapper != MAPPER::INES_MAPPER_268 &&
+						(pNES_instance->NES_state.catridgeInfo.subMapper == SUB_MAPPER::SUB_MAPPER_NOT_APPLICABLE || pNES_instance->NES_state.catridgeInfo.subMapper == SUB_MAPPER::VRC2A)) // 0
 					{
 						const uint32_t prgRomSizeBytes = prg16kBanks * 0x4000U;
 
@@ -15364,6 +15720,21 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 					memset(&pNES_instance->NES_state.catridgeInfo.vrc24, 0, sizeof(pNES_instance->NES_state.catridgeInfo.vrc24));
 					memset(&pNES_instance->NES_state.catridgeInfo.mmc3, 0, sizeof(pNES_instance->NES_state.catridgeInfo.mmc3));
 
+					pNES_instance->NES_state.catridgeInfo.mmc3
+						.exRegisters.prgRamProtect_oddAk.fields.prgRamEnable = hasPrgRam ? YES : NO;
+
+					// CHR Bank Registers (R0 - R5)
+					pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank2a = 0; // R0 (2KB bank at $0000)
+					pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank2b = 2; // R1 (2KB bank at $0800)
+					pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1a = 4; // R2 (1KB bank at $1000)
+					pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1b = 5; // R3 (1KB bank at $1100)
+					pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1c = 6; // R4 (1KB bank at $1200)
+					pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.chrBank1d = 7; // R5 (1KB bank at $1300)
+
+					// PRG Bank Registers (R6 - R7)
+					pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.prgBank8a = 0; // R6 (8KB bank at $8000)
+					pNES_instance->NES_state.catridgeInfo.mmc3.inRegisters.prgBank8b = 1; // R7 (8KB bank at $A000)
+
 					// Cold-boot: supervisorReg=0 -> VRC2 mode, CHR A18=0 for all three
 					// regions. The wiki doesn't document mapper 014's own reset state, but
 					// "mode bit clear" is the natural default and matches mode 0 = VRC2.
@@ -15653,8 +16024,6 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 
 						pNES_instance->NES_state.catridgeInfo.nameTblMir = NAMETABLE_MIRROR::HORIZONTAL_MIRROR; // arbitrary -- "rest of state is unspecified"
 					}
-
-					nesReset = CLEAR;
 					BREAK;
 				}
 				case MAPPER::INES_MAPPER_029:
@@ -16116,6 +16485,8 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 	{
 		RETURN FAILURE;
 	}
+
+	nesReset = CLEAR;
 
 	RETURN SUCCESS;
 }

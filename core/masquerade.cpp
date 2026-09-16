@@ -509,6 +509,13 @@ PALETTE_ID    currEnGbcPalette = PALETTE_ID::PALETTE_1;
 
 // NES Support
 FLAG enableZapper = NO;
+int32_t zapperDebugX = ZERO;
+int32_t zapperDebugY = ZERO;
+int32_t zapperDebugLy = ZERO;
+int32_t zapperDebugCy = ZERO;
+bool zapperDebugBeam[ZAPPER_DEBUG_SIZE][ZAPPER_DEBUG_SIZE] = {};
+bool zapperDebugLight[ZAPPER_DEBUG_SIZE][ZAPPER_DEBUG_SIZE] = {};
+FLAG showZapperDebugOverlay = NO;
 FLAG nesReset = NO;
 FLAG forceNTSC = NO;
 FLAG forcePAL = NO;
@@ -1657,8 +1664,9 @@ private:
 		{
 			int x = RESET, y = RESET;
 			SDL_GetWindowSize(window, &x, &y);
-			config.put("mods._X", std::uint16_t(x));
-			config.put("mods._Y", std::uint16_t(y));
+			uint32_t saveScale = (_XSCALE > RESET) ? _XSCALE : ONE;
+			config.put("mods._X", std::uint16_t(x / saveScale));
+			config.put("mods._Y", std::uint16_t(y / saveScale));
 			boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
 		}
 
@@ -2453,6 +2461,111 @@ public:
 
 #endif // !__RPI_PICO__ (setupThemes)
 
+public:
+#ifndef  __RPI_PICO__
+
+#ifdef _WIN32
+	MASQ_INLINE void setZapperMouseLock(FLAG enable)
+	{
+		static FLAG mouseLocked = NO;
+
+		if (enable == YES)
+		{
+			RECT rect =
+			{
+				static_cast<LONG>(emuWindowX),
+				static_cast<LONG>(emuWindowY),
+				static_cast<LONG>(emuWindowX + emuWindowMaxX),
+				static_cast<LONG>(emuWindowY + emuWindowMaxY)
+			};
+
+			ClipCursor(&rect);
+			mouseLocked = YES;
+		}
+		else if (mouseLocked == YES)
+		{
+			ClipCursor(NULL);
+			mouseLocked = NO;
+		}
+	}
+#endif
+	
+	MASQ_INLINE void drawZapperDebugOverlay(ImVec2 imagePos, ImVec2 imageSize, uint32_t width, uint32_t height)
+	{
+		if (showZapperDebugOverlay == NO)
+		{
+			RETURN;
+		}
+
+		ImDrawList* drawList = ImGui::GetWindowDrawList();
+
+		const float pixelWidth = imageSize.x / (float)width;
+		const float pixelHeight = imageSize.y / (float)height;
+
+		// ---- Every cell the light-detection loop scanned this click ----
+		for (int32_t gy = ZERO; gy < ZAPPER_DEBUG_SIZE; ++gy)
+		{
+			const int32_t yPos = zapperDebugY + (gy - ZAPPER_RADIUS);
+			if (yPos < ZERO || yPos >= (int32_t)height)
+			{
+				CONTINUE;
+			}
+
+			for (int32_t gx = ZERO; gx < ZAPPER_DEBUG_SIZE; ++gx)
+			{
+				const int32_t xPos = zapperDebugX + (gx - ZAPPER_RADIUS);
+				if (xPos < ZERO || xPos >= (int32_t)width)
+				{
+					CONTINUE;
+				}
+
+				const float cellX = imagePos.x + (float)xPos * pixelWidth;
+				const float cellY = imagePos.y + (float)yPos * pixelHeight;
+
+				ImU32 cellColor;
+				if (zapperDebugLight[gy][gx])
+				{
+					cellColor = IM_COL32(0, 255, 0, 200);     // beam passed + bright enough: this is the hit
+				}
+				else if (zapperDebugBeam[gy][gx])
+				{
+					cellColor = IM_COL32(80, 140, 255, 160);  // beam already passed, but too dark
+				}
+				else
+				{
+					cellColor = IM_COL32(255, 60, 60, 120);   // beam hasn't reached this pixel yet this frame
+				}
+
+				drawList->AddRect(
+					ImVec2(cellX, cellY),
+					ImVec2(cellX + pixelWidth, cellY + pixelHeight),
+					cellColor, 0.0f, 0, 2.0f);
+			}
+		}
+
+		// ---- Exact click pixel, drawn last so it's on top of the grid ----
+		const float debugX = imagePos.x + (float)zapperDebugX * pixelWidth;
+		const float debugY = imagePos.y + (float)zapperDebugY * pixelHeight;
+
+		drawList->AddRect(
+			ImVec2(debugX, debugY),
+			ImVec2(debugX + pixelWidth, debugY + pixelHeight),
+			IM_COL32(255, 255, 0, 255),
+			0.0f, 0, 3.0f);
+
+		const std::string label =
+			std::to_string(zapperDebugX) + ", " + std::to_string(zapperDebugY) +
+			"  (Ly=" + std::to_string(zapperDebugLy) +
+			" dot=" + std::to_string(zapperDebugCy) + ")";
+
+		drawList->AddText(
+			ImVec2(imagePos.x, imagePos.y),
+			IM_COL32(255, 255, 0, 255),
+			label.c_str());
+	}
+
+#endif // ! __RPI_PICO__
+
 	// ---- Start: two complete versions for clarity -----------
 public:
 
@@ -2571,8 +2684,8 @@ public:
 			Uint32 window_flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN;
 			SDL_Window* window = SDL_CreateWindow(
 				"Masquerade Emulator",
-				(current_instance->getScreenWidth() * current_instance->getPixelWidth()) + WINDOW_PADDING,
-				(current_instance->getScreenHeight() * current_instance->getPixelHeight()) + WINDOW_PADDING + WINDOW_PADDING,
+				(current_instance->getTotalScreenWidth() * current_instance->getTotalPixelWidth()) + WINDOW_PADDING,
+				(current_instance->getTotalScreenHeight() * current_instance->getTotalPixelHeight()) + WINDOW_PADDING + WINDOW_PADDING,
 				window_flags);
 			if (window == nullptr)
 			{
@@ -2650,7 +2763,7 @@ public:
 			gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress);
 #endif
 
-			ImGui::SetNextWindowSize(ImVec2((float)current_instance->getScreenWidth(), (float)current_instance->getScreenHeight()));
+			ImGui::SetNextWindowSize(ImVec2((float)current_instance->getTotalScreenWidth(), (float)current_instance->getTotalScreenHeight()));
 			std::string emuWindow = "Emulation Window (" + std::string(current_instance->getEmulatorName()) + ")";
 
 			FlushEarlyLogsToImGui();
@@ -2803,8 +2916,21 @@ public:
 							static const FLAG showBiosPrompt = NO;
 #endif
 							static FLAG barcodeWindowOpen = NO;
+							static int  pendingWindowScale = RESET;
+							static int  appliedWindowScale = _XSCALE;
 
 							tickAtStart = SDL_GetTicksNS();
+
+							if (pendingWindowScale != RESET)
+							{
+								int curW = 0, curH = 0;
+								SDL_GetWindowSize(window, &curW, &curH);
+								int newW = (curW * pendingWindowScale) / appliedWindowScale;
+								int newH = (curH * pendingWindowScale) / appliedWindowScale;
+								SDL_SetWindowSize(window, newW, newH);
+								appliedWindowScale = pendingWindowScale;
+								pendingWindowScale = RESET;
+							}
 
 #if (ENABLED_IMGUI_DEFAULT_THEME == NO)
 							if (currentEmuTheme != previousEmuTheme)
@@ -3214,6 +3340,11 @@ public:
 												if (ImGui::MenuItem("Enable Zapper##EnableZapper", NULL, enableZapper))
 												{
 													enableZapper = (enableZapper == YES ? NO : YES);
+													SDL_SetWindowMouseGrab(window, enableZapper == YES);
+												}
+												if (ImGui::MenuItem("Zapper Debug Overlay##ZapperDebugOverlay", NULL, showZapperDebugOverlay, enableZapper))
+												{
+													showZapperDebugOverlay = (showZapperDebugOverlay == YES ? NO : YES);
 												}
 												ImGui::EndMenu();
 											}
@@ -3234,7 +3365,7 @@ public:
 										{
 											if (ImGui::MenuItem("GB/GBC##Reset", NULL, NO, NO))
 											{
-												nesReset = YES;
+												;
 											}
 											if (ImGui::MenuItem("NES##Reset", NULL, NO, MASQ_ENABLE_NES))
 											{
@@ -3242,7 +3373,7 @@ public:
 											}
 											if (ImGui::MenuItem("GBA##Reset", NULL, NO, NO))
 											{
-												nesReset = YES;
+												;
 											}
 											ImGui::EndMenu();
 										}
@@ -3308,13 +3439,37 @@ public:
 											}
 											if (ImGui::BeginMenu("GB##GBFamily", MASQ_ENABLE_GBC))
 											{
-												static FLAG isTicked = to_bool(config.get<std::string>("gb_gbc._force_gbc_for_gb", "false"));
-												if (ImGui::MenuItem("CGB Mode", NULL, isTicked))
+												static FLAG isCgbTicked = to_bool(config.get<std::string>("gb_gbc._force_gbc_for_gb", "false"));
+												if (ImGui::MenuItem("CGB Mode", NULL, isCgbTicked))
 												{
-													isTicked = !isTicked;
-													config.put("gb_gbc._force_gbc_for_gb", isTicked);
+													isCgbTicked = !isCgbTicked;
+													config.put("gb_gbc._force_gbc_for_gb", isCgbTicked);
 													boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
 												}
+												ImGui::EndMenu();
+											}
+											ImGui::Separator();
+											if (ImGui::BeginMenu("Scale", YES))
+											{
+												static int scaleSelection = _XSCALE;
+												const char* scaleLabels[FOUR] = { "1X", "2X", "3X", "4X" };
+												FLAG scaleChanged = NO;
+												for (INC8 ii = RESET; ii < FOUR; ii++)
+												{
+													if (ImGui::RadioButton(scaleLabels[ii], &scaleSelection, ii + 1))
+														scaleChanged = YES;
+												}
+#ifndef __EMSCRIPTEN__
+												if (scaleChanged == YES)
+												{
+													_XSCALE = scaleSelection;
+													config.put("mods._XSCALE", _XSCALE);
+													boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
+													pendingWindowScale = scaleSelection;
+												}
+#else
+												MASQ_UNUSED(scaleChanged);
+#endif
 												ImGui::EndMenu();
 											}
 											ImGui::EndMenu();
@@ -3589,10 +3744,15 @@ public:
 									ImGui::SetNextWindowFocus();
 									focusEmuWindowOnStartup = NO;
 								}
+
 								ImGui::Begin(emuWindow.c_str(), &showEmuWin,
 									ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove |
 									ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoScrollbar |
 									ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_AlwaysAutoResize);
+
+								// Exact screen-space rect of the rendered emu framebuffer (used for zapper mouse mapping)
+								ImVec2 renderedImagePos = ImVec2(0.0f, 0.0f);
+								ImVec2 renderedImageSize = ImVec2(0.0f, 0.0f);
 
 								if (maintainAspectRatio == NO || current_instance->getEmulationID() == EMULATION_ID::DEFAULT_ID)
 								{
@@ -3767,15 +3927,20 @@ public:
 									}
 									else
 									{
-										ImGui::Image((ImTextureID)(uintptr_t)masquerade_texture, (ImVec2)ImGui::GetContentRegionAvail());
+										const ImVec2 imagePos = ImGui::GetCursorScreenPos();
+										const ImVec2 imageSize = ImGui::GetContentRegionAvail();
+										ImGui::Image((ImTextureID)(uintptr_t)masquerade_texture, imageSize);
+										drawZapperDebugOverlay(imagePos, imageSize, current_instance->getTotalScreenWidth(), current_instance->getTotalScreenHeight());
+										renderedImagePos = imagePos;
+										renderedImageSize = imageSize;
 									}
 								}
 								else
 								{
 									// Aspect-ratio preserving display
 									ImVec2 avail_size = ImGui::GetContentRegionAvail();
-									float  fbWidth = (float)(current_instance->getScreenWidth() * FRAME_BUFFER_SCALE);
-									float  fbHeight = (float)(current_instance->getScreenHeight() * FRAME_BUFFER_SCALE);
+									float  fbWidth = (float)(current_instance->getTotalScreenWidth() * FRAME_BUFFER_SCALE);
+									float  fbHeight = (float)(current_instance->getTotalScreenHeight() * FRAME_BUFFER_SCALE);
 									float  fbAspect = fbWidth / fbHeight;
 
 									ImVec2 imageSize;
@@ -3791,13 +3956,28 @@ public:
 									ImVec2 cursor_pos = ImGui::GetCursorPos();
 									ImVec2 offset = { (avail_size.x - imageSize.x) * 0.5f, (avail_size.y - imageSize.y) * 0.5f };
 									ImGui::SetCursorPos(ImVec2(cursor_pos.x + offset.x, cursor_pos.y + offset.y));
+									const ImVec2 imagePos = ImGui::GetCursorScreenPos();
 									ImGui::Image((ImTextureID)(uintptr_t)masquerade_texture, imageSize);
+									drawZapperDebugOverlay(imagePos, imageSize, current_instance->getTotalScreenWidth(), current_instance->getTotalScreenHeight());
+									renderedImagePos = imagePos;
+									renderedImageSize = imageSize;
 								}
 
-								emuWindowX = ImGui::GetWindowPos().x;
-								emuWindowY = ImGui::GetWindowPos().y;
-								emuWindowMaxX = ImGui::GetWindowWidth();
-								emuWindowMaxY = ImGui::GetWindowHeight();
+								emuWindowX = renderedImagePos.x;
+								emuWindowY = renderedImagePos.y;
+								emuWindowMaxX = renderedImageSize.x;
+								emuWindowMaxY = renderedImageSize.y;
+
+#ifdef _WIN32
+								if ((SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0)
+								{
+									setZapperMouseLock(enableZapper);
+								}
+								else
+								{
+									setZapperMouseLock(NO);
+								}
+#endif
 
 								ImGui::End();
 								ImGui::PopStyleVar(); // WindowPadding
@@ -4497,6 +4677,8 @@ public:
 									if (current_instance->getEmulationID() == EMULATION_ID::GB_GBC_ID)
 									{
 										GBc_t* gbc = static_cast<GBc_t*>(current_instance);
+
+										// Draw Camera Capture Debugger
 										gbc->RenderGBCCaptureStagesUI();
 									}
 									RenderCameraHardwareUI(camera);

@@ -340,10 +340,6 @@ private:
 	static const uint32_t total_screen_width = screen_width + (screen_x_offset * 2);
 	static const uint32_t pixel_height = 1;
 	static const uint32_t pixel_width = 1;
-	static const uint32_t debugger_screen_height = 560;
-	static const uint32_t debugger_screen_width = 880;
-	static const uint32_t debugger_pixel_height = 1;
-	static const uint32_t debugger_pixel_width = 1;
 	const char* NAME = "GBA";
 
 private:
