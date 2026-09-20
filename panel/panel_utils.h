@@ -84,16 +84,15 @@ MASQ_INLINE void PANEL_TRANSFORM_FOR_CHIP8(
                     idx |= (1 << plane);
             }
 
-            const uint16_t color  = rgb565LUT[idx];
-            const uint32_t basePX = (outW - 1) - (offsetX + x * scaleX);
-            const uint32_t basePY = offsetY + y * scaleY;
+            const uint16_t color = rgb565LUT[idx];
+            const uint32_t baseX  = offsetX + x * scaleX;
+            const uint32_t baseY  = offsetY + y * scaleY;
 
             for (uint32_t dy = 0; dy < scaleY; dy++)
             {
                 for (uint32_t dx = 0; dx < scaleX; dx++)
                 {
-                    // column-major to match PANEL_BACKEND_PRESENT
-                    dst[(basePX - dx) * outH + (basePY + dy)] = color;
+                    PANEL_FB_WRITE(dst, baseX + dx, baseY + dy, outW, outH, color);
                 }
             }
         }
@@ -114,7 +113,7 @@ MASQ_INLINE void PANEL_TRANSFORM_FOR_CHIP8(
 
 #pragma region DRAW_PRIMITIVES
 MASQ_INLINE void PANEL_DrawChar(uint16_t x, uint16_t y, char c,
-                                 sFONT* font, uint16_t fg, uint16_t bg)
+                                 PANEL_FONT_T* font, uint16_t fg, uint16_t bg)
 {
     uint32_t       offset = (c - ' ') * font->Height *
                             (font->Width / 8 + (font->Width % 8 ? 1 : 0));
@@ -133,7 +132,7 @@ MASQ_INLINE void PANEL_DrawChar(uint16_t x, uint16_t y, char c,
 }
 
 MASQ_INLINE void PANEL_DrawString(uint16_t x, uint16_t y, const char* str,
-                                   sFONT* font, uint16_t fg, uint16_t bg)
+                                   PANEL_FONT_T* font, uint16_t fg, uint16_t bg)
 {
     uint16_t cx = x;
     uint16_t cy = y;
@@ -203,7 +202,7 @@ MASQ_INLINE void PANEL_ShowStatus(bool flag)
 MASQ_INLINE void PANEL_PrintStr(const char* buf)
 {
     static uint16_t cursorY    = 12;
-    const uint16_t  lineHeight = Font8.Height + 2;
+    const uint16_t  lineHeight = PANEL_FONT_SMALL.Height + 2;
     const uint16_t  startY     = 10;
     const uint16_t  maxY       = PANEL_SCREEN_HEIGHT - lineHeight;
 
@@ -212,7 +211,7 @@ MASQ_INLINE void PANEL_PrintStr(const char* buf)
         PANEL_BACKEND_CLEAR(swap16(PixelToRGB565_fast(WHITE)));
         cursorY = startY;
     }
-    PANEL_DrawString(10, cursorY, buf, &Font8,
+    PANEL_DrawString(10, cursorY, buf, &PANEL_FONT_SMALL,
                      swap16(PixelToRGB565_fast(BLACK)),
                      swap16(PixelToRGB565_fast(WHITE)));
     cursorY += lineHeight;
@@ -249,10 +248,10 @@ MASQ_INLINE void PANEL_ShowFPS(PCTX& ctx)
         lastTime   = now;
     }
 
-    sFONT*      font = &Font12;
-    const char* str  = fpsBuf;
-    uint16_t    cx   = 10;
-    uint16_t    cy   = 10;
+    PANEL_FONT_T* font = &PANEL_FONT_MEDIUM;
+    const char*   str  = fpsBuf;
+    uint16_t      cx   = 10;
+    uint16_t      cy   = 10;
 
     while (*str != '\0')
     {
@@ -267,8 +266,7 @@ MASQ_INLINE void PANEL_ShowFPS(PCTX& ctx)
                 uint16_t color = (*ptr & (0x80 >> (col % 8)))
                     ? swap16(PixelToRGB565_fast(WHITE))
                     : swap16(PixelToRGB565_fast(BLACK));
-                // column-major, x-flipped to match PANEL_TRANSFORM_FOR_CHIP8
-                ctx.fb[(ctx.outW - 1 - (cx + col)) * ctx.outH + (cy + row)] = color;
+                PANEL_FB_WRITE(ctx.fb, cx + col, cy + row, ctx.outW, ctx.outH, color);
                 if (col % 8 == 7) ptr++;
             }
             if (font->Width % 8 != 0) ptr++;
