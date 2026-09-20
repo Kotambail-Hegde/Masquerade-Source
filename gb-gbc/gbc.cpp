@@ -957,12 +957,10 @@ uint16_t GBc_t::getROMBankNumber()
 	RETURN ((pGBc_emuStatus->currentROMBankNumber.raw) % (getNumberOfROMBanksUsed()));
 }
 
-#ifndef __RPI_PICO__
 void GBc_t::setROMBankNumberB(uint16_t romBankNumber)
 {
 	pGBc_emuStatus->currentROMBankNumberB = romBankNumber;
 }
-#endif // !__RPI_PICO__
 
 uint16_t GBc_t::getROMBankNumberB()
 {
@@ -1129,12 +1127,10 @@ uint8_t GBc_t::getRAMBankNumberB()
 	RETURN pGBc_emuStatus->currentRAMBankNumberB;
 }
 
-#ifndef __RPI_PICO__
 void GBc_t::setRAMBankNumberB(uint8_t ramBankNumber)
 {
 	pGBc_emuStatus->currentRAMBankNumberB = ramBankNumber;
 }
-#endif // !__RPI_PICO__
 
 uint8_t GBc_t::getNumberOfRAMBanksUsed()
 {
@@ -1517,7 +1513,6 @@ MASQ_INLINE void GBc_t::joypadTick()
 
 void GBc_t::serialTick()
 {
-#ifndef __RPI_PICO__
 	/*
 	*   Supported Rates
 	*   8192Hz		-	1KB/s	- Bit 1 cleared, Normal
@@ -1767,7 +1762,6 @@ void GBc_t::serialTick()
 			pGBc_peripherals->SC.scFields.TRANSFER_ENABLE = RESET;
 		}
 	}
-#endif // !__RPI_PICO__
 }
 
 void GBc_t::rtcTick()
@@ -1900,7 +1894,6 @@ void GBc_t::rtcTick()
 
 void GBc_t::cameraTick()
 {
-#ifndef __RPI_PICO__
 	// Advance Camera capture timing
 	if (isGameBoyCamera() == YES) MASQ_UNLIKELY
 	{
@@ -1912,7 +1905,6 @@ void GBc_t::cameraTick()
 			}
 		}
 	}
-#endif
 }
 
 void GBc_t::requestVblankStatInterrupt()
@@ -4149,7 +4141,6 @@ float GBc_t::finHPF(float sampleIn)
 {
 	float sampleOut = MUTE_AUDIO;
 
-#ifndef __RPI_PICO__
 	static float capacitor = MUTE_AUDIO;
 
 	if (_ENABLE_AUDIO_HPF == YES)
@@ -4173,9 +4164,6 @@ float GBc_t::finHPF(float sampleIn)
 	{
 		sampleOut = sampleIn;
 	}
-#else
-	sampleOut = sampleIn;
-#endif
 
 	RETURN sampleOut;
 }
@@ -4193,7 +4181,6 @@ void GBc_t::captureDownsampledAudioSamples()
 	{
 		pGBc_instance->GBc_state.audio.downSamplingRatioCounter -= ((uint32_t)(GB_GBC_REFERENCE_CLOCK_HZ / EMULATED_AUDIO_SAMPLING_RATE_FOR_GB_GBC));
 
-#ifndef __RPI_PICO__
 		GBC_AUDIO_SAMPLE_TYPE leftSample = MUTE_AUDIO;
 		GBC_AUDIO_SAMPLE_TYPE rightSample = MUTE_AUDIO;
 
@@ -4310,7 +4297,6 @@ void GBc_t::captureDownsampledAudioSamples()
 			}
 
 		}
-#endif // !__RPI_PICO__
 	}
 
 	RETURN;
@@ -7464,7 +7450,6 @@ FLAG GBc_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 		}
 	}
 
-#ifndef __RPI_PICO__
 	// Advance the printer's own timers (currently: countdown toward "print job
 	// finished"). This is decoupled from serialTick()/the byte-shift state
 	// machine on purpose -- printing is a physical, real-time process on real
@@ -7477,7 +7462,6 @@ FLAG GBc_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 		gbPrinterEngine.tick();
 		gbPrinterEngine.drawImGuiWindows();
 	}
-#endif
 
 #ifndef __RPI_PICO__
 	// Screen refresh Per LY / Per Dot yields the loop early -- letting your normal, existing
@@ -8340,7 +8324,6 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 				// setup defaults if MBC6
 				if (isMBC6())
 				{
-#ifndef __RPI_PICO__
 					auto& e = pGBc_emuStatus->mbc6;
 
 					e.flashEnable = NO;
@@ -8350,19 +8333,10 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 					e.flashCmdState = 0;
 
 					// FLASH memory content — erased state is 0xFF
-					memset(
-						e.flash.raw,
-						0xFF,
-						sizeof(e.flash)); // 8 MBits
+					memset(e.flash.raw, 0xFF, sizeof(e.flash)); // 8 MBits
 
 					// FLASH Hidden memory content — erased state is 0xFF
-					memset(
-						e.flashHidden,
-						0xFF,
-						sizeof(e.flashHidden)); // 256 bytes
-#else
-					FATAL("MBC6 is not supported");
-#endif
+					memset(e.flashHidden, 0xFF, sizeof(e.flashHidden)); // 256 bytes
 				}
 
 				// setup defaults if MBC7
@@ -8411,17 +8385,13 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 				setROMBankNumber(ONE);
 
 				// for mbc6
-#ifndef __RPI_PICO__
 				setROMBankNumberB(TWO);
-#endif // !__RPI_PICO__
 
 				// initialize the RAM Bank number to ZERO (2K external RAM) as this is basic for all MBCs
 				setRAMBankNumber(ZERO);
 
 				// for mbc6
-#ifndef __RPI_PICO__
 				setRAMBankNumberB(ONE);
-#endif // !__RPI_PICO__
 
 				// initialize the VRAM Bank number to ZERO
 				setVRAMBankNumber(ZERO);
@@ -9375,7 +9345,6 @@ byte GBc_t::readRawMemory(uint16_t address
 
 			if (isMBC6()) MASQ_UNLIKELY
 			{
-#ifndef __RPI_PICO__
 				// Refer https://gbdev.io/pandocs/MBC6.html
 				// Maximum Flash bank is 0x7F, refer // Refer https://gbdev.io/pandocs/MBC6.html#4000-5fff--romflash-bank-a-00-7f-readwrite-for-flash-read-only-for-rom
 				// Bank A = $4000-$5FFF, Bank B = $6000-$7FFF; each bank is 8 KB (0x2000)
@@ -9462,9 +9431,6 @@ byte GBc_t::readRawMemory(uint16_t address
 						}
 					}
 				}
-#else
-				FATAL("MBC6 is not supported");
-#endif
 			}
 
 			// ROM NN ($4000-$7FFF)
@@ -9569,7 +9535,6 @@ byte GBc_t::readRawMemory(uint16_t address
 
 			if (isMBC6()) MASQ_UNLIKELY
 			{
-#ifndef __RPI_PICO__
 				if (address <= 0xAFFF)
 				{
 					uint8_t RAMBankNumber = getRAMBankNumber();
@@ -9583,9 +9548,6 @@ byte GBc_t::readRawMemory(uint16_t address
 					address -= 0xB000;
 					RETURN pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks4KB[RAMBankNumberB][address];
 				}
-#else
-				FATAL("MBC6 is not supported");
-#endif
 			}
 
 			if (isMBC3())
@@ -10613,7 +10575,6 @@ void GBc_t::executeHUC3Command()
 	}
 }
 
-#ifndef __RPI_PICO__
 // Refer https://gbdev.io/pandocs/MBC6.html#flash-commands
 //
 // Three separate protection flags:
@@ -10976,7 +10937,6 @@ void GBc_t::processMBC6FlashWrite(uint16_t cpuAddr, BYTE data)
 		BREAK;
 	}
 }
-#endif // !__RPI_PICO__
 
 void GBc_t::updateMMM01RamBanking()
 {
@@ -11145,7 +11105,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 				}
 				else if (isMBC6()) MASQ_UNLIKELY
 				{
-#ifndef __RPI_PICO__
+
 					if (address <= 0x03FF)
 					{
 						pGBc_emuStatus->dataWrittenToMBCReg0 = data;
@@ -11182,9 +11142,6 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 					{
 						pGBc_emuStatus->dataWrittenToMBCReg8 = data;
 					}
-#else
-					FATAL("MBC6 is not supported");
-#endif
 				}
 				else
 				{
@@ -11259,7 +11216,6 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 
 			if (isMBC6()) MASQ_UNLIKELY
 			{
-#ifndef __RPI_PICO__
 				if (address <= 0x03FF)
 				{
 					const FLAG ramEnable = ((data & 0x0F) == 0x0A);
@@ -11306,9 +11262,6 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 				{
 					processMBC6FlashWrite(address, data);
 				}
-#else
-				FATAL("MBC6 is not supported");
-#endif
 				RETURN;
 			}
 
@@ -11818,7 +11771,6 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 
 			if (isMBC6()) MASQ_UNLIKELY
 			{
-#ifndef __RPI_PICO__
 				if (address <= 0xAFFF)
 				{
 					uint8_t RAMBankNumber = getRAMBankNumber();
@@ -11833,9 +11785,6 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 					pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks4KB[RAMBankNumberB][address] = data;
 					RETURN;
 				}
-#else
-				FATAL("MBC6 is not supported");
-#endif
 			}
 
 			if (isMBC3())

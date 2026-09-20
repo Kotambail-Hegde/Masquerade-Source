@@ -16,7 +16,7 @@
 #if defined(PANEL_BACKEND_PICOLCD2)
     #include "picolcd2_backend.h"
 #elif defined(PANEL_BACKEND_ILI9341)
-    #include "li9341_backend.h"
+    #include "ili9341_backend.h"
 #else
     #error "No panel backend defined. Add -DPANEL_BACKEND=<backend> to CMake."
 #endif
