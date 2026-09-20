@@ -8,68 +8,163 @@ Masquerade is a multi-platform emulator targeting both desktop (Windows/Linux/We
 
 ## Directory Structure
 
-```
+```text
 masquerade/
-├── core/               — shared emulator orchestration
-├── chip8/              — CHIP-8 / SCHIP / XO-CHIP emulator
-├── gb-gbc/             — Game Boy / Game Boy Color emulator
-├── nes/                — NES emulator
-├── gba/                — GBA emulator (WIP)
-├── helpers/            — shared types, macros, logger
-├── pico/               — Pico-specific: config, ROM
-│   ├── pico_config.h   — auto-generated compile-time config table
-│   └── pico_rom.h      — auto-generated ROM data (flash)
-├── panel/              — physical display abstraction (Pico only)
-│   ├── panel.h         — ONLY file emulators include
-│   ├── panel_interface.h — WCTX, PANEL_SET_PARAMS
-│   ├── panel_utils.h   — generic blitters, draw primitives, FPS overlay
+
+├── core/                  — shared emulator orchestration
+├── chip8/                 — CHIP-8 / SCHIP / XO-CHIP emulator
+├── gb-gbc/                — Game Boy / Game Boy Color emulator
+├── nes/                   — NES emulator
+├── gba/                   — GBA emulator (WIP)
+├── helpers/               — shared types, macros, logger
+
+├── pico/                  — Pico-specific configuration and ROM data
+│   ├── pico_config.h      — auto-generated compile-time configuration
+│   └── pico_rom.h         — auto-generated ROM data (flash)
+
+├── panel/                 — physical display abstraction (Pico only)
+│   ├── panel.h            — ONLY file emulators include
+│   ├── panel_interface.h  — WCTX, PANEL_SET_PARAMS
+│   ├── panel_utils.h     — generic blitters, draw primitives, FPS overlay
 │   └── backends/
-│       ├── picolcd2/   — Waveshare 2in LCD driver files
-│       │   picolcd2_backend.h
-│       └── ili9341/    — ILI9341 driver files (SD card capable)
-│           ili9341_backend.h
-└── ui/                 — desktop only: ImGui, OpenGL, SDL
+│       ├── picolcd2/      — Waveshare 2in LCD driver
+│       │   └── picolcd2_backend.h
+│       └── ili9341/       — ILI9341 LCD driver
+│           └── ili9341_backend.h
+
+└── ui/                    — desktop only: ImGui, OpenGL, SDL
 ```
 
 ---
 
-## CMake Options
+## Example Build Commands
 
-### Platform Selection
-| Option | Default | Description |
-|--------|---------|-------------|
-| `-DRPI_PICO=ON` | OFF | Build for Raspberry Pi Pico (bare-metal) |
-| `-DEMSCRIPTEN=ON` | OFF | Build for WebAssembly |
-| `-DRPI_5=ON` | OFF | Build for Raspberry Pi 5 (GLES) |
+### Visual Studio
 
-These are mutually exclusive — enabling one disables the others.
+On Windows, CMake uses the Visual Studio generator by default.
 
-### Panel Backend (Pico only)
-| Option | Description |
-|--------|-------------|
-| `-DPANEL_BACKEND=PICOLCD2` | Waveshare 2in SPI LCD — no SD card |
-| `-DPANEL_BACKEND=ILI9341` | ILI9341 SPI LCD — with SD card slot |
+#### LCD Backend
 
-### Module Selection
-| Option | Example | Description |
-|--------|---------|-------------|
-| `-DMASQ_ONLY` | `CHIP8;GBC;NES` | Build only specified emulators |
+Replace `<LCD>` with one of:
 
-### Example Build Commands
-```bash
-# Desktop (Windows/Linux)
-cmake ..
-cmake --build .
-
-# Pico with Waveshare 2in
-cmake -DRPI_PICO=ON -DPANEL_BACKEND=PICOLCD2 -DMASQ_ONLY=CHIP8 ..
-
-# Pico with ILI9341 (SD card)
-cmake -DRPI_PICO=ON -DPANEL_BACKEND=ILI9341 -DMASQ_ONLY=CHIP8 ..
-
-# Pico GBC only
-cmake -DRPI_PICO=ON -DPANEL_BACKEND=PICOLCD2 -DMASQ_ONLY=GBC ..
+```text
+PICOLCD2
+ILI9341
 ```
+
+```bash
+mkdir build
+cd build
+
+cmake -DRPI_PICO=ON -DPICO_BOARD=pico_w -DPANEL_BACKEND=<LCD> ..
+cmake --build . --config Release
+```
+
+#### Single Module
+
+Replace `<MODULE>` with one of:
+
+```text
+GBA
+GBC
+NES
+PACMAN
+SI
+CHIP8
+GOL
+```
+
+```bash
+mkdir build
+cd build
+
+cmake -DRPI_PICO=ON -DPICO_BOARD=pico_w -DPANEL_BACKEND=<LCD> -DMASQ_ONLY=<MODULE> ..
+cmake --build . --config Release
+```
+
+#### Multiple Modules
+
+```bash
+mkdir build
+cd build
+
+cmake -DRPI_PICO=ON -DPICO_BOARD=pico_w -DPANEL_BACKEND=<LCD> -DMASQ_ONLY=CHIP8;GBC;NES ..
+cmake --build . --config Release
+```
+
+Omit `MASQ_ONLY` to build all modules.
+
+---
+
+### Ninja Multi-Config
+
+Use Ninja Multi-Config instead of the default Visual Studio generator.
+
+#### LCD Backend
+
+Replace `<LCD>` with one of:
+
+```text
+PICOLCD2
+ILI9341
+```
+
+```bash
+cmake -G "Ninja Multi-Config" ^
+    -DCMAKE_DEFAULT_BUILD_TYPE=Release ^
+    -DRPI_PICO=ON ^
+    -DPICO_BOARD=pico_w ^
+    -DPANEL_BACKEND=<LCD> ^
+    -S . -B build/RP2040/ninja
+```
+
+Build:
+
+```bash
+cmake --build build/RP2040/ninja --config Release
+```
+
+#### Single Module
+
+Replace `<MODULE>` with one of:
+
+```text
+GBA
+GBC
+NES
+PACMAN
+SI
+CHIP8
+GOL
+```
+
+```bash
+cmake -G "Ninja Multi-Config" ^
+    -DCMAKE_DEFAULT_BUILD_TYPE=Release ^
+    -DRPI_PICO=ON ^
+    -DPICO_BOARD=pico_w ^
+    -DPANEL_BACKEND=<LCD> ^
+    -DMASQ_ONLY=<MODULE> ^
+    -S . -B build/RP2040/ninja
+
+cmake --build build/RP2040/ninja --config Release
+```
+
+#### Multiple Modules
+
+```bash
+cmake -G "Ninja Multi-Config" ^
+    -DCMAKE_DEFAULT_BUILD_TYPE=Release ^
+    -DRPI_PICO=ON ^
+    -DPICO_BOARD=pico_w ^
+    -DPANEL_BACKEND=<LCD> ^
+    -DMASQ_ONLY=CHIP8;GBC;NES ^
+    -S . -B build/RP2040/ninja
+
+cmake --build build/RP2040/ninja --config Release
+```
+
+Omit `MASQ_ONLY` to build all modules.
 
 ---
 
@@ -254,9 +349,9 @@ SD card structure:
 | CHIP-8 | ✅ | ✅ | ✅ planned |
 | SCHIP | ✅ | ✅ | ✅ planned |
 | XO-CHIP | ✅ | ⚠️ 1-plane only | ✅ planned |
-| GBC | ✅ | 🚧 WIP | 🚧 WIP |
+| GBC | ✅ | 🔜 | 🔜 |
 | NES | ✅ | 🔜 | 🔜 |
-| GBA | ✅ | ❌ too heavy | ❌ |
+| GBA | ✅ | ❌ | ❌ |
 
 ---
 

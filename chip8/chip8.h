@@ -266,7 +266,12 @@ private:
 			Pixel imGuiBuffer2D[screen_height][screen_width];
 		} imGuiBuffer;
 #else  // __RPI_PICO__
+#if defined(PANEL_BACKEND_PICOLCD2)
 		uint16_t* waveshareFb;
+#endif
+#if defined(PANEL_BACKEND_ILI9341)
+		uint16_t* iliFb;
+#endif
 #endif
 		C8RES res;
 		INC32 scrollH;
@@ -406,15 +411,19 @@ public:
 	void sendBiosToEmulator(bios_t* bios = nullptr) override { MASQ_UNUSED(bios); };
 
 	FLAG resetAudio(void* audio = nullptr) override {
+		MASQ_UNUSED(audio);
 		RETURN SUCCESS;
 	};
 	FLAG resetInput(void* input = nullptr) override {
+		MASQ_UNUSED(input);
 		RETURN SUCCESS;
 	};
 	FLAG resetNetwork(void* network = nullptr) override {
+		MASQ_UNUSED(network);
 		RETURN SUCCESS;
 	};
 	FLAG resetCamera(void* camera = nullptr) override {
+		MASQ_UNUSED(camera);
 		RETURN SUCCESS;
 	};
 

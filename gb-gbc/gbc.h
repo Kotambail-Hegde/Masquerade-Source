@@ -3115,12 +3115,7 @@ private:
 	}
 	MASQ_INLINE FLAG isMBC6() const
 	{
-#ifdef __RPI_PICO__
-		FATAL("MBC6 is not supported");
-		RETURN NO;
-#else
 		RETURN pGBc_emuStatus->activeMBC == MBCType::MBC6;
-#endif
 	}
 	MASQ_INLINE FLAG isMBC7() const
 	{

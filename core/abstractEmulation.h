@@ -68,7 +68,7 @@ using InputHintCallback = std::function<void()>;
 
 #pragma endregion GLOBAL_INFRASTRUCTURE_DECLARATIONS
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__)
 #pragma region NETWORK
 class abstractEmulationLinkSession_t
 {

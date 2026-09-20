@@ -35,11 +35,6 @@
 #include "pico/multicore.h"     // multicore support (optional — only if you use core1 for offloading tasks)
 #include "pico/sync.h"          // mutexes, critical sections, etc. for multicore synchronization
 
-// ---- Waveshare -----------------------------------------
-extern "C" {
-    #include "LCD_2in.h"
-}
-
 // ---- Minimal C / C++ headers for bare-metal ----------
 #include <stdint.h>
 #include <stdarg.h>
@@ -64,6 +59,14 @@ extern "C" {
 
 #include "pico_config.h"
 #include "pico_rom.h"
+
+// ---- Panel Specific Backends --------------------------------
+#if defined(PANEL_BACKEND_PICOLCD2)
+// ---- Waveshare -----------------------------------------
+extern "C" {
+#include "LCD_2in.h"
+}
+#endif
 
 #else // !__RPI_PICO__ — full desktop / Emscripten build
 
@@ -1075,9 +1078,12 @@ using MasqConfig_t = boost::property_tree::ptree;
 // GLOBAL EXTERNS
 // =========================================================
 extern MAP64 ENABLE_LOGS;
+
+#ifndef __RPI_PICO__
 extern FLAG fbSHA1Enabled;
 extern uint64_t fbSHA1TimeoutSeconds;
 extern std::chrono::steady_clock::time_point fbSHA1StartTime;
+#endif
 
 #ifndef __RPI_PICO__
 // Desktop-only OpenGL / emulation window externs
