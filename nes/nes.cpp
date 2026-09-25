@@ -6827,9 +6827,10 @@ inline void NES_t::writeCpuRawMemoryInternal(uint16_t address, byte data, MEMORY
 						}
 					}
 					pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::PULSE_1)].envelope.startFlag = YES;
-					// Refer https://forums.nesdev.org/viewtopic.php?p=163102#p163102
-					pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::PULSE_1)].frequencyCounter
-						= pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::PULSE_1)].frequencyPeriod.raw;
+					// Refer https://www.nesdev.org/wiki/APU and https://forums.nesdev.org/viewtopic.php?f=2&t=15346
+					// $4003 resets the duty *phase* only. The clock divider (frequencyCounter) must NOT be
+					// reset here — it keeps counting down and only reloads from frequencyPeriod.raw once it
+					// naturally reaches 0
 					pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::PULSE_1)].dutyCounter = RESET;
 					RETURN;
 				}
@@ -6903,9 +6904,8 @@ inline void NES_t::writeCpuRawMemoryInternal(uint16_t address, byte data, MEMORY
 						}
 					}
 					pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::PULSE_2)].envelope.startFlag = YES;
-					// Refer https://forums.nesdev.org/viewtopic.php?p=163102#p163102
-					pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::PULSE_2)].frequencyCounter
-						= pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::PULSE_2)].frequencyPeriod.raw;
+					// Refer https://www.nesdev.org/wiki/APU and https://forums.nesdev.org/viewtopic.php?f=2&t=15346
+					// $4007 resets the duty *phase* only — see the PULSE_1/$4003 note above.
 					pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::PULSE_2)].dutyCounter = RESET;
 					RETURN;
 				}
