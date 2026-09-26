@@ -250,6 +250,7 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 		_FORCE_GB_FOR_GBC = to_bool(pt.get<std::string>("gb_gbc._force_gb_for_gbc", _FORCE_GB_FOR_GBC ? "true" : "false"));
 		_FORCE_GB_GFX_FOR_GBC = to_bool(pt.get<std::string>("gb_gbc._force_gb_gfx_for_gbc", _FORCE_GB_GFX_FOR_GBC ? "true" : "false"));
 		_FORCE_GBC_FOR_GB = to_bool(pt.get<std::string>("gb_gbc._force_gbc_for_gb", _FORCE_GBC_FOR_GB ? "true" : "false"));
+		_FORCE_SGB = to_bool(pt.get<std::string>("gb_gbc._force_sgb", _FORCE_SGB ? "true" : "false"));
 		_ENABLE_AUDIO_HPF = to_bool(config.get<std::string>("gb_gbc._enable_audio_hpf", _ENABLE_AUDIO_HPF ? "true" : "false"));
 		_GB_GHOST_FACTOR = config.get<std::float_t>("gb_gbc._gb_ghosting", _GB_GHOST_FACTOR);
 		_GBC_GHOST_FACTOR = config.get<std::float_t>("gb_gbc._gbc_ghosting", _GBC_GHOST_FACTOR);
@@ -260,14 +261,14 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 			INFO("Running in Forced CGB mode");
 			ROM_TYPE = ROM::GAME_BOY_COLOR; // .gb loaded to GBC
 
-			ghost_decay = _GB_GHOST_FACTOR;
+			ghost_decay = _GBC_GHOST_FACTOR;
 		}
 		else if (ROM_TYPE == ROM::GAME_BOY_COLOR && _FORCE_GB_FOR_GBC == YES)
 		{
 			INFO("Running in Forced DMG mode");
 			ROM_TYPE = ROM::GAME_BOY; // .gbc loaded to GB
 
-			ghost_decay = _GBC_GHOST_FACTOR;
+			ghost_decay = _GB_GHOST_FACTOR;
 		}
 
 		if (ROM_TYPE == ROM::GAME_BOY || (ROM_TYPE == ROM::GAME_BOY_COLOR && _FORCE_GB_FOR_GBC == YES))
@@ -305,6 +306,21 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 		else
 		{
 			FATAL("Invalid CONFIG.ini");
+		}
+
+		if (_FORCE_SGB == YES)
+		{
+#ifndef __EMSCRIPTEN__
+			_BIOS_LOCATION = config.get<std::string>("gb_gbc._sgb_bios_location");
+#else
+			_BIOS_LOCATION = "/persistent/sgb2_boot.bin";
+#endif
+			// SGB doesnt directly support CGB games
+			ROM_TYPE = ROM::GAME_BOY; // .gbc loaded to GB
+			ghost_decay = _GB_GHOST_FACTOR;
+
+			INFO("Searching for BIOS in %s\n", _BIOS_LOCATION.c_str());
+			dmg_cgb_bios.expectedBiosSize = 0x100;
 		}
 
 		if (ENABLED)
@@ -383,6 +399,17 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 						LOG_NEW_LINE;
 #endif
 
+						if (_FORCE_SGB == YES)
+						{
+							_IF_SGB_THEN_SGB2 = dmg_cgb_bios.biosImage[0xFD] == 0x01 ? NO : YES;
+							const FLAG isSGB2 = (_IF_SGB_THEN_SGB2 == YES);
+							INFO("Override: Running in %s mode", isSGB2 ? "SGB2" : "SGB1");
+#ifndef __EMSCRIPTEN__
+							_SGB_DEFAULT_BORDER_LOCATION = pt.get<std::string>((isSGB2 ? "gb_gbc._sgb2_border_location" : "gb_gbc._sgb1_border_location"), "assets/sgb2/borders/border_" + std::string(isSGB2 ? "sgb2_pcb.sgb" : "sgb1.sgb"));
+#else
+							_SGB_DEFAULT_BORDER_LOCATION = isSGB2 ? "assets/sgb2/borders/border_sgb2_pcb.sgb" : "assets/sgb2/borders/border_sgb1.sgb";
+#endif
+						}
 					}
 					else
 					{
@@ -518,12 +545,26 @@ void GBc_t::setEmulationWindowOffsets(uint32_t x, uint32_t y, FLAG isEnabled)
 
 uint32_t GBc_t::getTotalScreenWidth()
 {
-	RETURN this->screen_width;
+	if (_FORCE_SGB == ENABLED)
+	{
+		RETURN this->sgb_screen_width;
+	}
+	else
+	{
+		RETURN this->screen_width;
+	}
 }
 
 uint32_t GBc_t::getTotalScreenHeight()
 {
-	RETURN this->screen_height;
+	if (_FORCE_SGB == ENABLED)
+	{
+		RETURN this->sgb_screen_height;
+	}
+	else
+	{
+		RETURN this->screen_height;
+	}
 }
 
 uint32_t GBc_t::getTotalPixelWidth()
@@ -957,12 +998,10 @@ uint16_t GBc_t::getROMBankNumber()
 	RETURN ((pGBc_emuStatus->currentROMBankNumber.raw) % (getNumberOfROMBanksUsed()));
 }
 
-#ifndef __RPI_PICO__
 void GBc_t::setROMBankNumberB(uint16_t romBankNumber)
 {
 	pGBc_emuStatus->currentROMBankNumberB = romBankNumber;
 }
-#endif // !__RPI_PICO__
 
 uint16_t GBc_t::getROMBankNumberB()
 {
@@ -1129,12 +1168,10 @@ uint8_t GBc_t::getRAMBankNumberB()
 	RETURN pGBc_emuStatus->currentRAMBankNumberB;
 }
 
-#ifndef __RPI_PICO__
 void GBc_t::setRAMBankNumberB(uint8_t ramBankNumber)
 {
 	pGBc_emuStatus->currentRAMBankNumberB = ramBankNumber;
 }
-#endif // !__RPI_PICO__
 
 uint8_t GBc_t::getNumberOfRAMBanksUsed()
 {
@@ -1517,7 +1554,6 @@ MASQ_INLINE void GBc_t::joypadTick()
 
 void GBc_t::serialTick()
 {
-#ifndef __RPI_PICO__
 	/*
 	*   Supported Rates
 	*   8192Hz		-	1KB/s	- Bit 1 cleared, Normal
@@ -1767,7 +1803,6 @@ void GBc_t::serialTick()
 			pGBc_peripherals->SC.scFields.TRANSFER_ENABLE = RESET;
 		}
 	}
-#endif // !__RPI_PICO__
 }
 
 void GBc_t::rtcTick()
@@ -1900,7 +1935,6 @@ void GBc_t::rtcTick()
 
 void GBc_t::cameraTick()
 {
-#ifndef __RPI_PICO__
 	// Advance Camera capture timing
 	if (isGameBoyCamera() == YES) MASQ_UNLIKELY
 	{
@@ -1912,7 +1946,6 @@ void GBc_t::cameraTick()
 			}
 		}
 	}
-#endif
 }
 
 void GBc_t::requestVblankStatInterrupt()
@@ -3372,6 +3405,214 @@ void GBc_t::processHDMA()
 	}
 }
 
+void GBc_t::updateSGBJOYP(BIT P14, BIT P15)
+{
+	// Detect P15 transition from LOW (0) to HIGH (1) to cycle active joypad,
+	// per gbdev.io/pandocs/SGB_Command_Multiplayer.html "Reading Multiple
+	// Controllers": deselect-both -> read ID nibble -> read each group normally
+	// -> deselect-both again advances the player on that final P15 0->1 edge.
+	// That entire sequence writes only (1,1)/(0,1)/(1,0) -- never (0,0) -- so it
+	// stays inside sgbState::IDLE throughout, unaffected by this gate.
+	// Gated to IDLE only: the packet protocol's own LATCH state (P14==1 &&
+	// P15==1) clocks P15 low-to-high on every bit of every command packet,
+	// which would otherwise register as spurious player advances. p15WasLow's
+	// tracking itself is gated too (not just the increment), so a P15 level
+	// left over from a packet's last bit-clock can't be misread as a real
+	// transition on the very next post-packet poll.
+	if (sgbState == SGB_STATE::IDLE)
+	{
+		if (sgbJoypad.p15WasLow && (P15 == 1) && (sgbJoypad.numPlayers > 1))
+		{
+			sgbJoypad.activePlayer = (sgbJoypad.activePlayer + 1) % sgbJoypad.numPlayers;
+		}
+		sgbJoypad.p15WasLow = (P15 == 0);
+	}
+
+	// 1. START PULSE: Both lines driven LOW (0x00)
+	if (P14 == 0 && P15 == 0)
+	{
+		sgbBitCounter = 0;
+
+		// If we receive a START pulse while expected to be in a transfer, or starting fresh:
+		if (sgbPacketIndex == 0 || sgbState == SGB_STATE::IDLE)
+		{
+			if (sgbState == SGB_STATE::IDLE) sgbPacketIndex = 0;
+			sgbPacketCount = 1;
+			std::memset(sgbPacketBuffer, 0, sizeof(sgbPacketBuffer));
+			DEBUG("[SGB] --- START Pulse Received: Starting Packet Transfer ---");
+		}
+		else
+		{
+			DEBUG("[SGB] --- START Pulse Received: Multi-packet %d/%d ---", sgbPacketIndex + 1, sgbPacketCount);
+		}
+
+		sgbState = SGB_STATE::DATA;
+		recordSgbSample(P14, P15, 0xFF, sgbState);
+		RETURN;
+	}
+
+	// 2. STATE MACHINE (DATA -> LATCH -> END)
+	switch (sgbState)
+	{
+	case SGB_STATE::IDLE:
+		BREAK;
+
+	case SGB_STATE::DATA:
+		if (P14 == 0 && P15 == 1)
+		{
+			sgbCurrentBit = 0;
+			sgbState = SGB_STATE::LATCH;
+			recordSgbSample(P14, P15, 0xFF, sgbState);
+		}
+		else if (P14 == 1 && P15 == 0)
+		{
+			sgbCurrentBit = 1;
+			sgbState = SGB_STATE::LATCH;
+			recordSgbSample(P14, P15, 0xFF, sgbState);
+		}
+		BREAK;
+
+	case SGB_STATE::LATCH:
+		if (P14 == 1 && P15 == 1)
+		{
+			if (sgbBitCounter < 128)
+			{
+				DEBUG("[SGB] Bit %3d: %d", sgbBitCounter, sgbCurrentBit);
+
+				if (sgbCurrentBit == 1)
+				{
+					uint16_t totalByteIdx = (sgbPacketIndex * 16) + (sgbBitCounter / 8);
+					uint8_t  bitIdx = sgbBitCounter % 8;
+					sgbPacketBuffer[totalByteIdx] |= (1 << bitIdx);
+				}
+
+				if (sgbPacketIndex == 0 && sgbBitCounter == 7)
+				{
+					sgbPacketCount = sgbPacketBuffer[0] & 0x07;
+					if (sgbPacketCount == 0)
+					{
+						sgbPacketCount = 1;
+					}
+					DEBUG("[SGB] Header Byte Received: 0x%02X (Cmd: 0x%02X, Packets Expected: %d)",
+						sgbPacketBuffer[0], sgbPacketBuffer[0] >> 3, sgbPacketCount);
+				}
+
+				recordSgbSample(P14, P15, sgbCurrentBit, sgbState);
+				sgbBitCounter++;
+				sgbState = SGB_STATE::DATA;
+			}
+			else if (sgbBitCounter == 128)
+			{
+				DEBUG("[SGB] Stop Bit (Bit 129: %d) Latched for Packet %d.", sgbCurrentBit, sgbPacketIndex + 1);
+				recordSgbSample(P14, P15, sgbCurrentBit, sgbState);
+
+				sgbPacketIndex++;
+				sgbBitCounter = 0;
+
+				if (sgbPacketIndex >= sgbPacketCount)
+				{
+					uint8_t commandCode = sgbPacketBuffer[0] >> 3;
+					DEBUG("[SGB] === Transfer Complete! Executing Command: 0x%02X (%d Total Bytes) ===",
+						commandCode, sgbPacketCount * 16);
+
+					executeSGBCommand(commandCode, sgbPacketBuffer);
+
+					sgbPacketIndex = 0;
+					sgbPacketCount = 1;
+					sgbState = SGB_STATE::IDLE;
+				}
+				else
+				{
+					DEBUG("[SGB] Packet %d Done. Waiting for START Pulse for Packet %d...",
+						sgbPacketIndex, sgbPacketIndex + 1);
+					sgbState = SGB_STATE::IDLE;
+				}
+			}
+		}
+		BREAK;
+	}
+}
+
+void GBc_t::executeSGBCommand(uint8_t commandCode, const uint8_t* packetData)
+{
+	// =========================================================================
+	// ARCHITECTURAL OVERVIEW: SGB Border Rendering vs. Standard Game Boy (GB)
+	// =========================================================================
+	// Just like the standard Game Boy PPU separates graphics into Tile Data, 
+	// Tile Maps, and Palettes, the Super Game Boy (SGB) border relies on the exact 
+	// same conceptual pipeline, but mapped to SNES background layers:
+	//
+	// 1. CHR_TRN ($13) -> [Equivalent to GB Tile Data (0x8000)]
+	//    - Acts as a hardware trigger that pulls 4KB of raw tile graphics from 
+	//      GB VRAM (Bank 0) and copies them into SNES Tile VRAM (`snesTileData`).
+	//    - These are the raw 4bpp graphic blocks that make up the border artwork.
+	//
+	// 2. PCT_TRN ($14) -> [Equivalent to GB Tile Map (0x9800 / 0x9C00)]
+	//    - Acts as a layout blueprint (`snesTileMap`). 
+	//    - Each 16-bit entry acts like a GB tilemap cell: it contains a **tile index** 
+	//      pointing to `snesTileData`, combined with bits for **palette assignment** 
+	//      and **flipping attributes**. It dictates *where* each tile sits on screen.
+	//
+	// 3. DATA_TRN ($0B / PAL_TRN) -> [Equivalent to GB Palettes (BGP/OBP or CGB RAM)]
+	//    - Pulls 4KB of color data from GB VRAM into `sgbBorderPalettes`.
+	//    - Provides the actual 15-bit RGB color values for the palettes referenced 
+	//      by the tilemap.
+	// =========================================================================
+
+	switch (static_cast<SGB_COMMAND>(commandCode))
+	{
+	case SGB_COMMAND::SGB_CMD_CHR_TRN:
+		requestDeferredSGBTrn(SGB_COMMAND::SGB_CMD_CHR_TRN, packetData);
+		BREAK;
+
+	case SGB_COMMAND::SGB_CMD_PCT_TRN:
+		requestDeferredSGBTrn(SGB_COMMAND::SGB_CMD_PCT_TRN, packetData);
+		BREAK;
+
+	case SGB_COMMAND::SGB_CMD_PAL_TRN:
+		requestDeferredSGBTrn(SGB_COMMAND::SGB_CMD_PAL_TRN, packetData);
+		BREAK;
+
+	case SGB_COMMAND::SGB_CMD_ATTR_TRN:
+		requestDeferredSGBTrn(SGB_COMMAND::SGB_CMD_ATTR_TRN, packetData);
+		BREAK;
+
+	case SGB_COMMAND::SGB_CMD_PAL_SET:
+		handleSGB_PAL_SET(packetData);
+		BREAK;
+
+	case SGB_COMMAND::SGB_CMD_ATTR_SET:
+		handleSGB_ATTR_SET(packetData);
+		BREAK;
+
+	case SGB_COMMAND::SGB_CMD_MASK_EN:
+		handleSGB_MASK_EN(packetData);
+		BREAK;
+
+	case SGB_COMMAND::SGB_CMD_MLT_REQ:
+		handleSGB_MLT_REQ(packetData);
+		BREAK;
+
+	case SGB_COMMAND::SGB_CMD_PAL01:
+	case SGB_COMMAND::SGB_CMD_PAL23:
+	case SGB_COMMAND::SGB_CMD_PAL03:
+	case SGB_COMMAND::SGB_CMD_PAL12:
+		handleSGB_PAL_XX(commandCode, packetData);
+		BREAK;
+
+	case SGB_COMMAND::SGB_CMD_ATTR_BLK:
+	case SGB_COMMAND::SGB_CMD_ATTR_LIN:
+	case SGB_COMMAND::SGB_CMD_ATTR_DIV:
+	case SGB_COMMAND::SGB_CMD_ATTR_CHR:
+		handleSGB_ATTR(commandCode, packetData);
+		BREAK;
+
+	default:
+		// Unhandled or non-visual command (e.g. SOUND / DATA_BM)
+		BREAK;
+	}
+}
+
 // Called EVERY TIME P14/P15 selection bits change (on JOYP write) AND after onKeyEvent
 void GBc_t::updateJOYP(STATE8 prevState)
 {
@@ -3416,13 +3657,22 @@ void GBc_t::updateJOYP(STATE8 prevState)
 		joy.P12_UP_SELECT = toState((keys.keyUP == YES) || (keys.keySELECT == YES));
 		joy.P13_DOWN_START = toState((keys.keyDOWN == YES) || (keys.keySTART == YES));
 	}
-	else
+	else // Both P14 and P15 are 1 (Deselected)
 	{
-		// Keep all 4 keys to deactivated state
-		pGBc_peripherals->P1_JOYP.joyPadMemory |= 0x0F;
+		if (isSGBCompatible() == YES && sgbJoypad.numPlayers > 1)
+		{
+			// SGB Hardware ID Nibble output when both lines are deselected
+			uint8_t idNibble = (0x0F - sgbJoypad.activePlayer) & 0x0F;
+			pGBc_peripherals->P1_JOYP.joyPadMemory = (pGBc_peripherals->P1_JOYP.joyPadMemory & 0xF0) | idNibble;
+		}
+		else
+		{
+			// Standard Game Boy: Keep all 4 keys in deactivated state (0x0F)
+			pGBc_peripherals->P1_JOYP.joyPadMemory |= 0x0F;
+		}
 	}
 
-	// Setting the unused bits to 1
+	// Setting the unused bits (7 and 6) to 1
 	pGBc_peripherals->P1_JOYP.joyPadMemory |= 0xC0;
 
 	// Check if we need to request for interrupt
@@ -4149,7 +4399,6 @@ float GBc_t::finHPF(float sampleIn)
 {
 	float sampleOut = MUTE_AUDIO;
 
-#ifndef __RPI_PICO__
 	static float capacitor = MUTE_AUDIO;
 
 	if (_ENABLE_AUDIO_HPF == YES)
@@ -4173,9 +4422,6 @@ float GBc_t::finHPF(float sampleIn)
 	{
 		sampleOut = sampleIn;
 	}
-#else
-	sampleOut = sampleIn;
-#endif
 
 	RETURN sampleOut;
 }
@@ -4193,7 +4439,6 @@ void GBc_t::captureDownsampledAudioSamples()
 	{
 		pGBc_instance->GBc_state.audio.downSamplingRatioCounter -= ((uint32_t)(GB_GBC_REFERENCE_CLOCK_HZ / EMULATED_AUDIO_SAMPLING_RATE_FOR_GB_GBC));
 
-#ifndef __RPI_PICO__
 		GBC_AUDIO_SAMPLE_TYPE leftSample = MUTE_AUDIO;
 		GBC_AUDIO_SAMPLE_TYPE rightSample = MUTE_AUDIO;
 
@@ -4310,7 +4555,6 @@ void GBc_t::captureDownsampledAudioSamples()
 			}
 
 		}
-#endif // !__RPI_PICO__
 	}
 
 	RETURN;
@@ -6493,15 +6737,32 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 
 										if (pGBc_display->pixelRenderCounterPerScanLine >= ZERO)
 										{
-											pGBc_display->resolvedColorBuffer
-												[pGBc_peripherals->LY][pGBc_display->pixelRenderCounterPerScanLine]
-												= getColorFromColorIDForGB(palette, objPixelToBePushed.color);
+											if (isSGBCompatible() == YES)
+											{
+												// Post-BGP shade, captured unconditionally every pixel regardless of mask
+												// state. This single buffer serves two independent readers with different
+												// timing: readSGBTransferByte (border/palette _TRN handlers) takes a
+												// one-shot snapshot 3 frames after a command, which the cart times to land
+												// during its own MASK_EN FREEZE_SCREEN window by convention. 
+												// The per-frame resolve in displayCompleteScreen's CANCEL_MASK case
+												// reads continuously, but only runs while unmasked, so it only ever shows
+												// live gameplay. Same source, different consumers.
+												pGBc_display->sgbScreenBuffer
+													[pGBc_peripherals->LY][pGBc_display->pixelRenderCounterPerScanLine]
+													= getColorNumberFromColorIDForGB(palette, objPixelToBePushed.color);
+											}
+											else
+											{
+												pGBc_display->resolvedColorBuffer
+													[pGBc_peripherals->LY][pGBc_display->pixelRenderCounterPerScanLine]
+													= getColorFromColorIDForGB(palette, objPixelToBePushed.color);
 
-											// update the imgui buffer
+												// update the imgui buffer
 
-											pGBc_display->imGuiBuffer.imGuiBuffer2D
-												[pGBc_peripherals->LY][pGBc_display->pixelRenderCounterPerScanLine]
-												= getColorFromColorIDForGB(palette, objPixelToBePushed.color).COLOR;
+												pGBc_display->imGuiBuffer.imGuiBuffer2D
+													[pGBc_peripherals->LY][pGBc_display->pixelRenderCounterPerScanLine]
+													= getColorFromColorIDForGB(palette, objPixelToBePushed.color).COLOR;
+											}
 										}
 
 										didWeRenderObjectForThisPixel = YES;
@@ -6532,13 +6793,31 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 								{
 									if (pGBc_display->pixelRenderCounterPerScanLine >= ZERO)
 									{
-										pGBc_display->resolvedColorBuffer[pGBc_peripherals->LY][pGBc_display->pixelRenderCounterPerScanLine]
-											= getColorFromColorIDForGB(palette, bgWinpixelToBePushed.color);
+										if (isSGBCompatible() == YES)
+										{
+											// Post-BGP shade, captured unconditionally every pixel regardless of mask
+											// state. This single buffer serves two independent readers with different
+											// timing: readSGBTransferByte (border/palette _TRN handlers) takes a
+											// one-shot snapshot 3 frames after a command, which the cart times to land
+											// during its own MASK_EN FREEZE_SCREEN window by convention. 
+											// The per-frame resolve in displayCompleteScreen's CANCEL_MASK case
+											// reads continuously, but only runs while unmasked, so it only ever shows
+											// live gameplay. Same source, different consumers.
+											uint8_t shade = (palette >> (TO_UINT8(bgWinpixelToBePushed.color) << 1)) & 0x03;
+											pGBc_display->sgbScreenBuffer
+												[pGBc_peripherals->LY][pGBc_display->pixelRenderCounterPerScanLine]
+												= getColorNumberFromColorIDForGB(palette, bgWinpixelToBePushed.color);
+										}
+										else
+										{
+											pGBc_display->resolvedColorBuffer[pGBc_peripherals->LY][pGBc_display->pixelRenderCounterPerScanLine]
+												= getColorFromColorIDForGB(palette, bgWinpixelToBePushed.color);
 
-										// update the imgui buffer
+											// update the imgui buffer
 
-										pGBc_display->imGuiBuffer.imGuiBuffer2D[pGBc_peripherals->LY][pGBc_display->pixelRenderCounterPerScanLine]
-											= getColorFromColorIDForGB(palette, bgWinpixelToBePushed.color).COLOR;
+											pGBc_display->imGuiBuffer.imGuiBuffer2D[pGBc_peripherals->LY][pGBc_display->pixelRenderCounterPerScanLine]
+												= getColorFromColorIDForGB(palette, bgWinpixelToBePushed.color).COLOR;
+										}
 
 										pGBc_display->prevDMGPixelBGColor = bgWinpixelToBePushed.color;
 										pGBc_display->prevDMGPixelIsBG = YES;
@@ -6548,13 +6827,31 @@ void GBc_t::processPixelPipelineAndRender(int32_t dots)
 								{
 									if (pGBc_display->pixelRenderCounterPerScanLine >= ZERO)
 									{
-										pGBc_display->resolvedColorBuffer[pGBc_peripherals->LY][pGBc_display->pixelRenderCounterPerScanLine]
-											= getColorFromColorIDForGB(palette, COLOR_ID_ZERO);
+										if (isSGBCompatible() == YES)
+										{
+											// Post-BGP shade, captured unconditionally every pixel regardless of mask
+											// state. This single buffer serves two independent readers with different
+											// timing: readSGBTransferByte (border/palette _TRN handlers) takes a
+											// one-shot snapshot 3 frames after a command, which the cart times to land
+											// during its own MASK_EN FREEZE_SCREEN window by convention. 
+											// The per-frame resolve in displayCompleteScreen's CANCEL_MASK case
+											// reads continuously, but only runs while unmasked, so it only ever shows
+											// live gameplay. Same source, different consumers.
+											uint8_t shade = (palette >> (TO_UINT8(COLOR_ID_ZERO) << 1)) & 0x03;
+											pGBc_display->sgbScreenBuffer
+												[pGBc_peripherals->LY][pGBc_display->pixelRenderCounterPerScanLine]
+												= getColorNumberFromColorIDForGB(palette, COLOR_ID_ZERO);
+										}
+										else
+										{
+											pGBc_display->resolvedColorBuffer[pGBc_peripherals->LY][pGBc_display->pixelRenderCounterPerScanLine]
+												= getColorFromColorIDForGB(palette, COLOR_ID_ZERO);
 
-										// update the imgui buffer
+											// update the imgui buffer
 
-										pGBc_display->imGuiBuffer.imGuiBuffer2D[pGBc_peripherals->LY][pGBc_display->pixelRenderCounterPerScanLine]
-											= getColorFromColorIDForGB(palette, COLOR_ID_ZERO).COLOR;
+											pGBc_display->imGuiBuffer.imGuiBuffer2D[pGBc_peripherals->LY][pGBc_display->pixelRenderCounterPerScanLine]
+												= getColorFromColorIDForGB(palette, COLOR_ID_ZERO).COLOR;
+										}
 
 										pGBc_display->prevDMGPixelBGColor = COLOR_ID_ZERO;
 										pGBc_display->prevDMGPixelIsBG = YES;
@@ -6656,14 +6953,135 @@ void GBc_t::translateGFX(PALETTE_ID from, PALETTE_ID to, PALETTE_ID colorCorrect
 	}
 }
 
+void GBc_t::drawSGBBorderTiles()
+{
+	for (int ty = 0; ty < 28; ++ty)
+	{
+		for (int tx = 0; tx < 32; ++tx)
+		{
+			uint16_t mapEntry = snesTileMap.raw[ty * 32 + tx];
+
+			uint16_t tileIndex = mapEntry & 0x01FF;
+			uint8_t  paletteIdx = (mapEntry >> 10) & 0x7;
+			bool     hFlip = (mapEntry & 0x4000) != 0;
+			bool     vFlip = (mapEntry & 0x8000) != 0;
+
+			const uint8_t* tileData = &snesTileData[tileIndex * 32];
+			const uint8_t* lowPlanes = tileData;
+			const uint8_t* highPlanes = tileData + 16;
+
+			for (int py = 0; py < 8; ++py)
+			{
+				int row = vFlip ? (7 - py) : py;
+				uint8_t plane0 = lowPlanes[row * 2 + 0];
+				uint8_t plane1 = lowPlanes[row * 2 + 1];
+				uint8_t plane2 = highPlanes[row * 2 + 0];
+				uint8_t plane3 = highPlanes[row * 2 + 1];
+
+				for (int px = 0; px < 8; ++px)
+				{
+					int col = hFlip ? px : (7 - px);
+
+					uint8_t bit = 1 << col;
+					uint8_t colorId = 0;
+					if (plane0 & bit) colorId |= 0x01;
+					if (plane1 & bit) colorId |= 0x02;
+					if (plane2 & bit) colorId |= 0x04;
+					if (plane3 & bit) colorId |= 0x08;
+
+					uint16_t rgb15 = sgbBorderPalettes[paletteIdx][colorId];
+					if (colorId == 0) rgb15 = sgbSystemPalettePool[0][0];
+					Pixel finalPixel = snesColorToPixel(rgb15);
+
+					int screenX = (tx * 8) + px;
+					int screenY = (ty * 8) + py;
+					if (screenX < 256 && screenY < 224)
+					{
+						pGBc_display->imGuiSgbBuffer.imGuiSgbBuffer2D[screenY][screenX] = finalPixel;
+					}
+				}
+			}
+		}
+	}
+}
+
 void GBc_t::displayCompleteScreen()
 {
+	// Determine active dimensions and buffer based on SGB state
+	FLAG useSGB = (isSGBCompatible() == YES);
+
+	int activeWidth = useSGB ? sgb_screen_width : screen_width;
+	int activeHeight = useSGB ? sgb_screen_height : screen_height;
+
+	// Reference the correct buffer dynamically!
+	Pixel* activeBuffer = useSGB ? pGBc_display->imGuiSgbBuffer.imGuiSgbBuffer1D : pGBc_display->imGuiBuffer.imGuiBuffer1D;
+
+	// --- SGB MASK_EN OVERRIDE LOGIC ---
+	// Scoped to the 160x144 interior rectangle only (SGB_GB_OFFSET_X/Y) -- on
+	// real hardware the border stays visible while the game screen is masked.
+	// The border itself is no longer drawn here: drawSGBBorderTiles() (called
+	// from resolvePendingSGBTrnIfDue) writes it directly once per transfer,
+	// and the live interior is written directly by the pixel push. Nothing
+	// left to composite per-frame.
+	if (useSGB)
+	{
+		const int interiorWidth = screen_width;   // 160
+		const int interiorHeight = screen_height; // 144
+		auto& sgb2D = pGBc_display->imGuiSgbBuffer.imGuiSgbBuffer2D;
+
+		// The pixel push already skips writing the interior
+		// while frozen, so whatever was last drawn simply stays in place. No
+		// capture, no restore, nothing to do in this switch for this case.
+		switch (currentScreenMask)
+		{
+		case SGB_MASK_MODE::FREEZE_SCREEN:
+		{
+			BREAK;
+		}
+		case SGB_MASK_MODE::BLANK_BLACK:
+		{
+			for (int y = 0; y < interiorHeight; ++y)
+			{
+				std::memset(&sgb2D[SGB_GB_OFFSET_Y + y][SGB_GB_OFFSET_X], 0x00, interiorWidth * sizeof(Pixel));
+			}
+			BREAK;
+		}
+		case SGB_MASK_MODE::BLANK_COLOR_0:
+		{
+			Pixel color0 = snesColorToPixel(sgbBGPalettes[0][0]);
+			for (int y = 0; y < interiorHeight; ++y)
+			{
+				for (int x = 0; x < interiorWidth; ++x)
+				{
+					sgb2D[SGB_GB_OFFSET_Y + y][SGB_GB_OFFSET_X + x] = color0;
+				}
+			}
+			BREAK;
+		}
+		case SGB_MASK_MODE::CANCEL_MASK:
+		{
+			for (int y = 0; y < interiorHeight; ++y)
+			{
+				for (int x = 0; x < interiorWidth; ++x)
+				{
+					uint8_t shade = pGBc_display->sgbScreenBuffer[y][x] & 0x03;
+					sgb2D[SGB_GB_OFFSET_Y + y][SGB_GB_OFFSET_X + x] = resolveSGBPixel(shade, TO_UINT8(x), TO_UINT8(y));
+				}
+			}
+			BREAK;
+		}
+		default:
+			FATAL("Unknown SGB MASK_EN mode : %u", TO_UINT8(currentScreenMask));
+			BREAK;
+		}
+	}
+
 	if (fbSHA1Enabled == YES)
 	{
 		if (std::chrono::steady_clock::now() >= fbSHA1StartTime + std::chrono::seconds(fbSHA1TimeoutSeconds))
 		{
-			const size_t bufferSize = static_cast<size_t>(getScreenWidth()) * getScreenHeight() * sizeof(Pixel);
-			std::string frameHash = SHA1_CUSTOM::CalculateSHA1(pGBc_display->imGuiBuffer.imGuiBuffer1D, getScreenWidth(), getScreenHeight());
+			const size_t bufferSize = static_cast<size_t>(activeWidth) * activeHeight * sizeof(Pixel);
+			std::string frameHash = SHA1_CUSTOM::CalculateSHA1(activeBuffer, activeWidth, activeHeight);
 			LOG("SHA1: %s", frameHash.c_str());
 			std::ofstream file("sha1.txt");
 			file << frameHash;
@@ -6684,7 +7102,7 @@ void GBc_t::displayCompleteScreen()
 	// Handle for gameboy system's texture
 
 	glBindTexture(GL_TEXTURE_2D, gameboy_texture);
-	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, getScreenWidth(), getScreenHeight(), GL_RGBA, GL_UNSIGNED_BYTE, (GLvoid*)pGBc_display->imGuiBuffer.imGuiBuffer1D);
+	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, activeWidth, activeHeight, GL_RGBA, GL_UNSIGNED_BYTE, (GLvoid*)activeBuffer);
 
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -6702,18 +7120,18 @@ void GBc_t::displayCompleteScreen()
 
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();
-	glOrtho(0, getScreenWidth() * FRAME_BUFFER_SCALE, 0, getScreenHeight() * FRAME_BUFFER_SCALE, -1, 1);
+	glOrtho(0, activeWidth * FRAME_BUFFER_SCALE, 0, activeHeight * FRAME_BUFFER_SCALE, -1, 1);
 	glMatrixMode(GL_MODELVIEW);
-	glViewport(0, 0, getScreenWidth() * FRAME_BUFFER_SCALE, getScreenHeight() * FRAME_BUFFER_SCALE);
+	glViewport(0, 0, activeWidth * FRAME_BUFFER_SCALE, activeHeight * FRAME_BUFFER_SCALE);
 	glBegin(GL_QUADS);
 	glTexCoord2f(0.0, 0.0);
 	glVertex2f(0.0, 0.0);
 	glTexCoord2f(1.0, 0.0);
-	glVertex2f(getScreenWidth() * FRAME_BUFFER_SCALE, 0.0);
+	glVertex2f(activeWidth * FRAME_BUFFER_SCALE, 0.0);
 	glTexCoord2f(1.0, 1.0);
-	glVertex2f(getScreenWidth() * FRAME_BUFFER_SCALE, getScreenHeight() * FRAME_BUFFER_SCALE);
+	glVertex2f(activeWidth * FRAME_BUFFER_SCALE, activeHeight * FRAME_BUFFER_SCALE);
 	glTexCoord2f(0.0, 1.0);
-	glVertex2f(0.0, getScreenHeight() * FRAME_BUFFER_SCALE);
+	glVertex2f(0.0, activeHeight * FRAME_BUFFER_SCALE);
 	glEnd();
 
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -6730,8 +7148,8 @@ void GBc_t::displayCompleteScreen()
 
 		glBindTexture(GL_TEXTURE_2D, matrix_texture);
 
-		int viewportWidth = getScreenWidth() * FRAME_BUFFER_SCALE;
-		int viewportHeight = getScreenHeight() * FRAME_BUFFER_SCALE;
+		int viewportWidth = activeWidth * FRAME_BUFFER_SCALE;
+		int viewportHeight = activeHeight * FRAME_BUFFER_SCALE;
 
 		glMatrixMode(GL_PROJECTION);
 		glLoadIdentity();
@@ -6744,11 +7162,11 @@ void GBc_t::displayCompleteScreen()
 		glBegin(GL_QUADS);
 		glTexCoord2f(0.0, 0.0);
 		glVertex2f(0.0, 0.0);
-		glTexCoord2f(getScreenWidth(), 0.0);
+		glTexCoord2f(activeWidth, 0.0);
 		glVertex2f(viewportWidth, 0.0);
-		glTexCoord2f(getScreenWidth(), getScreenHeight());
+		glTexCoord2f(activeWidth, activeHeight);
 		glVertex2f(viewportWidth, viewportHeight);
-		glTexCoord2f(0.0, getScreenHeight());
+		glTexCoord2f(0.0, activeHeight);
 		glVertex2f(0.0, viewportHeight);
 		glEnd();
 
@@ -6765,7 +7183,7 @@ void GBc_t::displayCompleteScreen()
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-	if (currEnVFilter == VIDEO_FILTERS::LCD_FILTER)
+	if (currEnVFilter == VIDEO_FILTERS::BILINEAR_FILTER) // Fixed filter check consistency
 	{
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -6776,10 +7194,10 @@ void GBc_t::displayCompleteScreen()
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	}
 #else
-	// 1. Upload emulator framebuffer to gameboy_texture
+	// 1. Upload active emulator framebuffer to gameboy_texture
 	GL_CALL(glBindTexture(GL_TEXTURE_2D, gameboy_texture));
-	GL_CALL(glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, getScreenWidth(), getScreenHeight(), GL_RGBA, GL_UNSIGNED_BYTE,
-		(GLvoid*)pGBc_display->imGuiBuffer.imGuiBuffer1D));
+	GL_CALL(glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, activeWidth, activeHeight, GL_RGBA, GL_UNSIGNED_BYTE,
+		(GLvoid*)activeBuffer));
 
 	// Choose filtering mode (NEAREST or LINEAR)
 	GLint filter = (currEnVFilter == VIDEO_FILTERS::BILINEAR_FILTER) ? GL_LINEAR : GL_NEAREST;
@@ -6789,8 +7207,8 @@ void GBc_t::displayCompleteScreen()
 	GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter));
 
 	// 1b. Ghost pass – exponential decay blend of gameboy_texture into ghost_texture.
-	//     Runs at native GB/GBC resolution (160x144 or 160x144 GBC) before upscaling.
-	//     ghost_texture is NOT cleared between frames – that persistence is the effect.
+	//      Runs at native resolution before upscaling.
+	//      ghost_texture is NOT cleared between frames – that persistence is the effect.
 	if (ghost_decay > 0.0f)
 	{
 		uint32_t read = ghost_index;
@@ -6801,7 +7219,7 @@ void GBc_t::displayCompleteScreen()
 		// Attach WRITE target (critical fix)
 		GL_CALL(glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, ghost_texture[write], 0));
 
-		GL_CALL(glViewport(0, 0, getScreenWidth(), getScreenHeight()));
+		GL_CALL(glViewport(0, 0, activeWidth, activeHeight));
 
 		GL_CALL(glUseProgram(shaderProgramGhost));
 
@@ -6829,12 +7247,12 @@ void GBc_t::displayCompleteScreen()
 	}
 
 	// 2. Render into framebuffer (masquerade_texture target)
-	//    Source is ghost_texture when ghosting is active, gameboy_texture otherwise.
+	//      Source is ghost_texture when ghosting is active, gameboy_texture otherwise.
 	GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, frame_buffer));
-	GL_CALL(glViewport(0, 0, getScreenWidth() * FRAME_BUFFER_SCALE, getScreenHeight() * FRAME_BUFFER_SCALE));
+	GL_CALL(glViewport(0, 0, activeWidth * FRAME_BUFFER_SCALE, activeHeight * FRAME_BUFFER_SCALE));
 	GL_CALL(glClear(GL_COLOR_BUFFER_BIT));
 
-	// Pass 1: Render base texture (ghosted or raw Game Boy framebuffer)
+	// Pass 1: Render base texture (ghosted or raw framebuffer)
 	GL_CALL(glUseProgram(shaderProgramBasic));
 	GL_CALL(glActiveTexture(GL_TEXTURE0));
 
@@ -6912,15 +7330,275 @@ void GBc_t::displayCompleteScreen()
 #endif
 }
 
+void GBc_t::initDefaultSGBBorder()
+{
+	auto& sgbBuffer = pGBc_display->imGuiSgbBuffer.imGuiSgbBuffer1D;
+
+	// Open the .sgb border file using the path string
+	std::ifstream file(_SGB_DEFAULT_BORDER_LOCATION, std::ios::binary);
+	if (!file.is_open())
+	{
+		// Handle error: file could not be opened
+		RETURN;
+	}
+
+	// Read file contents into a byte vector
+	std::vector<uint8_t> fileData(
+		(std::istreambuf_iterator<char>(file)),
+		std::istreambuf_iterator<char>()
+	);
+
+	// Verify expected size: 8192 (tiles) + 1792 (map) + 128 (palettes) = 10112 bytes (0x2780)
+	if (fileData.size() < 0x2780)
+	{
+		// Handle error: file size too small
+		RETURN;
+	}
+
+	const uint8_t* tileData = fileData.data() + 0x0000; // Tiles (8192 bytes)
+	const uint8_t* tileMap = fileData.data() + 0x2000; // Tile map (1792 bytes)
+	const uint8_t* paletteData = fileData.data() + 0x2700; // Palettes (128 bytes)
+
+	// The SGB border screen layout is 32x28 tiles (256x224 pixels)
+	for (int ty = 0; ty < 28; ++ty)
+	{
+		for (int tx = 0; tx < 32; ++tx)
+		{
+			int mapIndex = (ty * 32 + tx) * 2;
+
+			// Read 16-bit SNES tilemap entry
+			uint16_t entry = tileMap[mapIndex] | (tileMap[mapIndex + 1] << 8);
+			uint16_t tileNum = entry & 0x03FF;
+			bool hFlip = (entry & 0x4000) != 0;
+			bool vFlip = (entry & 0x8000) != 0;
+			int palNum = (entry >> 10) & 0x07; // Palette index (0-7)
+
+			// Each 4bpp SNES tile takes 32 bytes
+			const uint8_t* tile = tileData + (tileNum * 32);
+
+			for (int py = 0; py < 8; ++py)
+			{
+				int actualY = vFlip ? (7 - py) : py;
+
+				// SNES 4bpp bitplane layout: planes 0/1 are in the first 16 bytes, 2/3 in the next 16 bytes
+				uint8_t plane0 = tile[actualY * 2 + 0];
+				uint8_t plane1 = tile[actualY * 2 + 1];
+				uint8_t plane2 = tile[actualY * 2 + 16];
+				uint8_t plane3 = tile[actualY * 2 + 17];
+
+				for (int px = 0; px < 8; ++px)
+				{
+					// Matches drawSGBBorderTiles' verified-correct convention: bit 7 = leftmost pixel.
+					int col = hFlip ? px : (7 - px);
+					uint8_t bit = 1 << col;
+
+					int colorIdx = ((plane0 & bit) ? 1 : 0) |
+						((plane1 & bit) ? 2 : 0) |
+						((plane2 & bit) ? 4 : 0) |
+						((plane3 & bit) ? 8 : 0);
+
+					// Look up color index in the respective 16-color palette (2 bytes per color, 15-bit BGR)
+					int palOffset = (palNum * 16 + colorIdx) * 2;
+					uint16_t snesColor = paletteData[palOffset] | (paletteData[palOffset + 1] << 8);
+
+					// Convert SNES 15-bit BGR to standard 24-bit RGB
+					uint8_t r = (snesColor & 0x001F) << 3;
+					uint8_t g = ((snesColor & 0x03E0) >> 5) << 3;
+					uint8_t b = ((snesColor & 0x7C00) >> 10) << 3;
+
+					int screenX = tx * 8 + px;
+					int screenY = ty * 8 + py;
+
+					if (screenX < 256 && screenY < 224)
+					{
+						sgbBuffer[screenY * 256 + screenX] = Pixel(r, g, b);
+					}
+				}
+			}
+		}
+	}
+}
+
 void GBc_t::initializeGraphics()
 {
+	if (isCLI() == NO && isHeadless == NO)
+	{
+		// Determine initialization dimensions and buffer based on SGB state
+		FLAG useSGB = (isSGBCompatible() == YES);
+		int initWidth = useSGB ? sgb_screen_width : screen_width;
+		int initHeight = useSGB ? sgb_screen_height : screen_height;
+		Pixel* initBuffer = useSGB ? pGBc_display->imGuiSgbBuffer.imGuiSgbBuffer1D : pGBc_display->imGuiBuffer.imGuiBuffer1D;
+
+		// initialization specific to OpenGL
+#if (GL_FIXED_FUNCTION_PIPELINE == YES) && !defined(IMGUI_IMPL_OPENGL_ES2) && !defined(IMGUI_IMPL_OPENGL_ES3)
+		glEnable(GL_TEXTURE_2D);
+		glGenFramebuffers(1, &frame_buffer);
+		glBindFramebuffer(GL_FRAMEBUFFER, frame_buffer);
+
+		glGenTextures(1, &masquerade_texture);
+		glBindTexture(GL_TEXTURE_2D, masquerade_texture);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, initWidth * FRAME_BUFFER_SCALE, initHeight * FRAME_BUFFER_SCALE, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, masquerade_texture, 0);
+
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+		glGenTextures(1, &gameboy_texture);
+		glBindTexture(GL_TEXTURE_2D, gameboy_texture);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, initWidth, initHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, (GLvoid*)initBuffer);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+
+		// for "Dot Matrix"
+		glGenTextures(1, &matrix_texture);
+
+		glBindTexture(GL_TEXTURE_2D, matrix_texture);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 4, 4, 0, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8, (GLvoid*)matrix);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+#else
+		// 1. Setup framebuffer
+		GL_CALL(glGenFramebuffers(1, &frame_buffer));
+		GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, frame_buffer));
+
+		// 2. Create texture to attach to framebuffer (masquerade_texture)
+		GL_CALL(glGenTextures(1, &masquerade_texture));
+		GL_CALL(glBindTexture(GL_TEXTURE_2D, masquerade_texture));
+		GL_CALL(glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, initWidth * FRAME_BUFFER_SCALE, initHeight * FRAME_BUFFER_SCALE, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr));
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST));
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST));
+		GL_CALL(glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, masquerade_texture, 0));
+
+		// Optional: Check framebuffer status
+		if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+		{
+			LOG("Error: Framebuffer is not complete!");
+		}
+		GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, 0)); // Unbind
+
+		// 3. Game Boy texture (used to upload emulated framebuffer)
+		GL_CALL(glGenTextures(1, &gameboy_texture));
+		GL_CALL(glBindTexture(GL_TEXTURE_2D, gameboy_texture));
+		GL_CALL(glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, initWidth, initHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, (GLvoid*)initBuffer));
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST));
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST));
+
+		// 4. Dot Matrix overlay texture
+		GL_CALL(glGenTextures(1, &matrix_texture));
+		GL_CALL(glBindTexture(GL_TEXTURE_2D, matrix_texture));
+		GL_CALL(glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 4, 4, 0, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8, (GLvoid*)matrix));
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST));
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST));
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT));
+		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT));
+
+		// 4b. Ghost accumulator textures (PING-PONG)
+		GL_CALL(glGenTextures(2, ghost_texture));
+
+		for (int i = 0; i < 2; i++)
+		{
+			GL_CALL(glBindTexture(GL_TEXTURE_2D, ghost_texture[i]));
+			GL_CALL(glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, initWidth, initHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr));
+			GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST));
+			GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST));
+			GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
+			GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
+		}
+
+		// Start index
+		ghost_index = 0;
+
+		// 4c. Ghost FBO (no permanent attachment!)
+		GL_CALL(glGenFramebuffers(1, &ghost_fbo));
+
+		if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+		{
+			LOG("Error: Ghost framebuffer is not complete!");
+		}
+		GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, 0));
+
+		// 5. Fullscreen Quad VAO/VBO (for textured quad rendering)
+		float fullscreenVertices[] = {
+			//  X     Y      U     V
+			-1.0f,  1.0f,  0.0f, 1.0f,  // Top-left
+			-1.0f, -1.0f,  0.0f, 0.0f,  // Bottom-left
+			 1.0f, -1.0f,  1.0f, 0.0f,  // Bottom-right
+
+			-1.0f,  1.0f,  0.0f, 1.0f,  // Top-left
+			 1.0f, -1.0f,  1.0f, 0.0f,  // Bottom-right
+			 1.0f,  1.0f,  1.0f, 1.0f   // Top-right
+		};
+
+		GL_CALL(glGenVertexArrays(1, &fullscreenVAO));
+		GL_CALL(glBindVertexArray(fullscreenVAO));
+
+		GL_CALL(glGenBuffers(1, &fullscreenVBO));
+		GL_CALL(glBindBuffer(GL_ARRAY_BUFFER, fullscreenVBO));
+		GL_CALL(glBufferData(GL_ARRAY_BUFFER, sizeof(fullscreenVertices), fullscreenVertices, GL_STATIC_DRAW));
+
+		// Attribute 0: position (vec2)
+		GL_CALL(glEnableVertexAttribArray(0));
+		GL_CALL(glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0));
+
+		// Attribute 1: UV (vec2)
+		GL_CALL(glEnableVertexAttribArray(1));
+		GL_CALL(glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float))));
+
+		GL_CALL(glBindVertexArray(0));
+
+		std::string shaderPath;
+#ifndef __EMSCRIPTEN__
+		shaderPath = pt.get<std::string>("internal._working_directory", "");
+		if (shaderPath.empty())
+		{
+			FATAL("Could not locate the shaders");
+		}
+#else
+		shaderPath = "assets/internal";
+#endif
+
+		// 6. Compile passthrough shader
+		shaderProgramSource_t passthroughShader = parseShader(shaderPath + "/shaders/passthrough.shaders");
+		shaderProgramBasic = createShader(passthroughShader.vertexSource, passthroughShader.fragmentSource);
+		// 7. Compile blend shader (for LCD effect)
+		shaderProgramSource_t blendShader = parseShader(shaderPath + "/shaders/blend.shaders");
+		shaderProgramBlend = createShader(blendShader.vertexSource, blendShader.fragmentSource);
+		// 8. Compile ghost shader (for LCD ghosting / frame persistence)
+		shaderProgramSource_t ghostShader = parseShader(shaderPath + "/shaders/ghost.shaders");
+		shaderProgramGhost = createShader(ghostShader.vertexSource, ghostShader.fragmentSource);
+
+		DEBUG("PASSTHROUGH VERTEX");
+		DEBUG("%s", passthroughShader.vertexSource.c_str());
+		DEBUG("PASSTHROUGH FRAGMENT");
+		DEBUG("%s", passthroughShader.fragmentSource.c_str());
+		DEBUG("BLEND VERTEX");
+		DEBUG("%s", blendShader.vertexSource.c_str());
+		DEBUG("BLEND FRAGMENT");
+		DEBUG("%s", blendShader.fragmentSource.c_str());
+		DEBUG("GHOST VERTEX");
+		DEBUG("%s", ghostShader.vertexSource.c_str());
+		DEBUG("GHOST FRAGMENT");
+		DEBUG("%s", ghostShader.fragmentSource.c_str());
+#endif
+	}
+
 	// Clear the screen
+	auto& imGuiBuffer2D = pGBc_display->imGuiBuffer.imGuiBuffer2D;
 	for (uint32_t y = ZERO; y < getScreenHeight(); y++)
 	{
 		for (uint32_t x = ZERO; x < getScreenWidth(); x++)
 		{
-			pGBc_display->imGuiBuffer.imGuiBuffer2D[y][x] = BLANK;
+			imGuiBuffer2D[y][x] = BLANK;
 		}
+	}
+
+	if (isSGBCompatible() == YES)
+	{
+		initDefaultSGBBorder();
 	}
 
 	pGBc_display->windowLineCounter = -ONE;
@@ -7018,6 +7696,10 @@ FLAG GBc_t::runEmulationAtFixedRate(uint32_t currentFrame)
 	}
 
 	displayCompleteScreen();
+
+	// Resolve any pending SGB CHR_TRN/PCT_TRN capture at the frame boundary
+	// (see resolvePendingSGBTrnIfDue comment) before anything else this VBlank.
+	resolvePendingSGBTrnIfDue();
 
 	RETURN status;
 }
@@ -7464,7 +8146,6 @@ FLAG GBc_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 		}
 	}
 
-#ifndef __RPI_PICO__
 	// Advance the printer's own timers (currently: countdown toward "print job
 	// finished"). This is decoupled from serialTick()/the byte-shift state
 	// machine on purpose -- printing is a physical, real-time process on real
@@ -7477,7 +8158,6 @@ FLAG GBc_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 		gbPrinterEngine.tick();
 		gbPrinterEngine.drawImGuiWindows();
 	}
-#endif
 
 #ifndef __RPI_PICO__
 	// Screen refresh Per LY / Per Dot yields the loop early -- letting your normal, existing
@@ -7576,165 +8256,6 @@ FLAG GBc_t::initializeEmulator()
 		currEnGbcPalette = (to_bool(cgbCorrStr) == YES) ? PALETTE_ID::PALETTE_2 : PALETTE_ID::PALETTE_1;
 	}
 	pGBc_instance->GBc_state.gbc_palette = currEnGbcPalette;
-
-	if (isCLI() == NO && isHeadless == NO)
-	{
-		// initialization specific to OpenGL
-#if (GL_FIXED_FUNCTION_PIPELINE == YES) && !defined(IMGUI_IMPL_OPENGL_ES2) && !defined(IMGUI_IMPL_OPENGL_ES3)
-		glEnable(GL_TEXTURE_2D);
-		glGenFramebuffers(1, &frame_buffer);
-		glBindFramebuffer(GL_FRAMEBUFFER, frame_buffer);
-
-		glGenTextures(1, &masquerade_texture);
-		glBindTexture(GL_TEXTURE_2D, masquerade_texture);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, getScreenWidth() * FRAME_BUFFER_SCALE, getScreenHeight() * FRAME_BUFFER_SCALE, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-
-		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, masquerade_texture, 0);
-
-		glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-		glGenTextures(1, &gameboy_texture);
-		glBindTexture(GL_TEXTURE_2D, gameboy_texture);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, getScreenWidth(), getScreenHeight(), 0, GL_RGBA, GL_UNSIGNED_BYTE, (GLvoid*)pGBc_display->imGuiBuffer.imGuiBuffer1D);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-
-		// for "Dot Matrix"
-		glGenTextures(1, &matrix_texture);
-
-		glBindTexture(GL_TEXTURE_2D, matrix_texture);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 4, 4, 0, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8, (GLvoid*)matrix);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-#else
-		// 1. Setup framebuffer
-		GL_CALL(glGenFramebuffers(1, &frame_buffer));
-		GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, frame_buffer));
-
-		// 2. Create texture to attach to framebuffer (masquerade_texture)
-		GL_CALL(glGenTextures(1, &masquerade_texture));
-		GL_CALL(glBindTexture(GL_TEXTURE_2D, masquerade_texture));
-		GL_CALL(glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, getScreenWidth() * FRAME_BUFFER_SCALE, getScreenHeight() * FRAME_BUFFER_SCALE, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr));
-		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST));
-		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST));
-		GL_CALL(glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, masquerade_texture, 0));
-
-		// Optional: Check framebuffer status
-		if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-		{
-			LOG("Error: Framebuffer is not complete!");
-		}
-		GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, 0)); // Unbind
-
-		// 3. Game Boy texture (used to upload emulated framebuffer)
-		GL_CALL(glGenTextures(1, &gameboy_texture));
-		GL_CALL(glBindTexture(GL_TEXTURE_2D, gameboy_texture));
-		GL_CALL(glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, getScreenWidth(), getScreenHeight(), 0, GL_RGBA, GL_UNSIGNED_BYTE, (GLvoid*)pGBc_display->imGuiBuffer.imGuiBuffer1D));
-		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST));
-		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST));
-
-		// 4. Dot Matrix overlay texture
-		GL_CALL(glGenTextures(1, &matrix_texture));
-		GL_CALL(glBindTexture(GL_TEXTURE_2D, matrix_texture));
-		GL_CALL(glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 4, 4, 0, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8, (GLvoid*)matrix));
-		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST));
-		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST));
-		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT));
-		GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT));
-
-		// 4b. Ghost accumulator textures (PING-PONG)
-		GL_CALL(glGenTextures(2, ghost_texture));
-
-		for (int i = 0; i < 2; i++)
-		{
-			GL_CALL(glBindTexture(GL_TEXTURE_2D, ghost_texture[i]));
-			GL_CALL(glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, getScreenWidth(), getScreenHeight(), 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr));
-			GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST));
-			GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST));
-			GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
-			GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
-		}
-
-		// Start index
-		ghost_index = 0;
-
-		// 4c. Ghost FBO (no permanent attachment!)
-		GL_CALL(glGenFramebuffers(1, &ghost_fbo));
-
-		if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-		{
-			LOG("Error: Ghost framebuffer is not complete!");
-		}
-		GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, 0));
-
-		// 5. Fullscreen Quad VAO/VBO (for textured quad rendering)
-		float fullscreenVertices[] = {
-			//  X     Y      U     V
-			-1.0f,  1.0f,  0.0f, 1.0f,  // Top-left
-			-1.0f, -1.0f,  0.0f, 0.0f,  // Bottom-left
-			 1.0f, -1.0f,  1.0f, 0.0f,  // Bottom-right
-
-			-1.0f,  1.0f,  0.0f, 1.0f,  // Top-left
-			 1.0f, -1.0f,  1.0f, 0.0f,  // Bottom-right
-			 1.0f,  1.0f,  1.0f, 1.0f   // Top-right
-		};
-
-		GL_CALL(glGenVertexArrays(1, &fullscreenVAO));
-		GL_CALL(glBindVertexArray(fullscreenVAO));
-
-		GL_CALL(glGenBuffers(1, &fullscreenVBO));
-		GL_CALL(glBindBuffer(GL_ARRAY_BUFFER, fullscreenVBO));
-		GL_CALL(glBufferData(GL_ARRAY_BUFFER, sizeof(fullscreenVertices), fullscreenVertices, GL_STATIC_DRAW));
-
-		// Attribute 0: position (vec2)
-		GL_CALL(glEnableVertexAttribArray(0));
-		GL_CALL(glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0));
-
-		// Attribute 1: UV (vec2)
-		GL_CALL(glEnableVertexAttribArray(1));
-		GL_CALL(glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float))));
-
-		GL_CALL(glBindVertexArray(0));
-
-		std::string shaderPath;
-#ifndef __EMSCRIPTEN__
-		shaderPath = pt.get<std::string>("internal._working_directory", "");
-		if (shaderPath.empty())
-		{
-			FATAL("Could not locate the shaders");
-		}
-#else
-		shaderPath = "assets/internal";
-#endif
-
-		// 6. Compile passthrough shader
-		shaderProgramSource_t passthroughShader = parseShader(shaderPath + "/shaders/passthrough.shaders");
-		shaderProgramBasic = createShader(passthroughShader.vertexSource, passthroughShader.fragmentSource);
-		// 7. Compile blend shader (for LCD effect)
-		shaderProgramSource_t blendShader = parseShader(shaderPath + "/shaders/blend.shaders");
-		shaderProgramBlend = createShader(blendShader.vertexSource, blendShader.fragmentSource);
-		// 8. Compile ghost shader (for LCD ghosting / frame persistence)
-		shaderProgramSource_t ghostShader = parseShader(shaderPath + "/shaders/ghost.shaders");
-		shaderProgramGhost = createShader(ghostShader.vertexSource, ghostShader.fragmentSource);
-
-		DEBUG("PASSTHROUGH VERTEX");
-		DEBUG("%s", passthroughShader.vertexSource.c_str());
-		DEBUG("PASSTHROUGH FRAGMENT");
-		DEBUG("%s", passthroughShader.fragmentSource.c_str());
-		DEBUG("BLEND VERTEX");
-		DEBUG("%s", blendShader.vertexSource.c_str());
-		DEBUG("BLEND FRAGMENT");
-		DEBUG("%s", blendShader.fragmentSource.c_str());
-		DEBUG("GHOST VERTEX");
-		DEBUG("%s", ghostShader.vertexSource.c_str());
-		DEBUG("GHOST FRAGMENT");
-		DEBUG("%s", ghostShader.fragmentSource.c_str());
-#endif
-	}
 
 	RETURN status;
 }
@@ -8091,6 +8612,19 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 				}
 			}
 
+			if (_FORCE_SGB == YES)
+			{
+				if (isSGBCompatible() == YES)
+				{
+					LOG(" SGB Mode : Compatible");
+				}
+				else
+				{
+					FATAL("Not compatible with SGB mode. Please reload the ROM with \"_force_sgb\" disabled");
+					RETURN false;
+				}
+			}
+
 			uint8_t checksum = 0;
 			for (uint16_t address = 0x0134; address <= 0x014C; address++)
 			{
@@ -8340,7 +8874,6 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 				// setup defaults if MBC6
 				if (isMBC6())
 				{
-#ifndef __RPI_PICO__
 					auto& e = pGBc_emuStatus->mbc6;
 
 					e.flashEnable = NO;
@@ -8350,19 +8883,10 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 					e.flashCmdState = 0;
 
 					// FLASH memory content — erased state is 0xFF
-					memset(
-						e.flash.raw,
-						0xFF,
-						sizeof(e.flash)); // 8 MBits
+					memset(e.flash.raw, 0xFF, sizeof(e.flash)); // 8 MBits
 
 					// FLASH Hidden memory content — erased state is 0xFF
-					memset(
-						e.flashHidden,
-						0xFF,
-						sizeof(e.flashHidden)); // 256 bytes
-#else
-					FATAL("MBC6 is not supported");
-#endif
+					memset(e.flashHidden, 0xFF, sizeof(e.flashHidden)); // 256 bytes
 				}
 
 				// setup defaults if MBC7
@@ -8411,17 +8935,13 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 				setROMBankNumber(ONE);
 
 				// for mbc6
-#ifndef __RPI_PICO__
 				setROMBankNumberB(TWO);
-#endif // !__RPI_PICO__
 
 				// initialize the RAM Bank number to ZERO (2K external RAM) as this is basic for all MBCs
 				setRAMBankNumber(ZERO);
 
 				// for mbc6
-#ifndef __RPI_PICO__
 				setRAMBankNumberB(ONE);
-#endif // !__RPI_PICO__
 
 				// initialize the VRAM Bank number to ZERO
 				setVRAMBankNumber(ZERO);
@@ -9375,7 +9895,6 @@ byte GBc_t::readRawMemory(uint16_t address
 
 			if (isMBC6()) MASQ_UNLIKELY
 			{
-#ifndef __RPI_PICO__
 				// Refer https://gbdev.io/pandocs/MBC6.html
 				// Maximum Flash bank is 0x7F, refer // Refer https://gbdev.io/pandocs/MBC6.html#4000-5fff--romflash-bank-a-00-7f-readwrite-for-flash-read-only-for-rom
 				// Bank A = $4000-$5FFF, Bank B = $6000-$7FFF; each bank is 8 KB (0x2000)
@@ -9462,9 +9981,6 @@ byte GBc_t::readRawMemory(uint16_t address
 						}
 					}
 				}
-#else
-				FATAL("MBC6 is not supported");
-#endif
 			}
 
 			// ROM NN ($4000-$7FFF)
@@ -9569,7 +10085,6 @@ byte GBc_t::readRawMemory(uint16_t address
 
 			if (isMBC6()) MASQ_UNLIKELY
 			{
-#ifndef __RPI_PICO__
 				if (address <= 0xAFFF)
 				{
 					uint8_t RAMBankNumber = getRAMBankNumber();
@@ -9583,9 +10098,6 @@ byte GBc_t::readRawMemory(uint16_t address
 					address -= 0xB000;
 					RETURN pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks4KB[RAMBankNumberB][address];
 				}
-#else
-				FATAL("MBC6 is not supported");
-#endif
 			}
 
 			if (isMBC3())
@@ -9813,6 +10325,17 @@ byte GBc_t::readRawMemory(uint16_t address
 		{
 			auto joyp = pGBc_peripherals->P1_JOYP;
 
+			// SGB Multi-player ID probe logging (Both lines HIGH / SET)
+			if (isSGBCompatible() == YES && sgbJoypad.numPlayers > 1)
+			{
+				if ((joyp.joyPadFields.P14_SEL_DIRECTION_KEYS == SET) && (joyp.joyPadFields.P15_SEL_ACTION_KEYS == SET))
+				{
+					DEBUG("[SGB] JOYP Read Probe (P14=1, P15=1): Returning Player %d ID Nibble 0x%X (Register: 0x%02X)",
+						sgbJoypad.activePlayer + 1, (0x0F - sgbJoypad.activePlayer) & 0x0F, joyp.joyPadMemory);
+				}
+			}
+
+			// Non-SGB Hardware Quirk (Both lines LOW / RESET -> open circuit returns 0x0F)
 			if ((joyp.joyPadFields.P14_SEL_DIRECTION_KEYS == RESET) && (joyp.joyPadFields.P15_SEL_ACTION_KEYS == RESET))
 			{
 				joyp.joyPadMemory |= 0xCF; // including the spare bits
@@ -10613,7 +11136,6 @@ void GBc_t::executeHUC3Command()
 	}
 }
 
-#ifndef __RPI_PICO__
 // Refer https://gbdev.io/pandocs/MBC6.html#flash-commands
 //
 // Three separate protection flags:
@@ -10976,7 +11498,6 @@ void GBc_t::processMBC6FlashWrite(uint16_t cpuAddr, BYTE data)
 		BREAK;
 	}
 }
-#endif // !__RPI_PICO__
 
 void GBc_t::updateMMM01RamBanking()
 {
@@ -11145,7 +11666,7 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 				}
 				else if (isMBC6()) MASQ_UNLIKELY
 				{
-#ifndef __RPI_PICO__
+
 					if (address <= 0x03FF)
 					{
 						pGBc_emuStatus->dataWrittenToMBCReg0 = data;
@@ -11182,9 +11703,6 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 					{
 						pGBc_emuStatus->dataWrittenToMBCReg8 = data;
 					}
-#else
-					FATAL("MBC6 is not supported");
-#endif
 				}
 				else
 				{
@@ -11259,7 +11777,6 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 
 			if (isMBC6()) MASQ_UNLIKELY
 			{
-#ifndef __RPI_PICO__
 				if (address <= 0x03FF)
 				{
 					const FLAG ramEnable = ((data & 0x0F) == 0x0A);
@@ -11306,9 +11823,6 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 				{
 					processMBC6FlashWrite(address, data);
 				}
-#else
-				FATAL("MBC6 is not supported");
-#endif
 				RETURN;
 			}
 
@@ -11818,7 +12332,6 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 
 			if (isMBC6()) MASQ_UNLIKELY
 			{
-#ifndef __RPI_PICO__
 				if (address <= 0xAFFF)
 				{
 					uint8_t RAMBankNumber = getRAMBankNumber();
@@ -11833,9 +12346,6 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 					pGBc_instance->GBc_state.entireRam.ramMemoryBanks.mRAMBanks4KB[RAMBankNumberB][address] = data;
 					RETURN;
 				}
-#else
-				FATAL("MBC6 is not supported");
-#endif
 			}
 
 			if (isMBC3())
@@ -12258,7 +12768,12 @@ void GBc_t::writeRawMemory(uint16_t address, byte data, MEMORY_ACCESS_SOURCE sou
 			pGBc_peripherals->P1_JOYP.joyPadFields.P14_SEL_DIRECTION_KEYS = GETBIT(FOUR, data);
 			pGBc_peripherals->P1_JOYP.joyPadFields.P15_SEL_ACTION_KEYS = GETBIT(FIVE, data);
 
-			// 2. TODO: Process SGB clock edges & player cycling with new line states
+			// 2. Process SGB clock edges & player cycling with new line states
+			if (isSGBCompatible() == YES)
+			{
+				updateSGBJOYP(GETBIT(FOUR, data), GETBIT(FIVE, data));
+			}
+
 			// 3. Update memory state and fire interrupts
 			updateJOYP(previousJoyPadState);
 			RETURN;

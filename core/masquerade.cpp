@@ -71,9 +71,11 @@
 // --- Args
 int   gArgc = 0;
 char** gArgv = nullptr;
+#ifndef __RPI_PICO__
 FLAG fbSHA1Enabled = NO;
 uint64_t fbSHA1TimeoutSeconds = 5ULL;
 std::chrono::steady_clock::time_point fbSHA1StartTime;
+#endif
 
 // --- Emscripten / desktop mode flag
 #ifdef __EMSCRIPTEN__
@@ -152,15 +154,6 @@ uint32_t shaderProgramBlend = 0;
 uint32_t fullscreenVAO = 0;
 uint32_t fullscreenVBO = 0;
 uint32_t FRAME_BUFFER_SCALE = 4;
-#if !defined(__RPI_PICO__) && !defined(ENABLE_OTA_EXECUTABLE) && !defined(ENABLE_SERVER_EXECUTABLE)
-GLuint camera_gl_texture = 0;
-FLAG show_camera_hardware_window = NO;
-FLAG camera_success = NO;
-FLAG camera_connected = NO;
-static SDL_Camera* camera = nullptr;
-#else
-void* camera = nullptr;
-#endif // !__RPI_PICO__ && !ENABLE_OTA_EXECUTABLE && !ENABLE_SERVER_EXECUTABLE 
 
 #pragma region IMGUI_SPECIFIC_DECLARATIONS
 
@@ -462,6 +455,17 @@ DockSpace         ID=0xE7F226C9 Pos=469,327 Size=1713,947 Split=X
 
 #endif // !__RPI_PICO__
 
+// Camera Support (desktop-only, not available on Pico)
+#if !defined(__RPI_PICO__) && !defined(ENABLE_OTA_EXECUTABLE) && !defined(ENABLE_SERVER_EXECUTABLE)
+GLuint camera_gl_texture = 0;
+FLAG show_camera_hardware_window = NO;
+FLAG camera_success = NO;
+FLAG camera_connected = NO;
+static SDL_Camera* camera = nullptr;
+#else
+static void* camera = nullptr;
+#endif // !__RPI_PICO__ && !ENABLE_OTA_EXECUTABLE && !ENABLE_SERVER_EXECUTABLE 
+
 // --- Emulation state (always present)
 INC8  numberOfRomsSelected = RESET;
 std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> romsToRun;
@@ -740,11 +744,7 @@ FLAG LoadTextureFromFile(const char* file_name, GLuint* out_texture, int* out_wi
 
 MASQ_INLINE FLAG isHeadless()
 {
-#ifdef __RPI_PICO__
-	RETURN NO; // Pico always runs in emulation mode
-#else
 	RETURN isMasqHeadless;
-#endif
 }
 
 // --- Camera types (desktop only) -------------
@@ -840,7 +840,7 @@ static void RenderCameraHardwareUI(SDL_Camera* camera)
 #pragma endregion CAMERA_HELPERS
 #endif // !__RPI_PICO__ && !ENABLE_OTA_EXECUTABLE && !ENABLE_SERVER_EXECUTABLE 
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__)
 #pragma region NETWORK_HELPERS
 FLAG abstractEmulationLinkSession_t::connect(const char* hostAddress, uint16_t port)
 {
@@ -1286,7 +1286,7 @@ private:
 
 	KeyBindings keyBindings;
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__)
 private:
 
 	NetworkUIState_t networkUI;
@@ -2572,7 +2572,7 @@ public:
 #ifdef __RPI_PICO__
 
 	// Pico version: bare-metal infinite loop.
-	// Initialise your Waveshark display driver BEFORE calling
+	// Initialise your Waveshark/ILI display driver BEFORE calling
 	// Start(). Drive the display flush from inside the emulator
 	// (abstractEmulation_t::runEmulationAtFixedRate) or add it
 	// here after OnUserUpdate() returns.
@@ -2918,6 +2918,7 @@ public:
 							static FLAG barcodeWindowOpen = NO;
 							static int  pendingWindowScale = RESET;
 							static int  appliedWindowScale = _XSCALE;
+							static FLAG showSgbTimingViewer = NO;
 
 							tickAtStart = SDL_GetTicksNS();
 
@@ -3440,12 +3441,31 @@ public:
 											if (ImGui::BeginMenu("GB##GBFamily", MASQ_ENABLE_GBC))
 											{
 												static FLAG isCgbTicked = to_bool(config.get<std::string>("gb_gbc._force_gbc_for_gb", "false"));
+												static FLAG isSgbTicked = to_bool(config.get<std::string>("gb_gbc._force_sgb", "false"));
+
 												if (ImGui::MenuItem("CGB Mode", NULL, isCgbTicked))
 												{
 													isCgbTicked = !isCgbTicked;
 													config.put("gb_gbc._force_gbc_for_gb", isCgbTicked);
 													boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
 												}
+												if (ImGui::MenuItem("SGB Mode", NULL, isSgbTicked))
+												{
+													isSgbTicked = !isSgbTicked;
+													config.put("gb_gbc._force_sgb", isSgbTicked);
+													boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
+												}
+
+												if (current_instance && current_instance->getEmulationID() == EMULATION_ID::GB_GBC_ID)
+												{
+													ImGui::Separator();
+													FLAG showViewer = (showSgbTimingViewer == YES);
+													if (ImGui::MenuItem("SGB Timing Diagram Viewer", NULL, &showViewer))
+													{
+														showSgbTimingViewer = showViewer ? YES : NO;
+													}
+												}
+
 												ImGui::EndMenu();
 											}
 											ImGui::Separator();
@@ -3502,7 +3522,7 @@ public:
 												{
 													ImGui::MenuItem("GB-GBC", NULL, NO, DISABLED);
 													if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-														ImGui::SetTooltip("Load a GB/GBC ROM first");
+														ImGui::SetTooltip("Please load a GB/GBC ROM");
 												}
 												if (current_instance->getEmulationID() == EMULATION_ID::NES_ID)
 												{
@@ -3514,7 +3534,7 @@ public:
 												{
 													ImGui::MenuItem("NES", NULL, NO, DISABLED);
 													if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) 
-														ImGui::SetTooltip("Load an NES ROM first");
+														ImGui::SetTooltip("Please load a NES ROM");
 												}
 												ImGui::MenuItem("Pac-Man", NULL, NO, DISABLED);
 												if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("Coming soon");
@@ -4680,6 +4700,17 @@ public:
 
 										// Draw Camera Capture Debugger
 										gbc->RenderGBCCaptureStagesUI();
+
+										// Draw SGB Timing Diagram Viewer
+										if (showSgbTimingViewer == YES)
+										{
+											bool open = true;
+											gbc->renderSGBTimingDiagramWindow(&open);
+											if (!open)
+											{
+												showSgbTimingViewer = NO; // Handle close button click (X)
+											}
+										}
 									}
 									RenderCameraHardwareUI(camera);
 #endif // !__RPI_PICO__ && !ENABLE_OTA_EXECUTABLE && !ENABLE_SERVER_EXECUTABLE
@@ -5192,12 +5223,16 @@ inline EMULATION_ID getPlatformFromPath(const std::string& path)
 #endif
 }
 
+#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__)
 #define DISABLE_HEADLESS_WITH_WARNING(msg) \
-    do { \
-        INFO(msg); \
-        isHeadlessMode = NO; \
-        isMasqHeadless = NO; \
-    } while (0)
+	do { \
+		INFO(msg); \
+		isHeadlessMode = NO; \
+		isMasqHeadless = NO; \
+	} while (0)
+#else
+#define DISABLE_HEADLESS_WITH_WARNING(msg)
+#endif
 
 // Detect ROM type from file count / extension and instantiate
 // the correct emulator object.  Uses MasqConfig_t so it
@@ -5208,11 +5243,12 @@ abstractEmulation_t* getType(int nFiles,
 	MasqConfig_t& config,
 	CheatEngine_t* ce = nullptr)
 {
+	FLAG isHeadlessMode = NO;
+
 #ifndef __RPI_PICO__
 	// Extract flags out of argument list regardless of order
 	std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> cleanRoms{};
 	int romCount = 0;
-	FLAG isHeadlessMode = NO;
 
 	for (int i = 0; i < nFiles; ++i)
 	{
@@ -5253,13 +5289,15 @@ abstractEmulation_t* getType(int nFiles,
 #if MASQ_ENABLE_CHIP8
 		if (suspectedID == EMULATION_ID::CHIP8_ID)
 		{
-			DISABLE_HEADLESS_WITH_WARNING("Headless mode is not supported for this platform; falling back to non-headless mode");  RETURN new chip8_t(rom, config, isHeadlessMode);
+			DISABLE_HEADLESS_WITH_WARNING("Headless mode is not supported for this platform; falling back to non-headless mode");  
+			RETURN new chip8_t(rom, config, isHeadlessMode);
 		}
 #endif
 #if MASQ_ENABLE_NES
 		if (suspectedID == EMULATION_ID::NES_ID)
 		{
-			DISABLE_HEADLESS_WITH_WARNING("Headless mode is not supported for this platform; falling back to non-headless mode");  RETURN new NES_t(ONE, rom, config, ce, isHeadlessMode);
+			DISABLE_HEADLESS_WITH_WARNING("Headless mode is not supported for this platform; falling back to non-headless mode");  
+			RETURN new NES_t(ONE, rom, config, ce, isHeadlessMode);
 		}
 #endif
 #if MASQ_ENABLE_GBC
@@ -5271,13 +5309,15 @@ abstractEmulation_t* getType(int nFiles,
 #if MASQ_ENABLE_GBA
 		if (suspectedID == EMULATION_ID::GBA_ID)
 		{
-			DISABLE_HEADLESS_WITH_WARNING("Headless mode is not supported for this platform; falling back to non-headless mode");  RETURN new GBA_t(ONE, rom, config, ce, isHeadlessMode);
+			DISABLE_HEADLESS_WITH_WARNING("Headless mode is not supported for this platform; falling back to non-headless mode");  
+			RETURN new GBA_t(ONE, rom, config, ce, isHeadlessMode);
 		}
 #endif
 #if MASQ_ENABLE_GOL
 		if (suspectedID == EMULATION_ID::GAME_OF_LIFE_ID)
 		{
-			DISABLE_HEADLESS_WITH_WARNING("Headless mode is not supported for this platform; falling back to non-headless mode");  RETURN new gameOfLife_t(config, isHeadlessMode);
+			DISABLE_HEADLESS_WITH_WARNING("Headless mode is not supported for this platform; falling back to non-headless mode");  
+			RETURN new gameOfLife_t(config, isHeadlessMode);
 		}
 #endif
 	}

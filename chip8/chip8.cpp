@@ -65,6 +65,7 @@ void chip8_t::setupTheCoreOfEmulation(void* masqueradeInstance, void* audio, voi
 	MASQ_UNUSED(masqueradeInstance);
 	MASQ_UNUSED(audio);
 	MASQ_UNUSED(network);
+	MASQ_UNUSED(camera);
 }
 
 uint32_t chip8_t::getScreenWidth()
@@ -675,11 +676,20 @@ bool chip8_t::initializeEmulator()
 	pChip8_io = &(pChip8_instance->chip8_state.io);
 
 #ifdef __RPI_PICO__
+#if defined(PANEL_BACKEND_PICOLCD2)
 	pChip8_display->waveshareFb = (uint16_t*)malloc(LCD_2IN_WIDTH * LCD_2IN_HEIGHT * sizeof(uint16_t));
 	if (pChip8_display->waveshareFb == nullptr)
 	{
 		panic("memory allocation failure for framebuffer");
 	}
+#endif
+#if defined(PANEL_BACKEND_ILI9341)
+	pChip8_display->iliFb = (uint16_t*)malloc(PANEL_SCREEN_WIDTH * PANEL_SCREEN_HEIGHT * sizeof(uint16_t));
+	if (pChip8_display->iliFb == nullptr)
+	{
+		panic("memory allocation failure for framebuffer");
+	}
+#endif
 #endif
 
 	// quirks
@@ -772,7 +782,12 @@ bool chip8_t::initializeEmulator()
 	// For Raspberry Pi Pico, we will use the default framebuffer and render directly to it.
 	// No need for OpenGL setup or texture management.
 	// Waveshare 2in LCD specific initialization
-	PANEL_SET_PARAMS(pctx, pChip8_display->waveshareFb, LCD_2IN_WIDTH, LCD_2IN_HEIGHT);
+#if defined(PANEL_BACKEND_PICOLCD2)
+	PANEL_SET_PARAMS(pctx, pChip8_display->waveshareFb, PANEL_SCREEN_WIDTH, PANEL_SCREEN_HEIGHT);
+#endif
+#if defined(PANEL_BACKEND_ILI9341)
+	PANEL_SET_PARAMS(pctx, pChip8_display->iliFb, PANEL_SCREEN_WIDTH, PANEL_SCREEN_HEIGHT);
+#endif
 #else // !__RPI_PICO__
 	// initialization specific to OpenGL
 #if (GL_FIXED_FUNCTION_PIPELINE == YES) && !defined(IMGUI_IMPL_OPENGL_ES2) && !defined(IMGUI_IMPL_OPENGL_ES3)
@@ -909,9 +924,9 @@ void chip8_t::destroyEmulator()
 	// For Raspberry Pi Pico, we will use the default framebuffer and render directly to it.
 	// No need for OpenGL cleanup or SDL audio stream management.
 
-	// Waveshare 2in LCD specific cleanup
-	LCD_2IN_Clear(PixelToRGB565(WHITE));
-	DEV_Module_Exit();
+	// Panel cleanup — routes to whichever backend is active
+	PANEL_BACKEND_CLEAR(swap16(PixelToRGB565_fast(WHITE)));
+	PANEL_BACKEND_DEINIT();
 #else // !__RPI_PICO__
 #if (GL_FIXED_FUNCTION_PIPELINE == YES) && !defined(IMGUI_IMPL_OPENGL_ES2) && !defined(IMGUI_IMPL_OPENGL_ES3)
 	glDeleteTextures(1, &chip8_texture);
@@ -1439,8 +1454,8 @@ void chip8_t::clearCompleteScreen()
 	// For Raspberry Pi Pico, we will use the default framebuffer and render directly to it.
 	// No need for OpenGL setup or texture management.
 
-	// Waveshare 2in LCD specific cleanup
-	LCD_2IN_Clear(PixelToRGB565(WHITE));
+	// Panel cleanup — routes to whichever backend is active
+	PANEL_BACKEND_CLEAR(swap16(PixelToRGB565_fast(WHITE)));
 #else // !__RPI_PICO__
 #if (GL_FIXED_FUNCTION_PIPELINE == YES) && !defined(IMGUI_IMPL_OPENGL_ES2) && !defined(IMGUI_IMPL_OPENGL_ES3)
 	// Bind the framebuffer used for the emulator display
