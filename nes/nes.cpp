@@ -6827,9 +6827,10 @@ inline void NES_t::writeCpuRawMemoryInternal(uint16_t address, byte data, MEMORY
 						}
 					}
 					pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::PULSE_1)].envelope.startFlag = YES;
-					// Refer https://forums.nesdev.org/viewtopic.php?p=163102#p163102
-					pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::PULSE_1)].frequencyCounter
-						= pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::PULSE_1)].frequencyPeriod.raw;
+					// Refer https://www.nesdev.org/wiki/APU and https://forums.nesdev.org/viewtopic.php?f=2&t=15346
+					// $4003 resets the duty *phase* only. The clock divider (frequencyCounter) must NOT be
+					// reset here — it keeps counting down and only reloads from frequencyPeriod.raw once it
+					// naturally reaches 0
 					pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::PULSE_1)].dutyCounter = RESET;
 					RETURN;
 				}
@@ -6903,9 +6904,8 @@ inline void NES_t::writeCpuRawMemoryInternal(uint16_t address, byte data, MEMORY
 						}
 					}
 					pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::PULSE_2)].envelope.startFlag = YES;
-					// Refer https://forums.nesdev.org/viewtopic.php?p=163102#p163102
-					pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::PULSE_2)].frequencyCounter
-						= pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::PULSE_2)].frequencyPeriod.raw;
+					// Refer https://www.nesdev.org/wiki/APU and https://forums.nesdev.org/viewtopic.php?f=2&t=15346
+					// $4007 resets the duty *phase* only — see the PULSE_1/$4003 note above.
 					pNES_instance->NES_state.audio.apuInternalRegisters[TO_UINT8(AUDIO_CHANNELS::PULSE_2)].dutyCounter = RESET;
 					RETURN;
 				}
@@ -12593,16 +12593,39 @@ void NES_t::updateKeyStatus()
 {
 	auto& keys = pNES_instance->NES_state.emulatorStatus.controllerInput;
 
+	// SOCD (Simultaneous Opposing Cardinal Direction) cleaning: real hardware
+	// has no interlock preventing Left+Right or Up+Down being held together,
+	// but most emulators (FCEUX, Nestopia, Mesen) filter this before it
+	// reaches the game, since games are rarely tested against it and some
+	// (e.g. this Road Runner unlicensed dump) crash outright on it. Policy
+	// here is Neutral: an opposing pair cancels to "neither pressed" rather
+	// than picking a winner.
+	bool up = (keys.keyUP == YES);
+	bool down = (keys.keyDOWN == YES);
+	if (up && down)
+	{
+		up = false;
+		down = false;
+	}
+
+	bool left = (keys.keyLEFT == YES);
+	bool right = (keys.keyRIGHT == YES);
+	if (left && right)
+	{
+		left = false;
+		right = false;
+	}
+
 	byte status = 0;
 
 	status |= (byte)(keys.keyA == YES);
 	status |= (byte)(keys.keyB == YES) << ONE;
 	status |= (byte)(keys.keySELECT == YES) << TWO;
 	status |= (byte)(keys.keySTART == YES) << THREE;
-	status |= (byte)(keys.keyUP == YES) << FOUR;
-	status |= (byte)(keys.keyDOWN == YES) << FIVE;
-	status |= (byte)(keys.keyLEFT == YES) << SIX;
-	status |= (byte)(keys.keyRIGHT == YES) << SEVEN;
+	status |= (byte)up << FOUR;
+	status |= (byte)down << FIVE;
+	status |= (byte)left << SIX;
+	status |= (byte)right << SEVEN;
 
 	pNES_instance->NES_state.controller.keyStatus = status;
 }
