@@ -4642,7 +4642,7 @@ OPT_SPEED
 				else
 				{
 					// NOTE: This information is obtained from NBA and Skyemu
-					dataT = pGBA_memory->romLatchedAddress / TWO;
+					dataT = (pGBA_memory->romLatchedAddress / TWO) >> ((address & 0x01) << 0x03);
 				}
 
 				stride = sizeof(GBA_HALFWORD);
@@ -4665,7 +4665,19 @@ OPT_SPEED
 			{
 				if (pGBA_memory->romLatchedAddress < pAbsolute_GBA_instance->absolute_GBA_state.aboutRom.codeRomSize) MASQ_LIKELY
 				{
-					dataT = static_cast<T>(pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakRom.mWaitState.mWaitState0.mWaitState0Memory32bit[pGBA_memory->romLatchedAddress / FOUR]);
+					if ((pGBA_memory->romLatchedAddress & 0x02) == ZERO) MASQ_LIKELY
+					{
+						dataT = static_cast<T>(pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakRom.mWaitState.mWaitState0.mWaitState0Memory32bit[pGBA_memory->romLatchedAddress / FOUR]);
+					}
+					else
+					{
+						const uint32_t latchHi = (pGBA_memory->romLatchedAddress + TWO) & pAbsolute_GBA_instance->absolute_GBA_state.aboutRom.romMaxAddressMask;
+						const uint32_t lo = static_cast<uint16_t>(pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakRom.mWaitState.mWaitState0.mWaitState0Memory16bit[pGBA_memory->romLatchedAddress / TWO]);
+						const uint32_t hi = (latchHi < pAbsolute_GBA_instance->absolute_GBA_state.aboutRom.codeRomSize)
+							? static_cast<uint32_t>(static_cast<uint16_t>(pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakRom.mWaitState.mWaitState0.mWaitState0Memory16bit[latchHi / TWO]))
+							: ((latchHi / TWO) & 0xFFFF);
+						dataT = static_cast<T>(lo | (hi << SIXTEEN));
+					}
 				}
 				else
 				{
@@ -5237,7 +5249,6 @@ OPT_SPEED
 			address &= 0x01FFFFFF;
 
 			/*
-			*
 			* 1) There is no 8 bits access to ROM, its 16 or 32 bit access
 			* 2) Because of https://discord.com/channels/465585922579103744/465586361731121162/996871166079803542
 			* Post a non-sequential access, next write address is latched
