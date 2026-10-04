@@ -4230,12 +4230,17 @@ OPT_SPEED
 		INC64 dmaCyclesInThisRun = RESET; // Currently there is no use for this, but using this to cache the count before the reset
 
 		// Refer https://github.com/zaydlang/AGBEEG-Aging-Cartridge/blob/master/documentation/dma/cpu_runs_idles_throughout_dma.md
-		if ((IsAnyDMARunning() == YES) && (source == MEMORY_ACCESS_SOURCE::CPU || source == MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH) && (LOCK == NO))
+		if ((source == MEMORY_ACCESS_SOURCE::CPU || source == MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH) && (LOCK == NO))
 		{
-			dmaTick();
-			dmaCyclesInThisRun = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.dmaCounter;
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.dmaCounter = RESET;
-			// All currenlty enabled DMA transactions should be complete by the time we come here
+			if (IsAnyDMARunning() == YES)
+			{
+				dmaTick();
+				dmaCyclesInThisRun = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.dmaCounter;
+				pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.dmaCounter = RESET;
+				// All currenlty enabled DMA transactions should be complete by the time we come here
+			}
+
+			// CPU accessed the bus: drop any remaining free (parallel) internal cycles, as NBA does on every Bus::Read / Bus::Write
 			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.freeBusCyclesCounter = RESET;
 		}
 
@@ -4838,12 +4843,17 @@ OPT_SPEED
 		}
 
 		// Refer https://github.com/zaydlang/AGBEEG-Aging-Cartridge/blob/master/documentation/dma/cpu_runs_idles_throughout_dma.md
-		if ((IsAnyDMARunning() == YES) && (source == MEMORY_ACCESS_SOURCE::CPU || source == MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH) && (LOCK == NO))
+		if ((source == MEMORY_ACCESS_SOURCE::CPU || source == MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH) && (LOCK == NO))
 		{
-			dmaTick();
-			dmaCyclesInThisRun = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.dmaCounter;
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.dmaCounter = RESET;
-			// All currenlty enabled DMA transactions should be complete by the time we come here
+			if (IsAnyDMARunning() == YES)
+			{
+				dmaTick();
+				dmaCyclesInThisRun = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.dmaCounter;
+				pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.dmaCounter = RESET;
+				// All currenlty enabled DMA transactions should be complete by the time we come here
+			}
+
+			// CPU accessed the bus: drop any remaining free (parallel) internal cycles, as NBA does on every Bus::Read / Bus::Write
 			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.freeBusCyclesCounter = RESET;
 		}
 
