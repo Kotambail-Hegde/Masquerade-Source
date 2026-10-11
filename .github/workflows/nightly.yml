@@ -626,8 +626,6 @@ jobs:
 
           if [ -d "../artifacts/windows" ] && [ "$(ls -A ../artifacts/windows)" ]; then
             rsync -a \
-              --exclude='*.pgc' \
-              --exclude='*.pgd' \
               --exclude='LICENSE.md' \
               --exclude='assets/' \
               ../artifacts/windows/Release/. windows/ || true

@@ -393,6 +393,7 @@ set(PROJECT_HEADERS
     gba/gba_opcodes.inl
     helpers/helpers.h
     cheats/cheats.h
+    scheduler/scheduler.h
     ui/imgui_custom_config.h
     ui/resource.h
 )
@@ -507,6 +508,11 @@ if(MASQ_ENABLE_GBA)
     )
 endif()
 
+set(SCHEDULER_SOURCES  "")
+    list(APPEND SCHEDULER_SOURCES
+        scheduler/scheduler.cpp
+    )
+
 # --- Desktop-only source files ---------------------------
 set(CHEATS_SOURCES  "")
 set(MINIZ_SOURCES   "")
@@ -574,6 +580,7 @@ set(SOURCES
     ${NES_SOURCES}
     ${GBC_SOURCES}
     ${GBA_SOURCES}
+    ${SCHEDULER_SOURCES}
     ${CHEATS_SOURCES}
     ${MINIZ_SOURCES}
     ${IMGUI_SOURCES}
@@ -628,6 +635,7 @@ source_group("Sources\\PacMan"                              FILES ${PACMAN_SOURC
 source_group("Sources\\NES"                                 FILES ${NES_SOURCES})
 source_group("Sources\\GBC"                                 FILES ${GBC_SOURCES})
 source_group("Sources\\GBA"                                 FILES ${GBA_SOURCES})
+source_group("Sources\\Scheduler"                           FILES ${SCHEDULER_SOURCES})
 source_group("Sources\\Cheats"                              FILES ${CHEATS_SOURCES})
 if (NOT EMSCRIPTEN)         
 source_group("Sources\\Third-party\\Glad"                   FILES ${GLAD_SOURCES})
@@ -715,6 +723,7 @@ endif()
 # =========================================================
 target_include_directories(${PROJECT_NAME} PUBLIC
     ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/scheduler
     ${CMAKE_SOURCE_DIR}/cheats
     ${CMAKE_SOURCE_DIR}/core
     ${CMAKE_SOURCE_DIR}/ui
@@ -904,11 +913,9 @@ elseif (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     target_link_libraries(${PROJECT_NAME} PRIVATE nfd::nfd SDL3::SDL3 SDL3_net::SDL3_net)
     target_link_options(${PROJECT_NAME} PRIVATE
         $<$<CONFIG:Release>:/INCREMENTAL:NO>
-        $<$<CONFIG:Release>:/LTCG:PGOPTIMIZE>
-        $<$<CONFIG:Release>:/USEPROFILE>
+        $<$<CONFIG:Release>:/LTCG>
         $<$<CONFIG:Release>:/OPT:REF>
         $<$<CONFIG:Release>:/OPT:ICF>
-        $<$<CONFIG:Release>:/PGD:${CMAKE_SOURCE_DIR}/assets/internal/pgo/masquerade.pgd>
     )
     target_compile_definitions(${PROJECT_NAME} PRIVATE SDL_MAIN_HANDLED __STDC_FORMAT_MACROS)
     target_compile_definitions(${PROJECT_NAME} PRIVATE
@@ -921,16 +928,6 @@ endif()
 # PRE / POST BUILD SCRIPTS (desktop only)
 # =========================================================
 if (NOT EMSCRIPTEN AND NOT RPI_PICO)
-    if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-        add_custom_command(
-            TARGET ${PROJECT_NAME} PRE_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_directory
-                "${CMAKE_SOURCE_DIR}/assets/internal/pgo"
-                "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
-            COMMENT "Copying all PGO files (.pgc/.pgd) to output"
-        )
-    endif()
-
     add_custom_command(
         TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy
