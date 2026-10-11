@@ -652,7 +652,7 @@ void GBA_t::processDMA()
 		RETURN;
 	}
 
-	cpuTick(TICK_TYPE::DMA_TICK);
+	tick(TICK_TYPE::DMA_TICK);
 
 	// Handles the loop for all DMA IDs
 	do
@@ -661,7 +661,7 @@ void GBA_t::processDMA()
 	}
 	while (IsAnyDMARunning());
 
-	cpuTick(TICK_TYPE::DMA_TICK);
+	tick(TICK_TYPE::DMA_TICK);
 }
 
 void GBA_t::processAPU(INC64 apuCycles)
