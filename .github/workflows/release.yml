@@ -876,10 +876,8 @@ jobs:
 
           # ── Windows ───────────────────────────────────────────────────────
           if [ "${{ github.event.inputs.release_windows }}" = "true" ]; then
-            # Copy from Release/ subfolder, excluding pgc/pgd/LICENSE files
+            # Copy from Release/ subfolder, excluding LICENSE files
             rsync -a \
-              --exclude='*.pgc' \
-              --exclude='*.pgd' \
               --exclude='LICENSE.md' \
               --exclude='assets/' \
               ../artifacts/windows/Release/. windows/
