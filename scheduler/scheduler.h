@@ -45,7 +45,7 @@ public:
 	void reschedule(EventId id, uint64_t new_target_cycle, int context = 0);
 
 	// Called every cycle, advances the clock by one and fires the events that are due
-	inline void tick()
+	MASQ_INLINE void tick()
 	{
 		advance();
 
@@ -66,12 +66,12 @@ private:
 	MASQ_INLINE void advance() {
 		currentCycles++;
 	}
-	MASQ_INLINE bool is_event_due() const {
-		RETURN currentCycles >= nextEventTime;
+	MASQ_INLINE FLAG is_event_due() const {
+		RETURN currentCycles >= nextEventTime ? YES : NO;
 	}
 
 	void    process_due_events();
-	bool    is_before(const ScheduledEvent_t& a, const ScheduledEvent_t& b) const;
+	FLAG    is_before(const ScheduledEvent_t& a, const ScheduledEvent_t& b) const;
 	int32_t find_event(EventId id, int context) const;
 	void    remove_at(uint32_t index);
 	void    recompute_next_event_time();

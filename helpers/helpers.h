@@ -96,6 +96,7 @@ extern "C" {
 #include <codecvt>
 #include <cstdint>
 #include <cstring>
+#include <cassert>
 #include <deque>
 #include <filesystem>
 #include <fstream>
