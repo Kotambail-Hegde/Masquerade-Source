@@ -6,6 +6,7 @@
 #pragma region INCLUDES
 //
 #include "helpers.h"
+#include "scheduler.h"
 //
 #include "abstractEmulation.h"
 #pragma endregion INCLUDES
@@ -15,7 +16,6 @@
 #define GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN	YES	// Refer : https://nba-emu.github.io/hw-docs/ppu/background.html
 #define GBA_ENABLE_DELAYED_IRQ							YES
 #define GBA_ENABLE_DELAYED_DMA_ENABLE					YES
-#define GBA_ENABLE_DELAYED_TIMER_REG					YES
 #define GBA_ENABLE_ROM_SEQ_BURST_QUIRK					YES
 #define GBA_ENABLE_AGS_PATCHED_TEST						NO
 #pragma endregion WIP
@@ -3659,6 +3659,20 @@ private:
 		uint32_t ifPend;
 	} interrupt_t;
 
+private:
+
+	Scheduler_t scheduler;
+
+	enum class GBA_EVENT : EventId
+	{
+		EVENT_TIMER_RELOAD_WRITE,
+		EVENT_TIMER_CONTROL_WRITE,
+		EVENT_TIMER_OVERFLOW,
+		EVENT_COUNT
+	};
+
+private:
+
 	typedef struct
 	{
 		cpu_t cpuInstance;
@@ -3666,7 +3680,6 @@ private:
 		interrupt_t interrupt;
 		uint16_t dmaPendMap;
 		dma_t dma;
-		uint16_t timerPendMap;
 		timer_t timer[FOUR];
 		audio_t audio;
 		display_t display;
@@ -5035,12 +5048,10 @@ OPT_SPEED
 				if (address == IO_HALTCNT
 					|| address == IO_POSTFLG
 					|| address == IO_BLDY
-#if (GBA_ENABLE_DELAYED_TIMER_REG == YES)
 					|| address == IO_TM0CNT_H
 					|| address == IO_TM1CNT_H
 					|| address == IO_TM2CNT_H
 					|| address == IO_TM3CNT_H
-#endif
 					|| address == IO_SOUND1CNT_L)
 				{
 					writeIO8(address, TO_UINT8(data), accessWidth, source, accessType);
@@ -5801,6 +5812,9 @@ private:
 		ppuTick();
 		processBackup();
 
+		// Tick the scheduler
+		scheduler.tick();
+
 		// Cache state pointer to reduce dereferencing overhead
 		auto* state = &pGBA_instance->GBA_state;
 
@@ -5838,44 +5852,6 @@ private:
 			{
 				ActivateDMAChannel(dmaID);
 			}
-		}
-#endif
-
-#if (GBA_ENABLE_DELAYED_TIMER_REG == YES)
-		if (state->timerPendMap != RESET) MASQ_UNLIKELY
-		{
-			uint16_t pendMap = state->timerPendMap;
-			auto* timers = state->timer;
-
-			// Timer 0
-			if (pendMap & 0x03)
-			{
-				if (pendMap & 0x01) cntlRegUpdate(TIMER0, timers[TIMER0].cache.io_tmxcnt_l);
-				if (pendMap & 0x02) cnthRegUpdate(TIMER0, timers[TIMER0].cache.io_tmxcnt_h);
-			}
-
-			// Timer 1
-			if (pendMap & 0x0C)
-			{
-				if (pendMap & 0x04) cntlRegUpdate(TIMER1, timers[TIMER1].cache.io_tmxcnt_l);
-				if (pendMap & 0x08) cnthRegUpdate(TIMER1, timers[TIMER1].cache.io_tmxcnt_h);
-			}
-
-			// Timer 2
-			if (pendMap & 0x30)
-			{
-				if (pendMap & 0x10) cntlRegUpdate(TIMER2, timers[TIMER2].cache.io_tmxcnt_l);
-				if (pendMap & 0x20) cnthRegUpdate(TIMER2, timers[TIMER2].cache.io_tmxcnt_h);
-			}
-
-			// Timer 3
-			if (pendMap & 0xC0)
-			{
-				if (pendMap & 0x40) cntlRegUpdate(TIMER3, timers[TIMER3].cache.io_tmxcnt_l);
-				if (pendMap & 0x80) cnthRegUpdate(TIMER3, timers[TIMER3].cache.io_tmxcnt_h);
-			}
-
-			state->timerPendMap = RESET;
 		}
 #endif
 
@@ -5992,100 +5968,95 @@ OPT_SPEED
 		}
 	}
 
-	MASQ_INLINE void timerCommonProcessing(TIMER timerID, uint16_t reloadValueIfOverflow, mTIMERnCNT_HHalfWord_t* CNTH, INC64 timerCycles)
+	MASQ_INLINE void timerCommonProcessing(TIMER timerID, uint16_t reloadValueIfOverflow, mTIMERnCNT_HHalfWord_t* CNTH)
 	{
 		const uint8_t timerIdx = TO_UINT(timerID);
 		auto& timerState = pGBA_instance->GBA_state.timer[timerIdx];
 		uint32_t timerValue = timerState.cache.counter;
 
-		while (timerCycles != RESET)
+		++timerValue;
+
+		if (timerValue > 0xFFFF) MASQ_UNLIKELY
 		{
-			++timerValue;
+			timerState.overflow = YES;
+			++timerState.cascadeEvents;
 
-			if (timerValue > 0xFFFF) MASQ_UNLIKELY
+			// Reload timer
+			timerValue = (timerValue - 0x10000) + reloadValueIfOverflow;
+
+			// Request interrupt if enabled
+			if (CNTH->mTIMERnCNT_HFields.TIMER_IRQ_EN == YES) MASQ_UNLIKELY
 			{
-				timerState.overflow = YES;
-				++timerState.cascadeEvents;
+				requestInterrupts((GBA_INTERRUPT)(timerIdx + TO_UINT(GBA_INTERRUPT::IRQ_TIMER0)));
+			}
 
-				// Reload timer
-				timerValue = (timerValue - 0x10000) + reloadValueIfOverflow;
-
-				// Request interrupt if enabled
-				if (CNTH->mTIMERnCNT_HFields.TIMER_IRQ_EN == YES) MASQ_UNLIKELY
+			// Handle FIFO audio for Timer 0 or Timer 1
+			if ((timerIdx == 0 || timerIdx == 1) && pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.PSG_FIFO_MASTER_EN == ONE) MASQ_UNLIKELY
+			{
+				// Process both FIFOs (unrolled)
+				auto& fifoA = pGBA_audio->FIFO[DIRECT_SOUND_A];
+				if (fifoA.timer == timerIdx)
 				{
-					requestInterrupts((GBA_INTERRUPT)(timerIdx + TO_UINT(GBA_INTERRUPT::IRQ_TIMER0)));
-				}
-
-				// Handle FIFO audio for Timer 0 or Timer 1
-				if ((timerIdx == 0 || timerIdx == 1) && pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.PSG_FIFO_MASTER_EN == ONE) MASQ_UNLIKELY
-				{
-					// Process both FIFOs (unrolled)
-					auto& fifoA = pGBA_audio->FIFO[DIRECT_SOUND_A];
-					if (fifoA.timer == timerIdx)
+					if (fifoA.size > ZERO) MASQ_LIKELY
 					{
-						if (fifoA.size > ZERO) MASQ_LIKELY
-						{
-							fifoA.latch = ((GBA_AUDIO_SAMPLE_TYPE)fifoA.fifo[fifoA.position] << ONE);
-							fifoA.position = (fifoA.position + ONE) & THIRTYONE;
-							fifoA.size--;
-						}
-						else
-						{
-							fifoA.latch = (GBA_AUDIO_SAMPLE_TYPE)MUTE_AUDIO;
-						}
-
-						if (fifoA.size < SIXTEEN) MASQ_UNLIKELY
-						{
-							auto& dmacntH = pGBA_peripherals->mDMA1CNT_H;
-							if (dmacntH.mDMAnCNT_HFields.DMA_EN == SET
-								&& dmacntH.mDMAnCNT_HFields.DMA_START_TIMING == DMA_TIMING::SPECIAL)
-							{
-								DelayedDMAActivate(DMA::DMA1);
-							}
-						}
+						fifoA.latch = ((GBA_AUDIO_SAMPLE_TYPE)fifoA.fifo[fifoA.position] << ONE);
+						fifoA.position = (fifoA.position + ONE) & THIRTYONE;
+						fifoA.size--;
+					}
+					else
+					{
+						fifoA.latch = (GBA_AUDIO_SAMPLE_TYPE)MUTE_AUDIO;
 					}
 
-					auto& fifoB = pGBA_audio->FIFO[DIRECT_SOUND_B];
-					if (fifoB.timer == timerIdx)
+					if (fifoA.size < SIXTEEN) MASQ_UNLIKELY
 					{
-						if (fifoB.size > ZERO) MASQ_LIKELY
+						auto& dmacntH = pGBA_peripherals->mDMA1CNT_H;
+						if (dmacntH.mDMAnCNT_HFields.DMA_EN == SET
+							&& dmacntH.mDMAnCNT_HFields.DMA_START_TIMING == DMA_TIMING::SPECIAL)
 						{
-							fifoB.latch = ((GBA_AUDIO_SAMPLE_TYPE)fifoB.fifo[fifoB.position] << ONE);
-							fifoB.position = (fifoB.position + ONE) & THIRTYONE;
-							fifoB.size--;
+							DelayedDMAActivate(DMA::DMA1);
 						}
-						else
-						{
-							fifoB.latch = (GBA_AUDIO_SAMPLE_TYPE)MUTE_AUDIO;
-						}
+					}
+				}
 
-						if (fifoB.size < SIXTEEN) MASQ_UNLIKELY
+				auto& fifoB = pGBA_audio->FIFO[DIRECT_SOUND_B];
+				if (fifoB.timer == timerIdx)
+				{
+					if (fifoB.size > ZERO) MASQ_LIKELY
+					{
+						fifoB.latch = ((GBA_AUDIO_SAMPLE_TYPE)fifoB.fifo[fifoB.position] << ONE);
+						fifoB.position = (fifoB.position + ONE) & THIRTYONE;
+						fifoB.size--;
+					}
+					else
+					{
+						fifoB.latch = (GBA_AUDIO_SAMPLE_TYPE)MUTE_AUDIO;
+					}
+
+					if (fifoB.size < SIXTEEN) MASQ_UNLIKELY
+					{
+						auto& dmacntH = pGBA_peripherals->mDMA2CNT_H;
+						if (dmacntH.mDMAnCNT_HFields.DMA_EN == SET
+							&& dmacntH.mDMAnCNT_HFields.DMA_START_TIMING == DMA_TIMING::SPECIAL)
 						{
-							auto& dmacntH = pGBA_peripherals->mDMA2CNT_H;
-							if (dmacntH.mDMAnCNT_HFields.DMA_EN == SET
-								&& dmacntH.mDMAnCNT_HFields.DMA_START_TIMING == DMA_TIMING::SPECIAL)
-							{
-								DelayedDMAActivate(DMA::DMA2);
-							}
+							DelayedDMAActivate(DMA::DMA2);
 						}
 					}
 				}
 			}
-			else MASQ_LIKELY
-			{
-				timerState.overflow = NO;
-			}
-
-			timerState.cache.counter = (uint16_t)timerValue;
-			setTimerCNTLRegister(timerID, (uint16_t)timerValue);
-
-			--timerCycles;
 		}
+		else MASQ_LIKELY
+		{
+			timerState.overflow = NO;
+		}
+
+		timerState.cache.counter = (uint16_t)timerValue;
+		setTimerCNTLRegister(timerID, (uint16_t)timerValue);
 	}
 
 OPT_DEFAULT
 
-	void processTimer(INC64 timerCycles);
+	void processTimer();
 
 private:
 
@@ -12263,6 +12234,31 @@ private:
 				}
 			}
 		}
+	}
+
+private:
+
+	void registerEvents();
+
+	static void timerReloadWriteHandler(void* userData, int timerId)
+	{
+		ASSERT(timerId >= 0 && timerId < TO_INT(TIMER::TOTAL_TIMER));
+
+		auto* gba = static_cast<GBA_t*>(userData);
+		gba->cntlRegUpdate((TIMER)timerId, gba->pGBA_instance->GBA_state.timer[timerId].cache.io_tmxcnt_l);
+	}
+
+	static void timerControlWriteHandler(void* userData, int timerId)
+	{
+		ASSERT(timerId >= 0 && timerId < TO_INT(TIMER::TOTAL_TIMER));
+
+		auto* gba = static_cast<GBA_t*>(userData);
+		gba->cnthRegUpdate((TIMER)timerId, gba->pGBA_instance->GBA_state.timer[timerId].cache.io_tmxcnt_h);
+	}
+
+	static void timerOverflowHandler(void* userData, int timer)
+	{
+		;
 	}
 
 private:

@@ -214,6 +214,9 @@ GBA_t::GBA_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 
 	this->ceGBA->setCheatEngineMode(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, EMULATION_ID::GBA_ID);
 
+	registerEvents();
+	LOG("Setup the event handlers in the scheduler for GBA emulator");
+
 #ifndef __EMSCRIPTEN__
 	_SAVE_LOCATION = pt.get<std::string>("gba._save_location", "");
 	if (_SAVE_LOCATION.empty())
@@ -576,7 +579,7 @@ OPT_DEFAULT
 #pragma region EMULATION_DEFINITIONS
 OPT_SPEED
 
-void GBA_t::processTimer(INC64 timerCycles)
+void GBA_t::processTimer()
 {
 	// Cache pointers
 	static mTIMERnCNT_HHalfWord_t* const CNTHLUT[4] = {
@@ -594,7 +597,7 @@ void GBA_t::processTimer(INC64 timerCycles)
 	timers[2].cascadeEvents = RESET;
 	timers[3].cascadeEvents = RESET;
 
-	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.globalTimerCounter += timerCycles;
+	++pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.globalTimerCounter;
 	const auto systemTimer = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.globalTimerCounter;
 
 	// Unroll timer loop for performance
@@ -612,7 +615,7 @@ void GBA_t::processTimer(INC64 timerCycles)
 
 		if (timer.startupDelay > RESET) MASQ_UNLIKELY
 		{
-			timer.startupDelay -= timerCycles;
+			--timer.startupDelay;
 			CONTINUE;
 		}
 
@@ -628,7 +631,7 @@ void GBA_t::processTimer(INC64 timerCycles)
 
 			if ((systemTimer & moduloPow2Prescalar) == ZERO) MASQ_LIKELY
 			{
-				timerCommonProcessing((TIMER)timerID, CNTL, CNTH, timerCycles);
+				timerCommonProcessing((TIMER)timerID, CNTL, CNTH);
 			}
 		}
 		else
@@ -636,7 +639,7 @@ void GBA_t::processTimer(INC64 timerCycles)
 			auto& prevCascade = timers[timerID - ONE].cascadeEvents;
 			while (prevCascade > ZERO)
 			{
-				timerCommonProcessing((TIMER)timerID, CNTL, CNTH, timerCycles);
+				timerCommonProcessing((TIMER)timerID, CNTL, CNTH);
 				--prevCascade;
 			}
 		}
@@ -1760,6 +1763,29 @@ FLAG GBA_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 	RETURN pGBA_display->wasVblankJustTriggered;
 }
 
+void GBA_t::registerEvents()
+{
+	struct EventSetup 
+	{
+		EventHandler handler; uint8_t priority;
+	};
+
+	static const EventSetup setup[] =
+	{
+		{ &GBA_t::timerReloadWriteHandler,  1 },
+		{ &GBA_t::timerControlWriteHandler, 2 },
+		{ &GBA_t::timerOverflowHandler,     0 },
+	};
+
+	static_assert(std::size(setup) == static_cast<size_t>(GBA_EVENT::EVENT_COUNT));
+
+	for (EventId i = 0; i < static_cast<EventId>(GBA_EVENT::EVENT_COUNT); i++)
+	{
+		const EventId id = scheduler.register_event(setup[i].handler, this, setup[i].priority);
+		ASSERT(id == i);
+	}
+}
+
 FLAG GBA_t::initializeEmulator()
 {
 	FLAG status = true;
@@ -1769,6 +1795,10 @@ FLAG GBA_t::initializeEmulator()
 	// Initialize the memory
 
 	memset(pAbsolute_GBA_instance->GBA_absoluteMemoryState, RESET, sizeof(absolute_GBA_state_t));
+
+	// Reset the scheduler
+
+	scheduler.reset();
 
 	// for readability
 
