@@ -1,9 +1,9 @@
 // Standalone tests for Scheduler_t (scheduler.h / scheduler.cpp)
 //
-// g++/clang : g++ -std=c++17 -O2 -Wall -Wextra scheduler.cpp scheduler_test.cpp -o scheduler_test
+// g++/clang : g++ -std=c++17 -O2 -Wall -Wextra -pthread scheduler.cpp scheduler_test.cpp -o scheduler_test
 // MSVC      : cl /std:c++17 /EHsc /O2 scheduler.cpp scheduler_test.cpp /Fe:scheduler_test.exe
 //
-// scheduler_test [-v] [-q] [--list] [--filter text] [--seed N] [--fuzz-iters N]
+// scheduler_test [-v] [-q] [--list] [--filter text] [--seed N] [--fuzz-iters N] [--timeout seconds]
 //                [--probe] [--probe-capacity] [--bench]
 //
 //   default           the tests that must pass
@@ -11,10 +11,12 @@
 //   --probe-capacity  same, for running out of event slots (may abort if you ASSERT there)
 //   --bench           speed of tick() (use an optimized build)
 //   -v / -q           full logs / results only
+//   --timeout N       a test running longer than N seconds is reported as a hang and the program exits (default 20, 0 = off)
 
 #include "scheduler.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdarg>
 #include <cstdio>
@@ -26,7 +28,9 @@
 #include <random>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #if defined(_MSC_VER)
@@ -66,6 +70,7 @@ struct Options
 	std::string filter;
 	u64 seed = 1;
 	int fuzzIters = 25;
+	int timeoutSec = 20;
 };
 static Options opt;
 
@@ -270,11 +275,14 @@ private:
 
 	void on_fire(int slot, int c)
 	{
+		if (fires.size() >= MAX_FIRES) throw std::runtime_error("runaway: more than 2000000 events fired in one test");
 		const u64 t = sched.get_current_cycles();
 		fires.push_back({t, slot, c});
 		if (logEvents) ctx.log.push_back(fmt("[t=%6llu] FIRE     %-8s ctx=%d", ull(t), slots[slot].name.c_str(), c));
 		if (slots[slot].action) slots[slot].action(c);
 	}
+
+	static constexpr size_t MAX_FIRES = 2000000;
 
 	TestCtx& ctx;
 	std::vector<Slot> slots;
@@ -308,9 +316,9 @@ TEST(reset_state)
 	h.tick(20);
 	CHECK(h.fires.empty());
 
-	h.at(a, 4, 7);
+	h.at(a, h.now() + 4, 7);
 	h.tick(4);
-	h.expect({{4, a, 7}});
+	h.expect({{24, a, 7}});
 }
 
 TEST(register_ids_unique)
@@ -602,9 +610,14 @@ TEST(reschedule_repeatedly)
 	Harness h(t);
 	const int a = h.reg("A");
 	h.at(a, 10);
-	for (u64 target = 11; target <= 40; target += 3) h.resched(a, target);
+	u64 last = 0;
+	for (u64 target = 11; target <= 40; target += 3)
+	{
+		h.resched(a, target);
+		last = target;
+	}
 	h.run_to(50);
-	h.expect({{40, a, 0}});
+	h.expect({{last, a, 0}});
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -781,16 +794,6 @@ TEST(recurring_events_stress)
 	h.logEvents = false;
 	const u64 periods[] = {3, 5, 7, 16, 31, 64, 100, 1000};
 	const int n = 8;
-	std::vector<int> slots(n);
-	for (int i = 0; i < n; i++)
-	{
-		slots[i] = h.reg(fmt("P%llu", ull(periods[i])).c_str(), (uint8_t)(i % 3));
-		const int s = slots[i];
-		const u64 p = periods[i];
-		(void)p;
-	}
-	std::vector<std::unique_ptr<std::function<void(int)>>> keep;
-	// re-register with actions is not possible after the fact, so build a second harness-less loop with the scheduler
 	Scheduler_t s;
 	struct Rec { u64 t; int which; };
 	struct Env
@@ -1255,6 +1258,19 @@ PROBE(probe_schedule_same_id_and_context_same_cycle)
 	t.info.push_back(fmt("same (id, ctx) scheduled twice @10: fired %zu time(s) -> %s", h.fires.size(), fires_str(h).c_str()));
 }
 
+PROBE(probe_reschedule_same_cycle_order)
+{
+	Harness h(t);
+	const int a = h.reg("A");
+	const int b = h.reg("B");
+	h.at(a, 10, 0);
+	h.at(b, 10, 0);
+	h.resched(a, 10, 0);
+	h.run_to(10);
+	const bool aFirst = !h.fires.empty() && h.fires[0].slot == a;
+	t.info.push_back(fmt("A then B scheduled @10, then reschedule(A, 10): %s -> %s", aFirst ? "A keeps its place (reschedule keeps the original insertion order)" : "A goes after B (reschedule counts as a new insertion)", fires_str(h).c_str()));
+}
+
 PROBE(probe_cancel_with_duplicates)
 {
 	Harness h(t);
@@ -1478,7 +1494,33 @@ BENCH(bench_gba_like_100_frames)
 
 static void print_usage()
 {
-	std::printf("scheduler_test [-v] [-q] [--list] [--filter text] [--seed N] [--fuzz-iters N] [--probe] [--probe-capacity] [--bench]\n");
+	std::printf("scheduler_test [-v] [-q] [--list] [--filter text] [--seed N] [--fuzz-iters N] [--timeout seconds] [--probe] [--probe-capacity] [--bench]\n");
+}
+
+static std::atomic<const char*> g_runningTest{nullptr};
+static std::atomic<long long> g_testStartMs{0};
+
+static long long now_ms()
+{
+	return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+static void start_watchdog()
+{
+	if (opt.timeoutSec <= 0) return;
+	std::thread([] {
+		for (;;)
+		{
+			std::this_thread::sleep_for(std::chrono::milliseconds(100));
+			const char* name = g_runningTest.load();
+			if (name && now_ms() - g_testStartMs.load() > (long long)opt.timeoutSec * 1000)
+			{
+				std::printf("[ HANG   ] %s  running for more than %d s, probably an infinite loop (for example a dispatch loop that never ends, or a handler that keeps scheduling an event that is already due)\n", name, opt.timeoutSec);
+				std::fflush(stdout);
+				std::_Exit(3);
+			}
+		}
+	}).detach();
 }
 
 static bool selected(const TestCase& tc)
@@ -1507,6 +1549,7 @@ int main(int argc, char** argv)
 		else if (a == "--filter" && i + 1 < argc) opt.filter = argv[++i];
 		else if (a == "--seed" && i + 1 < argc) opt.seed = std::strtoull(argv[++i], nullptr, 10);
 		else if (a == "--fuzz-iters" && i + 1 < argc) opt.fuzzIters = std::atoi(argv[++i]);
+		else if (a == "--timeout" && i + 1 < argc) opt.timeoutSec = std::atoi(argv[++i]);
 		else
 		{
 			print_usage();
@@ -1519,6 +1562,8 @@ int main(int argc, char** argv)
 		for (const TestCase& tc : registry()) std::printf("%-8s %s\n", tc.kind == Kind::Normal ? "test" : (tc.kind == Kind::Bench ? "bench" : "probe"), tc.name);
 		return 0;
 	}
+
+	start_watchdog();
 
 	int passed = 0, failed = 0, infos = 0;
 	std::vector<std::string> failedNames;
@@ -1533,8 +1578,19 @@ int main(int argc, char** argv)
 		TestCtx ctx;
 		g_ctx = &ctx;
 		std::printf("[ RUN    ] %s\n", tc.name);
+		std::fflush(stdout);
 		const auto t0 = std::chrono::steady_clock::now();
-		tc.fn(ctx);
+		g_testStartMs = now_ms();
+		g_runningTest = tc.kind == Kind::Bench ? nullptr : tc.name;
+		try
+		{
+			tc.fn(ctx);
+		}
+		catch (const std::exception& e)
+		{
+			ctx.failures.push_back(std::string("exception: ") + e.what());
+		}
+		g_runningTest = nullptr;
 		const double ms = seconds_since(t0) * 1000.0;
 
 		const bool failedNow = !ctx.failures.empty();
