@@ -71,6 +71,7 @@ extern "C" {
 #else // !__RPI_PICO__ — full desktop / Emscripten build
 
 // ---- Windows platform fix ----------------------------
+#ifndef MASQ_SCHEDULER_TESTS
 #ifdef _WIN32
 #ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0601
@@ -83,6 +84,7 @@ extern "C" {
 #else
 #include <dlfcn.h>
 #endif
+#endif // !MASQ_SCHEDULER_TESTS
 
 // ---- C++ Standard Library ----------------------------
 #pragma region INCLUDES
@@ -94,6 +96,7 @@ extern "C" {
 #include <codecvt>
 #include <cstdint>
 #include <cstring>
+#include <cassert>
 #include <deque>
 #include <filesystem>
 #include <fstream>
@@ -121,6 +124,7 @@ extern "C" {
 #include <vector>
 #pragma endregion INCLUDES
 
+#ifndef MASQ_SCHEDULER_TESTS
 // ---- Boost -------------------------------------------
 #pragma region BOOST_INCLUDES
 #ifndef BOOST_ALL_NO_LIB
@@ -205,6 +209,7 @@ extern "C" {
 #include "rapidjson/document.h"
 #include "rapidjson/filereadstream.h"
 #pragma endregion RAPIDJSON_INCLUDES
+#endif // !MASQ_SCHEDULER_TESTS
 
 #endif // __RPI_PICO__
 #pragma endregion PLATFORM_INCLUDES
@@ -616,6 +621,7 @@ extern "C" {
 
 // --- OpenGL error helpers (desktop only) -------------
 #ifndef __RPI_PICO__
+#ifndef MASQ_SCHEDULER_TESTS
 #ifdef __EMSCRIPTEN__
 #define GL_ASSERT(x)                                if (!(x));
 #else
@@ -624,6 +630,7 @@ extern "C" {
 #define GL_CALL(x)                                  GLClearError();\
     x;\
     GL_ASSERT(GLLogCall(#x, __FILE__, __LINE__))
+#endif // !MASQ_SCHEDULER_TESTS
 #endif // !__RPI_PICO__
 
 // --- PAUSE: platform-specific -------------------------
@@ -839,6 +846,13 @@ extern "C" {
 #define MASQ_LIKELY                                 [[likely]]
 #endif
 
+// [[maybe_unused]] — C++17, falls back to the compiler attribute on the toolchains below
+#if defined(__EMSCRIPTEN__) || defined(__RPI_PICO__)
+#define MASQ_MAYBE_UNUSED                           __attribute__((unused))
+#else
+#define MASQ_MAYBE_UNUSED                           [[maybe_unused]]
+#endif
+
 // --- Cross-platform struct packing -------------------
 #if defined(_MSC_VER)
 #define PACK_BEGIN __pragma(pack(push, 1))
@@ -889,12 +903,14 @@ extern "C" {
 
 // --- ImGui theme IDs (desktop only) ------------------
 #ifndef __RPI_PICO__
+#ifndef MASQ_SCHEDULER_TESTS
 #define ENABLED_IMGUI_DEFAULT_THEME                 NO
 #define SE_THEME_DARK                               0
 #define SE_THEME_LIGHT                              1
 #define SE_THEME_BLACK                              2
 #define SE_THEME_PHOSPHOR                           3
 #define SE_THEME_CUSTOM                             4
+#endif // !MASQ_SCHEDULER_TESTS
 #endif
 
 // --- CPU SST toggles (all platforms) -----------------
@@ -1070,7 +1086,9 @@ using MasqConfig_t = PicoConfig_t;
 
 #else // !__RPI_PICO__
 
+#ifndef MASQ_SCHEDULER_TESTS
 using MasqConfig_t = boost::property_tree::ptree;
+#endif // !MASQ_SCHEDULER_TESTS
 
 #endif // __RPI_PICO__
 
@@ -1080,21 +1098,25 @@ using MasqConfig_t = boost::property_tree::ptree;
 extern MAP64 ENABLE_LOGS;
 
 #ifndef __RPI_PICO__
+#ifndef MASQ_SCHEDULER_TESTS
 extern FLAG fbSHA1Enabled;
 extern uint64_t fbSHA1TimeoutSeconds;
 extern std::chrono::steady_clock::time_point fbSHA1StartTime;
 #endif
+#endif // !MASQ_SCHEDULER_TESTS
 
 #ifndef __RPI_PICO__
+#ifndef MASQ_SCHEDULER_TESTS
 // Desktop-only OpenGL / emulation window externs
 extern float    emuWindowX;
 extern float    emuWindowY;
 extern float    emuWindowMaxX;
 extern float    emuWindowMaxY;
 #endif
+#endif // !MASQ_SCHEDULER_TESTS
 
 // Desktop-only camera externs (SDL3)
-#if !defined(__RPI_PICO__) && !defined(ENABLE_OTA_EXECUTABLE) && !defined(ENABLE_SERVER_EXECUTABLE)
+#if !defined(__RPI_PICO__) && !defined(ENABLE_OTA_EXECUTABLE) && !defined(ENABLE_SERVER_EXECUTABLE) && !defined(MASQ_SCHEDULER_TESTS)
 extern FLAG camera_success;
 extern FLAG camera_connected;
 #endif
@@ -1153,6 +1175,7 @@ constexpr int getPicoConfigInt(uint32_t hash)
 //           in main() before any logging).
 // =========================================================
 
+#ifndef MASQ_SCHEDULER_TESTS
 #ifdef __RPI_PICO__
 
 void PANEL_PrintStr(const char* buf);  // forward declare — avoids circular include
@@ -1202,7 +1225,7 @@ inline void logger(const char* fmt, ...)
 #else // !__RPI_PICO__ — full desktop logger with ImGui sink
 
 // --- Desktop helpers ----------------------------------
-#if !defined(ENABLE_OTA_EXECUTABLE) && !defined(ENABLE_SERVER_EXECUTABLE)
+#if !defined(ENABLE_OTA_EXECUTABLE) && !defined(ENABLE_SERVER_EXECUTABLE) && !defined(MASQ_SCHEDULER_TESTS)
 
 template<typename... T>
 MASQ_INLINE void dummy(T...) 
@@ -1740,7 +1763,7 @@ inline void logger(const char* fmt, ...)
     va_list args;
     va_start(args, fmt);
 
-#if !defined(ENABLE_OTA_EXECUTABLE) && !defined(ENABLE_SERVER_EXECUTABLE)
+#if !defined(ENABLE_OTA_EXECUTABLE) && !defined(ENABLE_SERVER_EXECUTABLE) && !defined(MASQ_SCHEDULER_TESTS)
     if (isAppLoggingEnabled == YES)
     {
         va_list args_copy;
@@ -1757,6 +1780,7 @@ inline void logger(const char* fmt, ...)
 }
 
 #endif // __RPI_PICO__
+#endif // !MASQ_SCHEDULER_TESTS
 
 // =========================================================
 // UTILITY FUNCTIONS
@@ -2022,7 +2046,7 @@ MASQ_INLINE bool doesFileExist(const std::string& name)
 
 MASQ_INLINE std::filesystem::path getexepath()
 {
-#ifdef __EMSCRIPTEN__
+#if defined(__EMSCRIPTEN__) || defined(MASQ_SCHEDULER_TESTS)
 	// No executable path in WASM; RETURN empty or fixed string
 	RETURN {};
 #elif defined(_WIN32) || defined(_WIN64)
@@ -2145,6 +2169,7 @@ MASQ_INLINE int maxInt(int a, int b)
     RETURN (a > b) ? a : b;
 }
 
+#ifndef MASQ_SCHEDULER_TESTS
 // Used by NES database
 #ifndef __RPI_PICO__
 MASQ_INLINE uint32_t hexStr32(const char* s)
@@ -3575,3 +3600,4 @@ struct NetworkUIState_t
     std::vector<BYTE> receivedTestBytes;
 };
 #endif // !__RPI_PICO__ && !__EMSCRIPTEN__
+#endif // !MASQ_SCHEDULER_TESTS

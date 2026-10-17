@@ -4274,7 +4274,7 @@ OPT_SPEED
 						|| (IF_ADDRESS_WITHIN(address, OAM_START_ADDRESS, OAM_END_ADDRESS))
 						|| (IF_ADDRESS_WITHIN(address, OAM_MIRROR_START_ADDRESS, OAM_MIRROR_END_ADDRESS)))
 					{
-						cpuTick();
+						tick();
 						RETURN ZERO;
 					}
 				}
@@ -4286,7 +4286,7 @@ OPT_SPEED
 						if ((IF_ADDRESS_WITHIN(address, OAM_START_ADDRESS, OAM_END_ADDRESS))
 							|| (IF_ADDRESS_WITHIN(address, OAM_MIRROR_START_ADDRESS, OAM_MIRROR_END_ADDRESS)))
 						{
-							cpuTick();
+							tick();
 							RETURN ZERO;
 						}
 					}
@@ -4317,7 +4317,7 @@ OPT_SPEED
 #endif
 				while (cpuTicks)
 				{
-					cpuTick();
+					tick();
 					--cpuTicks;
 				}
 		}
@@ -4337,7 +4337,7 @@ OPT_SPEED
 						|| (IF_ADDRESS_WITHIN(address, OAM_START_ADDRESS, OAM_END_ADDRESS))
 						|| (IF_ADDRESS_WITHIN(address, OAM_MIRROR_START_ADDRESS, OAM_MIRROR_END_ADDRESS)))
 					{
-						cpuTick();
+						tick();
 						RETURN ZERO;
 					}
 				}
@@ -4349,7 +4349,7 @@ OPT_SPEED
 						if ((IF_ADDRESS_WITHIN(address, OAM_START_ADDRESS, OAM_END_ADDRESS))
 							|| (IF_ADDRESS_WITHIN(address, OAM_MIRROR_START_ADDRESS, OAM_MIRROR_END_ADDRESS)))
 						{
-							cpuTick();
+							tick();
 							RETURN ZERO;
 						}
 					}
@@ -4359,7 +4359,7 @@ OPT_SPEED
 			uint32_t dmaTicks = getMemoryAccessCycles(address, accessWidth, source, accessType);
 			while (dmaTicks)
 			{
-				cpuTick(TICK_TYPE::DMA_TICK);
+				tick(TICK_TYPE::DMA_TICK);
 				--dmaTicks;
 			}
 		}
@@ -4886,7 +4886,7 @@ OPT_SPEED
 						|| (IF_ADDRESS_WITHIN(address, OAM_START_ADDRESS, OAM_END_ADDRESS))
 						|| (IF_ADDRESS_WITHIN(address, OAM_MIRROR_START_ADDRESS, OAM_MIRROR_END_ADDRESS)))
 					{
-						cpuTick();
+						tick();
 						RETURN;
 					}
 				}
@@ -4900,7 +4900,7 @@ OPT_SPEED
 							if ((IF_ADDRESS_WITHIN(address, OAM_START_ADDRESS, OAM_END_ADDRESS))
 								|| (IF_ADDRESS_WITHIN(address, OAM_MIRROR_START_ADDRESS, OAM_MIRROR_END_ADDRESS)))
 							{
-								cpuTick();
+								tick();
 								RETURN;
 							}
 						}
@@ -4932,7 +4932,7 @@ OPT_SPEED
 #endif
 			while (cpuTicks)
 			{
-				cpuTick();
+				tick();
 				--cpuTicks;
 			}
 		}
@@ -4952,7 +4952,7 @@ OPT_SPEED
 						|| (IF_ADDRESS_WITHIN(address, OAM_START_ADDRESS, OAM_END_ADDRESS))
 						|| (IF_ADDRESS_WITHIN(address, OAM_MIRROR_START_ADDRESS, OAM_MIRROR_END_ADDRESS)))
 					{
-						cpuTick();
+						tick();
 						RETURN;
 					}
 				}
@@ -4966,7 +4966,7 @@ OPT_SPEED
 							if ((IF_ADDRESS_WITHIN(address, OAM_START_ADDRESS, OAM_END_ADDRESS))
 								|| (IF_ADDRESS_WITHIN(address, OAM_MIRROR_START_ADDRESS, OAM_MIRROR_END_ADDRESS)))
 							{
-								cpuTick();
+								tick();
 								RETURN;
 							}
 						}
@@ -4977,7 +4977,7 @@ OPT_SPEED
 			uint32_t dmaTicks = getMemoryAccessCycles(address, accessWidth, source, accessType);
 			while (dmaTicks)
 			{
-				cpuTick(TICK_TYPE::DMA_TICK);
+				tick(TICK_TYPE::DMA_TICK);
 				--dmaTicks;
 			}
 		}
@@ -5769,7 +5769,7 @@ OPT_DEFAULT
 
 private:
 
-	MASQ_INLINE void cpuTick(TICK_TYPE type = TICK_TYPE::CPU_TICK)
+	MASQ_INLINE void tick(TICK_TYPE type = TICK_TYPE::CPU_TICK)
 	{
 		// Cache state pointer to reduce dereferencing overhead
 		auto* state = &pGBA_instance->GBA_state;
@@ -6543,7 +6543,7 @@ private:
 				{
 					// Refer https://discord.com/channels/465585922579103744/465586361731121162/757700928202735626 for reads < 0x02000000 
 					data16 = (cache.destination & TWO) ? (GBA_HALFWORD)(cache.bus >> SIXTEEN) : (GBA_HALFWORD)(cache.bus);
-					cpuTick(TICK_TYPE::DMA_TICK);
+					tick(TICK_TYPE::DMA_TICK);
 				}
 
 				writeRawMemory<GBA_HALFWORD>(cache.destination, data16, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::DMA, dstType);
@@ -6571,7 +6571,7 @@ private:
 				else
 				{
 					// Refer https://discord.com/channels/465585922579103744/465586361731121162/757700928202735626 for reads < 0x02000000 
-					cpuTick(TICK_TYPE::DMA_TICK);
+					tick(TICK_TYPE::DMA_TICK);
 				}
 
 				writeRawMemory<GBA_WORD>(cache.destination, cache.bus, MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT, MEMORY_ACCESS_SOURCE::DMA, dstType);

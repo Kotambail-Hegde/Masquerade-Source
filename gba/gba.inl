@@ -2712,7 +2712,7 @@ MASQ_INLINE void GBA_t::writeIO8(uint32_t address, BYTE data, MEMORY_ACCESS_WIDT
 
 MASQ_INLINE void GBA_t::busCycles()
 {
-	cpuTick();
+	tick();
 
 #if (ENABLE_ARM7TDMI_SST == YES)
 	if (ROM_TYPE == ROM::TEST_SST) MASQ_UNLIKELY
