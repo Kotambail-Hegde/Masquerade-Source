@@ -2191,155 +2191,82 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 	{
 		RETURN;
 	}
-#if (GBA_ENABLE_DELAYED_TIMER_REG == YES)
 	case IO_TM0CNT_L:
 	{
-		SETBIT(pGBA_instance->GBA_state.timerPendMap, ZERO);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER0].cache.io_tmxcnt_l = data;
+		scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_RELOAD_WRITE),
+			scheduler.get_current_cycles() + ONE,
+			static_cast<int>(TIMER::TIMER0));
 		RETURN;
 	}
 	case IO_TM0CNT_H:
 	{
 		REJECT_IO8(accessWidth);
-		SETBIT(pGBA_instance->GBA_state.timerPendMap, ONE);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER0].cache.io_tmxcnt_h = data;
+		scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
+			scheduler.get_current_cycles() + ONE,
+			static_cast<int>(TIMER::TIMER0));
 		RETURN;
 	}
 	case IO_TM1CNT_L:
 	{
-		SETBIT(pGBA_instance->GBA_state.timerPendMap, TWO);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER1].cache.io_tmxcnt_l = data;
+		scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_RELOAD_WRITE),
+			scheduler.get_current_cycles() + ONE,
+			static_cast<int>(TIMER::TIMER1));
 		RETURN;
 	}
 	case IO_TM1CNT_H:
 	{
 		REJECT_IO8(accessWidth);
-		SETBIT(pGBA_instance->GBA_state.timerPendMap, THREE);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER1].cache.io_tmxcnt_h = data;
+		scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
+			scheduler.get_current_cycles() + ONE,
+			static_cast<int>(TIMER::TIMER1));
 		RETURN;
 	}
 	case IO_TM2CNT_L:
 	{
-		SETBIT(pGBA_instance->GBA_state.timerPendMap, FOUR);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER2].cache.io_tmxcnt_l = data;
+		scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_RELOAD_WRITE),
+			scheduler.get_current_cycles() + ONE,
+			static_cast<int>(TIMER::TIMER2));
 		RETURN;
 	}
 	case IO_TM2CNT_H:
 	{
 		REJECT_IO8(accessWidth);
-		SETBIT(pGBA_instance->GBA_state.timerPendMap, FIVE);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER2].cache.io_tmxcnt_h = data;
+		scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
+			scheduler.get_current_cycles() + ONE,
+			static_cast<int>(TIMER::TIMER2));
 		RETURN;
 	}
 	case IO_TM3CNT_L:
 	{
-		SETBIT(pGBA_instance->GBA_state.timerPendMap, SIX);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER3].cache.io_tmxcnt_l = data;
+		scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_RELOAD_WRITE),
+			scheduler.get_current_cycles() + ONE,
+			static_cast<int>(TIMER::TIMER3));
 		RETURN;
 	}
 	case IO_TM3CNT_H:
 	{
 		REJECT_IO8(accessWidth);
-		SETBIT(pGBA_instance->GBA_state.timerPendMap, SEVEN);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER3].cache.io_tmxcnt_h = data;
+		scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
+			scheduler.get_current_cycles() + ONE,
+			static_cast<int>(TIMER::TIMER3));
 		RETURN;
 	}
-#else
-	case IO_TM0CNT_L:
-	{
-		// Write should directly happen to "reload" instead of the actual mTIMERxCNT_L)
-		pGBA_instance->GBA_state.timer[TIMER::TIMER0].cache.reload = data; // Store the new value in "reload"
-		RETURN;
-	}
-	case IO_TM0CNT_H:
-	{
-		BIT timer0EnBeforeUpdate = pGBA_peripherals->mTIMER0CNT_H.mTIMERnCNT_HFields.TIMER_START_STOP;
-		pGBA_peripherals->mTIMER0CNT_H.mTIMERnCNT_HHalfWord = data;
-
-		// Handles loading of "reload" to "counter" when timer is enabled (0 -> 1)
-		if (timer0EnBeforeUpdate == RESET && pGBA_peripherals->mTIMER0CNT_H.mTIMERnCNT_HFields.TIMER_START_STOP == SET)
-		{
-			pGBA_instance->GBA_state.timer[TIMER::TIMER0].cache.counter = pGBA_instance->GBA_state.timer[TIMER::TIMER0].cache.reload;
-			pGBA_peripherals->mTIMER0CNT_L = pGBA_instance->GBA_state.timer[TIMER::TIMER0].cache.counter;
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.timerCounter[TIMER::TIMER0] = RESET;
-			// Takes 2 cycles for CNTH to get applied after writing to control/reload
-			// Refer : https://discordapp.com/channels/465585922579103744/465586361731121162/1034239922602782801
-			pGBA_instance->GBA_state.timer[TIMER::TIMER0].currentState = DISABLED;
-			TODO("For some reason, instead of 2, we need to put 3 for prescalar tests to pass in AGS");
-			pGBA_instance->GBA_state.timer[TIMER::TIMER0].startupDelay = TWO;
-		}
-		RETURN;
-	}
-	case IO_TM1CNT_L:
-	{
-		// Write should directly happen to "reload" instead of the actual mTIMERxCNT_L)
-		pGBA_instance->GBA_state.timer[TIMER::TIMER1].cache.reload = data; // Store the new value in "reload"
-		RETURN;
-	}
-	case IO_TM1CNT_H:
-	{
-		BIT timer1EnBeforeUpdate = pGBA_peripherals->mTIMER1CNT_H.mTIMERnCNT_HFields.TIMER_START_STOP;
-		pGBA_peripherals->mTIMER1CNT_H.mTIMERnCNT_HHalfWord = data;
-		if (timer1EnBeforeUpdate == RESET && pGBA_peripherals->mTIMER1CNT_H.mTIMERnCNT_HFields.TIMER_START_STOP == SET)
-		{
-			pGBA_instance->GBA_state.timer[TIMER::TIMER1].cache.counter = pGBA_instance->GBA_state.timer[TIMER::TIMER1].cache.reload;
-			pGBA_peripherals->mTIMER1CNT_L = pGBA_instance->GBA_state.timer[TIMER::TIMER1].cache.counter;
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.timerCounter[TIMER::TIMER1] = RESET;
-			// Takes 2 cycles for CNTH to get applied after writing to control/reload
-			// Refer : https://discordapp.com/channels/465585922579103744/465586361731121162/1034239922602782801
-			pGBA_instance->GBA_state.timer[TIMER::TIMER1].currentState = DISABLED;
-			TODO("For some reason, instead of 2, we need to put 3 for prescalar tests to pass in AGS");
-			pGBA_instance->GBA_state.timer[TIMER::TIMER1].startupDelay = TWO;
-		}
-		RETURN;
-	}
-	case IO_TM2CNT_L:
-	{
-		// Write should directly happen to "reload" instead of the actual mTIMERxCNT_L)
-		pGBA_instance->GBA_state.timer[TIMER::TIMER2].cache.reload = data; // Store the new value in "reload"
-		RETURN;
-	}
-	case IO_TM2CNT_H:
-	{
-		BIT timer2EnBeforeUpdate = pGBA_peripherals->mTIMER2CNT_H.mTIMERnCNT_HFields.TIMER_START_STOP;
-		pGBA_peripherals->mTIMER2CNT_H.mTIMERnCNT_HHalfWord = data;
-		if (timer2EnBeforeUpdate == RESET && pGBA_peripherals->mTIMER2CNT_H.mTIMERnCNT_HFields.TIMER_START_STOP == SET)
-		{
-			pGBA_instance->GBA_state.timer[TIMER::TIMER2].cache.counter = pGBA_instance->GBA_state.timer[TIMER::TIMER2].cache.reload;
-			pGBA_peripherals->mTIMER2CNT_L = pGBA_instance->GBA_state.timer[TIMER::TIMER2].cache.counter;
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.timerCounter[TIMER::TIMER2] = RESET;
-			// Takes 2 cycles for CNTH to get applied after writing to control/reload
-			// Refer : https://discordapp.com/channels/465585922579103744/465586361731121162/1034239922602782801
-			pGBA_instance->GBA_state.timer[TIMER::TIMER2].currentState = DISABLED;
-			TODO("For some reason, instead of 2, we need to put 3 for prescalar tests to pass in AGS");
-			pGBA_instance->GBA_state.timer[TIMER::TIMER2].startupDelay = TWO;
-		}
-		RETURN;
-	}
-	case IO_TM3CNT_L:
-	{
-		// Write should directly happen to "reload" instead of the actual mTIMERxCNT_L)
-		pGBA_instance->GBA_state.timer[TIMER::TIMER3].cache.reload = data; // Store the new value in "reload"
-		RETURN;
-	}
-	case IO_TM3CNT_H:
-	{
-		BIT timer3EnBeforeUpdate = pGBA_peripherals->mTIMER3CNT_H.mTIMERnCNT_HFields.TIMER_START_STOP;
-		pGBA_peripherals->mTIMER3CNT_H.mTIMERnCNT_HHalfWord = data;
-		if (timer3EnBeforeUpdate == RESET && pGBA_peripherals->mTIMER3CNT_H.mTIMERnCNT_HFields.TIMER_START_STOP == SET)
-		{
-			pGBA_instance->GBA_state.timer[TIMER::TIMER3].cache.counter = pGBA_instance->GBA_state.timer[TIMER::TIMER3].cache.reload;
-			pGBA_peripherals->mTIMER3CNT_L = pGBA_instance->GBA_state.timer[TIMER::TIMER3].cache.counter;
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.timerCounter[TIMER::TIMER3] = RESET;
-			// Takes 2 cycles for CNTH to get applied after writing to control/reload
-			// Refer : https://discordapp.com/channels/465585922579103744/465586361731121162/1034239922602782801
-			pGBA_instance->GBA_state.timer[TIMER::TIMER3].currentState = DISABLED;
-			TODO("For some reason, instead of 2, we need to put 3 for prescalar tests to pass in AGS");
-			pGBA_instance->GBA_state.timer[TIMER::TIMER3].startupDelay = TWO;
-		}
-		RETURN;
-	}
-#endif
 	case IO_SIOMULTI0:
 	{
 		pGBA_peripherals->mSIOMULTI0 = data;
@@ -2649,32 +2576,46 @@ MASQ_INLINE void GBA_t::writeIO8(uint32_t address, BYTE data, MEMORY_ACCESS_WIDT
 
 		RETURN;
 	}
-#if (GBA_ENABLE_DELAYED_TIMER_REG == YES)
 	case IO_TM0CNT_H:
 	{
-		SETBIT(pGBA_instance->GBA_state.timerPendMap, ONE);
+		REJECT_IO8(accessWidth);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER0].cache.io_tmxcnt_h = data;
+		scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
+			scheduler.get_current_cycles() + ONE,
+			static_cast<int>(TIMER::TIMER0));
 		RETURN;
 	}
 	case IO_TM1CNT_H:
 	{
-		SETBIT(pGBA_instance->GBA_state.timerPendMap, THREE);
+		REJECT_IO8(accessWidth);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER1].cache.io_tmxcnt_h = data;
+		scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
+			scheduler.get_current_cycles() + ONE,
+			static_cast<int>(TIMER::TIMER1));
 		RETURN;
 	}
 	case IO_TM2CNT_H:
 	{
-		SETBIT(pGBA_instance->GBA_state.timerPendMap, FIVE);
+		REJECT_IO8(accessWidth);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER2].cache.io_tmxcnt_h = data;
+		scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
+			scheduler.get_current_cycles() + ONE,
+			static_cast<int>(TIMER::TIMER2));
 		RETURN;
 	}
 	case IO_TM3CNT_H:
 	{
-		SETBIT(pGBA_instance->GBA_state.timerPendMap, SEVEN);
+		REJECT_IO8(accessWidth);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER3].cache.io_tmxcnt_h = data;
+		scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
+			scheduler.get_current_cycles() + ONE,
+			static_cast<int>(TIMER::TIMER3));
 		RETURN;
 	}
-#endif
 	case IO_POSTFLG:
 	{
 		CPUTODO("If condition of PC <= 0x3FFF at %d in %s is obtained from NBA. Find actual source of this information", __LINE__, __FILE__);
@@ -3214,7 +3155,7 @@ MASQ_INLINE void GBA_t::dmaTick()
 
 MASQ_INLINE void GBA_t::timerTick()
 {
-	processTimer(ONE);
+	processTimer();
 }
 
 MASQ_INLINE void GBA_t::serialTick()
