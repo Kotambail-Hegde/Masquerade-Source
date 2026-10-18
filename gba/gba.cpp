@@ -699,20 +699,20 @@ void GBA_t::processAPU(INC64 apuCycles)
 			processSoundLength();
 		}
 
-			// 128 Hz - every 4th frame at offset 2
-			if ((apuState.apuFrameCounter & THREE) == TWO) MASQ_UNLIKELY
-			{
-				processFrequencySweep();
-			}
+		// 128 Hz - every 4th frame at offset 2
+		if ((apuState.apuFrameCounter & THREE) == TWO) MASQ_UNLIKELY
+		{
+			processFrequencySweep();
+		}
 
-				// 64 Hz - frame 7 only
-				if (apuState.apuFrameCounter == SEVEN) MASQ_UNLIKELY
-				{
-					processEnvelopeSweep();
-				}
+		// 64 Hz - frame 7 only
+		if (apuState.apuFrameCounter == SEVEN) MASQ_UNLIKELY
+		{
+			processEnvelopeSweep();
+		}
 
-				apuState.apuFrameCounter = (apuState.apuFrameCounter + ONE) & SEVEN;
-				apuState.apuCounter -= FRAME_SEQ_THRESHOLD;
+		apuState.apuFrameCounter = (apuState.apuFrameCounter + ONE) & SEVEN;
+		apuState.apuCounter -= FRAME_SEQ_THRESHOLD;
 	}
 
 	captureDownsampledAudioSamples(apuCycles);

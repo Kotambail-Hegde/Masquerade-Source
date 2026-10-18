@@ -6967,8 +6967,7 @@ OPT_SPEED
 				: EIGHT;
 
 		// Update frequency sweep
-		if (ch1.sweepEnabled == ENABLED
-			&& pGBA_peripherals->mSOUND1CNT_LHalfWord.mSOUND1CNT_LFields.SWEEP_TIME > ZERO)
+		if (ch1.sweepEnabled == ENABLED && pGBA_peripherals->mSOUND1CNT_LHalfWord.mSOUND1CNT_LFields.SWEEP_TIME > ZERO)
 		{
 			int32_t newFrequency = getUpdatedFrequency();
 
