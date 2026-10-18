@@ -1714,6 +1714,9 @@ void GBA_t::registerEvents()
 
 	static const EventSetup setup[] =
 	{
+		{ &GBA_t::irqWriteHandler,			0 },
+		{ &GBA_t::irqAvailHandler,			1 },
+		{ &GBA_t::irqLineHandler,			2 },
 		{ &GBA_t::dmaActivationHandler,     0 },
 		{ &GBA_t::timerReloadWriteHandler,  1 },
 		{ &GBA_t::timerControlWriteHandler, 2 },
