@@ -612,7 +612,7 @@ GBA_HALFWORD GBA_t::readIO(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, ME
 	}
 	case IO_TM0CNT_L:
 	{
-		RETURN pGBA_peripherals->mTIMER0CNT_L;
+		RETURN readTimerCounter(TIMER::TIMER0);
 	}
 	case IO_TM0CNT_H:
 	{
@@ -620,7 +620,7 @@ GBA_HALFWORD GBA_t::readIO(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, ME
 	}
 	case IO_TM1CNT_L:
 	{
-		RETURN pGBA_peripherals->mTIMER1CNT_L;
+		RETURN readTimerCounter(TIMER::TIMER1);
 	}
 	case IO_TM1CNT_H:
 	{
@@ -628,7 +628,7 @@ GBA_HALFWORD GBA_t::readIO(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, ME
 	}
 	case IO_TM2CNT_L:
 	{
-		RETURN pGBA_peripherals->mTIMER2CNT_L;
+		RETURN readTimerCounter(TIMER::TIMER2);
 	}
 	case IO_TM2CNT_H:
 	{
@@ -636,7 +636,7 @@ GBA_HALFWORD GBA_t::readIO(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, ME
 	}
 	case IO_TM3CNT_L:
 	{
-		RETURN pGBA_peripherals->mTIMER3CNT_L;
+		RETURN readTimerCounter(TIMER::TIMER3);
 	}
 	case IO_TM3CNT_H:
 	{
@@ -2196,7 +2196,7 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 		pGBA_instance->GBA_state.timer[TIMER::TIMER0].cache.io_tmxcnt_l = data;
 		scheduler.schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_RELOAD_WRITE),
-			scheduler.get_current_cycles() + ONE,
+			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
 			static_cast<int>(TIMER::TIMER0));
 		RETURN;
 	}
@@ -2206,7 +2206,7 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 		pGBA_instance->GBA_state.timer[TIMER::TIMER0].cache.io_tmxcnt_h = data;
 		scheduler.schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
-			scheduler.get_current_cycles() + ONE,
+			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
 			static_cast<int>(TIMER::TIMER0));
 		RETURN;
 	}
@@ -2215,7 +2215,7 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 		pGBA_instance->GBA_state.timer[TIMER::TIMER1].cache.io_tmxcnt_l = data;
 		scheduler.schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_RELOAD_WRITE),
-			scheduler.get_current_cycles() + ONE,
+			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
 			static_cast<int>(TIMER::TIMER1));
 		RETURN;
 	}
@@ -2225,7 +2225,7 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 		pGBA_instance->GBA_state.timer[TIMER::TIMER1].cache.io_tmxcnt_h = data;
 		scheduler.schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
-			scheduler.get_current_cycles() + ONE,
+			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
 			static_cast<int>(TIMER::TIMER1));
 		RETURN;
 	}
@@ -2234,7 +2234,7 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 		pGBA_instance->GBA_state.timer[TIMER::TIMER2].cache.io_tmxcnt_l = data;
 		scheduler.schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_RELOAD_WRITE),
-			scheduler.get_current_cycles() + ONE,
+			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
 			static_cast<int>(TIMER::TIMER2));
 		RETURN;
 	}
@@ -2244,7 +2244,7 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 		pGBA_instance->GBA_state.timer[TIMER::TIMER2].cache.io_tmxcnt_h = data;
 		scheduler.schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
-			scheduler.get_current_cycles() + ONE,
+			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
 			static_cast<int>(TIMER::TIMER2));
 		RETURN;
 	}
@@ -2253,7 +2253,7 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 		pGBA_instance->GBA_state.timer[TIMER::TIMER3].cache.io_tmxcnt_l = data;
 		scheduler.schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_RELOAD_WRITE),
-			scheduler.get_current_cycles() + ONE,
+			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
 			static_cast<int>(TIMER::TIMER3));
 		RETURN;
 	}
@@ -2263,7 +2263,7 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 		pGBA_instance->GBA_state.timer[TIMER::TIMER3].cache.io_tmxcnt_h = data;
 		scheduler.schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
-			scheduler.get_current_cycles() + ONE,
+			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
 			static_cast<int>(TIMER::TIMER3));
 		RETURN;
 	}
@@ -2582,7 +2582,7 @@ MASQ_INLINE void GBA_t::writeIO8(uint32_t address, BYTE data, MEMORY_ACCESS_WIDT
 		pGBA_instance->GBA_state.timer[TIMER::TIMER0].cache.io_tmxcnt_h = data;
 		scheduler.schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
-			scheduler.get_current_cycles() + ONE,
+			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
 			static_cast<int>(TIMER::TIMER0));
 		RETURN;
 	}
@@ -2592,7 +2592,7 @@ MASQ_INLINE void GBA_t::writeIO8(uint32_t address, BYTE data, MEMORY_ACCESS_WIDT
 		pGBA_instance->GBA_state.timer[TIMER::TIMER1].cache.io_tmxcnt_h = data;
 		scheduler.schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
-			scheduler.get_current_cycles() + ONE,
+			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
 			static_cast<int>(TIMER::TIMER1));
 		RETURN;
 	}
@@ -2602,7 +2602,7 @@ MASQ_INLINE void GBA_t::writeIO8(uint32_t address, BYTE data, MEMORY_ACCESS_WIDT
 		pGBA_instance->GBA_state.timer[TIMER::TIMER2].cache.io_tmxcnt_h = data;
 		scheduler.schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
-			scheduler.get_current_cycles() + ONE,
+			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
 			static_cast<int>(TIMER::TIMER2));
 		RETURN;
 	}
@@ -2612,7 +2612,7 @@ MASQ_INLINE void GBA_t::writeIO8(uint32_t address, BYTE data, MEMORY_ACCESS_WIDT
 		pGBA_instance->GBA_state.timer[TIMER::TIMER3].cache.io_tmxcnt_h = data;
 		scheduler.schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
-			scheduler.get_current_cycles() + ONE,
+			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
 			static_cast<int>(TIMER::TIMER3));
 		RETURN;
 	}
@@ -3155,7 +3155,7 @@ MASQ_INLINE void GBA_t::dmaTick()
 
 MASQ_INLINE void GBA_t::timerTick()
 {
-	processTimer();
+	DO_NOTHING;
 }
 
 MASQ_INLINE void GBA_t::serialTick()
