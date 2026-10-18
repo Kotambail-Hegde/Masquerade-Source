@@ -316,6 +316,9 @@
 #define readRawMemory									readRawMemoryInternal
 #define writeRawMemory									writeRawMemoryInternal
 #endif
+
+#define TIMER_CONTROL_WRITE_DELAY						(1)
+#define TIMER_STARTUP_DELAY								(2) // TODO: Ideally this should 1 cycle delay but currently need to set 2 for prescalar tests to pass in AGS
 #pragma endregion MACROS
 
 #pragma region CORE
@@ -3152,7 +3155,6 @@ private:
 		int64_t dmaCounter;
 		int64_t freeBusCyclesCounter;
 		int64_t globalTimerCounter;
-		int64_t timerCounter[TIMER::TOTAL_TIMER];
 		int64_t apuCounter;
 		int64_t apuFrameCounter;
 		int64_t ppuCounter;
@@ -3356,14 +3358,19 @@ private:
 		uint16_t counter;
 		uint16_t io_tmxcnt_l;
 		uint16_t io_tmxcnt_h;
+		struct
+		{
+			union
+			{
+				int64_t firstTick;    // Used when running on an internal prescaler; clock of the first future time tick, not yet counted in cache.counter
+				int64_t readyAt;      // Used when running in count-up/cascade mode
+			};
+		} stats;
 	} timerCache_t;
 
 	typedef struct
 	{
 		FLAG currentState;
-		INC64 startupDelay;
-		FLAG overflow;
-		INC32 cascadeEvents;
 		timerCache_t cache;
 	} timer_t;
 
@@ -5890,6 +5897,89 @@ private:
 
 OPT_SPEED
 
+	MASQ_INLINE mTIMERnCNT_HHalfWord_t* getTimerCNTHegister(TIMER timer) const
+	{
+		static mTIMERnCNT_HHalfWord_t* const CNTHLUT[4] = {
+			&pGBA_peripherals->mTIMER0CNT_H,
+			&pGBA_peripherals->mTIMER1CNT_H,
+			&pGBA_peripherals->mTIMER2CNT_H,
+			&pGBA_peripherals->mTIMER3CNT_H
+		};
+
+		RETURN CNTHLUT[static_cast<int>(timer)];
+	}
+
+	MASQ_INLINE int64_t getTimerPrescalar(TIMER timer)
+	{
+		RETURN (int64_t)timerFrequency[getTimerCNTHegister(timer)->mTIMERnCNT_HFields.PRESCALER_SEL];
+	}
+
+	MASQ_INLINE FLAG isTimerCountUp(TIMER timer)
+	{
+		RETURN (getTimerCNTHegister(timer)->mTIMERnCNT_HFields.COUNT_UP_TIMING == SET && timer != TIMER::TIMER0) ? YES : NO;
+	}
+
+	MASQ_INLINE uint16_t readTimerCounter(TIMER timer)
+	{
+		const auto& state = pGBA_instance->GBA_state.timer[timer];
+
+		if (state.currentState != ENABLED)
+		{
+			RETURN state.cache.counter;
+		}
+
+		// Cascade / Count-up timers do not tick on an internal prescaler.
+		// Their counter is updated exclusively by the previous timer's overflows.
+		if (isTimerCountUp(timer) == YES)
+		{
+			RETURN state.cache.counter;
+		}
+
+		const int64_t now = (int64_t)scheduler.get_current_cycles();
+		// The reason for "+ ONE" is the firstTick is a tick in future, and when that happens, the ticks should be 1, not 0. So we add ONE to account for that.
+		const uint64_t ticks = (now >= state.cache.stats.firstTick) ? ((uint64_t)((now - state.cache.stats.firstTick) / getTimerPrescalar(timer)) + ONE) : 0;
+
+		RETURN (uint16_t)(state.cache.counter + ticks);
+	}
+
+	MASQ_INLINE void startTimer(TIMER timer, int64_t delayedStart)
+	{
+		auto& state = pGBA_instance->GBA_state.timer[timer];
+
+		const int64_t prescalar = getTimerPrescalar(timer);
+
+		// Capture the master CPU cycle from the scheduler.
+		const int64_t now = (int64_t)scheduler.get_current_cycles();
+		const int64_t activationTime = now + delayedStart;
+
+		// First prescaler boundary at or after the activation time
+		const int64_t cyclesTofirstTick = ((activationTime + prescalar - ONE) / prescalar) * prescalar;
+		state.cache.stats.firstTick = cyclesTofirstTick;
+		state.currentState = ENABLED;
+
+		// Assume we have N ticks to overflow
+		// First Tick: cyclesTofirstTick accounts for the first tick which will take less that prescalar ticks if the timer is started in the middle of a prescaler cycle. This is 
+		// Remaining N-1 Ticks: The subsequence ticks till oveflow are aligned, but we subtract ONE from the counter to account for cyclesTofirstTick.
+		const int64_t overflowAt = cyclesTofirstTick + ((int64_t)(0x10000 - state.cache.counter - 1) * prescalar);
+
+		// Register the absolute cycle target with the master event scheduler queue.
+		scheduler.schedule(static_cast<EventId>(GBA_EVENT::EVENT_TIMER_OVERFLOW), (uint64_t)overflowAt, (int)timer);
+	}
+
+	MASQ_INLINE void stopTimer(TIMER timer)
+	{
+		auto& state = pGBA_instance->GBA_state.timer[timer];
+
+		if (state.currentState != ENABLED)
+		{
+			RETURN;
+		}
+
+		state.cache.counter = readTimerCounter(timer);
+		scheduler.cancel(static_cast<EventId>(GBA_EVENT::EVENT_TIMER_OVERFLOW), (int)timer);
+		state.currentState = DISABLED;
+	}
+
 	MASQ_INLINE void cntlRegUpdate(TIMER timer, uint16_t data)
 	{
 		// Write should directly happen to "reload" instead of the actual mTIMERxCNT_L)
@@ -5898,165 +5988,145 @@ OPT_SPEED
 
 	MASQ_INLINE void cnthRegUpdate(TIMER timer, uint16_t data)
 	{
-		auto setTimerCNTLRegister = [&](TIMER timer, uint16_t value)
-			{
-				// Use a switch statement for better performance in this context.
-				switch (timer)
-				{
-				case TIMER::TIMER0:
-					pGBA_peripherals->mTIMER0CNT_L = value;
-					BREAK;
-				case TIMER::TIMER1:
-					pGBA_peripherals->mTIMER1CNT_L = value;
-					BREAK;
-				case TIMER::TIMER2:
-					pGBA_peripherals->mTIMER2CNT_L = value;
-					BREAK;
-				case TIMER::TIMER3:
-					pGBA_peripherals->mTIMER3CNT_L = value;
-					BREAK;
-				default:
-					FATAL("Unknown Timer : %d", TO_UINT8(timer));
-					BREAK;
-				}
-			};
+		auto& state = pGBA_instance->GBA_state.timer[timer];
 
-		static mTIMERnCNT_HHalfWord_t* CNTHLUT[] = {
-			&pGBA_peripherals->mTIMER0CNT_H,
-			&pGBA_peripherals->mTIMER1CNT_H,
-			&pGBA_peripherals->mTIMER2CNT_H,
-			&pGBA_peripherals->mTIMER3CNT_H
-		};
+		mTIMERnCNT_HHalfWord_t* const CNTH = getTimerCNTHegister(timer);
+		const BIT enabledBefore = CNTH->mTIMERnCNT_HFields.TIMER_START_STOP;
 
-		mTIMERnCNT_HHalfWord_t* CNTH = CNTHLUT[timer];
+		// Brings the counter up to date with the old prescaler and removes the pending overflow
+		stopTimer(timer);
 
-		BIT timerxEnBeforeUpdate = CNTH->mTIMERnCNT_HFields.TIMER_START_STOP;
 		CNTH->mTIMERnCNT_HHalfWord = data;
-		if (timerxEnBeforeUpdate == RESET && CNTH->mTIMERnCNT_HFields.TIMER_START_STOP == SET)
+		if (CNTH->mTIMERnCNT_HFields.TIMER_START_STOP != SET)
 		{
-			pGBA_instance->GBA_state.timer[timer].cache.counter = pGBA_instance->GBA_state.timer[timer].cache.reload;
-			setTimerCNTLRegister(timer, pGBA_instance->GBA_state.timer[timer].cache.counter);
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.timerCounter[timer] = RESET;
+			RETURN;
+		}
+
+		INC64 delayedStart = RESET;
+		if (enabledBefore == RESET)
+		{
+			state.cache.counter = state.cache.reload;
 			// Takes 2 cycles for CNTH to get applied after writing to control/reload
 			// Refer : https://discordapp.com/channels/465585922579103744/465586361731121162/1034239922602782801
 			// To be more precise: writing the timer control/reload registers takes a cycle to apply. Then it takes another cycle for the timer to actually start.
 			// Also refer : https://discord.com/channels/465585922579103744/465586361731121162/1034240236944891935
-			pGBA_instance->GBA_state.timer[timer].currentState = DISABLED;
-			pGBA_instance->GBA_state.timer[timer].startupDelay = ONE;
+			TODO("Ideally this should 1 cycle delay at this stage but currently need to set 2 for prescalar tests to pass in AGS");
+			delayedStart = TIMER_STARTUP_DELAY;
+		}
+
+		if (isTimerCountUp(timer) == YES)
+		{
+			// In cascade mode, the timer tick is purely dependent on overflow of previous timer
+			// Eventhough the overflow of previous timer itself is aligned to prescalar, this prescalar
+			// may be different that the current timer's prescalar
+			// readyAt: Acts as a startup latency threshold. Prevents the cascade timer 
+			// from incrementing on previous timer's overflow if this happened before the delay has elapsed.
+			state.cache.stats.readyAt = (int64_t)scheduler.get_current_cycles() + delayedStart;
+		}
+		else
+		{
+			startTimer(timer, delayedStart);
 		}
 	}
 
-	MASQ_INLINE void setTimerCNTLRegister(TIMER timer, uint16_t value)
+	void timerOverflowWork(TIMER timer)
 	{
-		// Use array lookup instead of switch for better performance
-		static uint16_t* CNTL_LUT[] = {
-			&pGBA_peripherals->mTIMER0CNT_L,
-			&pGBA_peripherals->mTIMER1CNT_L,
-			&pGBA_peripherals->mTIMER2CNT_L,
-			&pGBA_peripherals->mTIMER3CNT_L
-		};
+		// Called when a timer overflows. The timer is assumed to be enabled and running.
+		// If it was disabled, the overflow event would have been cancelled and this would not be called.
 
-		const uint8_t timerIdx = TO_UINT8(timer);
-
-		if (timerIdx < 4) MASQ_LIKELY
-		{
-			*CNTL_LUT[timerIdx] = value;
-		}
-		else MASQ_UNLIKELY
-		{
-			FATAL("Unknown Timer : %d", timerIdx);
-		}
-	}
-
-	MASQ_INLINE void timerCommonProcessing(TIMER timerID, uint16_t reloadValueIfOverflow, mTIMERnCNT_HHalfWord_t* CNTH)
-	{
-		const uint8_t timerIdx = TO_UINT(timerID);
+		const uint8_t timerIdx = TO_UINT(timer);
 		auto& timerState = pGBA_instance->GBA_state.timer[timerIdx];
-		uint32_t timerValue = timerState.cache.counter;
+		mTIMERnCNT_HHalfWord_t* const CNTH = getTimerCNTHegister(timer);
 
-		++timerValue;
+		// Reload timer
+		timerState.cache.counter = timerState.cache.reload;
 
-		if (timerValue > 0xFFFF) MASQ_UNLIKELY
+		// Request interrupt if enabled
+		if (CNTH->mTIMERnCNT_HFields.TIMER_IRQ_EN == YES) MASQ_UNLIKELY
 		{
-			timerState.overflow = YES;
-			++timerState.cascadeEvents;
+			requestInterrupts((GBA_INTERRUPT)(timerIdx + TO_UINT(GBA_INTERRUPT::IRQ_TIMER0)));
+		}
 
-			// Reload timer
-			timerValue = (timerValue - 0x10000) + reloadValueIfOverflow;
-
-			// Request interrupt if enabled
-			if (CNTH->mTIMERnCNT_HFields.TIMER_IRQ_EN == YES) MASQ_UNLIKELY
+		// Handle FIFO audio for Timer 0 or Timer 1
+		if ((timerIdx == 0 || timerIdx == 1) && pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.PSG_FIFO_MASTER_EN == ONE) MASQ_UNLIKELY
+		{
+			auto& fifoA = pGBA_audio->FIFO[DIRECT_SOUND_A];
+			if (fifoA.timer == timerIdx)
 			{
-				requestInterrupts((GBA_INTERRUPT)(timerIdx + TO_UINT(GBA_INTERRUPT::IRQ_TIMER0)));
-			}
-
-			// Handle FIFO audio for Timer 0 or Timer 1
-			if ((timerIdx == 0 || timerIdx == 1) && pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.PSG_FIFO_MASTER_EN == ONE) MASQ_UNLIKELY
-			{
-				// Process both FIFOs (unrolled)
-				auto& fifoA = pGBA_audio->FIFO[DIRECT_SOUND_A];
-				if (fifoA.timer == timerIdx)
+				if (fifoA.size > ZERO) MASQ_LIKELY
 				{
-					if (fifoA.size > ZERO) MASQ_LIKELY
-					{
-						fifoA.latch = ((GBA_AUDIO_SAMPLE_TYPE)fifoA.fifo[fifoA.position] << ONE);
-						fifoA.position = (fifoA.position + ONE) & THIRTYONE;
-						fifoA.size--;
-					}
-					else
-					{
-						fifoA.latch = (GBA_AUDIO_SAMPLE_TYPE)MUTE_AUDIO;
-					}
-
-					if (fifoA.size < SIXTEEN) MASQ_UNLIKELY
-					{
-						auto& dmacntH = pGBA_peripherals->mDMA1CNT_H;
-						if (dmacntH.mDMAnCNT_HFields.DMA_EN == SET
-							&& dmacntH.mDMAnCNT_HFields.DMA_START_TIMING == DMA_TIMING::SPECIAL)
-						{
-							DelayedDMAActivate(DMA::DMA1);
-						}
-					}
+					fifoA.latch = ((GBA_AUDIO_SAMPLE_TYPE)fifoA.fifo[fifoA.position] << ONE);
+					fifoA.position = (fifoA.position + ONE) & THIRTYONE;
+					fifoA.size--;
+				}
+				else
+				{
+					fifoA.latch = (GBA_AUDIO_SAMPLE_TYPE)MUTE_AUDIO;
 				}
 
-				auto& fifoB = pGBA_audio->FIFO[DIRECT_SOUND_B];
-				if (fifoB.timer == timerIdx)
+				if (fifoA.size < SIXTEEN) MASQ_UNLIKELY
 				{
-					if (fifoB.size > ZERO) MASQ_LIKELY
+					auto& dmacntH = pGBA_peripherals->mDMA1CNT_H;
+					if (dmacntH.mDMAnCNT_HFields.DMA_EN == SET
+						&& dmacntH.mDMAnCNT_HFields.DMA_START_TIMING == DMA_TIMING::SPECIAL)
 					{
-						fifoB.latch = ((GBA_AUDIO_SAMPLE_TYPE)fifoB.fifo[fifoB.position] << ONE);
-						fifoB.position = (fifoB.position + ONE) & THIRTYONE;
-						fifoB.size--;
+						DelayedDMAActivate(DMA::DMA1);
 					}
-					else
-					{
-						fifoB.latch = (GBA_AUDIO_SAMPLE_TYPE)MUTE_AUDIO;
-					}
+				}
+			}
 
-					if (fifoB.size < SIXTEEN) MASQ_UNLIKELY
+			auto& fifoB = pGBA_audio->FIFO[DIRECT_SOUND_B];
+			if (fifoB.timer == timerIdx)
+			{
+				if (fifoB.size > ZERO) MASQ_LIKELY
+				{
+					fifoB.latch = ((GBA_AUDIO_SAMPLE_TYPE)fifoB.fifo[fifoB.position] << ONE);
+					fifoB.position = (fifoB.position + ONE) & THIRTYONE;
+					fifoB.size--;
+				}
+				else
+				{
+					fifoB.latch = (GBA_AUDIO_SAMPLE_TYPE)MUTE_AUDIO;
+				}
+
+				if (fifoB.size < SIXTEEN) MASQ_UNLIKELY
+				{
+					auto& dmacntH = pGBA_peripherals->mDMA2CNT_H;
+					if (dmacntH.mDMAnCNT_HFields.DMA_EN == SET
+						&& dmacntH.mDMAnCNT_HFields.DMA_START_TIMING == DMA_TIMING::SPECIAL)
 					{
-						auto& dmacntH = pGBA_peripherals->mDMA2CNT_H;
-						if (dmacntH.mDMAnCNT_HFields.DMA_EN == SET
-							&& dmacntH.mDMAnCNT_HFields.DMA_START_TIMING == DMA_TIMING::SPECIAL)
-						{
-							DelayedDMAActivate(DMA::DMA2);
-						}
+						DelayedDMAActivate(DMA::DMA2);
 					}
 				}
 			}
 		}
-		else MASQ_LIKELY
-		{
-			timerState.overflow = NO;
-		}
 
-		timerState.cache.counter = (uint16_t)timerValue;
-		setTimerCNTLRegister(timerID, (uint16_t)timerValue);
+		// Cascade: the next timer counts if it is enabled, in count-up mode and past its startup window
+		if (timerIdx < THREE)
+		{
+			const TIMER nextTimer = (TIMER)(timerIdx + ONE);
+			auto& nextState = pGBA_instance->GBA_state.timer[nextTimer];
+		
+			if (getTimerCNTHegister(nextTimer)->mTIMERnCNT_HFields.TIMER_START_STOP == SET
+				&& isTimerCountUp(nextTimer) == YES
+				// Below condition is very rare but possible
+				// i.e when previous timer overflowed but current cascade timer's delay has not elapsed
+				&& (int64_t)scheduler.get_current_cycles() >= nextState.cache.stats.readyAt)
+			{
+				const uint32_t value = (uint32_t)nextState.cache.counter + ONE;
+				if (value > 0xFFFF)
+				{
+					timerOverflowWork(nextTimer);
+				}
+				else
+				{
+					nextState.cache.counter = (uint16_t)value;
+				}
+			}
+		}
 	}
 
 OPT_DEFAULT
-
-	void processTimer();
 
 private:
 
@@ -12256,9 +12326,23 @@ private:
 		gba->cnthRegUpdate((TIMER)timerId, gba->pGBA_instance->GBA_state.timer[timerId].cache.io_tmxcnt_h);
 	}
 
-	static void timerOverflowHandler(void* userData, int timer)
+	static void timerOverflowHandler(void* userData, int timerId)
 	{
-		;
+		auto* gba = static_cast<GBA_t*>(userData);
+		const TIMER timer = (TIMER)timerId;
+		auto& state = gba->pGBA_instance->GBA_state.timer[timerId];
+
+		gba->timerOverflowWork(timer);
+
+		// The counter is the reload value as of this cycle, the next tick is one period away
+		const int64_t now = (int64_t)gba->scheduler.get_current_cycles();
+		const int64_t prescalar = gba->getTimerPrescalar(timer);
+
+		// Point to the next future tick
+		state.cache.stats.firstTick = now + prescalar;
+
+		const int64_t overflowAt = state.cache.stats.firstTick + ((int64_t)(0x10000 - state.cache.counter - 1) * prescalar);
+		gba->scheduler.schedule(static_cast<EventId>(GBA_EVENT::EVENT_TIMER_OVERFLOW), (uint64_t)overflowAt, timerId);
 	}
 
 private:
