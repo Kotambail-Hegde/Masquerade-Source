@@ -15,7 +15,6 @@
 #pragma region WIP
 #define GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN	YES	// Refer : https://nba-emu.github.io/hw-docs/ppu/background.html
 #define GBA_ENABLE_DELAYED_IRQ							YES
-#define GBA_ENABLE_DELAYED_DMA_ENABLE					YES
 #define GBA_ENABLE_ROM_SEQ_BURST_QUIRK					YES
 #define GBA_ENABLE_AGS_PATCHED_TEST						NO
 #pragma endregion WIP
@@ -319,6 +318,7 @@
 
 #define TIMER_CONTROL_WRITE_DELAY						(1)
 #define TIMER_STARTUP_DELAY								(2) // TODO: Ideally this should 1 cycle delay but currently need to set 2 for prescalar tests to pass in AGS
+#define DMA_STARTUP_DELAY								(2)
 #pragma endregion MACROS
 
 #pragma region CORE
@@ -3672,6 +3672,7 @@ private:
 
 	enum class GBA_EVENT : EventId
 	{
+		EVENT_DMA_ACTIVATION,
 		EVENT_TIMER_RELOAD_WRITE,
 		EVENT_TIMER_CONTROL_WRITE,
 		EVENT_TIMER_OVERFLOW,
@@ -5844,24 +5845,6 @@ private:
 		ifRegUpdate(state->interrupt.ifPend);
 #endif
 
-#if (GBA_ENABLE_DELAYED_DMA_ENABLE == YES)
-		// Refer https://discord.com/channels/465585922579103744/465586361731121162/948407365852610590
-		for (int dmaID = 0; dmaID < DMA::TOTAL_DMA; ++dmaID)
-		{
-			auto& d = state->dma.cache[dmaID].startupDelay;
-
-			// branchless decrement: subtract 1 if > 0
-			unsigned old = d;
-			d -= (d > 0);
-
-			// call ActivateDMAChannel if it just reached zero
-			if (old > 0 && d == 0)
-			{
-				ActivateDMAChannel(dmaID);
-			}
-		}
-#endif
-
 		MASQ_UNUSED(state);
 	}
 
@@ -6070,7 +6053,10 @@ OPT_SPEED
 					if (dmacntH.mDMAnCNT_HFields.DMA_EN == SET
 						&& dmacntH.mDMAnCNT_HFields.DMA_START_TIMING == DMA_TIMING::SPECIAL)
 					{
-						DelayedDMAActivate(DMA::DMA1);
+						scheduler.schedule(
+							static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION),
+							scheduler.get_current_cycles() + DMA_STARTUP_DELAY,
+							static_cast<int>(DMA::DMA1));
 					}
 				}
 			}
@@ -6095,7 +6081,10 @@ OPT_SPEED
 					if (dmacntH.mDMAnCNT_HFields.DMA_EN == SET
 						&& dmacntH.mDMAnCNT_HFields.DMA_START_TIMING == DMA_TIMING::SPECIAL)
 					{
-						DelayedDMAActivate(DMA::DMA2);
+						scheduler.schedule(
+							static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION),
+							scheduler.get_current_cycles() + DMA_STARTUP_DELAY,
+							static_cast<int>(DMA::DMA2));
 					}
 				}
 			}
@@ -6409,7 +6398,10 @@ private:
 			// Activate if IMMEDIATE
 			if (cache.scheduleType == DMA_TIMING::IMMEDIATE)
 			{
-				DelayedDMAActivate(dmaID);
+				scheduler.schedule(
+					static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION),
+					scheduler.get_current_cycles() + DMA_STARTUP_DELAY,
+					static_cast<int>(dmaID));
 			}
 		}
 		else
@@ -6417,6 +6409,8 @@ private:
 			// Disable
 			cache.currentState = NO;
 			UNSETBIT(pGBA_instance->GBA_state.dma.runnableSet, dmaID);
+
+			scheduler.cancel(static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION), (int)dmaID);
 
 			// Remove from all trigger maps (already done above, but keeping for clarity)
 			for (int timing = DMA_TIMING::IMMEDIATE; timing < DMA_TIMING::TOTAL_DMA_TIMING; timing++)
@@ -6430,17 +6424,6 @@ private:
 				SelectNextDMA();
 			}
 		}
-	}
-
-	MASQ_INLINE void DelayedDMAActivate(ID dmaID)
-	{
-#if (GBA_ENABLE_DELAYED_DMA_ENABLE == YES)
-		// Reset the startup delay
-		// Refer https://discord.com/channels/465585922579103744/465586361731121162/948407365852610590
-		pGBA_instance->GBA_state.dma.cache[dmaID].startupDelay = TWO;
-#else
-		ActivateDMAChannel(dmaID);
-#endif
 	}
 
 	MASQ_INLINE void ActivateDMAChannel(ID dmaID)
@@ -6468,28 +6451,12 @@ private:
 		{
 			if (GETBIT(dmaID, dmaMap))
 			{
-				DelayedDMAActivate(dmaID);
+				scheduler.schedule(
+					static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION),
+					scheduler.get_current_cycles() + DMA_STARTUP_DELAY,
+					static_cast<int>(dmaID));
 			}
 		}
-	}
-
-	MASQ_INLINE void OnDMAActivated(ID dmaID)
-	{
-		auto& dmaState = pGBA_instance->GBA_state.dma;
-
-		if (dmaState.runnableSet == RESET)
-		{
-			// First DMA to activate
-			dmaState.currentlyActiveDMA = (DMA)dmaID;
-		}
-		else if (dmaID < dmaState.currentlyActiveDMA)
-		{
-			// Higher priority DMA - preempt
-			dmaState.currentlyActiveDMA = (DMA)dmaID;
-			dmaState.shouldReenterTransferLoop = YES;
-		}
-
-		SETBIT(dmaState.runnableSet, dmaID);
 	}
 
 	MASQ_INLINE void SelectNextDMA()
@@ -12343,6 +12310,25 @@ private:
 
 		const int64_t overflowAt = state.cache.stats.firstTick + ((int64_t)(0x10000 - state.cache.counter - 1) * prescalar);
 		gba->scheduler.schedule(static_cast<EventId>(GBA_EVENT::EVENT_TIMER_OVERFLOW), (uint64_t)overflowAt, timerId);
+	}
+
+	static void dmaActivationHandler(void* userData, int dmaId)
+	{
+		ASSERT(dmaId >= 0 && dmaId < TO_INT(DMA::TOTAL_DMA));
+
+		auto& dmaState = static_cast<GBA_t*>(userData)->pGBA_instance->GBA_state.dma;
+
+		if (dmaState.runnableSet == RESET)
+		{
+			dmaState.currentlyActiveDMA = (DMA)dmaId;
+		}
+		else if (dmaId < dmaState.currentlyActiveDMA)
+		{
+			dmaState.currentlyActiveDMA = (DMA)dmaId;
+			dmaState.shouldReenterTransferLoop = YES;
+		}
+
+		SETBIT(dmaState.runnableSet, dmaId);
 	}
 
 private:

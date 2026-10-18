@@ -781,7 +781,10 @@ void GBA_t::processPPU(INC64 ppuCycles)
 						&&
 						pGBA_instance->GBA_state.dma.cache[DMA::DMA3].scheduleType == DMA_TIMING::SPECIAL)
 					{
-						DelayedDMAActivate(DMA::DMA3);
+						scheduler.schedule(
+							static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION),
+							scheduler.get_current_cycles() + TWO,
+							static_cast<int>(DMA::DMA3));
 					}
 				}
 
@@ -866,7 +869,10 @@ void GBA_t::processPPU(INC64 ppuCycles)
 						&&
 						pGBA_instance->GBA_state.dma.cache[DMA::DMA3].scheduleType == DMA_TIMING::SPECIAL)
 					{
-						DelayedDMAActivate(DMA::DMA3);
+						scheduler.schedule(
+							static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION),
+							scheduler.get_current_cycles() + TWO,
+							static_cast<int>(DMA::DMA3));
 					}
 				}
 
@@ -1009,7 +1015,10 @@ void GBA_t::processPPU(INC64 ppuCycles)
 						&&
 						pGBA_instance->GBA_state.dma.cache[DMA::DMA3].scheduleType == DMA_TIMING::SPECIAL)
 					{
-						DelayedDMAActivate(DMA::DMA3);
+						scheduler.schedule(
+							static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION),
+							scheduler.get_current_cycles() + TWO,
+							static_cast<int>(DMA::DMA3));
 					}
 				}
 				else if (pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY >= 162)
@@ -1705,6 +1714,7 @@ void GBA_t::registerEvents()
 
 	static const EventSetup setup[] =
 	{
+		{ &GBA_t::dmaActivationHandler,     0 },
 		{ &GBA_t::timerReloadWriteHandler,  1 },
 		{ &GBA_t::timerControlWriteHandler, 2 },
 		{ &GBA_t::timerOverflowHandler,     0 },
