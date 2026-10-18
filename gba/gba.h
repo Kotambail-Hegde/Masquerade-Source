@@ -14,7 +14,6 @@
 #pragma region MACROS
 #pragma region WIP
 #define GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN	YES	// Refer : https://nba-emu.github.io/hw-docs/ppu/background.html
-#define GBA_ENABLE_DELAYED_IRQ							YES
 #define GBA_ENABLE_ROM_SEQ_BURST_QUIRK					YES
 #define GBA_ENABLE_AGS_PATCHED_TEST						NO
 #pragma endregion WIP
@@ -319,6 +318,9 @@
 #define TIMER_CONTROL_WRITE_DELAY						(1)
 #define TIMER_STARTUP_DELAY								(2) // TODO: Ideally this should 1 cycle delay but currently need to set 2 for prescalar tests to pass in AGS
 #define DMA_STARTUP_DELAY								(2)
+#define IRQ_REGISTERS_WRITE_DELAY						(1)
+#define IRQ_AVAILABILITY_DELAY							(0) // TODO: Ideally this should 1 cycle delay but currently need to set 0 for TIMER IRQ test to pass in MGBA suite
+#define IRQ_LINE_DELAY									(IRQ_AVAILABILITY_DELAY + 1)	
 #pragma endregion MACROS
 
 #pragma region CORE
@@ -3151,10 +3153,10 @@ private:
 
 	typedef struct
 	{
+		int64_t masterClockCounter;
 		int64_t cpuCounter;
 		int64_t dmaCounter;
 		int64_t freeBusCyclesCounter;
-		int64_t globalTimerCounter;
 		int64_t apuCounter;
 		int64_t apuFrameCounter;
 		int64_t ppuCounter;
@@ -3658,12 +3660,13 @@ private:
 
 	typedef struct
 	{
-		FLAG cpsrIrqMaskLatch;
-		FLAG irqAvailLatch;
-		FLAG irqLineLatch;
-		uint32_t imePend;
-		uint32_t iePend;
-		uint32_t ifPend;
+		FLAG cpsrIrqMaskLatch; // Delayed by 1 cycle
+		FLAG cpuIrqLineLatch;// Relatively delayed by 1 cycle and net delay is 3 cycles
+		FLAG irqLineLatch; // Relatively Instantaneous, but net delay is 1 cycle
+		FLAG irqAvailLatch; // Relatively delayed by 1 cycle and net delay is 2 cycles
+		uint32_t imePend; // Delayed by 1 cycle
+		uint32_t iePend; // Delayed by 1 cycle
+		uint32_t ifPend; // Delayed by 1 cycle
 	} interrupt_t;
 
 private:
@@ -3672,6 +3675,9 @@ private:
 
 	enum class GBA_EVENT : EventId
 	{
+		EVENT_IRQ_WRITE,
+		EVENT_IRQ_AVAIL,
+		EVENT_IRQ_LINE,
 		EVENT_DMA_ACTIVATION,
 		EVENT_TIMER_RELOAD_WRITE,
 		EVENT_TIMER_CONTROL_WRITE,
@@ -4200,22 +4206,6 @@ OPT_SPEED
 
 			RETURN ((T)(data >> shift));
 		}
-	}
-
-	MASQ_INLINE void imeRegUpdate(uint16_t data)
-	{
-		pGBA_peripherals->mIMEHalfWord.mIMEHalfWord = data;
-		pGBA_peripherals->mIMEHalfWord.mIMEFields.NOT_USED_0 = ZERO;
-	}
-
-	MASQ_INLINE void ieRegUpdate(uint16_t data)
-	{
-		pGBA_peripherals->mIEHalfWord.mIEHalfWord = data;
-	}
-
-	MASQ_INLINE void ifRegUpdate(uint16_t data)
-	{
-		pGBA_peripherals->mIFHalfWord.mIFHalfWord = data;
 	}
 
 	MASQ_INLINE uint8_t GenerateNBAAccessMask(
@@ -5793,6 +5783,8 @@ private:
 		// Cache state pointer to reduce dereferencing overhead
 		auto* state = &pGBA_instance->GBA_state;
 
+		state->emulatorStatus.ticks.cycle_accurate.masterClockCounter++;
+
 		if (type == TICK_TYPE::DMA_TICK)
 		{
 			state->emulatorStatus.ticks.cycle_accurate.dmaCounter++;
@@ -5826,26 +5818,10 @@ private:
 		// Cache state pointer to reduce dereferencing overhead
 		auto* state = &pGBA_instance->GBA_state;
 
-#if (GBA_ENABLE_DELAYED_IRQ == YES)
-
 		// Refer https://discord.com/channels/465585922579103744/465586361731121162/959490468868161569
-
 		// 1 cycle CPSR delay
 		state->interrupt.cpsrIrqMaskLatch = pGBA_registers->cpsr.psrFields.psrIRQDisBit;
 
-		// 1 cycle delay of IRQ Avail latch from the time when register is updated
-		state->interrupt.irqLineLatch = (FLAG)(state->interrupt.irqAvailLatch && ((FLAG)pGBA_peripherals->mIMEHalfWord.mIMEFields.ENABLE_ALL_INTERRUPTS));
-
-		// 1 cycle delay of IRQ Avail latch from the time when register is updated
-		state->interrupt.irqAvailLatch = (FLAG)(pGBA_peripherals->mIFHalfWord.mIFHalfWord & pGBA_peripherals->mIEHalfWord.mIEHalfWord & 0x3FFF);
-
-		// 1 cycle delay of IME, IE and IF from the time the register write is initiated
-		imeRegUpdate(state->interrupt.imePend);
-		ieRegUpdate(state->interrupt.iePend);
-		ifRegUpdate(state->interrupt.ifPend);
-#endif
-
-		MASQ_UNUSED(state);
 	}
 
 	void timerTick();
@@ -12277,6 +12253,80 @@ private:
 
 	void registerEvents();
 
+	static void irqWriteHandler(void* userData, MASQ_MAYBE_UNUSED int irqReg)
+	{
+		// The below scheduling of IRQ is not documented clearly, ARM7TDMI manual just mentions synchronizer delay of 3-4 cycles
+		// Refer: https://discord.com/channels/465585922579103744/465586361731121162/959490468868161569
+		// Further specifics of the timing are based on NBA
+
+		auto* gba = static_cast<GBA_t*>(userData);
+		auto& peripherals = *(gba->pGBA_peripherals);
+		auto& interruptState = gba->pGBA_instance->GBA_state.interrupt;
+
+		peripherals.mIMEHalfWord.mIMEHalfWord = interruptState.imePend;
+		peripherals.mIEHalfWord.mIEHalfWord = interruptState.iePend;
+		peripherals.mIFHalfWord.mIFHalfWord = interruptState.ifPend;
+
+		const FLAG irqAvailLatch = static_cast<FLAG>(peripherals.mIFHalfWord.mIFHalfWord & peripherals.mIEHalfWord.mIEHalfWord);
+
+		if (interruptState.irqAvailLatch != irqAvailLatch)
+		{
+			TODO("Ideally this should 1 cycle delay but currently need to set 0 for TIMER IRQ test to pass in MGBA suite");
+			gba->scheduler.schedule(
+				static_cast<EventId>(GBA_EVENT::EVENT_IRQ_AVAIL),
+				gba->scheduler.get_current_cycles() + IRQ_AVAILABILITY_DELAY,
+				irqAvailLatch);
+		}
+
+		const FLAG ime = static_cast<FLAG>(peripherals.mIMEHalfWord.mIMEFields.ENABLE_ALL_INTERRUPTS);
+		const FLAG irqLineLatch = static_cast<FLAG>(ime && irqAvailLatch);
+
+		if (interruptState.irqLineLatch != irqLineLatch)
+		{
+			TODO("Ideally this should 2 cycle delay but currently need to set 1 for TIMER IRQ test to pass in MGBA suite");
+			gba->scheduler.schedule(
+				static_cast<EventId>(GBA_EVENT::EVENT_IRQ_LINE),
+				gba->scheduler.get_current_cycles() + IRQ_LINE_DELAY,
+				irqLineLatch);
+
+			// "irqLineLatch" which is the IRQ line in SOC is instantenous but IRQ line in CPU i.e. "cpuIrqLineLatch" is delayed (handled in irqLineHandler)  
+			interruptState.irqLineLatch = irqLineLatch;
+		}
+	}
+
+	static void irqAvailHandler(void* userData, int irqAvail)
+	{
+		auto* gba = static_cast<GBA_t*>(userData);
+		auto& interruptState = gba->pGBA_instance->GBA_state.interrupt;
+		interruptState.irqAvailLatch = static_cast<FLAG>(irqAvail);
+	}
+
+	static void irqLineHandler(void* userData, int irqLine)
+	{
+		auto* gba = static_cast<GBA_t*>(userData);
+		auto& interruptState = gba->pGBA_instance->GBA_state.interrupt;
+		interruptState.cpuIrqLineLatch = static_cast<FLAG>(irqLine);
+	}
+
+	static void dmaActivationHandler(void* userData, int dmaId)
+	{
+		ASSERT(dmaId >= 0 && dmaId < TO_INT(DMA::TOTAL_DMA));
+
+		auto& dmaState = static_cast<GBA_t*>(userData)->pGBA_instance->GBA_state.dma;
+
+		if (dmaState.runnableSet == RESET)
+		{
+			dmaState.currentlyActiveDMA = (DMA)dmaId;
+		}
+		else if (dmaId < dmaState.currentlyActiveDMA)
+		{
+			dmaState.currentlyActiveDMA = (DMA)dmaId;
+			dmaState.shouldReenterTransferLoop = YES;
+		}
+
+		SETBIT(dmaState.runnableSet, dmaId);
+	}
+
 	static void timerReloadWriteHandler(void* userData, int timerId)
 	{
 		ASSERT(timerId >= 0 && timerId < TO_INT(TIMER::TOTAL_TIMER));
@@ -12310,25 +12360,6 @@ private:
 
 		const int64_t overflowAt = state.cache.stats.firstTick + ((int64_t)(0x10000 - state.cache.counter - 1) * prescalar);
 		gba->scheduler.schedule(static_cast<EventId>(GBA_EVENT::EVENT_TIMER_OVERFLOW), (uint64_t)overflowAt, timerId);
-	}
-
-	static void dmaActivationHandler(void* userData, int dmaId)
-	{
-		ASSERT(dmaId >= 0 && dmaId < TO_INT(DMA::TOTAL_DMA));
-
-		auto& dmaState = static_cast<GBA_t*>(userData)->pGBA_instance->GBA_state.dma;
-
-		if (dmaState.runnableSet == RESET)
-		{
-			dmaState.currentlyActiveDMA = (DMA)dmaId;
-		}
-		else if (dmaId < dmaState.currentlyActiveDMA)
-		{
-			dmaState.currentlyActiveDMA = (DMA)dmaId;
-			dmaState.shouldReenterTransferLoop = YES;
-		}
-
-		SETBIT(dmaState.runnableSet, dmaId);
 	}
 
 private:

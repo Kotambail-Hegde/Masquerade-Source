@@ -2357,11 +2357,11 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 	}
 	case IO_IE:
 	{
-#if (GBA_ENABLE_DELAYED_IRQ == YES)
-		pGBA_instance->GBA_state.interrupt.iePend = data;
-#else
-		pGBA_peripherals->mIEHalfWord.mIEHalfWord = data;
-#endif
+		pGBA_instance->GBA_state.interrupt.iePend = data & 0x3FFF;
+		scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_IRQ_WRITE),
+			scheduler.get_current_cycles() + IRQ_REGISTERS_WRITE_DELAY,
+			ZERO);
 		RETURN;
 	}
 	case IO_IF:
@@ -2369,11 +2369,11 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 		// For IF: Refer http://problemkaputt.de/gbatek-gba-interrupt-control.htm
 		// Writing from CPU is always an ACK, so this is basically W1C register for CPU
 		// Masters other than CPU should be able to write this without triggering W1C
-#if (GBA_ENABLE_DELAYED_IRQ == YES)
 		pGBA_instance->GBA_state.interrupt.ifPend &= ~data;
-#else
-		pGBA_peripherals->mIFHalfWord.mIFHalfWord &= ~data;
-#endif
+		scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_IRQ_WRITE),
+			scheduler.get_current_cycles() + IRQ_REGISTERS_WRITE_DELAY,
+			ZERO);
 		RETURN;
 	}
 	case IO_WAITCNT:
@@ -2517,12 +2517,11 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 	}
 	case IO_IME:
 	{
-#if (GBA_ENABLE_DELAYED_IRQ == YES)
-		pGBA_instance->GBA_state.interrupt.imePend = data;
-#else
-		pGBA_peripherals->mIMEHalfWord.mIMEHalfWord = data;
-		pGBA_peripherals->mIMEHalfWord.mIMEFields.NOT_USED_0 = ZERO;
-#endif
+		pGBA_instance->GBA_state.interrupt.imePend = data & 0x01;
+		scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_IRQ_WRITE),
+			scheduler.get_current_cycles() + IRQ_REGISTERS_WRITE_DELAY,
+			ZERO);
 		RETURN;
 	}
 	case IO_400020A:
@@ -3180,54 +3179,31 @@ MASQ_INLINE void GBA_t::joypadTick()
 
 MASQ_INLINE void GBA_t::requestInterrupts(GBA_INTERRUPT interrupt)
 {
-#if (GBA_ENABLE_DELAYED_IRQ == YES)
 	pGBA_instance->GBA_state.interrupt.ifPend |= (ONE << TO_UINT(interrupt));
-#else
-	pGBA_peripherals->mIFHalfWord.mIFHalfWord = (uint16_t)(ONE << TO_UINT16(interrupt));
-#endif
+
+	scheduler.schedule(
+		static_cast<EventId>(GBA_EVENT::EVENT_IRQ_WRITE),
+		scheduler.get_current_cycles() + IRQ_REGISTERS_WRITE_DELAY,
+		ZERO);
 }
 
 MASQ_INLINE FLAG GBA_t::shouldUnHaltTheCPU()
 {
-#if (GBA_ENABLE_DELAYED_IRQ == YES)
 	RETURN pGBA_instance->GBA_state.interrupt.irqAvailLatch;
-#else
-	if ((pGBA_peripherals->mIFHalfWord.mIFHalfWord & pGBA_peripherals->mIEHalfWord.mIEHalfWord & 0x3FFF) != ZERO)
-	{
-		RETURN YES;
-	}
-
-	RETURN NO;
-#endif
 }
 
 MASQ_INLINE FLAG GBA_t::isInterruptReadyToBeServed()
 {
-#if (GBA_ENABLE_DELAYED_IRQ == YES)
 	RETURN pGBA_instance->GBA_state.interrupt.irqAvailLatch;
-#else
-	if ((pGBA_peripherals->mIFHalfWord.mIFHalfWord & pGBA_peripherals->mIEHalfWord.mIEHalfWord & 0x3FFF) != ZERO)
-	{
-		RETURN YES;
-	}
-
-	RETURN NO;
-#endif
 }
 
 MASQ_INLINE FLAG GBA_t::handleInterruptsIfApplicable()
 {
 	FLAG interruptWasServiced = NO;
 
-#if (GBA_ENABLE_DELAYED_IRQ == YES)
 	if (pGBA_instance->GBA_state.interrupt.cpsrIrqMaskLatch == DISABLED
-		&& pGBA_instance->GBA_state.interrupt.irqLineLatch == ENABLED
+		&& pGBA_instance->GBA_state.interrupt.cpuIrqLineLatch == ENABLED
 		&& isInterruptReadyToBeServed() == YES)
-#else
-	if (pGBA_peripherals->mIMEHalfWord.mIMEFields.ENABLE_ALL_INTERRUPTS == ENABLED
-		&& pGBA_registers->cpsr.psrFields.psrIRQDisBit == RESET
-		&& isInterruptReadyToBeServed() == YES)
-#endif
 	{
 		// Refer : http://problemkaputt.de/gbatek-arm-cpu-exceptions.htm for details on steps to be taken when interrupt occurs
 
