@@ -3682,6 +3682,7 @@ private:
 		EVENT_TIMER_RELOAD_WRITE,
 		EVENT_TIMER_CONTROL_WRITE,
 		EVENT_TIMER_OVERFLOW,
+		EVENT_SIO_TRANSFER_COMPLETE,
 		EVENT_COUNT
 	};
 
@@ -12016,19 +12017,18 @@ OPT_SPEED
 
 OPT_DEFAULT
 
-private:
+private: 
 
-	MASQ_INLINE void processSIO(INC64 sioCycles)
+	MASQ_INLINE void checkAndScheduleSIO()
 	{
 		// Cache register access
 		const auto& rcnt = pGBA_peripherals->mRCNTHalfWord.mRCNTFields;
 		const auto& siocnt = pGBA_peripherals->mSIOCNT.mSIOFields;
+		auto& sioCntSP = pGBA_peripherals->mSIOCNT.mSIOCNT_SPFields;
 
-		// Compute mode select once
-		const ID modeSelect = (rcnt.MODE_SPECIFIC_3 << THREE) | (rcnt.MODE_SPECIFIC_2 << TWO)
-			| (siocnt.BIT_13 << ONE) | siocnt.BIT_12;
+		// Compute mode select using your exact bitfield mapping
+		const ID modeSelect = (rcnt.MODE_SPECIFIC_3 << THREE) | (rcnt.MODE_SPECIFIC_2 << TWO) | (siocnt.BIT_13 << ONE) | siocnt.BIT_12;
 
-		// Lookup table for SIO mode (faster than switch)
 		static constexpr SIO_MODE MODE_LUT[16] = {
 			SIO_MODE::NORMAL_8BIT,    // 0
 			SIO_MODE::NORMAL_32BIT,   // 1
@@ -12047,50 +12047,36 @@ private:
 			SIO_MODE::JOYBUS,         // 14
 			SIO_MODE::JOYBUS          // 15
 		};
-
 		const SIO_MODE sioMode = MODE_LUT[modeSelect];
 
-		// Process based on mode
-		if (sioMode == SIO_MODE::NORMAL_8BIT || sioMode == SIO_MODE::NORMAL_32BIT) MASQ_LIKELY
+		if (sioMode == SIO_MODE::NORMAL_8BIT || sioMode == SIO_MODE::NORMAL_32BIT)
 		{
-			auto& sioCntSP = pGBA_peripherals->mSIOCNT.mSIOCNT_SPFields;
-
-			if (sioCntSP.START_BIT != SET) MASQ_UNLIKELY
+			if (sioCntSP.START_BIT == SET)
 			{
-				pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.sioCounter = RESET;
-				RETURN;
-			}
+				pGBA_peripherals->mSIOCNT.mSIOCNTHalfWord |= 0x0080u; // Ensure start bit is forced active
 
-			if (static_cast<SIO_PARTY>(sioCntSP.SHIFT_CLK) == SIO_PARTY::MASTER) MASQ_LIKELY
-			{
-				pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.sioCounter += sioCycles;
-			}
+				bool isInternalClock = (static_cast<SIO_PARTY>(sioCntSP.SHIFT_CLK) == SIO_PARTY::MASTER);
+				bool is32Bit = (sioMode == SIO_MODE::NORMAL_32BIT);
 
-			const INC32 cyclesToTxRxData = (sioMode == SIO_MODE::NORMAL_8BIT) ? 64 : 256;  // 8*8 or 8*32
-
-			if (pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.sioCounter >= cyclesToTxRxData) MASQ_UNLIKELY
-			{
-				pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.sioCounter -= cyclesToTxRxData;
-
-				if (sioCntSP.IRQ_EN == SET) MASQ_LIKELY
+				INC32 cyclesToTxRxData;
+				if (!is32Bit) // 8-bit mode
 				{
-					requestInterrupts(GBA_INTERRUPT::IRQ_SERIAL);
+					cyclesToTxRxData = isInternalClock ? 64 : 512;
+				}
+				else // 32-bit mode
+				{
+					cyclesToTxRxData = isInternalClock ? 256 : 2048;
 				}
 
-				sioCntSP.START_BIT = RESET;
+				// Cancel any existing pending transfer event before scheduling the new one
+				scheduler.cancel(static_cast<EventId>(GBA_EVENT::EVENT_SIO_TRANSFER_COMPLETE));
+
+				scheduler.schedule(
+					static_cast<EventId>(GBA_EVENT::EVENT_SIO_TRANSFER_COMPLETE),
+					scheduler.get_current_cycles() + cyclesToTxRxData,
+					ZERO);
 			}
 		}
-		else if (sioMode == SIO_MODE::MULTIPLAY_16BIT) MASQ_UNLIKELY
-		{
-			// Empty implementation - only check interrupt flag
-			// No actual processing needed
-		}
-		else if (sioMode == SIO_MODE::UART) MASQ_UNLIKELY
-		{
-			// Empty implementation - only check interrupt flag
-			// No actual processing needed
-		}
-		// GP and JOYBUS modes have no processing
 	}
 
 private:
@@ -12360,6 +12346,23 @@ private:
 
 		const int64_t overflowAt = state.cache.stats.firstTick + ((int64_t)(0x10000 - state.cache.counter - 1) * prescalar);
 		gba->scheduler.schedule(static_cast<EventId>(GBA_EVENT::EVENT_TIMER_OVERFLOW), (uint64_t)overflowAt, timerId);
+	}
+
+	static void sioTransferHandler(void* userData, MASQ_MAYBE_UNUSED int context)
+	{
+		auto* gba = static_cast<GBA_t*>(userData);
+		auto& sioCntSP = gba->pGBA_peripherals->mSIOCNT.mSIOCNT_SPFields;
+
+		// Only process if the start bit is still active
+		if (sioCntSP.START_BIT == SET)
+		{
+			if (sioCntSP.IRQ_EN == SET)
+			{
+				gba->requestInterrupts(GBA_INTERRUPT::IRQ_SERIAL);
+			}
+
+			sioCntSP.START_BIT = RESET;
+		}
 	}
 
 private:

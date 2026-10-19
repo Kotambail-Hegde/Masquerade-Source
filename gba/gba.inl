@@ -2289,7 +2289,16 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 	}
 	case IO_SIOCNT:
 	{
-		pGBA_peripherals->mSIOCNT.mSIOCNTHalfWord = data;
+		uint16_t& siocntWord = pGBA_peripherals->mSIOCNT.mSIOCNTHalfWord;
+		uint16_t oldSiocnt = siocntWord;
+
+		siocntWord = data;
+
+		// Check if START bit (bit 7 / 0x0080) transitioned from 0 to 1
+		if (!(oldSiocnt & 0x0080u) && (siocntWord & 0x0080u))
+		{
+			checkAndScheduleSIO();
+		}
 		RETURN;
 	}
 	case IO_SIO_DATA8_MLTSEND:
@@ -3159,7 +3168,7 @@ MASQ_INLINE void GBA_t::timerTick()
 
 MASQ_INLINE void GBA_t::serialTick()
 {
-	processSIO(ONE);
+	DO_NOTHING;
 }
 
 MASQ_INLINE void GBA_t::apuTick()
