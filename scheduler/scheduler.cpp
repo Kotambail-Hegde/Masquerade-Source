@@ -17,14 +17,14 @@ EventId Scheduler_t::register_event(EventHandler handler, void* userData, uint8_
 void Scheduler_t::reset()
 {
 	currentCycles = 0;
-	nextEventTime = UINT64_MAX;
+	nextEventTime = INT64_MAX;
 	nextSequence = 0;
 	eventCount = 0;
 
 	memset(events, 0, sizeof(events));
 }
 
-void Scheduler_t::schedule(EventId id, uint64_t target_cycle, int context)
+void Scheduler_t::schedule(EventId id, int64_t target_cycle, int context)
 {
 	ASSERT(id < eventDefCount);
 	if (id >= eventDefCount)
@@ -66,7 +66,7 @@ void Scheduler_t::cancel(EventId id, int context)
 	}
 }
 
-void Scheduler_t::reschedule(EventId id, uint64_t new_target_cycle, int context)
+void Scheduler_t::reschedule(EventId id, int64_t new_target_cycle, int context)
 {
 	// Creates the event if it isn't pending, and counts as a new insertion for same-cycle order
 	cancel(id, context);
@@ -135,5 +135,5 @@ void Scheduler_t::remove_at(uint32_t index)
 
 void Scheduler_t::recompute_next_event_time()
 {
-	nextEventTime = (eventCount > 0) ? events[0].timestamp : UINT64_MAX;
+	nextEventTime = (eventCount > 0) ? events[0].timestamp : INT64_MAX;
 }

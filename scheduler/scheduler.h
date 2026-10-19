@@ -9,8 +9,8 @@ constexpr EventId INVALID_EVENT_ID = 0xFFFF;
 
 struct ScheduledEvent_t
 {
-	uint64_t timestamp;
-	uint64_t sequence;
+	int64_t timestamp;
+	int64_t sequence;
 	int      context;
 	EventId  id;
 };
@@ -33,16 +33,16 @@ public:
 	// Clears the event queue and resets the master cycle counter to zero, registered event types are kept
 	void reset();
 
-	uint64_t get_current_cycles() const {
+	int64_t get_current_cycles() const {
 		RETURN currentCycles;
 	}
-	uint64_t peek_next_timestamp() const {
+	int64_t peek_next_timestamp() const {
 		RETURN nextEventTime;
 	}
 
-	void schedule(EventId id, uint64_t target_cycle, int context = 0);
+	void schedule(EventId id, int64_t target_cycle, int context = 0);
 	void cancel(EventId id, int context = 0);
-	void reschedule(EventId id, uint64_t new_target_cycle, int context = 0);
+	void reschedule(EventId id, int64_t new_target_cycle, int context = 0);
 
 	// Called every cycle, advances the clock by one and fires the events that are due
 	MASQ_INLINE void tick()
@@ -79,9 +79,9 @@ private:
 	EventDef_t eventDefs[MAX_EVENT_TYPES];
 	uint32_t   eventDefCount;
 
-	uint64_t currentCycles;
-	uint64_t nextEventTime;
-	uint64_t nextSequence;
+	int64_t currentCycles;
+	int64_t nextEventTime;
+	int64_t nextSequence;
 	uint32_t eventCount;
 	ScheduledEvent_t events[MAX_EVENTS];
 };
