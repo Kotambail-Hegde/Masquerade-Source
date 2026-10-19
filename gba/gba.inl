@@ -168,6 +168,7 @@ GBA_HALFWORD GBA_t::readIO(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, ME
 	}
 	case IO_DISPSTAT:
 	{
+		syncPPU();
 		RETURN pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATHalfWord;
 	}
 	case IO_VCOUNT:
@@ -3178,7 +3179,7 @@ MASQ_INLINE void GBA_t::apuTick()
 
 MASQ_INLINE void GBA_t::ppuTick()
 {
-	processPPU(ONE);
+	DO_NOTHING;
 }
 
 MASQ_INLINE void GBA_t::joypadTick()

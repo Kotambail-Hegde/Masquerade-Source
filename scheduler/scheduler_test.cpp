@@ -40,8 +40,8 @@
 #define BENCH_BARRIER() asm volatile("" ::: "memory")
 #endif
 
-using u64 = uint64_t;
-static constexpr u64 NO_EVENT = UINT64_MAX;
+using u64 = int64_t;
+static constexpr u64 NO_EVENT = INT64_MAX;
 
 // ---------------------------------------------------------------------------------------------------------------------
 // framework

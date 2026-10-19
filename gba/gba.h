@@ -3647,6 +3647,11 @@ private:
 			FLAG modeStartEvent[TO_UINT(LCD_MODES::MODE_TOTAL_LCD_MODES)];
 			FLAG modeCompleteEvent[TO_UINT(LCD_MODES::MODE_TOTAL_LCD_MODES)];
 		} otherMisc;
+		struct scheduler_t
+		{
+			INC64 ppuStartCycleCount;
+			INC64 lastSyncCycleCount;
+		} scheduler;
 	} display_t;
 
 private:
@@ -12015,7 +12020,7 @@ OPT_SPEED
 
 	}
 
-	void exitHBlankVDraw()
+	MASQ_INLINE void exitHBlankVDraw()
 	{
 		pGBA_display->currentMergePixel = RESET;
 		pGBA_display->currentBgPixel = RESET;
@@ -12176,7 +12181,7 @@ OPT_SPEED
 		}
 	}
 
-	void exitHDrawVBlank()
+	MASQ_INLINE void exitHDrawVBlank()
 	{
 		//// Note: In process PPU, we should account for cycles which occur only in MODE_LCD_H_DRAW_V_BLANK
 		//ppuCycles -= pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter;
@@ -12202,7 +12207,7 @@ OPT_SPEED
 			ZERO);
 	}
 
-	void exitHDrawVDraw()
+	MASQ_INLINE void exitHDrawVDraw()
 	{
 		//// Note: In process PPU, we should account for cycles which occur only in MODE_LCD_H_DRAW_V_DRAW
 		//ppuCycles -= pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter;
@@ -12228,7 +12233,7 @@ OPT_SPEED
 			ZERO);
 	}
 
-	void exitHBlankVBlank()
+	MASQ_INLINE void exitHBlankVBlank()
 	{
 		pGBA_display->currentMergePixel = RESET;
 		pGBA_display->currentBgPixel = RESET;
@@ -12352,6 +12357,20 @@ OPT_SPEED
 				scheduler.get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE),
 				ZERO);
 		}
+	}
+
+	MASQ_INLINE void syncPPU()
+	{
+		INC64 currentCycles = scheduler.get_current_cycles();
+		// If nothing has advanced, exit immediately.
+		if (pGBA_display->scheduler.lastSyncCycleCount == currentCycles)
+		{
+			RETURN;
+		}
+		ASSERT(pGBA_display->scheduler.lastSyncCycleCount < currentCycles);
+		INC64 catchupCycles = currentCycles - pGBA_display->scheduler.lastSyncCycleCount;
+		processPPU(catchupCycles);
+		pGBA_display->scheduler.lastSyncCycleCount = currentCycles;
 	}
 
 	void processPPU(INC64 ppuCycles);
@@ -12712,10 +12731,7 @@ private:
 	{
 		auto* gba = static_cast<GBA_t*>(userData);
 
-		if (gba->pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter >= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE)
-		{
-			gba->pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter -= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE;
-		}
+		gba->syncPPU();
 
 		gba->exitHDrawVDraw();
 	}
@@ -12724,10 +12740,7 @@ private:
 	{
 		auto* gba = static_cast<GBA_t*>(userData);
 
-		if (gba->pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter >= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK)
-		{
-			gba->pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter -= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK;
-		}
+		gba->syncPPU();
 
 		gba->exitHBlankVDraw();
 	}
@@ -12736,10 +12749,7 @@ private:
 	{
 		auto* gba = static_cast<GBA_t*>(userData);
 
-		if (gba->pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter >= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE)
-		{
-			gba->pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter -= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE;
-		}
+		gba->syncPPU();
 
 		gba->exitHDrawVBlank();
 	}
@@ -12748,10 +12758,7 @@ private:
 	{
 		auto* gba = static_cast<GBA_t*>(userData);
 
-		if (gba->pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter >= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK)
-		{
-			gba->pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter -= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK;
-		}
+		gba->syncPPU();
 
 		gba->exitHBlankVBlank();
 	}

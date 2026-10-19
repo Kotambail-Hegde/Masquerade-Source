@@ -691,7 +691,9 @@ void GBA_t::processPPU(INC64 ppuCycles)
 	// On every new scanline, we just add the PD/PB to "Internal Reference Point" registers and load it to the "Affine Buffer"
 	// On every new frame, we just add BGX/BGY to "Internal Reference Point" registers and load it to the "Affine Buffer"
 
-	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter += ppuCycles;
+	auto& lcdCounter = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter;
+
+	lcdCounter += ppuCycles;
 
 	switch (pGBA_display->currentLCDMode)
 	{
@@ -699,6 +701,12 @@ void GBA_t::processPPU(INC64 ppuCycles)
 	{
 		PROCESS_PPU_MODES(ppuCycles + pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange, YES, YES, YES, YES);
 		pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = RESET;
+
+		if (lcdCounter >= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE)
+		{
+			lcdCounter -= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE;
+		}
+
 		BREAK;
 	}
 	case LCD_MODES::MODE_LCD_H_BLANK_V_DRAW: // H Blank V Draw
@@ -706,6 +714,12 @@ void GBA_t::processPPU(INC64 ppuCycles)
 		// needed alteast for objects
 		PROCESS_PPU_MODES(ppuCycles + pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange, NO, NO, YES, NO);
 		pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = RESET;
+
+		if (lcdCounter >= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK)
+		{
+			lcdCounter -= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK;
+		}
+
 		BREAK;
 	}
 	case LCD_MODES::MODE_LCD_H_DRAW_V_BLANK: // H Draw V Blank
@@ -713,6 +727,12 @@ void GBA_t::processPPU(INC64 ppuCycles)
 		// needed alteast for objects and perhaps windows as well
 		PROCESS_PPU_MODES(ppuCycles + pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange, NO, YES, YES, NO);
 		pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = RESET;
+
+		if (lcdCounter >= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE)
+		{
+			lcdCounter -= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE;
+		}
+
 		BREAK;
 	}
 	case LCD_MODES::MODE_LCD_H_BLANK_V_BLANK: // H Blank V Blank
@@ -720,6 +740,12 @@ void GBA_t::processPPU(INC64 ppuCycles)
 		// needed alteast for objects
 		PROCESS_PPU_MODES(ppuCycles + pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange, NO, NO, YES, NO);
 		pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = RESET;
+
+		if (lcdCounter >= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK)
+		{
+			lcdCounter -= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK;
+		}
+
 		BREAK;
 	}
 	default:
@@ -787,6 +813,8 @@ void GBA_t::initializeGraphics()
 	pGBA_display->objCache[TO_UINT(OBJECT_STAGE::OBJECT_FETCH_STAGE)].vcount = ((pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY + ONE) % 228);
 	pGBA_display->allObjectsRenderedForScanline = YES;
 
+	pGBA_display->scheduler.ppuStartCycleCount = scheduler.get_current_cycles();
+	pGBA_display->scheduler.lastSyncCycleCount = pGBA_display->scheduler.ppuStartCycleCount;
 	scheduler.schedule(
 		static_cast<EventId>(GBA_EVENT::EVENT_PPU_HBLANK_VBLANK),
 		scheduler.get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK),
