@@ -768,6 +768,9 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 {
 #define IO8_WRONG_HANDLER() FATAL("Should be handled by writeIO8, Line: %d in File %s", __LINE__, __FILE__)
 #define REJECT_IO8(width) if ((width) == MEMORY_ACCESS_WIDTH::EIGHT_BIT) MASQ_UNLIKELY IO8_WRONG_HANDLER()
+#define SYNC_PPU_REG(addr) if ((addr) >= IO_DISPCNT && (addr) <= IO_BLDY) { syncPPU(); }
+
+	SYNC_PPU_REG(address);
 
 	switch (address)
 	{
@@ -2552,6 +2555,10 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 
 MASQ_INLINE void GBA_t::writeIO8(uint32_t address, BYTE data, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType)
 {
+#define SYNC_PPU_REG(addr) if ((addr) >= IO_DISPCNT && (addr) <= IO_BLDY) { syncPPU(); }
+
+	SYNC_PPU_REG(address);
+
 	switch (address)
 	{
 	case IO_BLDY:

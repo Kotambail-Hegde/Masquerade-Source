@@ -3642,11 +3642,6 @@ private:
 			Pixel imGuiBuffer2D[screen_height][screen_width];
 		} imGuiBuffer;
 		uint64_t filters;
-		struct otherMisc_t
-		{
-			FLAG modeStartEvent[TO_UINT(LCD_MODES::MODE_TOTAL_LCD_MODES)];
-			FLAG modeCompleteEvent[TO_UINT(LCD_MODES::MODE_TOTAL_LCD_MODES)];
-		} otherMisc;
 		struct scheduler_t
 		{
 			INC64 ppuStartCycleCount;
