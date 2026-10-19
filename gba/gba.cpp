@@ -661,35 +661,35 @@ void GBA_t::processPPU(INC64 ppuCycles)
 		RETURN;
 	}
 
-		// NOTE: (PPU:01) Refer to "Internal Reference Point Registers" section in http://problemkaputt.de/gbatek-lcd-i-o-bg-rotation-scaling.htm 
-		// Reference points getting copied to internal registers can happen in 2 cases
-		// 1) We are jumping to scanline zero
-		// TWO) We wrote to BGX or BGY register from cpu (then we need to handle the copying irrespective of whether scanline is 0 or not)
-		// Both the points are handled below
-		//
-		// NOTE: (PPU:02) Refer to "Internal Reference Point Registers" section in http://problemkaputt.de/gbatek-lcd-i-o-bg-rotation-scaling.htm 
-		// Latched internal register are incremented by BG2/3PB and BG2/3PD
-		// Note that point (2) of PPU:01 can override this increment (Source: NBA) 
-		//
-		// NOTE: (PPU:03) Refer to https://gbadev.net/tonc/affine.html
-		// Affine transformation has following items as per TONC
-		// 1) BGX and BGY Initial reference point per frame (or mid scanline because of point 2 of PPU:01)
-		// TWO) pa : texture x - increment / pixel (Not directly added to internal reference point registers, refer below)
-		// 3) pb : texture x - increment / scanline
-		// 4) pc : texture y - increment / pixel (Not directly added to internal reference point registers, refer below)
-		// 5) pd : texture y - increment / scanline
-		//
-		// Point (1) is done as part of PPU:01
-		// Point (3) and (5) is done as part of PPU:02
-		//
-		// 6) IMPORTANT DETAILS:
-		// If you read carefully in (PPU:01) and (PPU:02), the document mentions that the "Internal Reference Point" registers are added by ONLY BGX/BGY (per frame) and PB/PD (per scanline)
-		// There is no mention of adding of PA and PC directly to "Internal Reference Point" registers
-		// Basically during the start of scanline we latch the "Internal Reference Point"
-		// Then as we proceed over the pixels of the particular scanline, we use the latched "Internal Reference Point" values and PA/PC, without modifying "Internal Reference Point" registers...
-		// The "Affine Buffer" that this emulator maintains is to handle this pixel processing per scanline which involves using/incrementing the latched "Internal Reference Point" value by PA/PC without directly modifying "Internal Reference Point" registers
-		// On every new scanline, we just add the PD/PB to "Internal Reference Point" registers and load it to the "Affine Buffer"
-		// On every new frame, we just add BGX/BGY to "Internal Reference Point" registers and load it to the "Affine Buffer"
+	// NOTE: (PPU:01) Refer to "Internal Reference Point Registers" section in http://problemkaputt.de/gbatek-lcd-i-o-bg-rotation-scaling.htm 
+	// Reference points getting copied to internal registers can happen in 2 cases
+	// 1) We are jumping to scanline zero
+	// TWO) We wrote to BGX or BGY register from cpu (then we need to handle the copying irrespective of whether scanline is 0 or not)
+	// Both the points are handled below
+	//
+	// NOTE: (PPU:02) Refer to "Internal Reference Point Registers" section in http://problemkaputt.de/gbatek-lcd-i-o-bg-rotation-scaling.htm 
+	// Latched internal register are incremented by BG2/3PB and BG2/3PD
+	// Note that point (2) of PPU:01 can override this increment (Source: NBA) 
+	//
+	// NOTE: (PPU:03) Refer to https://gbadev.net/tonc/affine.html
+	// Affine transformation has following items as per TONC
+	// 1) BGX and BGY Initial reference point per frame (or mid scanline because of point 2 of PPU:01)
+	// TWO) pa : texture x - increment / pixel (Not directly added to internal reference point registers, refer below)
+	// 3) pb : texture x - increment / scanline
+	// 4) pc : texture y - increment / pixel (Not directly added to internal reference point registers, refer below)
+	// 5) pd : texture y - increment / scanline
+	//
+	// Point (1) is done as part of PPU:01
+	// Point (3) and (5) is done as part of PPU:02
+	//
+	// 6) IMPORTANT DETAILS:
+	// If you read carefully in (PPU:01) and (PPU:02), the document mentions that the "Internal Reference Point" registers are added by ONLY BGX/BGY (per frame) and PB/PD (per scanline)
+	// There is no mention of adding of PA and PC directly to "Internal Reference Point" registers
+	// Basically during the start of scanline we latch the "Internal Reference Point"
+	// Then as we proceed over the pixels of the particular scanline, we use the latched "Internal Reference Point" values and PA/PC, without modifying "Internal Reference Point" registers...
+	// The "Affine Buffer" that this emulator maintains is to handle this pixel processing per scanline which involves using/incrementing the latched "Internal Reference Point" value by PA/PC without directly modifying "Internal Reference Point" registers
+	// On every new scanline, we just add the PD/PB to "Internal Reference Point" registers and load it to the "Affine Buffer"
+	// On every new frame, we just add BGX/BGY to "Internal Reference Point" registers and load it to the "Affine Buffer"
 
 	pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter += ppuCycles;
 
@@ -699,30 +699,6 @@ void GBA_t::processPPU(INC64 ppuCycles)
 	{
 		PROCESS_PPU_MODES(ppuCycles + pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange, YES, YES, YES, YES);
 		pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = RESET;
-
-		if (pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter >= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE)
-		{
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter -= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE;
-
-			// Note: In process PPU, we should account for cycles which occur only in MODE_LCD_H_DRAW_V_DRAW
-			ppuCycles -= pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter;
-
-			pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.HBLANK_FLAG = SET;
-
-			if (pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.HBLANK_IRQ_ENABLE == SET)
-			{
-				requestInterrupts(GBA_INTERRUPT::IRQ_HBLANK);
-			}
-
-			RequestDMA(DMA_TIMING::HBLANK);
-
-			// Proceed to next lcd mode
-			pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter;
-			pGBA_display->didLCDModeChangeJustNow = YES;
-			pGBA_display->currentLCDMode = LCD_MODES::MODE_LCD_H_BLANK_V_DRAW;
-			PPUINFO("Entering MODE_LCD_H_BLANK_V_DRAW");
-		}
-
 		BREAK;
 	}
 	case LCD_MODES::MODE_LCD_H_BLANK_V_DRAW: // H Blank V Draw
@@ -730,160 +706,6 @@ void GBA_t::processPPU(INC64 ppuCycles)
 		// needed alteast for objects
 		PROCESS_PPU_MODES(ppuCycles + pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange, NO, NO, YES, NO);
 		pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = RESET;
-
-		if (pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter >= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK)
-		{
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter -= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK;
-
-			pGBA_display->currentMergePixel = RESET;
-			pGBA_display->currentBgPixel = RESET;
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == YES)
-			pGBA_display->currentBgPixelInTextMode[BG0] = RESET;
-			pGBA_display->currentBgPixelInTextMode[BG1] = RESET;
-			pGBA_display->currentBgPixelInTextMode[BG2] = RESET;
-			pGBA_display->currentBgPixelInTextMode[BG3] = RESET;
-#endif
-			pGBA_display->currentWinPixel = RESET;
-			pGBA_display->mergeWaitCyclesDone = CLEAR;
-			pGBA_display->winWaitCyclesDone = CLEAR;
-			pGBA_display->bgWaitCyclesDone = CLEAR;
-			pGBA_display->objWaitCyclesDone = CLEAR;
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.ppuCounter = RESET;
-			for (INC8 mode = MODE0; mode <= MODE5; mode++)
-			{
-				pGBA_display->winAccessPatternState[mode] = RESET;
-				pGBA_display->bgAccessPatternState[mode] = RESET;
-				pGBA_display->mergeAccessPatternState[mode] = RESET;
-			}
-			pGBA_display->winAccessPattern = RESET;
-			pGBA_display->bgAccessPattern = RESET;
-			pGBA_display->mergeAccessPattern = RESET;
-
-			// LINE == 159
-			if (pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY == (TO_UINT(LCD_DIMENSIONS::LCD_VISIBLE_LINES) - ONE))
-			{
-				++pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
-
-				pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.HBLANK_FLAG = RESET;
-
-				pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.VBLANK_FLAG = SET;
-
-				HANDLE_VCOUNT();
-
-				// Refer http://problemkaputt.de/gbatek-gba-dma-transfers.htm
-				if (pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY >= TWO)
-				{
-					/*
-					* https://gbadev.net/tonc/dma.html
-					* For DMA3 it will start the copy at the start of each rendering line, but with a 2 scanline delay.
-					*/
-					if (pGBA_peripherals->mDMA3CNT_H.mDMAnCNT_HFields.DMA_EN == SET
-						&&
-						pGBA_instance->GBA_state.dma.cache[DMA::DMA3].scheduleType == DMA_TIMING::SPECIAL)
-					{
-						scheduler.schedule(
-							static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION),
-							scheduler.get_current_cycles() + TWO,
-							static_cast<int>(DMA::DMA3));
-					}
-				}
-
-				RequestDMA(DMA_TIMING::VBLANK);
-
-				if (pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.VBLANK_IRQ_ENABLE == SET)
-				{
-					requestInterrupts(GBA_INTERRUPT::IRQ_VBLANK);
-				}
-
-				// Proceed to next lcd mode
-				pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter;
-				pGBA_display->wasVblankJustTriggered = YES;
-				pGBA_display->didLCDModeChangeJustNow = YES;
-				pGBA_display->currentLCDMode = LCD_MODES::MODE_LCD_H_DRAW_V_BLANK;
-				PPUINFO("Entering MODE_LCD_H_DRAW_V_BLANK");
-			}
-			// LINE 0 - 158
-			else
-			{
-				// Handling PPU:02
-
-				pGBA_display->bgCache[BG2].internalRefPointRegisters.BGX_Signed += (int16_t)pGBA_peripherals->mBG2PBHalfWord.mBGnPxHalfWord_Signed;
-				pGBA_display->bgCache[BG2].internalRefPointRegisters.BGY_Signed += (int16_t)pGBA_peripherals->mBG2PDHalfWord.mBGnPxHalfWord_Signed;
-
-				if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE == MODE2)
-				{
-					pGBA_display->bgCache[BG3].internalRefPointRegisters.BGX_Signed += (int16_t)pGBA_peripherals->mBG3PBHalfWord.mBGnPxHalfWord_Signed;
-					pGBA_display->bgCache[BG3].internalRefPointRegisters.BGY_Signed += (int16_t)pGBA_peripherals->mBG3PDHalfWord.mBGnPxHalfWord_Signed;
-				}
-
-				// Handling point (2) of PPU:01
-
-				PPUTODO("Should the latching of Internal Reference Point when CPU writes to them be done only during end of Scanline or mid-scanline is also possible!");
-
-				if (pGBA_display->bgCache[BG2].internalRefPointRegisters.bgxOverwrittenByCPU == YES)
-				{
-					pGBA_display->bgCache[BG2].internalRefPointRegisters.BGX = (int32_t)pGBA_peripherals->mBG2XWord.mBGniWord_Signed;
-					pGBA_display->bgCache[BG2].internalRefPointRegisters.bgxOverwrittenByCPU = NO;
-				}
-
-				if (pGBA_display->bgCache[BG2].internalRefPointRegisters.bgyOverwrittenByCPU == YES)
-				{
-					pGBA_display->bgCache[BG2].internalRefPointRegisters.BGY = (int32_t)pGBA_peripherals->mBG2YWord.mBGniWord_Signed;
-					pGBA_display->bgCache[BG2].internalRefPointRegisters.bgyOverwrittenByCPU = NO;
-				}
-
-				if (pGBA_display->bgCache[BG3].internalRefPointRegisters.bgxOverwrittenByCPU == YES)
-				{
-					pGBA_display->bgCache[BG3].internalRefPointRegisters.BGX = (int32_t)pGBA_peripherals->mBG3XWord.mBGniWord_Signed;
-					pGBA_display->bgCache[BG3].internalRefPointRegisters.bgxOverwrittenByCPU = NO;
-				}
-
-				if (pGBA_display->bgCache[BG3].internalRefPointRegisters.bgyOverwrittenByCPU == YES)
-				{
-					pGBA_display->bgCache[BG3].internalRefPointRegisters.BGY = (int32_t)pGBA_peripherals->mBG3YWord.mBGniWord_Signed;
-					pGBA_display->bgCache[BG3].internalRefPointRegisters.bgyOverwrittenByCPU = NO;
-				}
-
-				// Handling point (6) of PPU:03
-				// Setting up the initial values in Affine buffer by loading it with the Internal Reference Point registers for per pixel processing of next scanline
-
-				pGBA_display->bgCache[BG2].affine.affineX = pGBA_display->bgCache[BG2].internalRefPointRegisters.BGX_Signed;
-				pGBA_display->bgCache[BG2].affine.affineY = pGBA_display->bgCache[BG2].internalRefPointRegisters.BGY_Signed;
-				pGBA_display->bgCache[BG3].affine.affineX = pGBA_display->bgCache[BG3].internalRefPointRegisters.BGX_Signed;
-				pGBA_display->bgCache[BG3].affine.affineY = pGBA_display->bgCache[BG3].internalRefPointRegisters.BGY_Signed;
-
-				++pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
-
-				pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.HBLANK_FLAG = RESET;
-
-				HANDLE_VCOUNT();
-
-				// Refer http://problemkaputt.de/gbatek-gba-dma-transfers.htm
-				if (pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY >= TWO)
-				{
-					/*
-					* https://gbadev.net/tonc/dma.html
-					* For DMA3 it will start the copy at the start of each rendering line, but with a 2 scanline delay.
-					*/
-					if (pGBA_peripherals->mDMA3CNT_H.mDMAnCNT_HFields.DMA_EN == SET
-						&&
-						pGBA_instance->GBA_state.dma.cache[DMA::DMA3].scheduleType == DMA_TIMING::SPECIAL)
-					{
-						scheduler.schedule(
-							static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION),
-							scheduler.get_current_cycles() + TWO,
-							static_cast<int>(DMA::DMA3));
-					}
-				}
-
-				// Proceed to next lcd mode
-				pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter;
-				pGBA_display->didLCDModeChangeJustNow = YES;
-				pGBA_display->currentLCDMode = LCD_MODES::MODE_LCD_H_DRAW_V_DRAW;
-				PPUINFO("Entering MODE_LCD_H_DRAW_V_DRAW");
-			}
-		}
-
 		BREAK;
 	}
 	case LCD_MODES::MODE_LCD_H_DRAW_V_BLANK: // H Draw V Blank
@@ -891,30 +713,6 @@ void GBA_t::processPPU(INC64 ppuCycles)
 		// needed alteast for objects and perhaps windows as well
 		PROCESS_PPU_MODES(ppuCycles + pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange, NO, YES, YES, NO);
 		pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = RESET;
-
-		if (pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter >= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE)
-		{
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter -= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE;
-
-			// Note: In process PPU, we should account for cycles which occur only in MODE_LCD_H_DRAW_V_BLANK
-			ppuCycles -= pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter;
-
-			pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.HBLANK_FLAG = SET;
-
-			// According to http://problemkaputt.de/gbatek-lcd-dimensions-and-timings.htm, we should not...but this is needed for tonc's irq_demo.gba
-			// GBATEK is confirmed to be wrong w.r.t this as per https://discord.com/channels/465585922579103744/465586361731121162/1313454859131031574
-			if (pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.HBLANK_IRQ_ENABLE == SET)
-			{
-				requestInterrupts(GBA_INTERRUPT::IRQ_HBLANK);
-			}
-
-			// Proceed to the next lcd mode
-			pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter;
-			pGBA_display->didLCDModeChangeJustNow = YES;
-			pGBA_display->currentLCDMode = LCD_MODES::MODE_LCD_H_BLANK_V_BLANK;
-			PPUINFO("Entering MODE_LCD_H_BLANK_V_BLANK");
-		}
-
 		BREAK;
 	}
 	case LCD_MODES::MODE_LCD_H_BLANK_V_BLANK: // H Blank V Blank
@@ -922,125 +720,6 @@ void GBA_t::processPPU(INC64 ppuCycles)
 		// needed alteast for objects
 		PROCESS_PPU_MODES(ppuCycles + pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange, NO, NO, YES, NO);
 		pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = RESET;
-
-		if (pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter >= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK)
-		{
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter -= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK;
-
-			pGBA_display->currentMergePixel = RESET;
-			pGBA_display->currentBgPixel = RESET;
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == YES)
-			pGBA_display->currentBgPixelInTextMode[BG0] = RESET;
-			pGBA_display->currentBgPixelInTextMode[BG1] = RESET;
-			pGBA_display->currentBgPixelInTextMode[BG2] = RESET;
-			pGBA_display->currentBgPixelInTextMode[BG3] = RESET;
-#endif
-			pGBA_display->currentWinPixel = RESET;
-			pGBA_display->mergeWaitCyclesDone = CLEAR;
-			pGBA_display->winWaitCyclesDone = CLEAR;
-			pGBA_display->bgWaitCyclesDone = CLEAR;
-			pGBA_display->objWaitCyclesDone = CLEAR;
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.ppuCounter = RESET;
-			for (INC8 mode = MODE0; mode <= MODE5; mode++)
-			{
-				pGBA_display->winAccessPatternState[mode] = RESET;
-				pGBA_display->bgAccessPatternState[mode] = RESET;
-				pGBA_display->mergeAccessPatternState[mode] = RESET;
-			}
-			pGBA_display->winAccessPattern = RESET;
-			pGBA_display->bgAccessPattern = RESET;
-			pGBA_display->mergeAccessPattern = RESET;
-
-			// LINE == 227
-			if (pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY == ((uint32_t)LCD_DIMENSIONS::LCD_TOTAL_V_LINES - ONE))
-			{
-				// Handling point (1) of PPU:01
-
-				pGBA_display->bgCache[BG2].internalRefPointRegisters.BGX_Signed = pGBA_peripherals->mBG2XWord.mBGniWord_Signed;
-				pGBA_display->bgCache[BG2].internalRefPointRegisters.BGY_Signed = pGBA_peripherals->mBG2YWord.mBGniWord_Signed;
-				pGBA_display->bgCache[BG3].internalRefPointRegisters.BGX_Signed = pGBA_peripherals->mBG3XWord.mBGniWord_Signed;
-				pGBA_display->bgCache[BG3].internalRefPointRegisters.BGY_Signed = pGBA_peripherals->mBG3YWord.mBGniWord_Signed;
-
-				// Reset the flags for point (2) of PPU:01 as we have already latched the registers
-				pGBA_display->bgCache[BG2].internalRefPointRegisters.bgxOverwrittenByCPU = NO;
-				pGBA_display->bgCache[BG2].internalRefPointRegisters.bgyOverwrittenByCPU = NO;
-				pGBA_display->bgCache[BG3].internalRefPointRegisters.bgxOverwrittenByCPU = NO;
-				pGBA_display->bgCache[BG3].internalRefPointRegisters.bgyOverwrittenByCPU = NO;
-
-				// Handling point (6) of PPU:03
-				// Setting up the initial values in Affine buffer by loading it with the Internal Reference Point registers for per pixel processing of next frame
-
-				pGBA_display->bgCache[BG2].affine.affineX = pGBA_display->bgCache[BG2].internalRefPointRegisters.BGX_Signed;
-				pGBA_display->bgCache[BG2].affine.affineY = pGBA_display->bgCache[BG2].internalRefPointRegisters.BGY_Signed;
-				pGBA_display->bgCache[BG3].affine.affineX = pGBA_display->bgCache[BG3].internalRefPointRegisters.BGX_Signed;
-				pGBA_display->bgCache[BG3].affine.affineY = pGBA_display->bgCache[BG3].internalRefPointRegisters.BGY_Signed;
-
-				pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.VBLANK_FLAG = RESET;
-				pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.HBLANK_FLAG = RESET;
-
-				pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY = RESET;
-
-				HANDLE_VCOUNT();
-
-				// Proceed to the next lcd mode
-				pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter;
-				pGBA_display->didLCDModeChangeJustNow = YES;
-				pGBA_display->currentLCDMode = LCD_MODES::MODE_LCD_H_DRAW_V_DRAW;
-				PPUINFO("Entering MODE_LCD_H_DRAW_V_DRAW");
-			}
-			// LINE 160 to 226
-			else
-			{
-				++pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
-
-				pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.HBLANK_FLAG = RESET;
-
-				// If the LINE just became 227....
-				// Refer http://problemkaputt.de/gbatek-lcd-i-o-interrupts-and-status.htm
-				if (pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY == ((uint32_t)LCD_DIMENSIONS::LCD_TOTAL_V_LINES - ONE))
-				{
-					pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.VBLANK_FLAG = RESET;
-				}
-
-				HANDLE_VCOUNT();
-
-				// Refer http://problemkaputt.de/gbatek-gba-dma-transfers.htm
-				if (pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY < 162)
-				{
-					/*
-					* https://gbadev.net/tonc/dma.html
-					* For DMA3 it will start the copy at the start of each rendering line, but with a 2 scanline delay.
-					*/
-					if (pGBA_peripherals->mDMA3CNT_H.mDMAnCNT_HFields.DMA_EN == SET
-						&&
-						pGBA_instance->GBA_state.dma.cache[DMA::DMA3].scheduleType == DMA_TIMING::SPECIAL)
-					{
-						scheduler.schedule(
-							static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION),
-							scheduler.get_current_cycles() + TWO,
-							static_cast<int>(DMA::DMA3));
-					}
-				}
-				else if (pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY >= 162)
-				{
-					// Need to stop scheduling the Video Capture DMA (DMA 3) 
-					if (pGBA_peripherals->mDMA3CNT_H.mDMAnCNT_HFields.DMA_EN == SET
-						&&
-						pGBA_instance->GBA_state.dma.cache[DMA::DMA3].scheduleType == DMA_TIMING::SPECIAL)
-					{
-						pGBA_peripherals->mDMA3CNT_H.mDMAnCNT_HFields.DMA_EN = RESET;
-						OnDMAChannelWritten(DMA::DMA3, ENABLED, DISABLED);
-					}
-				}
-
-				// Proceed to the next lcd mode
-				pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter;
-				pGBA_display->didLCDModeChangeJustNow = YES;
-				pGBA_display->currentLCDMode = LCD_MODES::MODE_LCD_H_DRAW_V_BLANK;
-				PPUINFO("Entering MODE_LCD_H_DRAW_V_BLANK");
-			}
-		}
-
 		BREAK;
 	}
 	default:
@@ -1107,6 +786,11 @@ void GBA_t::initializeGraphics()
 	pGBA_display->currentLCDMode = LCD_MODES::MODE_LCD_H_BLANK_V_BLANK;
 	pGBA_display->objCache[TO_UINT(OBJECT_STAGE::OBJECT_FETCH_STAGE)].vcount = ((pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY + ONE) % 228);
 	pGBA_display->allObjectsRenderedForScanline = YES;
+
+	scheduler.schedule(
+		static_cast<EventId>(GBA_EVENT::EVENT_PPU_HBLANK_VBLANK),
+		scheduler.get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK),
+		ZERO);
 }
 
 void GBA_t::initializeAudio()
@@ -1714,14 +1398,18 @@ void GBA_t::registerEvents()
 
 	static const EventSetup setup[] =
 	{
-		{ &GBA_t::irqWriteHandler,			0 },
-		{ &GBA_t::irqAvailHandler,			1 },
-		{ &GBA_t::irqLineHandler,			2 },
-		{ &GBA_t::dmaActivationHandler,     0 },
-		{ &GBA_t::timerReloadWriteHandler,  1 },
-		{ &GBA_t::timerControlWriteHandler, 2 },
-		{ &GBA_t::timerOverflowHandler,     0 },
-		{ &GBA_t::sioTransferHandler,       0 },
+		{ &GBA_t::exitHBlankVDrawHandler,			0 },
+		{ &GBA_t::exitHDrawVDrawHandler,			0 },
+		{ &GBA_t::exitHBlankVBlankHandler,			0 },
+		{ &GBA_t::exitHDrawVBlankHandler,			0 },
+		{ &GBA_t::irqWriteHandler,					0 },
+		{ &GBA_t::irqAvailHandler,					1 },
+		{ &GBA_t::irqLineHandler,					2 },
+		{ &GBA_t::dmaActivationHandler,				0 },
+		{ &GBA_t::timerReloadWriteHandler,			1 },
+		{ &GBA_t::timerControlWriteHandler,			2 },
+		{ &GBA_t::timerOverflowHandler,				0 },
+		{ &GBA_t::sioTransferHandler,				0 },
 	};
 
 	static_assert(std::size(setup) == static_cast<size_t>(GBA_EVENT::EVENT_COUNT));
