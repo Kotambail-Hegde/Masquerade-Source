@@ -664,7 +664,7 @@ void GBA_t::processPPU(INC64 ppuCycles)
 	// NOTE: (PPU:01) Refer to "Internal Reference Point Registers" section in http://problemkaputt.de/gbatek-lcd-i-o-bg-rotation-scaling.htm 
 	// Reference points getting copied to internal registers can happen in 2 cases
 	// 1) We are jumping to scanline zero
-	// TWO) We wrote to BGX or BGY register from cpu (then we need to handle the copying irrespective of whether scanline is 0 or not)
+	// 2) We wrote to BGX or BGY register from cpu (then we need to handle the copying irrespective of whether scanline is 0 or not)
 	// Both the points are handled below
 	//
 	// NOTE: (PPU:02) Refer to "Internal Reference Point Registers" section in http://problemkaputt.de/gbatek-lcd-i-o-bg-rotation-scaling.htm 
@@ -674,7 +674,7 @@ void GBA_t::processPPU(INC64 ppuCycles)
 	// NOTE: (PPU:03) Refer to https://gbadev.net/tonc/affine.html
 	// Affine transformation has following items as per TONC
 	// 1) BGX and BGY Initial reference point per frame (or mid scanline because of point 2 of PPU:01)
-	// TWO) pa : texture x - increment / pixel (Not directly added to internal reference point registers, refer below)
+	// 2) pa : texture x - increment / pixel (Not directly added to internal reference point registers, refer below)
 	// 3) pb : texture x - increment / scanline
 	// 4) pc : texture y - increment / pixel (Not directly added to internal reference point registers, refer below)
 	// 5) pd : texture y - increment / scanline
