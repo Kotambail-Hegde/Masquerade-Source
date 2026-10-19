@@ -3675,6 +3675,10 @@ private:
 
 	enum class GBA_EVENT : EventId
 	{
+		EVENT_PPU_HBLANK_VDRAW,
+		EVENT_PPU_HDRAW_VDRAW,
+		EVENT_PPU_HBLANK_VBLANK,
+		EVENT_PPU_HDRAW_VBLANK,
 		EVENT_IRQ_WRITE,
 		EVENT_IRQ_AVAIL,
 		EVENT_IRQ_LINE,
@@ -12011,6 +12015,345 @@ OPT_SPEED
 
 	}
 
+	void exitHBlankVDraw()
+	{
+		pGBA_display->currentMergePixel = RESET;
+		pGBA_display->currentBgPixel = RESET;
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == YES)
+		pGBA_display->currentBgPixelInTextMode[BG0] = RESET;
+		pGBA_display->currentBgPixelInTextMode[BG1] = RESET;
+		pGBA_display->currentBgPixelInTextMode[BG2] = RESET;
+		pGBA_display->currentBgPixelInTextMode[BG3] = RESET;
+#endif
+		pGBA_display->currentWinPixel = RESET;
+		pGBA_display->mergeWaitCyclesDone = CLEAR;
+		pGBA_display->winWaitCyclesDone = CLEAR;
+		pGBA_display->bgWaitCyclesDone = CLEAR;
+		pGBA_display->objWaitCyclesDone = CLEAR;
+		pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.ppuCounter = RESET;
+		for (INC8 mode = MODE0; mode <= MODE5; mode++)
+		{
+			pGBA_display->winAccessPatternState[mode] = RESET;
+			pGBA_display->bgAccessPatternState[mode] = RESET;
+			pGBA_display->mergeAccessPatternState[mode] = RESET;
+		}
+		pGBA_display->winAccessPattern = RESET;
+		pGBA_display->bgAccessPattern = RESET;
+		pGBA_display->mergeAccessPattern = RESET;
+
+		// LINE == 159
+		if (pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY == (TO_UINT(LCD_DIMENSIONS::LCD_VISIBLE_LINES) - ONE))
+		{
+			++pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
+
+			pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.HBLANK_FLAG = RESET;
+
+			pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.VBLANK_FLAG = SET;
+
+			HANDLE_VCOUNT();
+
+			// Refer http://problemkaputt.de/gbatek-gba-dma-transfers.htm
+			if (pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY >= TWO)
+			{
+				/*
+				* https://gbadev.net/tonc/dma.html
+				* For DMA3 it will start the copy at the start of each rendering line, but with a 2 scanline delay.
+				*/
+				if (pGBA_peripherals->mDMA3CNT_H.mDMAnCNT_HFields.DMA_EN == SET
+					&&
+					pGBA_instance->GBA_state.dma.cache[DMA::DMA3].scheduleType == DMA_TIMING::SPECIAL)
+				{
+					scheduler.schedule(
+						static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION),
+						scheduler.get_current_cycles() + TWO,
+						static_cast<int>(DMA::DMA3));
+				}
+			}
+
+			RequestDMA(DMA_TIMING::VBLANK);
+
+			if (pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.VBLANK_IRQ_ENABLE == SET)
+			{
+				requestInterrupts(GBA_INTERRUPT::IRQ_VBLANK);
+			}
+
+			// Proceed to next lcd mode
+			pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter;
+			pGBA_display->wasVblankJustTriggered = YES;
+			pGBA_display->didLCDModeChangeJustNow = YES;
+			pGBA_display->currentLCDMode = LCD_MODES::MODE_LCD_H_DRAW_V_BLANK;
+			PPUINFO("Entering MODE_LCD_H_DRAW_V_BLANK");
+
+			scheduler.schedule(
+				static_cast<EventId>(GBA_EVENT::EVENT_PPU_HDRAW_VBLANK),
+				scheduler.get_current_cycles() + ONE + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE),
+				ZERO);
+		}
+		// LINE 0 - 158
+		else
+		{
+			// Handling PPU:02
+
+			pGBA_display->bgCache[BG2].internalRefPointRegisters.BGX_Signed += (int16_t)pGBA_peripherals->mBG2PBHalfWord.mBGnPxHalfWord_Signed;
+			pGBA_display->bgCache[BG2].internalRefPointRegisters.BGY_Signed += (int16_t)pGBA_peripherals->mBG2PDHalfWord.mBGnPxHalfWord_Signed;
+
+			if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE == MODE2)
+			{
+				pGBA_display->bgCache[BG3].internalRefPointRegisters.BGX_Signed += (int16_t)pGBA_peripherals->mBG3PBHalfWord.mBGnPxHalfWord_Signed;
+				pGBA_display->bgCache[BG3].internalRefPointRegisters.BGY_Signed += (int16_t)pGBA_peripherals->mBG3PDHalfWord.mBGnPxHalfWord_Signed;
+			}
+
+			// Handling point (2) of PPU:01
+
+			PPUTODO("Should the latching of Internal Reference Point when CPU writes to them be done only during end of Scanline or mid-scanline is also possible!");
+
+			if (pGBA_display->bgCache[BG2].internalRefPointRegisters.bgxOverwrittenByCPU == YES)
+			{
+				pGBA_display->bgCache[BG2].internalRefPointRegisters.BGX = (int32_t)pGBA_peripherals->mBG2XWord.mBGniWord_Signed;
+				pGBA_display->bgCache[BG2].internalRefPointRegisters.bgxOverwrittenByCPU = NO;
+			}
+
+			if (pGBA_display->bgCache[BG2].internalRefPointRegisters.bgyOverwrittenByCPU == YES)
+			{
+				pGBA_display->bgCache[BG2].internalRefPointRegisters.BGY = (int32_t)pGBA_peripherals->mBG2YWord.mBGniWord_Signed;
+				pGBA_display->bgCache[BG2].internalRefPointRegisters.bgyOverwrittenByCPU = NO;
+			}
+
+			if (pGBA_display->bgCache[BG3].internalRefPointRegisters.bgxOverwrittenByCPU == YES)
+			{
+				pGBA_display->bgCache[BG3].internalRefPointRegisters.BGX = (int32_t)pGBA_peripherals->mBG3XWord.mBGniWord_Signed;
+				pGBA_display->bgCache[BG3].internalRefPointRegisters.bgxOverwrittenByCPU = NO;
+			}
+
+			if (pGBA_display->bgCache[BG3].internalRefPointRegisters.bgyOverwrittenByCPU == YES)
+			{
+				pGBA_display->bgCache[BG3].internalRefPointRegisters.BGY = (int32_t)pGBA_peripherals->mBG3YWord.mBGniWord_Signed;
+				pGBA_display->bgCache[BG3].internalRefPointRegisters.bgyOverwrittenByCPU = NO;
+			}
+
+			// Handling point (6) of PPU:03
+			// Setting up the initial values in Affine buffer by loading it with the Internal Reference Point registers for per pixel processing of next scanline
+
+			pGBA_display->bgCache[BG2].affine.affineX = pGBA_display->bgCache[BG2].internalRefPointRegisters.BGX_Signed;
+			pGBA_display->bgCache[BG2].affine.affineY = pGBA_display->bgCache[BG2].internalRefPointRegisters.BGY_Signed;
+			pGBA_display->bgCache[BG3].affine.affineX = pGBA_display->bgCache[BG3].internalRefPointRegisters.BGX_Signed;
+			pGBA_display->bgCache[BG3].affine.affineY = pGBA_display->bgCache[BG3].internalRefPointRegisters.BGY_Signed;
+
+			++pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
+
+			pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.HBLANK_FLAG = RESET;
+
+			HANDLE_VCOUNT();
+
+			// Refer http://problemkaputt.de/gbatek-gba-dma-transfers.htm
+			if (pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY >= TWO)
+			{
+				/*
+				* https://gbadev.net/tonc/dma.html
+				* For DMA3 it will start the copy at the start of each rendering line, but with a 2 scanline delay.
+				*/
+				if (pGBA_peripherals->mDMA3CNT_H.mDMAnCNT_HFields.DMA_EN == SET
+					&&
+					pGBA_instance->GBA_state.dma.cache[DMA::DMA3].scheduleType == DMA_TIMING::SPECIAL)
+				{
+					scheduler.schedule(
+						static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION),
+						scheduler.get_current_cycles() + TWO,
+						static_cast<int>(DMA::DMA3));
+				}
+			}
+
+			// Proceed to next lcd mode
+			pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter;
+			pGBA_display->didLCDModeChangeJustNow = YES;
+			pGBA_display->currentLCDMode = LCD_MODES::MODE_LCD_H_DRAW_V_DRAW;
+			PPUINFO("Entering MODE_LCD_H_DRAW_V_DRAW");
+
+			scheduler.schedule(
+				static_cast<EventId>(GBA_EVENT::EVENT_PPU_HDRAW_VDRAW),
+				scheduler.get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE),
+				ZERO);
+		}
+	}
+
+	void exitHDrawVBlank()
+	{
+		//// Note: In process PPU, we should account for cycles which occur only in MODE_LCD_H_DRAW_V_BLANK
+		//ppuCycles -= pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter;
+
+		pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.HBLANK_FLAG = SET;
+
+		// According to http://problemkaputt.de/gbatek-lcd-dimensions-and-timings.htm, we should not...but this is needed for tonc's irq_demo.gba
+		// GBATEK is confirmed to be wrong w.r.t this as per https://discord.com/channels/465585922579103744/465586361731121162/1313454859131031574
+		if (pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.HBLANK_IRQ_ENABLE == SET)
+		{
+			requestInterrupts(GBA_INTERRUPT::IRQ_HBLANK);
+		}
+
+		// Proceed to the next lcd mode
+		pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter;
+		pGBA_display->didLCDModeChangeJustNow = YES;
+		pGBA_display->currentLCDMode = LCD_MODES::MODE_LCD_H_BLANK_V_BLANK;
+		PPUINFO("Entering MODE_LCD_H_BLANK_V_BLANK");
+
+		scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_PPU_HBLANK_VBLANK),
+			scheduler.get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK),
+			ZERO);
+	}
+
+	void exitHDrawVDraw()
+	{
+		//// Note: In process PPU, we should account for cycles which occur only in MODE_LCD_H_DRAW_V_DRAW
+		//ppuCycles -= pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter;
+
+		pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.HBLANK_FLAG = SET;
+
+		if (pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.HBLANK_IRQ_ENABLE == SET)
+		{
+			requestInterrupts(GBA_INTERRUPT::IRQ_HBLANK);
+		}
+
+		RequestDMA(DMA_TIMING::HBLANK);
+
+		// Proceed to next lcd mode
+		pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter;
+		pGBA_display->didLCDModeChangeJustNow = YES;
+		pGBA_display->currentLCDMode = LCD_MODES::MODE_LCD_H_BLANK_V_DRAW;
+		PPUINFO("Entering MODE_LCD_H_BLANK_V_DRAW");
+
+		scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_PPU_HBLANK_VDRAW),
+			scheduler.get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK),
+			ZERO);
+	}
+
+	void exitHBlankVBlank()
+	{
+		pGBA_display->currentMergePixel = RESET;
+		pGBA_display->currentBgPixel = RESET;
+#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == YES)
+		pGBA_display->currentBgPixelInTextMode[BG0] = RESET;
+		pGBA_display->currentBgPixelInTextMode[BG1] = RESET;
+		pGBA_display->currentBgPixelInTextMode[BG2] = RESET;
+		pGBA_display->currentBgPixelInTextMode[BG3] = RESET;
+#endif
+		pGBA_display->currentWinPixel = RESET;
+		pGBA_display->mergeWaitCyclesDone = CLEAR;
+		pGBA_display->winWaitCyclesDone = CLEAR;
+		pGBA_display->bgWaitCyclesDone = CLEAR;
+		pGBA_display->objWaitCyclesDone = CLEAR;
+		pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.ppuCounter = RESET;
+		for (INC8 mode = MODE0; mode <= MODE5; mode++)
+		{
+			pGBA_display->winAccessPatternState[mode] = RESET;
+			pGBA_display->bgAccessPatternState[mode] = RESET;
+			pGBA_display->mergeAccessPatternState[mode] = RESET;
+		}
+		pGBA_display->winAccessPattern = RESET;
+		pGBA_display->bgAccessPattern = RESET;
+		pGBA_display->mergeAccessPattern = RESET;
+
+		// LINE == 227
+		if (pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY == ((uint32_t)LCD_DIMENSIONS::LCD_TOTAL_V_LINES - ONE))
+		{
+			// Handling point (1) of PPU:01
+
+			pGBA_display->bgCache[BG2].internalRefPointRegisters.BGX_Signed = pGBA_peripherals->mBG2XWord.mBGniWord_Signed;
+			pGBA_display->bgCache[BG2].internalRefPointRegisters.BGY_Signed = pGBA_peripherals->mBG2YWord.mBGniWord_Signed;
+			pGBA_display->bgCache[BG3].internalRefPointRegisters.BGX_Signed = pGBA_peripherals->mBG3XWord.mBGniWord_Signed;
+			pGBA_display->bgCache[BG3].internalRefPointRegisters.BGY_Signed = pGBA_peripherals->mBG3YWord.mBGniWord_Signed;
+
+			// Reset the flags for point (2) of PPU:01 as we have already latched the registers
+			pGBA_display->bgCache[BG2].internalRefPointRegisters.bgxOverwrittenByCPU = NO;
+			pGBA_display->bgCache[BG2].internalRefPointRegisters.bgyOverwrittenByCPU = NO;
+			pGBA_display->bgCache[BG3].internalRefPointRegisters.bgxOverwrittenByCPU = NO;
+			pGBA_display->bgCache[BG3].internalRefPointRegisters.bgyOverwrittenByCPU = NO;
+
+			// Handling point (6) of PPU:03
+			// Setting up the initial values in Affine buffer by loading it with the Internal Reference Point registers for per pixel processing of next frame
+
+			pGBA_display->bgCache[BG2].affine.affineX = pGBA_display->bgCache[BG2].internalRefPointRegisters.BGX_Signed;
+			pGBA_display->bgCache[BG2].affine.affineY = pGBA_display->bgCache[BG2].internalRefPointRegisters.BGY_Signed;
+			pGBA_display->bgCache[BG3].affine.affineX = pGBA_display->bgCache[BG3].internalRefPointRegisters.BGX_Signed;
+			pGBA_display->bgCache[BG3].affine.affineY = pGBA_display->bgCache[BG3].internalRefPointRegisters.BGY_Signed;
+
+			pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.VBLANK_FLAG = RESET;
+			pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.HBLANK_FLAG = RESET;
+
+			pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY = RESET;
+
+			HANDLE_VCOUNT();
+
+			// Proceed to the next lcd mode
+			pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter;
+			pGBA_display->didLCDModeChangeJustNow = YES;
+			pGBA_display->currentLCDMode = LCD_MODES::MODE_LCD_H_DRAW_V_DRAW;
+			PPUINFO("Entering MODE_LCD_H_DRAW_V_DRAW");
+
+			scheduler.schedule(
+				static_cast<EventId>(GBA_EVENT::EVENT_PPU_HDRAW_VDRAW),
+				scheduler.get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE),
+				ZERO);
+		}
+		// LINE 160 to 226
+		else
+		{
+			++pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
+
+			pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.HBLANK_FLAG = RESET;
+
+			// If the LINE just became 227....
+			// Refer http://problemkaputt.de/gbatek-lcd-i-o-interrupts-and-status.htm
+			if (pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY == ((uint32_t)LCD_DIMENSIONS::LCD_TOTAL_V_LINES - ONE))
+			{
+				pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATFields.VBLANK_FLAG = RESET;
+			}
+
+			HANDLE_VCOUNT();
+
+			// Refer http://problemkaputt.de/gbatek-gba-dma-transfers.htm
+			if (pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY < 162)
+			{
+				/*
+				* https://gbadev.net/tonc/dma.html
+				* For DMA3 it will start the copy at the start of each rendering line, but with a 2 scanline delay.
+				*/
+				if (pGBA_peripherals->mDMA3CNT_H.mDMAnCNT_HFields.DMA_EN == SET
+					&&
+					pGBA_instance->GBA_state.dma.cache[DMA::DMA3].scheduleType == DMA_TIMING::SPECIAL)
+				{
+					scheduler.schedule(
+						static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION),
+						scheduler.get_current_cycles() + TWO,
+						static_cast<int>(DMA::DMA3));
+				}
+			}
+			else if (pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY >= 162)
+			{
+				// Need to stop scheduling the Video Capture DMA (DMA 3) 
+				if (pGBA_peripherals->mDMA3CNT_H.mDMAnCNT_HFields.DMA_EN == SET
+					&&
+					pGBA_instance->GBA_state.dma.cache[DMA::DMA3].scheduleType == DMA_TIMING::SPECIAL)
+				{
+					pGBA_peripherals->mDMA3CNT_H.mDMAnCNT_HFields.DMA_EN = RESET;
+					OnDMAChannelWritten(DMA::DMA3, ENABLED, DISABLED);
+				}
+			}
+
+			// Proceed to the next lcd mode
+			pGBA_display->extraPPUCyclesForProcessPPUModesDuringModeChange = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter;
+			pGBA_display->didLCDModeChangeJustNow = YES;
+			pGBA_display->currentLCDMode = LCD_MODES::MODE_LCD_H_DRAW_V_BLANK;
+			PPUINFO("Entering MODE_LCD_H_DRAW_V_BLANK");
+
+			scheduler.schedule(
+				static_cast<EventId>(GBA_EVENT::EVENT_PPU_HDRAW_VBLANK),
+				scheduler.get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE),
+				ZERO);
+		}
+	}
+
 	void processPPU(INC64 ppuCycles);
 
 	void displayCompleteScreen();
@@ -12363,6 +12706,54 @@ private:
 
 			sioCntSP.START_BIT = RESET;
 		}
+	}
+
+	static void exitHDrawVDrawHandler(void* userData, MASQ_MAYBE_UNUSED int context)
+	{
+		auto* gba = static_cast<GBA_t*>(userData);
+
+		if (gba->pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter >= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE)
+		{
+			gba->pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter -= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE;
+		}
+
+		gba->exitHDrawVDraw();
+	}
+
+	static void exitHBlankVDrawHandler(void* userData, MASQ_MAYBE_UNUSED int context)
+	{
+		auto* gba = static_cast<GBA_t*>(userData);
+
+		if (gba->pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter >= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK)
+		{
+			gba->pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter -= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK;
+		}
+
+		gba->exitHBlankVDraw();
+	}
+
+	static void exitHDrawVBlankHandler(void* userData, MASQ_MAYBE_UNUSED int context)
+	{
+		auto* gba = static_cast<GBA_t*>(userData);
+
+		if (gba->pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter >= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE)
+		{
+			gba->pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter -= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE;
+		}
+
+		gba->exitHDrawVBlank();
+	}
+
+	static void exitHBlankVBlankHandler(void* userData, MASQ_MAYBE_UNUSED int context)
+	{
+		auto* gba = static_cast<GBA_t*>(userData);
+
+		if (gba->pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter >= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK)
+		{
+			gba->pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.lcdCounter -= (uint32_t)LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK;
+		}
+
+		gba->exitHBlankVBlank();
 	}
 
 private:
