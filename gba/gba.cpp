@@ -1721,6 +1721,7 @@ void GBA_t::registerEvents()
 		{ &GBA_t::timerReloadWriteHandler,  1 },
 		{ &GBA_t::timerControlWriteHandler, 2 },
 		{ &GBA_t::timerOverflowHandler,     0 },
+		{ &GBA_t::sioTransferHandler,       0 },
 	};
 
 	static_assert(std::size(setup) == static_cast<size_t>(GBA_EVENT::EVENT_COUNT));
