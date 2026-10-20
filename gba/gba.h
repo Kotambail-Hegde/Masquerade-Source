@@ -321,6 +321,7 @@
 #define IRQ_REGISTERS_WRITE_DELAY						(1)
 #define IRQ_AVAILABILITY_DELAY							(0) // TODO: Ideally this should 1 cycle delay but currently need to set 0 for TIMER IRQ test to pass in MGBA suite
 #define IRQ_LINE_DELAY									(IRQ_AVAILABILITY_DELAY + 1)	
+#define FRAME_SEQ_THRESHOLD								(static_cast<INC64>(GBA_REFERENCE_CLOCK_HZ / APU_FRAME_SEQUENCER_RATE_HZ))
 #define DOWNSAMPLE_THRESHOLD							(CEIL(GBA_REFERENCE_CLOCK_HZ / EMULATED_AUDIO_SAMPLING_RATE_FOR_GBA))
 #pragma endregion MACROS
 
@@ -3679,6 +3680,7 @@ private:
 		EVENT_PPU_HDRAW_VDRAW,
 		EVENT_PPU_HBLANK_VBLANK,
 		EVENT_PPU_HDRAW_VBLANK,
+		EVENT_APU_FRAME_SEQUENCER,
 		EVENT_APU_SAMPLE,
 		EVENT_IRQ_WRITE,
 		EVENT_IRQ_AVAIL,
@@ -7080,6 +7082,44 @@ OPT_SPEED
 		}
 
 		RETURN amplitude * (BYTE)pGBA_instance->GBA_state.audio.audioChannelInstance[static_cast<uint8_t>(channel)].currentVolume;
+	}
+
+	MASQ_INLINE void frameSequencer()
+	{
+		auto& audio = pGBA_instance->GBA_state.audio;
+		auto& apuState = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate;
+		const auto frame = apuState.apuFrameCounter;
+
+		// Frame sequencer @ 512 Hz
+
+		// 512 Hz - every frame
+		if (audio.wasPowerCycled == YES) MASQ_UNLIKELY
+		{
+			APUTODO("Not handling power cycling!");
+			audio.wasPowerCycled = NO;
+		}
+
+		audio.nextHalfWillNotClockLengthCounter = ((frame & ONE) == ZERO);
+
+		// 256 Hz - every other frame
+		if (audio.nextHalfWillNotClockLengthCounter)
+		{
+			processSoundLength();
+		}
+
+		// 128 Hz - every 4th frame at offset 2
+		if ((frame & THREE) == TWO)
+		{
+			processFrequencySweep();
+		}
+
+		// 64 Hz - frame 7 only
+		if (frame == SEVEN)
+		{
+			processEnvelopeSweep();
+		}
+
+		apuState.apuFrameCounter = (frame + ONE) & SEVEN;
 	}
 
 	MASQ_INLINE void captureDownsampledAudioSamples()
@@ -12749,6 +12789,19 @@ private:
 		gba->syncPPU();
 
 		gba->exitHBlankVBlank();
+	}
+
+	static void frameSequencerHandler(void* userData, MASQ_MAYBE_UNUSED int context)
+	{
+		auto* gba = static_cast<GBA_t*>(userData);
+
+		gba->frameSequencer();
+
+		// Schedule the Framesequencer
+		gba->scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_APU_FRAME_SEQUENCER),
+			gba->scheduler.get_current_cycles() + FRAME_SEQ_THRESHOLD,
+			ZERO);
 	}
 
 	static void audioDownSamplingHandler(void* userData, MASQ_MAYBE_UNUSED int context)
