@@ -321,6 +321,7 @@
 #define IRQ_REGISTERS_WRITE_DELAY						(1)
 #define IRQ_AVAILABILITY_DELAY							(0) // TODO: Ideally this should 1 cycle delay but currently need to set 0 for TIMER IRQ test to pass in MGBA suite
 #define IRQ_LINE_DELAY									(IRQ_AVAILABILITY_DELAY + 1)	
+#define DOWNSAMPLE_THRESHOLD							(CEIL(GBA_REFERENCE_CLOCK_HZ / EMULATED_AUDIO_SAMPLING_RATE_FOR_GBA))
 #pragma endregion MACROS
 
 #pragma region CORE
@@ -3410,7 +3411,6 @@ private:
 		int16_t sampleReadByChannel2;
 		int16_t sampleReadByChannel3;
 		int16_t sampleReadByChannel4;
-		INC64 downSamplingRatioCounter;
 		uint32_t accumulatedTone;
 		MAP8 soundTimerOverFlow;
 		audioChannelInstance_t audioChannelInstance[(uint8_t)AUDIO_CHANNELS::TOTAL_CHANNELS];
@@ -3679,6 +3679,7 @@ private:
 		EVENT_PPU_HDRAW_VDRAW,
 		EVENT_PPU_HBLANK_VBLANK,
 		EVENT_PPU_HDRAW_VBLANK,
+		EVENT_APU_SAMPLE,
 		EVENT_IRQ_WRITE,
 		EVENT_IRQ_AVAIL,
 		EVENT_IRQ_LINE,
@@ -7081,18 +7082,10 @@ OPT_SPEED
 		RETURN amplitude * (BYTE)pGBA_instance->GBA_state.audio.audioChannelInstance[static_cast<uint8_t>(channel)].currentVolume;
 	}
 
-	MASQ_INLINE void captureDownsampledAudioSamples(INC64 sampleCount)
+	MASQ_INLINE void captureDownsampledAudioSamples()
 	{
 		static constexpr int PSG_VOL[4] = { ONE, TWO, FOUR, ZERO };
 		static constexpr int DMA_VOL[2] = { TWO, FOUR };
-		static constexpr GBA_AUDIO_SAMPLE_TYPE DOWNSAMPLE_THRESHOLD = CEIL(GBA_REFERENCE_CLOCK_HZ / EMULATED_AUDIO_SAMPLING_RATE_FOR_GBA);
-
-		pGBA_instance->GBA_state.audio.downSamplingRatioCounter += sampleCount;
-
-		if (pGBA_instance->GBA_state.audio.downSamplingRatioCounter < DOWNSAMPLE_THRESHOLD) MASQ_LIKELY
-			RETURN;
-
-		pGBA_instance->GBA_state.audio.downSamplingRatioCounter -= DOWNSAMPLE_THRESHOLD;
 
 		// Cache commonly accessed registers
 		const auto& soundcntL = pGBA_peripherals->mSOUNDCNT_LHalfWord.mSOUNDCNT_LFields;
@@ -12756,6 +12749,19 @@ private:
 		gba->syncPPU();
 
 		gba->exitHBlankVBlank();
+	}
+
+	static void audioDownSamplingHandler(void* userData, MASQ_MAYBE_UNUSED int context)
+	{
+		auto* gba = static_cast<GBA_t*>(userData);
+
+		gba->captureDownsampledAudioSamples();
+
+		// Schedule the Downsampler
+		gba->scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_APU_SAMPLE),
+			gba->scheduler.get_current_cycles() + DOWNSAMPLE_THRESHOLD,
+			ZERO);
 	}
 
 private:
