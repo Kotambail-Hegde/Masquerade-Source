@@ -199,10 +199,7 @@ Masquerade supports the following hardware accessories and peripherals used by s
 - Passes all belogic's audio tests
 
 #### Known Issues (other than the ones mentioned above)
-- No audio issue while running GBS
-- Minor visual artifacts top left corner in Mode 3 for some video ROMs like Pokemon
-- Some undesired audio artifacts (expected fix in **_P0152_** variant)
-- Low end devices still need PGOs to run at full speed (expected fix in **_P0152_** variant)
+- Minor visual artifacts top left corner in Mode 3 for some video ROMs like Pokemon etc.
 
 ---
 
