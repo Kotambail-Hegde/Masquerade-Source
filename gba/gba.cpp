@@ -650,8 +650,6 @@ void GBA_t::processAPU(INC64 apuCycles)
 		apuState.apuFrameCounter = (apuState.apuFrameCounter + ONE) & SEVEN;
 		apuState.apuCounter -= FRAME_SEQ_THRESHOLD;
 	}
-
-	captureDownsampledAudioSamples(apuCycles);
 }
 
 void GBA_t::processPPU(INC64 ppuCycles)
@@ -843,6 +841,12 @@ void GBA_t::initializeAudio()
 	// Setup the volume for audio
 	pGBA_audio->emulatorVolume = pt.get<std::float_t>("gba._volume", 0.1f);
 	SDL_SetAudioDeviceGain(SDL_GetAudioStreamDevice(audioStream), pGBA_audio->emulatorVolume);
+
+	// Schedule the Downsampler
+	scheduler.schedule(
+		static_cast<EventId>(GBA_EVENT::EVENT_APU_SAMPLE),
+		scheduler.get_current_cycles() + DOWNSAMPLE_THRESHOLD,
+		ZERO);
 }
 
 FLAG GBA_t::runEmulationAtHostRate(uint32_t currentFrame)
@@ -1430,6 +1434,7 @@ void GBA_t::registerEvents()
 		{ &GBA_t::exitHDrawVDrawHandler,			0 },
 		{ &GBA_t::exitHBlankVBlankHandler,			0 },
 		{ &GBA_t::exitHDrawVBlankHandler,			0 },
+		{ &GBA_t::audioDownSamplingHandler,			0 },
 		{ &GBA_t::irqWriteHandler,					0 },
 		{ &GBA_t::irqAvailHandler,					1 },
 		{ &GBA_t::irqLineHandler,					2 },
