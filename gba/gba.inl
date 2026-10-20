@@ -168,6 +168,7 @@ GBA_HALFWORD GBA_t::readIO(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, ME
 	}
 	case IO_DISPSTAT:
 	{
+		syncPPU();
 		RETURN pGBA_peripherals->mDISPSTATHalfWord.mDISPSTATHalfWord;
 	}
 	case IO_VCOUNT:
@@ -464,6 +465,7 @@ GBA_HALFWORD GBA_t::readIO(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, ME
 	}
 	case IO_SOUNDCNT_X:
 	{
+		continousDACCheck();
 		pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.NOT_USED_0 = RESET;
 		pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.NOT_USED_1 = RESET;
 		RETURN pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XHalfWord;
@@ -612,7 +614,7 @@ GBA_HALFWORD GBA_t::readIO(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, ME
 	}
 	case IO_TM0CNT_L:
 	{
-		RETURN pGBA_peripherals->mTIMER0CNT_L;
+		RETURN readTimerCounter(TIMER::TIMER0);
 	}
 	case IO_TM0CNT_H:
 	{
@@ -620,7 +622,7 @@ GBA_HALFWORD GBA_t::readIO(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, ME
 	}
 	case IO_TM1CNT_L:
 	{
-		RETURN pGBA_peripherals->mTIMER1CNT_L;
+		RETURN readTimerCounter(TIMER::TIMER1);
 	}
 	case IO_TM1CNT_H:
 	{
@@ -628,7 +630,7 @@ GBA_HALFWORD GBA_t::readIO(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, ME
 	}
 	case IO_TM2CNT_L:
 	{
-		RETURN pGBA_peripherals->mTIMER2CNT_L;
+		RETURN readTimerCounter(TIMER::TIMER2);
 	}
 	case IO_TM2CNT_H:
 	{
@@ -636,7 +638,7 @@ GBA_HALFWORD GBA_t::readIO(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, ME
 	}
 	case IO_TM3CNT_L:
 	{
-		RETURN pGBA_peripherals->mTIMER3CNT_L;
+		RETURN readTimerCounter(TIMER::TIMER3);
 	}
 	case IO_TM3CNT_H:
 	{
@@ -767,6 +769,9 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 {
 #define IO8_WRONG_HANDLER() FATAL("Should be handled by writeIO8, Line: %d in File %s", __LINE__, __FILE__)
 #define REJECT_IO8(width) if ((width) == MEMORY_ACCESS_WIDTH::EIGHT_BIT) MASQ_UNLIKELY IO8_WRONG_HANDLER()
+#define SYNC_PPU_REG(addr) if ((addr) >= IO_DISPCNT && (addr) <= IO_BLDY) { syncPPU(); }
+
+	SYNC_PPU_REG(address);
 
 	switch (address)
 	{
@@ -1209,7 +1214,7 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 			{
 				pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.SOUND1_ON_FLAG = ZERO;
 				pGBA_peripherals->mSOUND1CNT_XHalfWord.mSOUND1CNT_XFields.INITIAL = ZERO;
-				pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].isChannelActuallyEnabled = DISABLED;
+				pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].isChannelActuallyEnabled = DISABLED;
 			}
 		}
 
@@ -1232,7 +1237,7 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 			else
 			{
 
-				pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].lengthTimer
+				pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].lengthTimer
 					= 64 - pGBA_peripherals->mSOUND1CNT_HHalfWord.mSOUND1CNT_HFields.SOUND_LENGTH;
 			}
 		}
@@ -1254,14 +1259,14 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 				if (isAudioChannelEnabled(AUDIO_CHANNELS::CHANNEL_1) == YES)
 				{
 					if (wasVolumePeriodZero == YES
-						&& pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].isVolumeEnvelopeStillDoingAutomaticUpdates == YES)
+						&& pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].isVolumeEnvelopeStillDoingAutomaticUpdates == YES)
 					{
-						++pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].currentVolume;
+						++pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].currentVolume;
 					}
 					else if (wasEnvelopeInSubtractMode == YES)
 					{
-						++pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].currentVolume;
-						++pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].currentVolume;
+						++pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].currentVolume;
+						++pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].currentVolume;
 					}
 					if (
 						(wasEnvelopeInSubtractMode == YES
@@ -1270,10 +1275,10 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 						(wasEnvelopeInSubtractMode == NO
 							&& pGBA_peripherals->mSOUND1CNT_HHalfWord.mSOUND1CNT_HFields.ENVP_DIR == ZERO))
 					{
-						pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].currentVolume
-							= SIXTEEN - pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].currentVolume;
+						pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].currentVolume
+							= SIXTEEN - pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].currentVolume;
 					}
-					pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].currentVolume
+					pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].currentVolume
 						&= 0x0F;
 				}
 				continousDACCheck();
@@ -1314,57 +1319,57 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 				if (wasLengthEnableBitZero == YES
 					&& pGBA_peripherals->mSOUND1CNT_XHalfWord.mSOUND1CNT_XFields.LENGTH_FLAG == ONE
 					&& pGBA_instance->GBA_state.audio.nextHalfWillNotClockLengthCounter == TRUE
-					&& pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].lengthTimer > ZERO)
+					&& pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].lengthTimer > ZERO)
 				{
-					--pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].lengthTimer;
-					if (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].lengthTimer == ZERO)
+					--pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].lengthTimer;
+					if (pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].lengthTimer == ZERO)
 					{
 						pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.SOUND1_ON_FLAG = ZERO;
-						pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].isChannelActuallyEnabled = DISABLED;
+						pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].isChannelActuallyEnabled = DISABLED;
 					}
 				}
 				if (pGBA_peripherals->mSOUND1CNT_XHalfWord.mSOUND1CNT_XFields.INITIAL == ONE)
 				{
 					enableChannelWhenTriggeredIfDACIsEnabled(AUDIO_CHANNELS::CHANNEL_1);
-					if (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].lengthTimer == ZERO)
+					if (pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].lengthTimer == ZERO)
 					{
-						pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].lengthTimer = 64;
+						pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].lengthTimer = 64;
 						// NOTE: One of the weird quirks of length counter
 						// Refer to "Obscure Behaviour" section of this link : https://gbdev.gg8.se/wiki/articles/Gameboy_sound_hardware#Registers
 						if (pGBA_peripherals->mSOUND1CNT_XHalfWord.mSOUND1CNT_XFields.LENGTH_FLAG == ONE
 							&& pGBA_instance->GBA_state.audio.nextHalfWillNotClockLengthCounter == TRUE)
 						{
-							--pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].lengthTimer;
+							--pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].lengthTimer;
 						}
 					}
-					pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].envelopePeriodTimer
+					pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].envelopePeriodTimer
 						= pGBA_peripherals->mSOUND1CNT_HHalfWord.mSOUND1CNT_HFields.ENVP_STEP_TIME;
 
-					pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].currentVolume
+					pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].currentVolume
 						= pGBA_peripherals->mSOUND1CNT_HHalfWord.mSOUND1CNT_HFields.ENVP_INIT_VOL;
 
-					pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].isVolumeEnvelopeStillDoingAutomaticUpdates = YES;
+					pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].isVolumeEnvelopeStillDoingAutomaticUpdates = YES;
 
-					pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].shadowFrequency
+					pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].shadowFrequency
 						= getChannelPeriod(AUDIO_CHANNELS::CHANNEL_1);
 
 					if (pGBA_peripherals->mSOUND1CNT_LHalfWord.mSOUND1CNT_LFields.SWEEP_TIME > ZERO)
 					{
-						pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].sweepTimer
+						pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].sweepTimer
 							= pGBA_peripherals->mSOUND1CNT_LHalfWord.mSOUND1CNT_LFields.SWEEP_TIME;
 					}
 					else
 					{
-						pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].sweepTimer = EIGHT;
+						pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].sweepTimer = EIGHT;
 					}
 					if (pGBA_peripherals->mSOUND1CNT_LHalfWord.mSOUND1CNT_LFields.SWEEP_TIME > ZERO
 						|| pGBA_peripherals->mSOUND1CNT_LHalfWord.mSOUND1CNT_LFields.SWEEP_SHIFT > ZERO)
 					{
-						pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].sweepEnabled = ENABLED;
+						pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].sweepEnabled = ENABLED;
 					}
 					else
 					{
-						pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].sweepEnabled = DISABLED;
+						pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].sweepEnabled = DISABLED;
 					}
 					pGBA_instance->GBA_state.audio.wasSweepDirectionNegativeAtleastOnceSinceLastTrigger = NO;
 					if (pGBA_peripherals->mSOUND1CNT_LHalfWord.mSOUND1CNT_LFields.SWEEP_SHIFT > ZERO)
@@ -1374,9 +1379,18 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 
 					// Source : https://www.slack.net/~ant/libs/audio.html#Gb_Snd_Emu
 					uint16_t resetFrequencyTimer = (2048 - getChannelPeriod(AUDIO_CHANNELS::CHANNEL_1)) * FOUR;
-					pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].frequencyTimer
-						= (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].frequencyTimer & THREE)
+					pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].frequencyTimer
+						= (pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].frequencyTimer & THREE)
 						+ resetFrequencyTimer;
+
+					if (pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.PSG_FIFO_MASTER_EN == ONE) MASQ_UNLIKELY
+					{
+						scheduler.reschedule(
+							static_cast<EventId>(GBA_EVENT::EVENT_APU_CHANNEL_STEP),
+							scheduler.get_current_cycles() +
+							pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].frequencyTimer,
+							TO_UINT8(AUDIO_CHANNELS::CHANNEL_1));
+					}
 				}
 			}
 		}
@@ -1403,7 +1417,7 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 			}
 			else
 			{
-				pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].lengthTimer
+				pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_2)].lengthTimer
 					= 64 - pGBA_peripherals->mSOUND2CNT_LHalfWord.mSOUND2CNT_LFields.SOUND_LENGTH;
 			}
 		}
@@ -1425,14 +1439,14 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 				if (isAudioChannelEnabled(AUDIO_CHANNELS::CHANNEL_2) == YES)
 				{
 					if (wasVolumePeriodZero == YES
-						&& pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].isVolumeEnvelopeStillDoingAutomaticUpdates == YES)
+						&& pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_2)].isVolumeEnvelopeStillDoingAutomaticUpdates == YES)
 					{
-						++pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].currentVolume;
+						++pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_2)].currentVolume;
 					}
 					else if (wasEnvelopeInSubtractMode == YES)
 					{
-						++pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].currentVolume;
-						++pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].currentVolume;
+						++pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_2)].currentVolume;
+						++pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_2)].currentVolume;
 					}
 					if (
 						(wasEnvelopeInSubtractMode == YES
@@ -1441,10 +1455,10 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 						(wasEnvelopeInSubtractMode == NO
 							&& pGBA_peripherals->mSOUND2CNT_LHalfWord.mSOUND2CNT_LFields.ENVP_DIR == ZERO))
 					{
-						pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].currentVolume
-							= SIXTEEN - pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].currentVolume;
+						pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_2)].currentVolume
+							= SIXTEEN - pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_2)].currentVolume;
 					}
-					pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].currentVolume &= 0x0F;
+					pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_2)].currentVolume &= 0x0F;
 				}
 				continousDACCheck();
 			}
@@ -1488,42 +1502,51 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 				if (wasLengthEnableBitZero == YES
 					&& pGBA_peripherals->mSOUND2CNT_HHalfWord.mSOUND2CNT_HFields.LENGTH_FLAG == ONE
 					&& pGBA_instance->GBA_state.audio.nextHalfWillNotClockLengthCounter == TRUE
-					&& pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].lengthTimer > ZERO)
+					&& pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_2)].lengthTimer > ZERO)
 				{
-					--pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].lengthTimer;
+					--pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_2)].lengthTimer;
 
-					if (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].lengthTimer == ZERO)
+					if (pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_2)].lengthTimer == ZERO)
 					{
 						pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.SOUND2_ON_FLAG = ZERO;
-						pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].isChannelActuallyEnabled = DISABLED;
+						pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_2)].isChannelActuallyEnabled = DISABLED;
 					}
 				}
 				if (pGBA_peripherals->mSOUND2CNT_HHalfWord.mSOUND2CNT_HFields.INITIAL == ONE)
 				{
 					enableChannelWhenTriggeredIfDACIsEnabled(AUDIO_CHANNELS::CHANNEL_2);
-					if (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].lengthTimer == ZERO)
+					if (pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_2)].lengthTimer == ZERO)
 					{
-						pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].lengthTimer = 64;
+						pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_2)].lengthTimer = 64;
 						// NOTE: One of the weird quirks of length counter
 						// Refer to "Obscure Behaviour" section of this link : https://gbdev.gg8.se/wiki/articles/Gameboy_sound_hardware#Registers
 						if (pGBA_peripherals->mSOUND2CNT_HHalfWord.mSOUND2CNT_HFields.LENGTH_FLAG == ONE
 							&& pGBA_instance->GBA_state.audio.nextHalfWillNotClockLengthCounter == TRUE)
 						{
-							--pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].lengthTimer;
+							--pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_2)].lengthTimer;
 						}
 					}
-					pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].envelopePeriodTimer
+					pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_2)].envelopePeriodTimer
 						= pGBA_peripherals->mSOUND2CNT_LHalfWord.mSOUND2CNT_LFields.ENVP_STEP_TIME;
 
-					pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].currentVolume
+					pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_2)].currentVolume
 						= pGBA_peripherals->mSOUND2CNT_LHalfWord.mSOUND2CNT_LFields.ENVP_INIT_VOL;
-					pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].isVolumeEnvelopeStillDoingAutomaticUpdates = YES;
+					pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_2)].isVolumeEnvelopeStillDoingAutomaticUpdates = YES;
 
 					// Source : https://www.slack.net/~ant/libs/audio.html#Gb_Snd_Emu
 					uint16_t resetFrequencyTimer = (2048 - getChannelPeriod(AUDIO_CHANNELS::CHANNEL_2)) * FOUR;
-					pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].frequencyTimer
-						= (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].frequencyTimer & THREE)
+					pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_2)].frequencyTimer
+						= (pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_2)].frequencyTimer & THREE)
 						+ resetFrequencyTimer;
+
+					if (pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.PSG_FIFO_MASTER_EN == ONE) MASQ_UNLIKELY
+					{
+						scheduler.reschedule(
+							static_cast<EventId>(GBA_EVENT::EVENT_APU_CHANNEL_STEP),
+							scheduler.get_current_cycles() +
+							pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_2)].frequencyTimer,
+							TO_UINT8(AUDIO_CHANNELS::CHANNEL_2));
+					}
 				}
 			}
 		}
@@ -1583,7 +1606,7 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 			}
 			else
 			{
-				pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_3].lengthTimer = 256 - nr31;
+				pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_3)].lengthTimer = 256 - nr31;
 			}
 		}
 
@@ -1656,41 +1679,50 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 				if (wasLengthEnableBitZero == YES
 					&& pGBA_peripherals->mSOUND3CNT_XHalfWord.mSOUND3CNT_XFields.LENGTH_FLAG == ONE
 					&& pGBA_instance->GBA_state.audio.nextHalfWillNotClockLengthCounter == TRUE
-					&& pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_3].lengthTimer > ZERO)
+					&& pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_3)].lengthTimer > ZERO)
 				{
-					--pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_3].lengthTimer;
+					--pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_3)].lengthTimer;
 
-					if (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_3].lengthTimer == ZERO)
+					if (pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_3)].lengthTimer == ZERO)
 					{
 						pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.SOUND3_ON_FLAG = ZERO;
-						pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_3].isChannelActuallyEnabled = DISABLED;
+						pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_3)].isChannelActuallyEnabled = DISABLED;
 					}
 				}
 				if (pGBA_peripherals->mSOUND3CNT_XHalfWord.mSOUND3CNT_XFields.INITIAL == ONE)
 				{
 					enableChannelWhenTriggeredIfDACIsEnabled(AUDIO_CHANNELS::CHANNEL_3);
 
-					if (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_3].lengthTimer == ZERO)
+					if (pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_3)].lengthTimer == ZERO)
 					{
-						pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_3].lengthTimer = 256;
+						pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_3)].lengthTimer = 256;
 
 						// NOTE: One of the weird quirks of length counter
 						// Refer to "Obscure Behaviour" section of this link : https://gbdev.gg8.se/wiki/articles/Gameboy_sound_hardware#Registers
 						if (pGBA_peripherals->mSOUND3CNT_XHalfWord.mSOUND3CNT_XFields.LENGTH_FLAG == ONE
 							&& pGBA_instance->GBA_state.audio.nextHalfWillNotClockLengthCounter == TRUE)
 						{
-							--pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_3].lengthTimer;
+							--pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_3)].lengthTimer;
 						}
 					}
 
 					// Period needs to be reloaded as per https://gbdev.io/pandocs/Audio_Registers.html#ff1e--nr34-channel-3-period-high--control
 					uint16_t resetFrequencyTimer = (2048 - getChannelPeriod(AUDIO_CHANNELS::CHANNEL_3)) * TWO;
-					pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_3].frequencyTimer = resetFrequencyTimer;
+					pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_3)].frequencyTimer = resetFrequencyTimer;
 					// As per https://forums.nesdev.org/viewtopic.php?p=188035#p188035, another 6 cycle delay is needed
-					pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_3].frequencyTimer += SIX;
+					pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_3)].frequencyTimer += SIX;
 
 					pGBA_instance->GBA_state.audio.waveRamCurrentIndex = RESET;
 					pGBA_instance->GBA_state.audio.didChannel3ReadWaveRamPostTrigger = NO;
+
+					if (pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.PSG_FIFO_MASTER_EN == ONE) MASQ_UNLIKELY
+					{
+						scheduler.reschedule(
+							static_cast<EventId>(GBA_EVENT::EVENT_APU_CHANNEL_STEP),
+							scheduler.get_current_cycles() +
+							pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_3)].frequencyTimer,
+							TO_UINT8(AUDIO_CHANNELS::CHANNEL_3));
+					}
 				}
 			}
 		}
@@ -1717,7 +1749,7 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 			}
 			else
 			{
-				pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].lengthTimer
+				pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_4)].lengthTimer
 					= 64 - pGBA_peripherals->mSOUND4CNT_LHalfWord.mSOUND4CNT_LFields.SOUND_LENGTH;
 			}
 		}
@@ -1739,14 +1771,14 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 				if (isAudioChannelEnabled(AUDIO_CHANNELS::CHANNEL_4) == YES)
 				{
 					if (wasVolumePeriodZero == YES
-						&& pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].isVolumeEnvelopeStillDoingAutomaticUpdates == YES)
+						&& pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_4)].isVolumeEnvelopeStillDoingAutomaticUpdates == YES)
 					{
-						++pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].currentVolume;
+						++pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_4)].currentVolume;
 					}
 					else if (wasEnvelopeInSubtractMode == YES)
 					{
-						++pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].currentVolume;
-						++pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].currentVolume;
+						++pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_4)].currentVolume;
+						++pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_4)].currentVolume;
 					}
 					if (
 						(wasEnvelopeInSubtractMode == YES
@@ -1755,10 +1787,10 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 						(wasEnvelopeInSubtractMode == NO
 							&& pGBA_peripherals->mSOUND4CNT_LHalfWord.mSOUND4CNT_LFields.ENVP_DIR == ZERO))
 					{
-						pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].currentVolume
-							= SIXTEEN - pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].currentVolume;
+						pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_4)].currentVolume
+							= SIXTEEN - pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_4)].currentVolume;
 					}
-					pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].currentVolume &= 0x0F;
+					pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_4)].currentVolume &= 0x0F;
 				}
 				continousDACCheck();
 			}
@@ -1802,42 +1834,51 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 				if (wasLengthEnableBitZero == YES
 					&& pGBA_peripherals->mSOUND4CNT_HHalfWord.mSOUND4CNT_HFields.LENGTH_FLAG == ONE
 					&& pGBA_instance->GBA_state.audio.nextHalfWillNotClockLengthCounter == TRUE
-					&& pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].lengthTimer > ZERO)
+					&& pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_4)].lengthTimer > ZERO)
 				{
-					--pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].lengthTimer;
+					--pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_4)].lengthTimer;
 
-					if (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].lengthTimer == ZERO)
+					if (pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_4)].lengthTimer == ZERO)
 					{
 						pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.SOUND4_ON_FLAG = ZERO;
-						pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].isChannelActuallyEnabled = DISABLED;
+						pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_4)].isChannelActuallyEnabled = DISABLED;
 					}
 				}
 				if (pGBA_peripherals->mSOUND4CNT_HHalfWord.mSOUND4CNT_HFields.INITIAL == ONE)
 				{
 					enableChannelWhenTriggeredIfDACIsEnabled(AUDIO_CHANNELS::CHANNEL_4);
-					if (pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].lengthTimer == ZERO)
+					if (pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_4)].lengthTimer == ZERO)
 					{
-						pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].lengthTimer = 64;
+						pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_4)].lengthTimer = 64;
 						// NOTE: One of the weird quirks of length counter
 						// Refer to "Obscure Behaviour" section of this link : https://gbdev.gg8.se/wiki/articles/Gameboy_sound_hardware#Registers
 						if (pGBA_peripherals->mSOUND4CNT_HHalfWord.mSOUND4CNT_HFields.LENGTH_FLAG == ONE
 							&& pGBA_instance->GBA_state.audio.nextHalfWillNotClockLengthCounter == TRUE)
 						{
-							--pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].lengthTimer;
+							--pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_4)].lengthTimer;
 						}
 
 					}
-					pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].envelopePeriodTimer
+					pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_4)].envelopePeriodTimer
 						= pGBA_peripherals->mSOUND4CNT_LHalfWord.mSOUND4CNT_LFields.ENVP_STEP_TIME;
 
-					pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].currentVolume
+					pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_4)].currentVolume
 						= pGBA_peripherals->mSOUND4CNT_LHalfWord.mSOUND4CNT_LFields.ENVP_INIT_VOL;
-					pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].isVolumeEnvelopeStillDoingAutomaticUpdates = YES;
+					pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_4)].isVolumeEnvelopeStillDoingAutomaticUpdates = YES;
 					// Refer "trigger event" section of this link : https://gbdev.gg8.se/wiki/articles/Gameboy_sound_hardware#Registers
-					pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].LFSR = 0x7FFF;
+					pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_4)].LFSR = 0x7FFF;
 
 					// Source : https://www.slack.net/~ant/libs/audio.html#Gb_Snd_Emu
-					pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].frequencyTimer += EIGHT;
+					pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_4)].frequencyTimer += EIGHT;
+
+					if (pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.PSG_FIFO_MASTER_EN == ONE) MASQ_UNLIKELY
+					{
+						scheduler.reschedule(
+							static_cast<EventId>(GBA_EVENT::EVENT_APU_CHANNEL_STEP),
+							scheduler.get_current_cycles() +
+							pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_4)].frequencyTimer,
+							TO_UINT8(AUDIO_CHANNELS::CHANNEL_4));
+					}
 				}
 			}
 		}
@@ -1913,27 +1954,43 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 					pGBA_memory->mGBAMemoryMap.mIO.mIOMemory8bit[address - 0x04000000] = ZERO;
 				}
 				pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.SOUND1_ON_FLAG = ZERO;
-				pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].isChannelActuallyEnabled = DISABLED;
+				pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].isChannelActuallyEnabled = DISABLED;
 				pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.SOUND2_ON_FLAG = ZERO;
-				pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].isChannelActuallyEnabled = DISABLED;
+				pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_2)].isChannelActuallyEnabled = DISABLED;
 				pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.SOUND3_ON_FLAG = ZERO;
-				pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_3].isChannelActuallyEnabled = DISABLED;
+				pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_3)].isChannelActuallyEnabled = DISABLED;
 				pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.SOUND4_ON_FLAG = ZERO;
-				pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].isChannelActuallyEnabled = DISABLED;
+				pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_4)].isChannelActuallyEnabled = DISABLED;
+
+				// Disable the scheduled events for the APU channel stepping as PSG FIFO is disabled
+				scheduler.cancel(static_cast<EventId>(GBA_EVENT::EVENT_APU_CHANNEL_STEP), TO_UINT8(AUDIO_CHANNELS::CHANNEL_1));
+				scheduler.cancel(static_cast<EventId>(GBA_EVENT::EVENT_APU_CHANNEL_STEP), TO_UINT8(AUDIO_CHANNELS::CHANNEL_2));
+				scheduler.cancel(static_cast<EventId>(GBA_EVENT::EVENT_APU_CHANNEL_STEP), TO_UINT8(AUDIO_CHANNELS::CHANNEL_3));
+				scheduler.cancel(static_cast<EventId>(GBA_EVENT::EVENT_APU_CHANNEL_STEP), TO_UINT8(AUDIO_CHANNELS::CHANNEL_4));
 			}
 			// Channel OFF -> Channel ON
 			else if (APU_POWER_WAS == ZERO && pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.PSG_FIFO_MASTER_EN == ONE)
 			{
 				// Reset the length counters in CGB mode during power up
-				pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].lengthTimer = ZERO;
-				pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_2].lengthTimer = ZERO;
-				pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_3].lengthTimer = ZERO;
-				pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_4].lengthTimer = ZERO;
+				pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].lengthTimer = ZERO;
+				pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_2)].lengthTimer = ZERO;
+				pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_3)].lengthTimer = ZERO;
+				pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_4)].lengthTimer = ZERO;
 
 				pGBA_instance->GBA_state.audio.wasPowerCycled = YES;
 
 				// NOTE: As we are resetting the frame sequencer, next half period WILL clock the length counter
 				pGBA_instance->GBA_state.audio.nextHalfWillNotClockLengthCounter = FALSE;
+
+				// Schedule the channel stepping events for the APU channels as PSG FIFO is enabled
+				for (uint8_t ch = ZERO; ch < FOUR; ch++)
+				{
+					scheduler.reschedule(
+						static_cast<EventId>(GBA_EVENT::EVENT_APU_CHANNEL_STEP),
+						scheduler.get_current_cycles() +
+						pGBA_instance->GBA_state.audio.audioChannelInstance[ch].frequencyTimer,
+						ch);
+				}
 			}
 		}
 
@@ -2191,155 +2248,82 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 	{
 		RETURN;
 	}
-#if (GBA_ENABLE_DELAYED_TIMER_REG == YES)
 	case IO_TM0CNT_L:
 	{
-		SETBIT(pGBA_instance->GBA_state.timerPendMap, ZERO);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER0].cache.io_tmxcnt_l = data;
+		scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_RELOAD_WRITE),
+			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
+			static_cast<int>(TIMER::TIMER0));
 		RETURN;
 	}
 	case IO_TM0CNT_H:
 	{
 		REJECT_IO8(accessWidth);
-		SETBIT(pGBA_instance->GBA_state.timerPendMap, ONE);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER0].cache.io_tmxcnt_h = data;
+		scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
+			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
+			static_cast<int>(TIMER::TIMER0));
 		RETURN;
 	}
 	case IO_TM1CNT_L:
 	{
-		SETBIT(pGBA_instance->GBA_state.timerPendMap, TWO);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER1].cache.io_tmxcnt_l = data;
+		scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_RELOAD_WRITE),
+			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
+			static_cast<int>(TIMER::TIMER1));
 		RETURN;
 	}
 	case IO_TM1CNT_H:
 	{
 		REJECT_IO8(accessWidth);
-		SETBIT(pGBA_instance->GBA_state.timerPendMap, THREE);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER1].cache.io_tmxcnt_h = data;
+		scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
+			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
+			static_cast<int>(TIMER::TIMER1));
 		RETURN;
 	}
 	case IO_TM2CNT_L:
 	{
-		SETBIT(pGBA_instance->GBA_state.timerPendMap, FOUR);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER2].cache.io_tmxcnt_l = data;
+		scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_RELOAD_WRITE),
+			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
+			static_cast<int>(TIMER::TIMER2));
 		RETURN;
 	}
 	case IO_TM2CNT_H:
 	{
 		REJECT_IO8(accessWidth);
-		SETBIT(pGBA_instance->GBA_state.timerPendMap, FIVE);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER2].cache.io_tmxcnt_h = data;
+		scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
+			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
+			static_cast<int>(TIMER::TIMER2));
 		RETURN;
 	}
 	case IO_TM3CNT_L:
 	{
-		SETBIT(pGBA_instance->GBA_state.timerPendMap, SIX);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER3].cache.io_tmxcnt_l = data;
+		scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_RELOAD_WRITE),
+			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
+			static_cast<int>(TIMER::TIMER3));
 		RETURN;
 	}
 	case IO_TM3CNT_H:
 	{
 		REJECT_IO8(accessWidth);
-		SETBIT(pGBA_instance->GBA_state.timerPendMap, SEVEN);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER3].cache.io_tmxcnt_h = data;
+		scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
+			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
+			static_cast<int>(TIMER::TIMER3));
 		RETURN;
 	}
-#else
-	case IO_TM0CNT_L:
-	{
-		// Write should directly happen to "reload" instead of the actual mTIMERxCNT_L)
-		pGBA_instance->GBA_state.timer[TIMER::TIMER0].cache.reload = data; // Store the new value in "reload"
-		RETURN;
-	}
-	case IO_TM0CNT_H:
-	{
-		BIT timer0EnBeforeUpdate = pGBA_peripherals->mTIMER0CNT_H.mTIMERnCNT_HFields.TIMER_START_STOP;
-		pGBA_peripherals->mTIMER0CNT_H.mTIMERnCNT_HHalfWord = data;
-
-		// Handles loading of "reload" to "counter" when timer is enabled (0 -> 1)
-		if (timer0EnBeforeUpdate == RESET && pGBA_peripherals->mTIMER0CNT_H.mTIMERnCNT_HFields.TIMER_START_STOP == SET)
-		{
-			pGBA_instance->GBA_state.timer[TIMER::TIMER0].cache.counter = pGBA_instance->GBA_state.timer[TIMER::TIMER0].cache.reload;
-			pGBA_peripherals->mTIMER0CNT_L = pGBA_instance->GBA_state.timer[TIMER::TIMER0].cache.counter;
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.timerCounter[TIMER::TIMER0] = RESET;
-			// Takes 2 cycles for CNTH to get applied after writing to control/reload
-			// Refer : https://discordapp.com/channels/465585922579103744/465586361731121162/1034239922602782801
-			pGBA_instance->GBA_state.timer[TIMER::TIMER0].currentState = DISABLED;
-			TODO("For some reason, instead of 2, we need to put 3 for prescalar tests to pass in AGS");
-			pGBA_instance->GBA_state.timer[TIMER::TIMER0].startupDelay = TWO;
-		}
-		RETURN;
-	}
-	case IO_TM1CNT_L:
-	{
-		// Write should directly happen to "reload" instead of the actual mTIMERxCNT_L)
-		pGBA_instance->GBA_state.timer[TIMER::TIMER1].cache.reload = data; // Store the new value in "reload"
-		RETURN;
-	}
-	case IO_TM1CNT_H:
-	{
-		BIT timer1EnBeforeUpdate = pGBA_peripherals->mTIMER1CNT_H.mTIMERnCNT_HFields.TIMER_START_STOP;
-		pGBA_peripherals->mTIMER1CNT_H.mTIMERnCNT_HHalfWord = data;
-		if (timer1EnBeforeUpdate == RESET && pGBA_peripherals->mTIMER1CNT_H.mTIMERnCNT_HFields.TIMER_START_STOP == SET)
-		{
-			pGBA_instance->GBA_state.timer[TIMER::TIMER1].cache.counter = pGBA_instance->GBA_state.timer[TIMER::TIMER1].cache.reload;
-			pGBA_peripherals->mTIMER1CNT_L = pGBA_instance->GBA_state.timer[TIMER::TIMER1].cache.counter;
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.timerCounter[TIMER::TIMER1] = RESET;
-			// Takes 2 cycles for CNTH to get applied after writing to control/reload
-			// Refer : https://discordapp.com/channels/465585922579103744/465586361731121162/1034239922602782801
-			pGBA_instance->GBA_state.timer[TIMER::TIMER1].currentState = DISABLED;
-			TODO("For some reason, instead of 2, we need to put 3 for prescalar tests to pass in AGS");
-			pGBA_instance->GBA_state.timer[TIMER::TIMER1].startupDelay = TWO;
-		}
-		RETURN;
-	}
-	case IO_TM2CNT_L:
-	{
-		// Write should directly happen to "reload" instead of the actual mTIMERxCNT_L)
-		pGBA_instance->GBA_state.timer[TIMER::TIMER2].cache.reload = data; // Store the new value in "reload"
-		RETURN;
-	}
-	case IO_TM2CNT_H:
-	{
-		BIT timer2EnBeforeUpdate = pGBA_peripherals->mTIMER2CNT_H.mTIMERnCNT_HFields.TIMER_START_STOP;
-		pGBA_peripherals->mTIMER2CNT_H.mTIMERnCNT_HHalfWord = data;
-		if (timer2EnBeforeUpdate == RESET && pGBA_peripherals->mTIMER2CNT_H.mTIMERnCNT_HFields.TIMER_START_STOP == SET)
-		{
-			pGBA_instance->GBA_state.timer[TIMER::TIMER2].cache.counter = pGBA_instance->GBA_state.timer[TIMER::TIMER2].cache.reload;
-			pGBA_peripherals->mTIMER2CNT_L = pGBA_instance->GBA_state.timer[TIMER::TIMER2].cache.counter;
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.timerCounter[TIMER::TIMER2] = RESET;
-			// Takes 2 cycles for CNTH to get applied after writing to control/reload
-			// Refer : https://discordapp.com/channels/465585922579103744/465586361731121162/1034239922602782801
-			pGBA_instance->GBA_state.timer[TIMER::TIMER2].currentState = DISABLED;
-			TODO("For some reason, instead of 2, we need to put 3 for prescalar tests to pass in AGS");
-			pGBA_instance->GBA_state.timer[TIMER::TIMER2].startupDelay = TWO;
-		}
-		RETURN;
-	}
-	case IO_TM3CNT_L:
-	{
-		// Write should directly happen to "reload" instead of the actual mTIMERxCNT_L)
-		pGBA_instance->GBA_state.timer[TIMER::TIMER3].cache.reload = data; // Store the new value in "reload"
-		RETURN;
-	}
-	case IO_TM3CNT_H:
-	{
-		BIT timer3EnBeforeUpdate = pGBA_peripherals->mTIMER3CNT_H.mTIMERnCNT_HFields.TIMER_START_STOP;
-		pGBA_peripherals->mTIMER3CNT_H.mTIMERnCNT_HHalfWord = data;
-		if (timer3EnBeforeUpdate == RESET && pGBA_peripherals->mTIMER3CNT_H.mTIMERnCNT_HFields.TIMER_START_STOP == SET)
-		{
-			pGBA_instance->GBA_state.timer[TIMER::TIMER3].cache.counter = pGBA_instance->GBA_state.timer[TIMER::TIMER3].cache.reload;
-			pGBA_peripherals->mTIMER3CNT_L = pGBA_instance->GBA_state.timer[TIMER::TIMER3].cache.counter;
-			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.timerCounter[TIMER::TIMER3] = RESET;
-			// Takes 2 cycles for CNTH to get applied after writing to control/reload
-			// Refer : https://discordapp.com/channels/465585922579103744/465586361731121162/1034239922602782801
-			pGBA_instance->GBA_state.timer[TIMER::TIMER3].currentState = DISABLED;
-			TODO("For some reason, instead of 2, we need to put 3 for prescalar tests to pass in AGS");
-			pGBA_instance->GBA_state.timer[TIMER::TIMER3].startupDelay = TWO;
-		}
-		RETURN;
-	}
-#endif
 	case IO_SIOMULTI0:
 	{
 		pGBA_peripherals->mSIOMULTI0 = data;
@@ -2362,7 +2346,16 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 	}
 	case IO_SIOCNT:
 	{
-		pGBA_peripherals->mSIOCNT.mSIOCNTHalfWord = data;
+		uint16_t& siocntWord = pGBA_peripherals->mSIOCNT.mSIOCNTHalfWord;
+		uint16_t oldSiocnt = siocntWord;
+
+		siocntWord = data;
+
+		// Check if START bit (bit 7 / 0x0080) transitioned from 0 to 1
+		if (!(oldSiocnt & 0x0080u) && (siocntWord & 0x0080u))
+		{
+			checkAndScheduleSIO();
+		}
 		RETURN;
 	}
 	case IO_SIO_DATA8_MLTSEND:
@@ -2430,11 +2423,11 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 	}
 	case IO_IE:
 	{
-#if (GBA_ENABLE_DELAYED_IRQ == YES)
-		pGBA_instance->GBA_state.interrupt.iePend = data;
-#else
-		pGBA_peripherals->mIEHalfWord.mIEHalfWord = data;
-#endif
+		pGBA_instance->GBA_state.interrupt.iePend = data & 0x3FFF;
+		scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_IRQ_WRITE),
+			scheduler.get_current_cycles() + IRQ_REGISTERS_WRITE_DELAY,
+			ZERO);
 		RETURN;
 	}
 	case IO_IF:
@@ -2442,11 +2435,11 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 		// For IF: Refer http://problemkaputt.de/gbatek-gba-interrupt-control.htm
 		// Writing from CPU is always an ACK, so this is basically W1C register for CPU
 		// Masters other than CPU should be able to write this without triggering W1C
-#if (GBA_ENABLE_DELAYED_IRQ == YES)
 		pGBA_instance->GBA_state.interrupt.ifPend &= ~data;
-#else
-		pGBA_peripherals->mIFHalfWord.mIFHalfWord &= ~data;
-#endif
+		scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_IRQ_WRITE),
+			scheduler.get_current_cycles() + IRQ_REGISTERS_WRITE_DELAY,
+			ZERO);
 		RETURN;
 	}
 	case IO_WAITCNT:
@@ -2590,12 +2583,11 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 	}
 	case IO_IME:
 	{
-#if (GBA_ENABLE_DELAYED_IRQ == YES)
-		pGBA_instance->GBA_state.interrupt.imePend = data;
-#else
-		pGBA_peripherals->mIMEHalfWord.mIMEHalfWord = data;
-		pGBA_peripherals->mIMEHalfWord.mIMEFields.NOT_USED_0 = ZERO;
-#endif
+		pGBA_instance->GBA_state.interrupt.imePend = data & 0x01;
+		scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_IRQ_WRITE),
+			scheduler.get_current_cycles() + IRQ_REGISTERS_WRITE_DELAY,
+			ZERO);
 		RETURN;
 	}
 	case IO_400020A:
@@ -2616,6 +2608,10 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 
 MASQ_INLINE void GBA_t::writeIO8(uint32_t address, BYTE data, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType)
 {
+#define SYNC_PPU_REG(addr) if ((addr) >= IO_DISPCNT && (addr) <= IO_BLDY) { syncPPU(); }
+
+	SYNC_PPU_REG(address);
+
 	switch (address)
 	{
 	case IO_BLDY:
@@ -2643,38 +2639,52 @@ MASQ_INLINE void GBA_t::writeIO8(uint32_t address, BYTE data, MEMORY_ACCESS_WIDT
 			{
 				pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.SOUND1_ON_FLAG = ZERO;
 				pGBA_peripherals->mSOUND1CNT_XHalfWord.mSOUND1CNT_XFields.INITIAL = ZERO;
-				pGBA_instance->GBA_state.audio.audioChannelInstance[(uint8_t)AUDIO_CHANNELS::CHANNEL_1].isChannelActuallyEnabled = DISABLED;
+				pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].isChannelActuallyEnabled = DISABLED;
 			}
 		}
 
 		RETURN;
 	}
-#if (GBA_ENABLE_DELAYED_TIMER_REG == YES)
 	case IO_TM0CNT_H:
 	{
-		SETBIT(pGBA_instance->GBA_state.timerPendMap, ONE);
+		REJECT_IO8(accessWidth);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER0].cache.io_tmxcnt_h = data;
+		scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
+			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
+			static_cast<int>(TIMER::TIMER0));
 		RETURN;
 	}
 	case IO_TM1CNT_H:
 	{
-		SETBIT(pGBA_instance->GBA_state.timerPendMap, THREE);
+		REJECT_IO8(accessWidth);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER1].cache.io_tmxcnt_h = data;
+		scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
+			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
+			static_cast<int>(TIMER::TIMER1));
 		RETURN;
 	}
 	case IO_TM2CNT_H:
 	{
-		SETBIT(pGBA_instance->GBA_state.timerPendMap, FIVE);
+		REJECT_IO8(accessWidth);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER2].cache.io_tmxcnt_h = data;
+		scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
+			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
+			static_cast<int>(TIMER::TIMER2));
 		RETURN;
 	}
 	case IO_TM3CNT_H:
 	{
-		SETBIT(pGBA_instance->GBA_state.timerPendMap, SEVEN);
+		REJECT_IO8(accessWidth);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER3].cache.io_tmxcnt_h = data;
+		scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
+			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
+			static_cast<int>(TIMER::TIMER3));
 		RETURN;
 	}
-#endif
 	case IO_POSTFLG:
 	{
 		CPUTODO("If condition of PC <= 0x3FFF at %d in %s is obtained from NBA. Find actual source of this information", __LINE__, __FILE__);
@@ -2712,7 +2722,7 @@ MASQ_INLINE void GBA_t::writeIO8(uint32_t address, BYTE data, MEMORY_ACCESS_WIDT
 
 MASQ_INLINE void GBA_t::busCycles()
 {
-	cpuTick();
+	tick();
 
 #if (ENABLE_ARM7TDMI_SST == YES)
 	if (ROM_TYPE == ROM::TEST_SST) MASQ_UNLIKELY
@@ -3214,22 +3224,26 @@ MASQ_INLINE void GBA_t::dmaTick()
 
 MASQ_INLINE void GBA_t::timerTick()
 {
-	processTimer(ONE);
+	DO_NOTHING;
 }
 
 MASQ_INLINE void GBA_t::serialTick()
 {
-	processSIO(ONE);
+	DO_NOTHING;
 }
 
 MASQ_INLINE void GBA_t::apuTick()
 {
-	processAPU(ONE);
+	DO_NOTHING;
+
+#if DEACTIVATED
+	debugApuEventHandlerTiming();
+#endif
 }
 
 MASQ_INLINE void GBA_t::ppuTick()
 {
-	processPPU(ONE);
+	DO_NOTHING;
 }
 
 MASQ_INLINE void GBA_t::joypadTick()
@@ -3239,54 +3253,31 @@ MASQ_INLINE void GBA_t::joypadTick()
 
 MASQ_INLINE void GBA_t::requestInterrupts(GBA_INTERRUPT interrupt)
 {
-#if (GBA_ENABLE_DELAYED_IRQ == YES)
 	pGBA_instance->GBA_state.interrupt.ifPend |= (ONE << TO_UINT(interrupt));
-#else
-	pGBA_peripherals->mIFHalfWord.mIFHalfWord = (uint16_t)(ONE << TO_UINT16(interrupt));
-#endif
+
+	scheduler.schedule(
+		static_cast<EventId>(GBA_EVENT::EVENT_IRQ_WRITE),
+		scheduler.get_current_cycles() + IRQ_REGISTERS_WRITE_DELAY,
+		ZERO);
 }
 
 MASQ_INLINE FLAG GBA_t::shouldUnHaltTheCPU()
 {
-#if (GBA_ENABLE_DELAYED_IRQ == YES)
 	RETURN pGBA_instance->GBA_state.interrupt.irqAvailLatch;
-#else
-	if ((pGBA_peripherals->mIFHalfWord.mIFHalfWord & pGBA_peripherals->mIEHalfWord.mIEHalfWord & 0x3FFF) != ZERO)
-	{
-		RETURN YES;
-	}
-
-	RETURN NO;
-#endif
 }
 
 MASQ_INLINE FLAG GBA_t::isInterruptReadyToBeServed()
 {
-#if (GBA_ENABLE_DELAYED_IRQ == YES)
 	RETURN pGBA_instance->GBA_state.interrupt.irqAvailLatch;
-#else
-	if ((pGBA_peripherals->mIFHalfWord.mIFHalfWord & pGBA_peripherals->mIEHalfWord.mIEHalfWord & 0x3FFF) != ZERO)
-	{
-		RETURN YES;
-	}
-
-	RETURN NO;
-#endif
 }
 
 MASQ_INLINE FLAG GBA_t::handleInterruptsIfApplicable()
 {
 	FLAG interruptWasServiced = NO;
 
-#if (GBA_ENABLE_DELAYED_IRQ == YES)
 	if (pGBA_instance->GBA_state.interrupt.cpsrIrqMaskLatch == DISABLED
-		&& pGBA_instance->GBA_state.interrupt.irqLineLatch == ENABLED
+		&& pGBA_instance->GBA_state.interrupt.cpuIrqLineLatch == ENABLED
 		&& isInterruptReadyToBeServed() == YES)
-#else
-	if (pGBA_peripherals->mIMEHalfWord.mIMEFields.ENABLE_ALL_INTERRUPTS == ENABLED
-		&& pGBA_registers->cpsr.psrFields.psrIRQDisBit == RESET
-		&& isInterruptReadyToBeServed() == YES)
-#endif
 	{
 		// Refer : http://problemkaputt.de/gbatek-arm-cpu-exceptions.htm for details on steps to be taken when interrupt occurs
 
