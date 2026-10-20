@@ -4011,7 +4011,7 @@ public:
 #ifndef __EMSCRIPTEN__
 									ImGui::Begin("Updater", &showUpdWin, ImGuiWindowFlags_AlwaysAutoResize);
 									ImGui::Text("Current Version : v%.4f", VERSION);
-									ImGui::Text("Build Type : P0052");
+									ImGui::Text("Build Type : P0152 (Partial)");
 									ImGui::Separator();
 									ImGui::End();
 #endif
@@ -4029,7 +4029,7 @@ public:
 										ImGui::Columns(2, nullptr, false);
 										ImGui::SetColumnWidth(0, columnWidth);
 
-										ImGui::Text("Build");       ImGui::NextColumn(); ImGui::Text(": P0052");               ImGui::NextColumn();
+										ImGui::Text("Build");       ImGui::NextColumn(); ImGui::Text(": P0152 (Partial)");               ImGui::NextColumn();
 										ImGui::Text("Version");     ImGui::NextColumn(); ImGui::Text(": v%.4f", VERSION);      ImGui::NextColumn();
 										ImGui::Text("Built On");    ImGui::NextColumn(); ImGui::Text(": %s at %s IST", __DATE__, __TIME__); ImGui::NextColumn();
 #if defined(NDEBUG)
