@@ -616,38 +616,8 @@ void GBA_t::processAPU(INC64 apuCycles)
 	tickChannel(AUDIO_CHANNELS::CHANNEL_4, apuCycles);
 
 	// Frame sequencer @ 512 Hz
-	static constexpr int64_t FRAME_SEQ_THRESHOLD = static_cast<int64_t>(GBA_REFERENCE_CLOCK_HZ / APU_FRAME_SEQUENCER_RATE_HZ);
-
-	if (apuState.apuCounter >= FRAME_SEQ_THRESHOLD) MASQ_UNLIKELY
+	if (apuState.apuCounter >= FRAME_SEQ_THRESHOLD)
 	{
-		if (pGBA_instance->GBA_state.audio.wasPowerCycled == YES) MASQ_UNLIKELY
-		{
-			APUTODO("Not handling power cycling!");
-			pGBA_instance->GBA_state.audio.wasPowerCycled = NO;
-		}
-
-		pGBA_instance->GBA_state.audio.nextHalfWillNotClockLengthCounter = FALSE;
-
-		// 256 Hz - every other frame
-		if ((apuState.apuFrameCounter & ONE) == ZERO) MASQ_UNLIKELY
-		{
-			pGBA_instance->GBA_state.audio.nextHalfWillNotClockLengthCounter = TRUE;
-			processSoundLength();
-		}
-
-		// 128 Hz - every 4th frame at offset 2
-		if ((apuState.apuFrameCounter & THREE) == TWO) MASQ_UNLIKELY
-		{
-			processFrequencySweep();
-		}
-
-		// 64 Hz - frame 7 only
-		if (apuState.apuFrameCounter == SEVEN) MASQ_UNLIKELY
-		{
-			processEnvelopeSweep();
-		}
-
-		apuState.apuFrameCounter = (apuState.apuFrameCounter + ONE) & SEVEN;
 		apuState.apuCounter -= FRAME_SEQ_THRESHOLD;
 	}
 }
@@ -841,6 +811,12 @@ void GBA_t::initializeAudio()
 	// Setup the volume for audio
 	pGBA_audio->emulatorVolume = pt.get<std::float_t>("gba._volume", 0.1f);
 	SDL_SetAudioDeviceGain(SDL_GetAudioStreamDevice(audioStream), pGBA_audio->emulatorVolume);
+
+	// Schedule the Framesequencer
+	scheduler.schedule(
+		static_cast<EventId>(GBA_EVENT::EVENT_APU_FRAME_SEQUENCER),
+		scheduler.get_current_cycles() + FRAME_SEQ_THRESHOLD,
+		ZERO);
 
 	// Schedule the Downsampler
 	scheduler.schedule(
@@ -1434,6 +1410,7 @@ void GBA_t::registerEvents()
 		{ &GBA_t::exitHDrawVDrawHandler,			0 },
 		{ &GBA_t::exitHBlankVBlankHandler,			0 },
 		{ &GBA_t::exitHDrawVBlankHandler,			0 },
+		{ &GBA_t::frameSequencerHandler,			1 },
 		{ &GBA_t::audioDownSamplingHandler,			0 },
 		{ &GBA_t::irqWriteHandler,					0 },
 		{ &GBA_t::irqAvailHandler,					1 },
