@@ -485,6 +485,59 @@ float GBA_t::getEmulationFPS()
 #pragma region ARM7TDMI_DEFINITIONS
 OPT_SIZE
 
+void GBA_t::debugApuEventHandlerTiming()
+{
+	auto& apuState = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate;
+
+	++apuState.apuCounter;
+
+	auto& ch1Instance = pGBA_instance->GBA_state.audio.audioChannelInstance[AUDIO_CHANNELS::CHANNEL_1];
+	auto& ch2Instance = pGBA_instance->GBA_state.audio.audioChannelInstance[AUDIO_CHANNELS::CHANNEL_2];
+	auto& ch3Instance = pGBA_instance->GBA_state.audio.audioChannelInstance[AUDIO_CHANNELS::CHANNEL_3];
+	auto& ch4Instance = pGBA_instance->GBA_state.audio.audioChannelInstance[AUDIO_CHANNELS::CHANNEL_4];
+
+	if (ch1Instance.frequencyTimer > RESET)
+	{
+		--ch1Instance.frequencyTimer;
+	}
+	if (ch2Instance.frequencyTimer > RESET)
+	{
+		--ch2Instance.frequencyTimer;
+	}
+	if (ch3Instance.frequencyTimer > RESET)
+	{
+		--ch3Instance.frequencyTimer;
+	}
+	if (ch4Instance.frequencyTimer > RESET)
+	{
+		--ch4Instance.frequencyTimer;
+	}
+
+	if (ch1Instance.frequencyTimer == RESET)
+	{
+		TODO("Make sure channel 1 stepping event was triggered");
+	}
+	if (ch2Instance.frequencyTimer == RESET)
+	{
+		TODO("Make sure channel 2 stepping event was triggered");
+	}
+	if (ch3Instance.frequencyTimer == RESET)
+	{
+		TODO("Make sure channel 3 stepping event was triggered");
+	}
+	if (ch4Instance.frequencyTimer == RESET)
+	{
+		TODO("Make sure channel 4 stepping event was triggered");
+	}
+
+	// Frame sequencer @ 512 Hz
+	if (apuState.apuCounter >= FRAME_SEQ_THRESHOLD)
+	{
+		TODO("Make sure frame sequencer event was triggered");
+		apuState.apuCounter -= FRAME_SEQ_THRESHOLD;
+	}
+}
+
 void GBA_t::skylersalehLogProcess()
 {
 #if (DEACTIVATED)
@@ -598,28 +651,6 @@ void GBA_t::processDMA()
 	while (IsAnyDMARunning());
 
 	tick(TICK_TYPE::DMA_TICK);
-}
-
-void GBA_t::processAPU(INC64 apuCycles)
-{
-	auto& apuState = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate;
-
-	apuState.apuCounter += apuCycles;
-
-	// DAC check - if DAC disabled, channel disabled immediately
-	continousDACCheck();
-
-	// Tick all 4 channels
-	tickChannel(AUDIO_CHANNELS::CHANNEL_1, apuCycles);
-	tickChannel(AUDIO_CHANNELS::CHANNEL_2, apuCycles);
-	tickChannel(AUDIO_CHANNELS::CHANNEL_3, apuCycles);
-	tickChannel(AUDIO_CHANNELS::CHANNEL_4, apuCycles);
-
-	// Frame sequencer @ 512 Hz
-	if (apuState.apuCounter >= FRAME_SEQ_THRESHOLD)
-	{
-		apuState.apuCounter -= FRAME_SEQ_THRESHOLD;
-	}
 }
 
 void GBA_t::processPPU(INC64 ppuCycles)
@@ -811,6 +842,12 @@ void GBA_t::initializeAudio()
 	// Setup the volume for audio
 	pGBA_audio->emulatorVolume = pt.get<std::float_t>("gba._volume", 0.1f);
 	SDL_SetAudioDeviceGain(SDL_GetAudioStreamDevice(audioStream), pGBA_audio->emulatorVolume);
+
+	for (INC8 ii = 0; ii < TO_UINT8(AUDIO_CHANNELS::TOTAL_CHANNELS); ii++)
+	{
+		pGBA_audio->scheduler.apuStartCycleCount[ii] = scheduler.get_current_cycles();
+		pGBA_audio->scheduler.lastSyncCycleCount[ii] = pGBA_audio->scheduler.apuStartCycleCount[ii];
+	}
 
 	// Schedule the Framesequencer
 	scheduler.schedule(
@@ -1410,6 +1447,7 @@ void GBA_t::registerEvents()
 		{ &GBA_t::exitHDrawVDrawHandler,			0 },
 		{ &GBA_t::exitHBlankVBlankHandler,			0 },
 		{ &GBA_t::exitHDrawVBlankHandler,			0 },
+		{ &GBA_t::apuChannelStepHandler,			1 },
 		{ &GBA_t::frameSequencerHandler,			1 },
 		{ &GBA_t::audioDownSamplingHandler,			0 },
 		{ &GBA_t::irqWriteHandler,					0 },

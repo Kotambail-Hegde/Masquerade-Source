@@ -3414,9 +3414,14 @@ private:
 		int16_t sampleReadByChannel4;
 		uint32_t accumulatedTone;
 		MAP8 soundTimerOverFlow;
-		audioChannelInstance_t audioChannelInstance[(uint8_t)AUDIO_CHANNELS::TOTAL_CHANNELS];
+		audioChannelInstance_t audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::TOTAL_CHANNELS)];
 		GBA_AUDIO_SAMPLE_TYPE audioBuffer[AUDIO_BUFFER_SIZE_FOR_GBA];
 		float emulatorVolume;
+		struct scheduler_t
+		{
+			INC64 apuStartCycleCount[TO_UINT8(AUDIO_CHANNELS::TOTAL_CHANNELS)];
+			INC64 lastSyncCycleCount[TO_UINT8(AUDIO_CHANNELS::TOTAL_CHANNELS)];
+		} scheduler;
 	} audio_t;
 
 private:
@@ -3680,6 +3685,7 @@ private:
 		EVENT_PPU_HDRAW_VDRAW,
 		EVENT_PPU_HBLANK_VBLANK,
 		EVENT_PPU_HDRAW_VBLANK,
+		EVENT_APU_CHANNEL_STEP,
 		EVENT_APU_FRAME_SEQUENCER,
 		EVENT_APU_SAMPLE,
 		EVENT_IRQ_WRITE,
@@ -5773,6 +5779,8 @@ OPT_DEFAULT
 
 	bool DataProcessing();
 
+	void debugApuEventHandlerTiming();
+
 	void skylersalehLogProcess();
 
 	void runCPUPipeline();
@@ -6645,18 +6653,14 @@ private:
 
 OPT_SPEED
 
-	MASQ_INLINE void tickChannel(AUDIO_CHANNELS channel, INC64 tCycles)
+	MASQ_INLINE void tickChannel(AUDIO_CHANNELS channel)
 	{
-		if (pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.PSG_FIFO_MASTER_EN != ONE) MASQ_UNLIKELY
-			RETURN;
+		// DAC check - if DAC disabled, channel disabled immediately
+		continousDACCheck();
 
+		// Assumption is by the time we come to this function, the channel is enabled and the frequency timer has already expired
 		const uint8_t ch = static_cast<uint8_t>(channel);
 		auto& chInstance = pGBA_instance->GBA_state.audio.audioChannelInstance[ch];
-
-		chInstance.frequencyTimer -= tCycles;
-
-		if (chInstance.frequencyTimer > ZERO) MASQ_LIKELY
-			RETURN;
 
 		// Channel-specific processing
 		if (ch == AUDIO_CHANNELS::CHANNEL_1) MASQ_LIKELY  // CHANNEL_1
@@ -6706,22 +6710,22 @@ OPT_SPEED
 				}
 			}
 
-				if (chInstance.isChannelActuallyEnabled == ENABLED) MASQ_LIKELY
-				{
-					const uint8_t byteIndex = waveIndex >> 1;  // Divide by 2
-					const bool isUpperNibble = (waveIndex & 1) == 0;
+			if (chInstance.isChannelActuallyEnabled == ENABLED) MASQ_LIKELY
+			{
+				const uint8_t byteIndex = waveIndex >> 1;  // Divide by 2
+				const bool isUpperNibble = (waveIndex & 1) == 0;
 
-					pGBA_instance->GBA_state.audio.sampleReadByChannel3 = isUpperNibble
-						? pGBA_memory->mBankedWAVERAM.mWAVERAM8[byteIndex].samples.upperNibble
-						: pGBA_memory->mBankedWAVERAM.mWAVERAM8[byteIndex].samples.lowerNibble;
+				pGBA_instance->GBA_state.audio.sampleReadByChannel3 = isUpperNibble
+					? pGBA_memory->mBankedWAVERAM.mWAVERAM8[byteIndex].samples.upperNibble
+					: pGBA_memory->mBankedWAVERAM.mWAVERAM8[byteIndex].samples.lowerNibble;
 
-					pGBA_instance->GBA_state.audio.sampleReadByChannel3 =
-						(pGBA_instance->GBA_state.audio.sampleReadByChannel3 - EIGHT) * FOUR;
-				}
-				else
-				{
-					pGBA_instance->GBA_state.audio.sampleReadByChannel3 = (GBA_AUDIO_SAMPLE_TYPE)MUTE_AUDIO;
-				}
+				pGBA_instance->GBA_state.audio.sampleReadByChannel3 =
+					(pGBA_instance->GBA_state.audio.sampleReadByChannel3 - EIGHT) * FOUR;
+			}
+			else
+			{
+				pGBA_instance->GBA_state.audio.sampleReadByChannel3 = (GBA_AUDIO_SAMPLE_TYPE)MUTE_AUDIO;
+			}
 		}
 		else  // CHANNEL_4
 		{
@@ -6742,11 +6746,12 @@ OPT_SPEED
 
 			chInstance.LFSR = LFSR;
 
-			pGBA_instance->GBA_state.audio.sampleReadByChannel4 =
-				(chInstance.isChannelActuallyEnabled == ENABLED)
-				? ((~LFSR & 1) ? EIGHT : -EIGHT)
-				: (GBA_AUDIO_SAMPLE_TYPE)MUTE_AUDIO;
+			pGBA_instance->GBA_state.audio.sampleReadByChannel4 = (chInstance.isChannelActuallyEnabled == ENABLED) 
+				? ((~LFSR & 1) ? EIGHT : -EIGHT) : (GBA_AUDIO_SAMPLE_TYPE)MUTE_AUDIO;
 		}
+	
+		// DAC check - if DAC disabled, channel disabled immediately
+		continousDACCheck();
 	}
 
 	MASQ_INLINE DIM16 getChannelPeriod(AUDIO_CHANNELS channel)
@@ -6829,28 +6834,31 @@ OPT_SPEED
 	MASQ_INLINE void continousDACCheck()
 	{
 		// Unrolled - no loop overhead
-		if ((pGBA_peripherals->mSOUND1CNT_HHalfWord.mSOUND1CNT_HHalfWord & 0xF800) == ZERO) MASQ_UNLIKELY
+		auto& soundControl = pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields;
+		auto& audioChannels = pGBA_instance->GBA_state.audio.audioChannelInstance;
+
+		if ((pGBA_peripherals->mSOUND1CNT_HHalfWord.mSOUND1CNT_HHalfWord & 0xF800) == ZERO)
 		{
-			pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.SOUND1_ON_FLAG = RESET;
-			pGBA_instance->GBA_state.audio.audioChannelInstance[AUDIO_CHANNELS::CHANNEL_1].isChannelActuallyEnabled = DISABLED;
+			soundControl.SOUND1_ON_FLAG = RESET;
+			audioChannels[AUDIO_CHANNELS::CHANNEL_1].isChannelActuallyEnabled = DISABLED;
 		}
 
-		if ((pGBA_peripherals->mSOUND2CNT_LHalfWord.mSOUND2CNT_LHalfWord & 0xF800) == ZERO) MASQ_UNLIKELY
+		if ((pGBA_peripherals->mSOUND2CNT_LHalfWord.mSOUND2CNT_LHalfWord & 0xF800) == ZERO)
 		{
-			pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.SOUND2_ON_FLAG = RESET;
-			pGBA_instance->GBA_state.audio.audioChannelInstance[AUDIO_CHANNELS::CHANNEL_2].isChannelActuallyEnabled = DISABLED;
+			soundControl.SOUND2_ON_FLAG = RESET;
+			audioChannels[AUDIO_CHANNELS::CHANNEL_2].isChannelActuallyEnabled = DISABLED;
 		}
 
-		if (pGBA_peripherals->mSOUND3CNT_LHalfWord.mSOUND3CNT_LFields.CHANNEL_3_OFF == ZERO) MASQ_UNLIKELY
+		if (pGBA_peripherals->mSOUND3CNT_LHalfWord.mSOUND3CNT_LFields.CHANNEL_3_OFF == ZERO)
 		{
-			pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.SOUND3_ON_FLAG = RESET;
-			pGBA_instance->GBA_state.audio.audioChannelInstance[AUDIO_CHANNELS::CHANNEL_3].isChannelActuallyEnabled = DISABLED;
+			soundControl.SOUND3_ON_FLAG = RESET;
+			audioChannels[AUDIO_CHANNELS::CHANNEL_3].isChannelActuallyEnabled = DISABLED;
 		}
 
-		if ((pGBA_peripherals->mSOUND4CNT_LHalfWord.mSOUND4CNT_LHalfWord & 0xF800) == ZERO) MASQ_UNLIKELY
+		if ((pGBA_peripherals->mSOUND4CNT_LHalfWord.mSOUND4CNT_LHalfWord & 0xF800) == ZERO)
 		{
-			pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.SOUND4_ON_FLAG = RESET;
-			pGBA_instance->GBA_state.audio.audioChannelInstance[AUDIO_CHANNELS::CHANNEL_4].isChannelActuallyEnabled = DISABLED;
+			soundControl.SOUND4_ON_FLAG = RESET;
+			audioChannels[AUDIO_CHANNELS::CHANNEL_4].isChannelActuallyEnabled = DISABLED;
 		}
 	}
 
@@ -7086,6 +7094,9 @@ OPT_SPEED
 
 	MASQ_INLINE void frameSequencer()
 	{
+		// DAC check - if DAC disabled, channel disabled immediately
+		continousDACCheck();
+
 		auto& audio = pGBA_instance->GBA_state.audio;
 		auto& apuState = pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate;
 		const auto frame = apuState.apuFrameCounter;
@@ -7120,10 +7131,16 @@ OPT_SPEED
 		}
 
 		apuState.apuFrameCounter = (frame + ONE) & SEVEN;
+
+		// DAC check - if DAC disabled, channel disabled immediately
+		continousDACCheck();
 	}
 
 	MASQ_INLINE void captureDownsampledAudioSamples()
 	{
+		// DAC check - if DAC disabled, channel disabled immediately
+		continousDACCheck();
+
 		static constexpr int PSG_VOL[4] = { ONE, TWO, FOUR, ZERO };
 		static constexpr int DMA_VOL[2] = { TWO, FOUR };
 
@@ -7228,8 +7245,6 @@ OPT_SPEED
 	}
 
 OPT_DEFAULT
-
-	void processAPU(INC64 apuCycles);
 
 	void playTheAudioFrame();
 
@@ -12789,6 +12804,23 @@ private:
 		gba->syncPPU();
 
 		gba->exitHBlankVBlank();
+	}
+
+	static void apuChannelStepHandler(void* userData, MASQ_MAYBE_UNUSED int channel)
+	{
+		auto* gba = static_cast<GBA_t*>(userData);
+
+		auto& chInstance = gba->pGBA_instance->GBA_state.audio.audioChannelInstance[channel];
+
+		gba->tickChannel(static_cast<AUDIO_CHANNELS>(channel));
+
+		gba->pGBA_audio->scheduler.lastSyncCycleCount[channel] = gba->scheduler.get_current_cycles();
+
+		// Schedule channel step
+		gba->scheduler.schedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_APU_CHANNEL_STEP),
+			gba->scheduler.get_current_cycles() + chInstance.frequencyTimer,
+			channel);
 	}
 
 	static void frameSequencerHandler(void* userData, MASQ_MAYBE_UNUSED int context)
