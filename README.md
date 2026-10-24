@@ -14,13 +14,13 @@ A multi-system emulator supporting classic gaming consoles and simulators.
 
 Current Version: **0.7x**
 
-> 🚧 **Beta Notice**  
+> **Beta Notice**  
 > Masquerade is currently in **beta**. All versions before **1.0** are under active development and may contain bugs, incomplete features, or breaking changes.
 >
-> 🔄 **Frequent Updates**  
+> **Frequent Updates**  
 > Releases may be frequent as development progresses rapidly.
 >
-> ⚠️ **Breaking Changes**  
+> **Breaking Changes**  
 > Backward compatibility is **not guaranteed** between versions. Save states, configs, or behaviors may change without notice.
 >
 > Stability, accuracy, and performance will continue improving toward the **1.x stable release**.
@@ -63,7 +63,7 @@ Current Version: **0.7x**
 
 <kbd><img width="240" height="160" alt="image" src="https://github.com/user-attachments/assets/c3041aaa-7de5-47c2-b45b-3d9c47b2c2e5" /></kbd> <kbd><img width="240" height="160" alt="image" src="https://github.com/user-attachments/assets/7f60032b-5031-4525-8aed-83b341bb0eed" /></kbd>
 
-#### 🛠️ Debugger (Work In Progress)
+#### Debugger (Work In Progress)
 
 The built-in debugger offers granular execution control, supporting **per-frame, per-line, and per-tick** stepping resolutions. 
 
