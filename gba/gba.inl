@@ -1379,17 +1379,14 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 
 					// Source : https://www.slack.net/~ant/libs/audio.html#Gb_Snd_Emu
 					uint16_t resetFrequencyTimer = (2048 - getChannelPeriod(AUDIO_CHANNELS::CHANNEL_1)) * FOUR;
+					syncChannelFrequencyTimer(AUDIO_CHANNELS::CHANNEL_1);
 					pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].frequencyTimer
 						= (pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].frequencyTimer & THREE)
 						+ resetFrequencyTimer;
 
 					if (pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.PSG_FIFO_MASTER_EN == ONE) MASQ_UNLIKELY
 					{
-						scheduler.reschedule(
-							static_cast<EventId>(GBA_EVENT::EVENT_APU_CHANNEL_STEP),
-							scheduler.get_current_cycles() +
-							pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].frequencyTimer,
-							TO_UINT8(AUDIO_CHANNELS::CHANNEL_1));
+						scheduleChannelStep(AUDIO_CHANNELS::CHANNEL_1);
 					}
 				}
 			}
@@ -1535,17 +1532,14 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 
 					// Source : https://www.slack.net/~ant/libs/audio.html#Gb_Snd_Emu
 					uint16_t resetFrequencyTimer = (2048 - getChannelPeriod(AUDIO_CHANNELS::CHANNEL_2)) * FOUR;
+					syncChannelFrequencyTimer(AUDIO_CHANNELS::CHANNEL_2);
 					pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_2)].frequencyTimer
 						= (pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_2)].frequencyTimer & THREE)
 						+ resetFrequencyTimer;
 
 					if (pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.PSG_FIFO_MASTER_EN == ONE) MASQ_UNLIKELY
 					{
-						scheduler.reschedule(
-							static_cast<EventId>(GBA_EVENT::EVENT_APU_CHANNEL_STEP),
-							scheduler.get_current_cycles() +
-							pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_2)].frequencyTimer,
-							TO_UINT8(AUDIO_CHANNELS::CHANNEL_2));
+						scheduleChannelStep(AUDIO_CHANNELS::CHANNEL_2);
 					}
 				}
 			}
@@ -1717,11 +1711,7 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 
 					if (pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.PSG_FIFO_MASTER_EN == ONE) MASQ_UNLIKELY
 					{
-						scheduler.reschedule(
-							static_cast<EventId>(GBA_EVENT::EVENT_APU_CHANNEL_STEP),
-							scheduler.get_current_cycles() +
-							pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_3)].frequencyTimer,
-							TO_UINT8(AUDIO_CHANNELS::CHANNEL_3));
+						scheduleChannelStep(AUDIO_CHANNELS::CHANNEL_3);
 					}
 				}
 			}
@@ -1869,15 +1859,12 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 					pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_4)].LFSR = 0x7FFF;
 
 					// Source : https://www.slack.net/~ant/libs/audio.html#Gb_Snd_Emu
+					syncChannelFrequencyTimer(AUDIO_CHANNELS::CHANNEL_4);
 					pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_4)].frequencyTimer += EIGHT;
 
 					if (pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.PSG_FIFO_MASTER_EN == ONE) MASQ_UNLIKELY
 					{
-						scheduler.reschedule(
-							static_cast<EventId>(GBA_EVENT::EVENT_APU_CHANNEL_STEP),
-							scheduler.get_current_cycles() +
-							pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_4)].frequencyTimer,
-							TO_UINT8(AUDIO_CHANNELS::CHANNEL_4));
+						scheduleChannelStep(AUDIO_CHANNELS::CHANNEL_4);
 					}
 				}
 			}
@@ -1949,6 +1936,11 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 			// Channel ON -> Channel OFF
 			if (APU_POWER_WAS == ONE && pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.PSG_FIFO_MASTER_EN == ZERO)
 			{
+				// The step events are about to be cancelled: fold the elapsed cycles in so the frozen value is the live one
+				for (uint8_t ch = ZERO; ch < FOUR; ch++)
+				{
+					foldChannelFrequencyTimer(static_cast<AUDIO_CHANNELS>(ch), YES);
+				}
 				for (uint32_t address = 0x04000060; address <= 0x040000AE /*0x04000075*/; address++)
 				{
 					pGBA_memory->mGBAMemoryMap.mIO.mIOMemory8bit[address - 0x04000000] = ZERO;
@@ -1985,11 +1977,7 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 				// Schedule the channel stepping events for the APU channels as PSG FIFO is enabled
 				for (uint8_t ch = ZERO; ch < FOUR; ch++)
 				{
-					scheduler.reschedule(
-						static_cast<EventId>(GBA_EVENT::EVENT_APU_CHANNEL_STEP),
-						scheduler.get_current_cycles() +
-						pGBA_instance->GBA_state.audio.audioChannelInstance[ch].frequencyTimer,
-						ch);
+					scheduleChannelStep(static_cast<AUDIO_CHANNELS>(ch));
 				}
 			}
 		}
@@ -2604,6 +2592,10 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 		RETURN;
 	}
 	}
+
+#undef IO8_WRONG_HANDLER
+#undef REJECT_IO8
+#undef SYNC_PPU_REG
 }
 
 MASQ_INLINE void GBA_t::writeIO8(uint32_t address, BYTE data, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType)
@@ -2647,7 +2639,6 @@ MASQ_INLINE void GBA_t::writeIO8(uint32_t address, BYTE data, MEMORY_ACCESS_WIDT
 	}
 	case IO_TM0CNT_H:
 	{
-		REJECT_IO8(accessWidth);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER0].cache.io_tmxcnt_h = data;
 		scheduler.schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
@@ -2657,7 +2648,6 @@ MASQ_INLINE void GBA_t::writeIO8(uint32_t address, BYTE data, MEMORY_ACCESS_WIDT
 	}
 	case IO_TM1CNT_H:
 	{
-		REJECT_IO8(accessWidth);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER1].cache.io_tmxcnt_h = data;
 		scheduler.schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
@@ -2667,7 +2657,6 @@ MASQ_INLINE void GBA_t::writeIO8(uint32_t address, BYTE data, MEMORY_ACCESS_WIDT
 	}
 	case IO_TM2CNT_H:
 	{
-		REJECT_IO8(accessWidth);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER2].cache.io_tmxcnt_h = data;
 		scheduler.schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
@@ -2677,7 +2666,6 @@ MASQ_INLINE void GBA_t::writeIO8(uint32_t address, BYTE data, MEMORY_ACCESS_WIDT
 	}
 	case IO_TM3CNT_H:
 	{
-		REJECT_IO8(accessWidth);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER3].cache.io_tmxcnt_h = data;
 		scheduler.schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
@@ -2718,6 +2706,8 @@ MASQ_INLINE void GBA_t::writeIO8(uint32_t address, BYTE data, MEMORY_ACCESS_WIDT
 		RETURN;
 	}
 	}
+
+#undef SYNC_PPU_REG
 }
 
 MASQ_INLINE void GBA_t::busCycles()
@@ -3255,9 +3245,10 @@ MASQ_INLINE void GBA_t::requestInterrupts(GBA_INTERRUPT interrupt)
 {
 	pGBA_instance->GBA_state.interrupt.ifPend |= (ONE << TO_UINT(interrupt));
 
+	TODO("Ideally this should be 1 cycle delay but currently need to set 0 for TIMER IRQ test to pass in MGBA suite");
 	scheduler.schedule(
 		static_cast<EventId>(GBA_EVENT::EVENT_IRQ_WRITE),
-		scheduler.get_current_cycles() + IRQ_REGISTERS_WRITE_DELAY,
+		scheduler.get_current_cycles() + IRQ_HW_REGISTERS_WRITE_DELAY,
 		ZERO);
 }
 

@@ -110,6 +110,312 @@ int     currentEmuTheme = SE_THEME_LIGHT;
 int     previousEmuTheme = SE_THEME_LIGHT;
 uint8_t customSEpalettes[FIVE * FOUR];
 
+#pragma region MASQUERADE_THEME
+// ---- Masquerade UI themes -----------------------------------------------------------------------------
+// Four themes (Dark / Light / Black / Phosphor), each described by one small palette: neutral surfaces, ONE
+// muted accent, and a few status colours. Every ImGui colour slot is derived from that palette, so no theme
+// inherits leftovers from the previously selected one (the old code left red debug colours and stale blues
+// behind when switching) and nothing is more colourful than it needs to be.
+// The same palette also hands "semantic" colours (good / warn / bad and a few chart tints) to windows that
+// draw their own graphics, such as the scheduler stats window, so those stay readable in every theme.
+
+struct MasqThemeSemantics_t
+{
+	ImVec4 good;
+	ImVec4 warn;
+	ImVec4 bad;
+	ImVec4 neutral;
+	ImVec4 series[6]; // muted chart / subsystem tints
+};
+
+struct MasqThemePalette_t
+{
+	ImVec4 windowBg, childBg, popupBg, menuBarBg, titleBg, titleBgActive;
+	ImVec4 frameBg, frameBgHovered, frameBgActive;
+	ImVec4 button, buttonHovered, buttonActive;
+	ImVec4 border;
+	ImVec4 text, textDisabled;
+	ImVec4 accent;
+	MasqThemeSemantics_t semantics;
+};
+
+// Updated every time a palette is applied. Dark values until then.
+static MasqThemeSemantics_t g_masqThemeSemantics =
+{
+	ImVec4(0.40f, 0.80f, 0.52f, 1.0f), ImVec4(0.93f, 0.76f, 0.36f, 1.0f), ImVec4(0.93f, 0.42f, 0.42f, 1.0f), ImVec4(0.60f, 0.64f, 0.70f, 1.0f),
+	{
+		ImVec4(0.42f, 0.78f, 0.56f, 1.0f), ImVec4(0.45f, 0.72f, 0.88f, 1.0f), ImVec4(0.50f, 0.64f, 0.92f, 1.0f),
+		ImVec4(0.90f, 0.65f, 0.40f, 1.0f), ImVec4(0.72f, 0.58f, 0.90f, 1.0f), ImVec4(0.88f, 0.78f, 0.45f, 1.0f)
+	}
+};
+
+static const MasqThemePalette_t& MasqDarkPalette()
+{
+	static const MasqThemePalette_t p =
+	{
+		ImVec4(0.122f, 0.126f, 0.134f, 1.00f), // windowBg
+		ImVec4(0.160f, 0.165f, 0.175f, 0.45f), // childBg
+		ImVec4(0.145f, 0.150f, 0.160f, 0.98f), // popupBg
+		ImVec4(0.100f, 0.104f, 0.112f, 1.00f), // menuBarBg
+		ImVec4(0.085f, 0.088f, 0.095f, 1.00f), // titleBg
+		ImVec4(0.105f, 0.109f, 0.118f, 1.00f), // titleBgActive
+		ImVec4(0.170f, 0.176f, 0.188f, 1.00f), // frameBg
+		ImVec4(0.205f, 0.212f, 0.226f, 1.00f), // frameBgHovered
+		ImVec4(0.245f, 0.254f, 0.270f, 1.00f), // frameBgActive
+		ImVec4(0.200f, 0.208f, 0.222f, 1.00f), // button
+		ImVec4(0.250f, 0.260f, 0.278f, 1.00f), // buttonHovered
+		ImVec4(0.300f, 0.312f, 0.334f, 1.00f), // buttonActive
+		ImVec4(0.235f, 0.243f, 0.258f, 1.00f), // border
+		ImVec4(0.915f, 0.925f, 0.940f, 1.00f), // text
+		ImVec4(0.545f, 0.560f, 0.585f, 1.00f), // textDisabled
+		ImVec4(0.380f, 0.630f, 0.900f, 1.00f), // accent (muted blue)
+		{
+			ImVec4(0.40f, 0.80f, 0.52f, 1.0f), ImVec4(0.93f, 0.76f, 0.36f, 1.0f), ImVec4(0.93f, 0.42f, 0.42f, 1.0f), ImVec4(0.60f, 0.64f, 0.70f, 1.0f),
+			{
+				ImVec4(0.42f, 0.78f, 0.56f, 1.0f), ImVec4(0.45f, 0.72f, 0.88f, 1.0f), ImVec4(0.50f, 0.64f, 0.92f, 1.0f),
+				ImVec4(0.90f, 0.65f, 0.40f, 1.0f), ImVec4(0.72f, 0.58f, 0.90f, 1.0f), ImVec4(0.88f, 0.78f, 0.45f, 1.0f)
+			}
+		}
+	};
+	return p;
+}
+
+static const MasqThemePalette_t& MasqLightPalette()
+{
+	static const MasqThemePalette_t p =
+	{
+		ImVec4(0.945f, 0.949f, 0.957f, 1.00f), // windowBg
+		ImVec4(0.900f, 0.905f, 0.915f, 0.55f), // childBg
+		ImVec4(0.985f, 0.986f, 0.990f, 0.98f), // popupBg
+		ImVec4(0.905f, 0.910f, 0.922f, 1.00f), // menuBarBg
+		ImVec4(0.875f, 0.882f, 0.898f, 1.00f), // titleBg
+		ImVec4(0.840f, 0.850f, 0.870f, 1.00f), // titleBgActive
+		ImVec4(0.880f, 0.888f, 0.903f, 1.00f), // frameBg
+		ImVec4(0.835f, 0.846f, 0.866f, 1.00f), // frameBgHovered
+		ImVec4(0.790f, 0.803f, 0.828f, 1.00f), // frameBgActive
+		ImVec4(0.850f, 0.860f, 0.880f, 1.00f), // button
+		ImVec4(0.800f, 0.815f, 0.840f, 1.00f), // buttonHovered
+		ImVec4(0.745f, 0.762f, 0.795f, 1.00f), // buttonActive
+		ImVec4(0.745f, 0.760f, 0.785f, 1.00f), // border
+		ImVec4(0.105f, 0.115f, 0.135f, 1.00f), // text
+		ImVec4(0.455f, 0.470f, 0.500f, 1.00f), // textDisabled
+		ImVec4(0.145f, 0.420f, 0.780f, 1.00f), // accent (deeper blue for contrast on light)
+		{
+			ImVec4(0.12f, 0.58f, 0.30f, 1.0f), ImVec4(0.74f, 0.50f, 0.05f, 1.0f), ImVec4(0.80f, 0.20f, 0.20f, 1.0f), ImVec4(0.40f, 0.44f, 0.50f, 1.0f),
+			{
+				ImVec4(0.15f, 0.60f, 0.35f, 1.0f), ImVec4(0.10f, 0.50f, 0.65f, 1.0f), ImVec4(0.22f, 0.40f, 0.80f, 1.0f),
+				ImVec4(0.80f, 0.45f, 0.10f, 1.0f), ImVec4(0.52f, 0.32f, 0.76f, 1.0f), ImVec4(0.62f, 0.50f, 0.05f, 1.0f)
+			}
+		}
+	};
+	return p;
+}
+
+static const MasqThemePalette_t& MasqBlackPalette()
+{
+	static const MasqThemePalette_t p =
+	{
+		ImVec4(0.000f, 0.000f, 0.000f, 1.00f), // windowBg
+		ImVec4(0.050f, 0.050f, 0.055f, 0.60f), // childBg
+		ImVec4(0.045f, 0.045f, 0.050f, 0.99f), // popupBg
+		ImVec4(0.000f, 0.000f, 0.000f, 1.00f), // menuBarBg
+		ImVec4(0.000f, 0.000f, 0.000f, 1.00f), // titleBg
+		ImVec4(0.045f, 0.045f, 0.050f, 1.00f), // titleBgActive
+		ImVec4(0.100f, 0.102f, 0.108f, 1.00f), // frameBg
+		ImVec4(0.140f, 0.143f, 0.152f, 1.00f), // frameBgHovered
+		ImVec4(0.185f, 0.190f, 0.200f, 1.00f), // frameBgActive
+		ImVec4(0.135f, 0.138f, 0.146f, 1.00f), // button
+		ImVec4(0.180f, 0.185f, 0.196f, 1.00f), // buttonHovered
+		ImVec4(0.230f, 0.236f, 0.250f, 1.00f), // buttonActive
+		ImVec4(0.155f, 0.158f, 0.168f, 1.00f), // border
+		ImVec4(0.900f, 0.905f, 0.915f, 1.00f), // text
+		ImVec4(0.500f, 0.510f, 0.530f, 1.00f), // textDisabled
+		ImVec4(0.400f, 0.640f, 0.900f, 1.00f), // accent
+		{
+			ImVec4(0.40f, 0.80f, 0.52f, 1.0f), ImVec4(0.93f, 0.76f, 0.36f, 1.0f), ImVec4(0.93f, 0.42f, 0.42f, 1.0f), ImVec4(0.60f, 0.64f, 0.70f, 1.0f),
+			{
+				ImVec4(0.42f, 0.78f, 0.56f, 1.0f), ImVec4(0.45f, 0.72f, 0.88f, 1.0f), ImVec4(0.50f, 0.64f, 0.92f, 1.0f),
+				ImVec4(0.90f, 0.65f, 0.40f, 1.0f), ImVec4(0.72f, 0.58f, 0.90f, 1.0f), ImVec4(0.88f, 0.78f, 0.45f, 1.0f)
+			}
+		}
+	};
+	return p;
+}
+
+// Phosphor keeps its CRT look (setupPhosphorTheme still overrides the slots it cares about, so the Console window
+// and the glow pass stay identical). This palette only fills every OTHER slot in the same green family, so
+// nothing is left over from a previous theme.
+static const MasqThemePalette_t& MasqPhosphorPalette()
+{
+	static const MasqThemePalette_t p =
+	{
+		ImVec4(3.0f / 255.0f, 7.0f / 255.0f, 4.0f / 255.0f, 1.00f),       // windowBg
+		ImVec4(3.0f / 255.0f, 7.0f / 255.0f, 4.0f / 255.0f, 1.00f),       // childBg
+		ImVec4(3.0f / 255.0f, 7.0f / 255.0f, 4.0f / 255.0f, 0.98f),       // popupBg
+		ImVec4(6.0f / 255.0f, 16.0f / 255.0f, 9.0f / 255.0f, 1.00f),      // menuBarBg
+		ImVec4(4.0f / 255.0f, 10.0f / 255.0f, 6.0f / 255.0f, 1.00f),      // titleBg
+		ImVec4(6.0f / 255.0f, 20.0f / 255.0f, 11.0f / 255.0f, 1.00f),     // titleBgActive
+		ImVec4(0.015f, 0.050f, 0.025f, 0.60f),                            // frameBg
+		ImVec4(0.030f, 0.160f, 0.070f, 0.75f),                            // frameBgHovered
+		ImVec4(0.050f, 0.280f, 0.120f, 0.90f),                            // frameBgActive
+		ImVec4(0.020f, 0.100f, 0.045f, 0.70f),                            // button
+		ImVec4(0.040f, 0.220f, 0.090f, 0.85f),                            // buttonHovered
+		ImVec4(0.060f, 0.350f, 0.140f, 1.00f),                            // buttonActive
+		ImVec4(50.0f / 255.0f, 180.0f / 255.0f, 100.0f / 255.0f, 140.0f / 255.0f), // border
+		ImVec4(0.350f, 0.950f, 0.550f, 1.00f),                            // text
+		ImVec4(0.120f, 0.450f, 0.220f, 0.75f),                            // textDisabled
+		ImVec4(0.350f, 0.950f, 0.550f, 1.00f),                            // accent (same phosphor green)
+		{
+			ImVec4(0.35f, 0.95f, 0.55f, 1.0f), ImVec4(0.95f, 0.78f, 0.30f, 1.0f), ImVec4(0.95f, 0.40f, 0.32f, 1.0f), ImVec4(0.22f, 0.60f, 0.34f, 1.0f),
+			{
+				ImVec4(0.35f, 0.95f, 0.55f, 1.0f), ImVec4(0.25f, 0.75f, 0.45f, 1.0f), ImVec4(0.45f, 0.98f, 0.68f, 1.0f),
+				ImVec4(0.18f, 0.60f, 0.35f, 1.0f), ImVec4(0.60f, 0.98f, 0.75f, 1.0f), ImVec4(0.30f, 0.85f, 0.60f, 1.0f)
+			}
+		}
+	};
+	return p;
+}
+
+// Fills EVERY colour slot from a palette.
+static void MasqApplyPalette(const MasqThemePalette_t& p)
+{
+	ImVec4* c = ImGui::GetStyle().Colors;
+
+	auto alpha = [](const ImVec4& v, float a) { return ImVec4(v.x, v.y, v.z, a); };
+	auto mix = [](const ImVec4& a, const ImVec4& b, float t)
+		{
+			return ImVec4(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t, a.w + (b.w - a.w) * t);
+		};
+
+	// Surfaces and text
+	c[ImGuiCol_Text] = p.text;
+	c[ImGuiCol_TextDisabled] = p.textDisabled;
+	c[ImGuiCol_WindowBg] = p.windowBg;
+	c[ImGuiCol_ChildBg] = p.childBg;
+	c[ImGuiCol_PopupBg] = p.popupBg;
+	c[ImGuiCol_Border] = p.border;
+	c[ImGuiCol_BorderShadow] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
+	c[ImGuiCol_MenuBarBg] = p.menuBarBg;
+	c[ImGuiCol_TitleBg] = p.titleBg;
+	c[ImGuiCol_TitleBgActive] = p.titleBgActive;
+	c[ImGuiCol_TitleBgCollapsed] = p.titleBg;
+
+	// Inputs
+	c[ImGuiCol_FrameBg] = p.frameBg;
+	c[ImGuiCol_FrameBgHovered] = p.frameBgHovered;
+	c[ImGuiCol_FrameBgActive] = p.frameBgActive;
+	c[ImGuiCol_Button] = p.button;
+	c[ImGuiCol_ButtonHovered] = p.buttonHovered;
+	c[ImGuiCol_ButtonActive] = p.buttonActive;
+	c[ImGuiCol_CheckMark] = p.accent;
+	c[ImGuiCol_SliderGrab] = alpha(p.accent, 0.80f);
+	c[ImGuiCol_SliderGrabActive] = p.accent;
+
+	// Selection / headers: the accent as a soft tint, never a solid block
+	c[ImGuiCol_Header] = alpha(p.accent, 0.22f);
+	c[ImGuiCol_HeaderHovered] = alpha(p.accent, 0.36f);
+	c[ImGuiCol_HeaderActive] = alpha(p.accent, 0.52f);
+	c[ImGuiCol_TextSelectedBg] = alpha(p.accent, 0.35f);
+
+	// Separators, grips, scrollbars
+	c[ImGuiCol_Separator] = p.border;
+	c[ImGuiCol_SeparatorHovered] = alpha(p.accent, 0.65f);
+	c[ImGuiCol_SeparatorActive] = p.accent;
+	c[ImGuiCol_ResizeGrip] = alpha(p.accent, 0.18f);
+	c[ImGuiCol_ResizeGripHovered] = alpha(p.accent, 0.50f);
+	c[ImGuiCol_ResizeGripActive] = alpha(p.accent, 0.85f);
+	c[ImGuiCol_ScrollbarBg] = alpha(p.menuBarBg, 0.55f);
+	c[ImGuiCol_ScrollbarGrab] = mix(p.frameBgActive, p.text, 0.12f);
+	c[ImGuiCol_ScrollbarGrabHovered] = mix(p.frameBgActive, p.text, 0.28f);
+	c[ImGuiCol_ScrollbarGrabActive] = mix(p.frameBgActive, p.text, 0.45f);
+
+	// Tabs (old names on purpose: they exist in the ImGui version Masquerade builds against)
+	c[ImGuiCol_Tab] = p.menuBarBg;
+	c[ImGuiCol_TabHovered] = mix(p.frameBgHovered, p.accent, 0.35f);
+	c[ImGuiCol_TabActive] = mix(p.frameBgActive, p.accent, 0.20f);
+	c[ImGuiCol_TabUnfocused] = p.menuBarBg;
+	c[ImGuiCol_TabUnfocusedActive] = p.frameBgHovered;
+#ifdef IMGUI_HAS_DOCK
+	c[ImGuiCol_DockingPreview] = alpha(p.accent, 0.65f);
+	c[ImGuiCol_DockingEmptyBg] = mix(p.windowBg, ImVec4(0.0f, 0.0f, 0.0f, 1.0f), 0.30f);
+#endif
+
+	// Plots and tables
+	c[ImGuiCol_PlotLines] = p.accent;
+	c[ImGuiCol_PlotLinesHovered] = mix(p.accent, p.text, 0.50f);
+	c[ImGuiCol_PlotHistogram] = alpha(p.accent, 0.85f);
+	c[ImGuiCol_PlotHistogramHovered] = mix(p.accent, p.text, 0.50f);
+	c[ImGuiCol_TableHeaderBg] = p.menuBarBg;
+	c[ImGuiCol_TableBorderStrong] = p.border;
+	c[ImGuiCol_TableBorderLight] = alpha(p.border, p.border.w * 0.55f);
+	c[ImGuiCol_TableRowBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
+	c[ImGuiCol_TableRowBgAlt] = alpha(p.text, 0.04f);
+
+	// Navigation / drag and drop / modal dimming (the accent instead of the old red debug colours)
+	c[ImGuiCol_DragDropTarget] = p.accent;
+	c[ImGuiCol_NavHighlight] = p.accent;
+	c[ImGuiCol_NavWindowingHighlight] = alpha(p.text, 0.70f);
+	c[ImGuiCol_NavWindowingDimBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.20f);
+	c[ImGuiCol_ModalWindowDimBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.55f);
+
+	g_masqThemeSemantics = p.semantics;
+}
+
+// Shared geometry for Dark / Light / Black / Custom. Only purely visual metrics change here (rounding and a popup
+// hairline). Every spacing / padding / size value is kept exactly as it was, because parts of the UI (the recently
+// played screen, its hover strips, the emulation window) are laid out from them.
+static void MasqApplyMetrics()
+{
+	ImGuiStyle& s = ImGui::GetStyle();
+
+	// Layout metrics: unchanged
+	s.WindowPadding = ImVec2(8.0f, 8.0f);
+	s.FramePadding = ImVec2(5.0f, 2.0f);
+	s.ItemSpacing = ImVec2(6.0f, 6.0f);
+	s.TouchExtraPadding = ImVec2(2.0f, 4.0f);
+	s.IndentSpacing = 25.0f;
+	s.ScrollbarSize = 15.0f;
+	s.GrabMinSize = 10.0f;
+
+	s.WindowBorderSize = 0.0f;
+	s.ChildBorderSize = 0.0f;
+	s.PopupBorderSize = 1.0f; // menus and popups get a hairline so they separate from what is behind them
+	s.FrameBorderSize = 0.0f;
+	s.TabBorderSize = 0.0f;
+
+	s.WindowRounding = 0.0f; // platform (viewport) windows must stay square
+	s.ChildRounding = 4.0f;
+	s.FrameRounding = 3.0f;
+	s.PopupRounding = 5.0f;
+	s.ScrollbarRounding = 9.0f;
+	s.GrabRounding = 100.0f;
+	s.TabRounding = 4.0f;
+
+	s.LogSliderDeadzone = 4.0f;
+	s.ButtonTextAlign = ImVec2(0.5f, 0.5f);
+}
+
+// ---- Small helpers for tool windows (Cheats and similar) ----------------------------------------------------
+// Section heading: the theme's single accent colour, no extra geometry.
+[[maybe_unused]] static void MasqSectionLabel(const char* label)
+{
+	ImGui::TextColored(ImGui::GetStyleColorVec4(ImGuiCol_CheckMark), "%s", label);
+}
+
+// SameLine() only when a radio button / checkbox with this label still fits on the current row.
+// Call it right after the previous widget; otherwise the next widget simply wraps to its own row.
+[[maybe_unused]] static void MasqSameLineIfFits(const char* nextLabel)
+{
+	const ImGuiStyle& style = ImGui::GetStyle();
+	const float nextWidth = ImGui::GetFrameHeight() + style.ItemInnerSpacing.x + ImGui::CalcTextSize(nextLabel).x;
+	const float rowRight = ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - style.WindowPadding.x - style.ScrollbarSize;
+	if (ImGui::GetItemRectMax().x + style.ItemSpacing.x + nextWidth <= rowRight)
+	{
+		ImGui::SameLine();
+	}
+}
+#pragma endregion MASQUERADE_THEME
+
 // Init screen
 #ifdef __EMSCRIPTEN__
 FLAG initScreen = YES;
@@ -842,6 +1148,520 @@ static void RenderCameraHardwareUI(SDL_Camera* camera)
 }
 #pragma endregion CAMERA_HELPERS
 #endif // !__RPI_PICO__ && !ENABLE_OTA_EXECUTABLE && !ENABLE_SERVER_EXECUTABLE 
+
+// Scheduler stats window is only built where ImGui exists and the GBA core is enabled
+#if MASQ_ENABLE_GBA && !defined(__RPI_PICO__) && !defined(ENABLE_OTA_EXECUTABLE) && !defined(ENABLE_SERVER_EXECUTABLE)
+#define MASQ_GBA_SCHEDULER_STATS_UI 1
+#else
+#define MASQ_GBA_SCHEDULER_STATS_UI 0
+#endif
+
+#if MASQ_GBA_SCHEDULER_STATS_UI
+#pragma region GBA_SCHEDULER_STATS_UI
+// Option > Stats > Scheduler
+// Reads the counters kept by Scheduler_t and shows live numbers plus a 1-sample-per-second history, so a slow
+// degradation (queue growth, event rate growth, drops, handler cost) is visible after minutes of play.
+// History is only recorded while the window is open.
+static void renderGBASchedulerStatsWindow(GBA_t* gba)
+{
+	if (gba == nullptr || gba->schedulerStatsWindowOpen == NO)
+	{
+		RETURN;
+	}
+
+	constexpr double GBA_CLOCK_HZ = 16777216.0;
+	constexpr int HISTORY_SIZE = 600; // 10 minutes at 1 sample per second
+
+	// ---- Palette: taken from the active theme (see MASQUERADE_THEME) so it stays readable in Light and calm in Phosphor
+	const MasqThemeSemantics_t& themeColors = g_masqThemeSemantics;
+	const ImVec4 colGood = themeColors.good;
+	const ImVec4 colWarn = themeColors.warn;
+	const ImVec4 colBad = themeColors.bad;
+	const ImVec4 colNeutral = themeColors.neutral;
+	const ImVec4 colSpeed = themeColors.series[0];
+	const ImVec4 colFps = themeColors.series[1];
+	const ImVec4 colEvents = themeColors.series[2];
+	const ImVec4 colDepth = themeColors.series[3];
+	const ImVec4 colDrops = themeColors.bad;
+	const ImVec4 colHandler = themeColors.series[4];
+	const ImVec4 colLabel = [&]()
+		{
+			// Secondary labels: the theme's own text colour pulled 38% toward the window background
+			const ImVec4 text = ImGui::GetStyleColorVec4(ImGuiCol_Text);
+			const ImVec4 bg = ImGui::GetStyleColorVec4(ImGuiCol_WindowBg);
+			return ImVec4(text.x + (bg.x - text.x) * 0.38f, text.y + (bg.y - text.y) * 0.38f, text.z + (bg.z - text.z) * 0.38f, 1.0f);
+		}();
+
+	// ---- Small formatting helpers --------------------------------------------------
+	auto formatCount = [](char* out, size_t size, uint64_t value)
+		{
+			char raw[32];
+			snprintf(raw, sizeof(raw), "%llu", (unsigned long long)value);
+			const size_t length = strlen(raw);
+			size_t o = 0;
+			for (size_t i = 0; i < length && o + 2 < size; i++)
+			{
+				out[o++] = raw[i];
+				const size_t remaining = length - 1 - i;
+				if (remaining > 0 && (remaining % 3) == 0)
+				{
+					out[o++] = ',';
+				}
+			}
+			out[o] = '\0';
+		};
+	auto formatCompact = [](char* out, size_t size, double value)
+		{
+			if (value >= 1.0e9)      snprintf(out, size, "%.2f G", value / 1.0e9);
+			else if (value >= 1.0e6) snprintf(out, size, "%.2f M", value / 1.0e6);
+			else if (value >= 1.0e3) snprintf(out, size, "%.1f k", value / 1.0e3);
+			else                     snprintf(out, size, "%.0f", value);
+		};
+	auto formatNs = [](char* out, size_t size, double ns)
+		{
+			if (ns >= 1.0e6)      snprintf(out, size, "%.2f ms", ns / 1.0e6);
+			else if (ns >= 1.0e3) snprintf(out, size, "%.2f us", ns / 1.0e3);
+			else                  snprintf(out, size, "%.0f ns", ns);
+		};
+	auto subsystemColor = [&themeColors](const char* name) -> ImVec4
+		{
+			if (strncmp(name, "PPU", 3) == 0)   return themeColors.series[2];
+			if (strncmp(name, "APU", 3) == 0)   return themeColors.series[0];
+			if (strncmp(name, "IRQ", 3) == 0)   return themeColors.series[3];
+			if (strncmp(name, "DMA", 3) == 0)   return themeColors.series[4];
+			if (strncmp(name, "TIMER", 5) == 0) return themeColors.series[5];
+			return themeColors.neutral;
+		};
+
+	// ---- History bookkeeping -------------------------------------------------------
+	struct SchedulerHistory_t
+	{
+		float speedPercent[HISTORY_SIZE];
+		float guiFps[HISTORY_SIZE];
+		float eventsPerSec[HISTORY_SIZE];
+		float queueDepth[HISTORY_SIZE];
+		float dropsPerSec[HISTORY_SIZE];
+		float handlerMsPerSec[HISTORY_SIZE];
+		int      head = 0;
+		int      count = 0;
+		double   lastTime = 0.0;
+		int64_t  lastCycles = 0;
+		uint64_t lastEvents = 0;
+		uint64_t lastDrops = 0;
+		uint64_t lastHandlerNs = 0;
+		const void* owner = nullptr;
+	};
+
+	static SchedulerHistory_t history;
+
+	Scheduler_t& scheduler = gba->getScheduler();
+	const Scheduler_t::Stats_t& stats = scheduler.get_stats();
+	const int64_t nowCycles = scheduler.get_current_cycles();
+	const double  nowTime = ImGui::GetTime();
+
+	// Counters restart from zero on Reset stats and on a new GBA instance, so deltas are saturated
+	auto delta64 = [](uint64_t current, uint64_t last) -> uint64_t { return (current >= last) ? (current - last) : current; };
+
+	if (history.owner != gba)
+	{
+		history = SchedulerHistory_t();
+		history.owner = gba;
+		history.lastTime = nowTime;
+		history.lastCycles = nowCycles;
+		history.lastEvents = stats.eventsFired;
+		history.lastDrops = stats.scheduleDropped;
+		history.lastHandlerNs = stats.handlerNsTotal;
+	}
+	else if (nowTime - history.lastTime >= 1.0)
+	{
+		const double dt = nowTime - history.lastTime;
+		const double dCycles = (nowCycles >= history.lastCycles) ? (double)(nowCycles - history.lastCycles) : (double)nowCycles;
+
+		const int i = history.head;
+		history.speedPercent[i] = (float)((dCycles / dt) / GBA_CLOCK_HZ * 100.0);
+		history.guiFps[i] = ImGui::GetIO().Framerate;
+		history.eventsPerSec[i] = (float)((double)delta64(stats.eventsFired, history.lastEvents) / dt);
+		history.queueDepth[i] = (float)scheduler.get_pending_count();
+		history.dropsPerSec[i] = (float)((double)delta64(stats.scheduleDropped, history.lastDrops) / dt);
+		history.handlerMsPerSec[i] = (float)((double)delta64(stats.handlerNsTotal, history.lastHandlerNs) / 1.0e6 / dt);
+
+		history.head = (history.head + 1) % HISTORY_SIZE;
+		if (history.count < HISTORY_SIZE) history.count++;
+
+		history.lastTime = nowTime;
+		history.lastCycles = nowCycles;
+		history.lastEvents = stats.eventsFired;
+		history.lastDrops = stats.scheduleDropped;
+		history.lastHandlerNs = stats.handlerNsTotal;
+	}
+
+	// ---- Window --------------------------------------------------------------------
+	ImGui::SetNextWindowSize(ImVec2(860.0f, 780.0f), ImGuiCond_FirstUseEver);
+	if (ImGui::Begin("Scheduler Stats##GBAScheduler", &gba->schedulerStatsWindowOpen))
+	{
+		ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 4.0f);
+		ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8.0f, 6.0f));
+
+		ImDrawList* drawList = ImGui::GetWindowDrawList();
+		const double emulatedSeconds = (double)nowCycles / GBA_CLOCK_HZ;
+		const int latest = (history.count > 0) ? ((history.head + HISTORY_SIZE - 1) % HISTORY_SIZE) : 0;
+		const uint32_t pending = scheduler.get_pending_count();
+		const bool profiling = (scheduler.is_handler_profiling() == YES);
+
+		// ---- Health pill + emulated time -------------------------------------------
+		{
+			const char* healthText = "SCHEDULER OK";
+			ImVec4 healthColor = colGood;
+			if (stats.scheduleDropped > 0 || stats.scheduleInvalid > 0)
+			{
+				healthText = "PROBLEM: events dropped";
+				healthColor = colBad;
+			}
+			else if (stats.lateFires > 0 || (pending * 4) >= (Scheduler_t::MAX_EVENTS * 3))
+			{
+				healthText = "WARNING: late events or deep queue";
+				healthColor = colWarn;
+			}
+
+			const ImVec2 textSize = ImGui::CalcTextSize(healthText);
+			const ImVec2 p0 = ImGui::GetCursorScreenPos();
+			const float padX = 10.0f, padY = 3.0f;
+			const ImVec2 p1(p0.x + textSize.x + padX * 2.0f + 14.0f, p0.y + textSize.y + padY * 2.0f);
+			const float rounding = (p1.y - p0.y) * 0.5f;
+			drawList->AddRectFilled(p0, p1, ImGui::GetColorU32(ImVec4(healthColor.x, healthColor.y, healthColor.z, 0.16f)), rounding);
+			drawList->AddRect(p0, p1, ImGui::GetColorU32(ImVec4(healthColor.x, healthColor.y, healthColor.z, 0.70f)), rounding);
+			drawList->AddCircleFilled(ImVec2(p0.x + padX + 4.0f, (p0.y + p1.y) * 0.5f), 4.0f, ImGui::GetColorU32(healthColor));
+			drawList->AddText(ImVec2(p0.x + padX + 14.0f, p0.y + padY), ImGui::GetColorU32(healthColor), healthText);
+			ImGui::Dummy(ImVec2(p1.x - p0.x, p1.y - p0.y));
+
+			char cycles[40];
+			formatCount(cycles, sizeof(cycles), (uint64_t)nowCycles);
+			ImGui::SameLine();
+			ImGui::AlignTextToFramePadding();
+			ImGui::TextColored(colLabel, "Emulated %.1f s   |   %s cycles", emulatedSeconds, cycles);
+		}
+
+		// ---- Toolbar -----------------------------------------------------------------
+		{
+			bool profilingToggle = profiling;
+			if (ImGui::Checkbox("Profile handlers", &profilingToggle))
+			{
+				scheduler.set_handler_profiling(profilingToggle ? YES : NO);
+			}
+			if (ImGui::IsItemHovered())
+			{
+				ImGui::SetTooltip("Times every handler call (two clock reads per event).\nAvg / Max columns and the handler history only fill while this is on.");
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Reset stats"))
+			{
+				scheduler.reset_stats();
+			}
+		}
+
+		ImGui::Spacing();
+
+		// ---- KPI tiles ---------------------------------------------------------------
+		{
+			const float spacing = ImGui::GetStyle().ItemSpacing.x;
+			const float tileWidth = (ImGui::GetContentRegionAvail().x - spacing * 3.0f) / 4.0f;
+			const float bigFont = ImGui::GetFontSize() * 1.9f;
+			const float tileHeight = bigFont + ImGui::GetTextLineHeight() * 2.0f + 18.0f;
+
+			auto drawTile = [&](const char* label, const char* value, const char* sub, const ImVec4& accent)
+				{
+					const ImVec2 p0 = ImGui::GetCursorScreenPos();
+					const ImVec2 p1(p0.x + tileWidth, p0.y + tileHeight);
+					drawList->AddRectFilled(p0, p1, ImGui::GetColorU32(ImGuiCol_FrameBg), 6.0f);
+					drawList->AddLine(ImVec2(p0.x + 8.0f, p1.y - 2.0f), ImVec2(p1.x - 8.0f, p1.y - 2.0f), ImGui::GetColorU32(accent), 3.0f);
+					drawList->AddText(ImVec2(p0.x + 10.0f, p0.y + 6.0f), ImGui::GetColorU32(colLabel), label);
+					drawList->AddText(ImGui::GetFont(), bigFont, ImVec2(p0.x + 10.0f, p0.y + 6.0f + ImGui::GetTextLineHeight()), ImGui::GetColorU32(accent), value);
+					drawList->AddText(ImVec2(p0.x + 10.0f, p1.y - ImGui::GetTextLineHeight() - 7.0f), ImGui::GetColorU32(colLabel), sub);
+					ImGui::Dummy(ImVec2(tileWidth, tileHeight));
+				};
+
+			const float speed = (history.count > 0) ? history.speedPercent[latest] : 0.0f;
+			const float fps = (history.count > 0) ? history.guiFps[latest] : ImGui::GetIO().Framerate;
+			const float eventsPerSec = (history.count > 0) ? history.eventsPerSec[latest] : 0.0f;
+			char value[48], sub[64];
+
+			if (history.count > 0) snprintf(value, sizeof(value), "%.1f %%", speed); else snprintf(value, sizeof(value), "--");
+			drawTile("EMULATION SPEED", value, (speed < 1.0f && history.count > 0) ? "not running / paused" : "last second", (speed < 1.0f) ? colNeutral : ((speed >= 97.0f) ? colGood : ((speed >= 85.0f) ? colWarn : colBad)));
+			ImGui::SameLine();
+
+			snprintf(value, sizeof(value), "%.1f", fps);
+			drawTile("GUI FPS", value, "ImGui frame rate", (fps >= 55.0f) ? colGood : ((fps >= 30.0f) ? colWarn : colBad));
+			ImGui::SameLine();
+
+			char compact[32], average[32];
+			formatCompact(compact, sizeof(compact), eventsPerSec);
+			formatCompact(average, sizeof(average), (emulatedSeconds > 0.0) ? ((double)stats.eventsFired / emulatedSeconds) : 0.0);
+			snprintf(sub, sizeof(sub), "avg %s per emulated s", average);
+			drawTile("EVENTS / SECOND", compact, sub, colEvents);
+			ImGui::SameLine();
+
+			const float fill = (float)pending / (float)Scheduler_t::MAX_EVENTS;
+			snprintf(value, sizeof(value), "%u / %u", pending, Scheduler_t::MAX_EVENTS);
+			snprintf(sub, sizeof(sub), "peak %u   dropped %llu", stats.peakDepth, (unsigned long long)stats.scheduleDropped);
+			drawTile("QUEUE DEPTH", value, sub, (stats.scheduleDropped > 0) ? colBad : ((fill >= 0.75f) ? colWarn : colDepth));
+		}
+
+		ImGui::Spacing();
+
+		// ---- History (1 sample per second) -------------------------------------------
+		if (ImGui::CollapsingHeader("History  (1 sample / second, up to 10 minutes)", ImGuiTreeNodeFlags_DefaultOpen))
+		{
+			const int plotCount = history.count;
+			const int plotOffset = (history.count < HISTORY_SIZE) ? 0 : history.head;
+
+			if (plotCount < 2)
+			{
+				ImGui::TextColored(colLabel, "Collecting samples...");
+			}
+			else
+			{
+				// Two plots per row. The height comes from the window height only (never from how much content is
+				// above or below), so the plots keep their size and position while the pending-event rows come and go.
+				const float lineHeight = ImGui::GetTextLineHeight();
+				const float gap = ImGui::GetStyle().ItemSpacing.y;
+				const float plotRows = 3.0f;
+				float       plotHeight = (ImGui::GetWindowHeight() * 0.30f - plotRows * (lineHeight + 4.0f * gap)) / plotRows;
+				plotHeight = (plotHeight < 46.0f) ? 46.0f : ((plotHeight > 130.0f) ? 130.0f : plotHeight);
+
+				auto plot = [&](const char* title, const char* id, const float* values, const char* unit, const ImVec4& colour, float minimumTop)
+					{
+						float minimum = values[0], maximum = values[0], sum = 0.0f;
+						for (int k = 0; k < plotCount; k++)
+						{
+							minimum = (values[k] < minimum) ? values[k] : minimum;
+							maximum = (values[k] > maximum) ? values[k] : maximum;
+							sum += values[k];
+						}
+
+						ImGui::TextColored(colour, "%s", title);
+						ImGui::SameLine();
+						ImGui::TextColored(colLabel, "now %.1f%s   min %.1f   avg %.1f   max %.1f", values[latest], unit, minimum, sum / (float)plotCount, maximum);
+
+						const float top = (maximum * 1.15f > minimumTop) ? (maximum * 1.15f) : minimumTop;
+						ImGui::PushStyleColor(ImGuiCol_PlotLines, colour);
+						ImGui::PlotLines(id, values, plotCount, plotOffset, nullptr, 0.0f, top, ImVec2(-FLT_MIN, plotHeight));
+						ImGui::PopStyleColor();
+					};
+
+				if (ImGui::BeginTable("sched_history", 2, ImGuiTableFlags_SizingStretchSame))
+				{
+					ImGui::TableNextColumn(); plot("Emulation speed", "##hist_speed", history.speedPercent, " %", colSpeed, 110.0f);
+					ImGui::TableNextColumn(); plot("GUI FPS", "##hist_fps", history.guiFps, "", colFps, 65.0f);
+					ImGui::TableNextColumn(); plot("Events fired / s", "##hist_events", history.eventsPerSec, "", colEvents, 1.0f);
+					ImGui::TableNextColumn(); plot("Queue depth", "##hist_depth", history.queueDepth, "", colDepth, (float)Scheduler_t::MAX_EVENTS);
+					ImGui::TableNextColumn(); plot("Dropped / s", "##hist_drops", history.dropsPerSec, "", colDrops, 1.0f);
+					if (profiling)
+					{
+						ImGui::TableNextColumn(); plot("Handler time (ms / s)", "##hist_handler", history.handlerMsPerSec, " ms", colHandler, 1.0f);
+					}
+					ImGui::EndTable();
+				}
+			}
+		}
+
+		// ---- Throughput and cost -----------------------------------------------------
+		if (ImGui::CollapsingHeader("Throughput and cost", ImGuiTreeNodeFlags_DefaultOpen))
+		{
+			if (ImGui::BeginTable("sched_throughput", 4, ImGuiTableFlags_SizingStretchProp))
+			{
+				ImGui::TableSetupColumn("##l1", ImGuiTableColumnFlags_WidthStretch, 1.3f);
+				ImGui::TableSetupColumn("##v1", ImGuiTableColumnFlags_WidthStretch, 1.7f);
+				ImGui::TableSetupColumn("##l2", ImGuiTableColumnFlags_WidthStretch, 1.6f);
+				ImGui::TableSetupColumn("##v2", ImGuiTableColumnFlags_WidthStretch, 1.4f);
+
+				char a[40], b[40], c[40], d[96];
+
+				const double avgDepth = (stats.eventsFired > 0) ? ((double)stats.depthSumAtFire / (double)stats.eventsFired) : 0.0;
+				const double insertAvg = (stats.scheduleCalls > 0) ? ((double)stats.insertShifts / (double)stats.scheduleCalls) : 0.0;
+				const double removeAvg = (stats.eventsFired > 0) ? ((double)stats.removeShifts / (double)stats.eventsFired) : 0.0;
+				const double findAvg = ((stats.scheduleCalls + stats.cancelCalls) > 0)
+					? ((double)stats.findScanSteps / (double)(stats.scheduleCalls + stats.cancelCalls)) : 0.0;
+
+				// Row: Events fired | process_due_events() calls
+				formatCount(a, sizeof(a), stats.eventsFired);
+				formatCount(b, sizeof(b), stats.processDueCalls);
+				ImGui::TableNextRow();
+				ImGui::TableSetColumnIndex(0); ImGui::TextColored(colLabel, "Events fired");
+				ImGui::TableSetColumnIndex(1); ImGui::TextColored(colEvents, "%s", a);
+				ImGui::TableSetColumnIndex(2); ImGui::TextColored(colLabel, "process_due_events() calls");
+				ImGui::TableSetColumnIndex(3); ImGui::Text("%s", b);
+
+				// Row: schedule() | cancel() / misses
+				formatCount(a, sizeof(a), stats.scheduleCalls);
+				formatCount(b, sizeof(b), stats.cancelCalls);
+				formatCount(c, sizeof(c), stats.cancelMisses);
+				snprintf(d, sizeof(d), "%s / %s", b, c);
+				ImGui::TableNextRow();
+				ImGui::TableSetColumnIndex(0); ImGui::TextColored(colLabel, "schedule()");
+				ImGui::TableSetColumnIndex(1); ImGui::Text("%s", a);
+				ImGui::TableSetColumnIndex(2); ImGui::TextColored(colLabel, "cancel() / misses");
+				ImGui::TableSetColumnIndex(3); ImGui::Text("%s", d);
+
+				// Row: reschedule() | ignored duplicates
+				formatCount(a, sizeof(a), stats.rescheduleCalls);
+				formatCount(b, sizeof(b), stats.scheduleDuplicates);
+				ImGui::TableNextRow();
+				ImGui::TableSetColumnIndex(0); ImGui::TextColored(colLabel, "reschedule()");
+				ImGui::TableSetColumnIndex(1); ImGui::Text("%s", a);
+				ImGui::TableSetColumnIndex(2); ImGui::TextColored(colLabel, "ignored duplicates");
+				ImGui::TableSetColumnIndex(3); ImGui::Text("%s", b);
+
+				// Row: Avg depth at fire | most events in one call
+				ImGui::TableNextRow();
+				ImGui::TableSetColumnIndex(0); ImGui::TextColored(colLabel, "Avg depth at fire");
+				ImGui::TableSetColumnIndex(1); ImGui::Text("%.2f", avgDepth);
+				ImGui::TableSetColumnIndex(2); ImGui::TextColored(colLabel, "most events in one call");
+				ImGui::TableSetColumnIndex(3); ImGui::Text("%u", stats.maxDueInOneCall);
+
+				// Row: Late fires | worst lateness
+				ImGui::TableNextRow();
+				ImGui::TableSetColumnIndex(0); ImGui::TextColored(colLabel, "Late fires");
+				ImGui::TableSetColumnIndex(1); ImGui::TextColored((stats.lateFires > 0) ? colWarn : colGood, "%llu", (unsigned long long)stats.lateFires);
+				ImGui::TableSetColumnIndex(2); ImGui::TextColored(colLabel, "worst lateness");
+				ImGui::TableSetColumnIndex(3); ImGui::Text("%lld cycles", (long long)stats.maxLateness);
+
+				// Row: element moves | find_event steps
+				snprintf(d, sizeof(d), "%.2f per insert   %.2f per fire", insertAvg, removeAvg);
+				ImGui::TableNextRow();
+				ImGui::TableSetColumnIndex(0); ImGui::TextColored(colLabel, "Element moves");
+				ImGui::TableSetColumnIndex(1); ImGui::Text("%s", d);
+				ImGui::TableSetColumnIndex(2); ImGui::TextColored(colLabel, "find_event() steps");
+				ImGui::TableSetColumnIndex(3); ImGui::Text("%.2f per call", findAvg);
+
+				// Row: handler cost (only once something was timed)
+				if (profiling && stats.profiledFiresTotal > 0)
+				{
+					formatNs(a, sizeof(a), (double)stats.handlerNsTotal / (double)stats.profiledFiresTotal);
+					snprintf(b, sizeof(b), "%.1f ms", (double)stats.handlerNsTotal / 1.0e6);
+					ImGui::TableNextRow();
+					ImGui::TableSetColumnIndex(0); ImGui::TextColored(colLabel, "Handler cost");
+					ImGui::TableSetColumnIndex(1); ImGui::TextColored(colHandler, "%s per timed event", a);
+					ImGui::TableSetColumnIndex(2); ImGui::TextColored(colLabel, "handler time in total");
+					ImGui::TableSetColumnIndex(3); ImGui::Text("%s", b);
+				}
+
+				ImGui::EndTable();
+			}
+		}
+
+		// ---- Per event type ----------------------------------------------------------
+		if (ImGui::CollapsingHeader("Per event type", ImGuiTreeNodeFlags_DefaultOpen))
+		{
+			const ImGuiTableFlags tableFlags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp;
+			if (ImGui::BeginTable("sched_types", 12, tableFlags))
+			{
+				const char* headers[12] = { "Event", "Prio", "Scheduled", "Fired", "Share", "Dup", "Dropped", "Cancel", "Late", "Max late", "Avg", "Max" };
+				const float weights[12] = { 3.2f, 0.6f, 1.5f, 1.5f, 1.9f, 0.7f, 1.0f, 0.9f, 0.8f, 1.1f, 1.1f, 1.2f };
+				for (int col = 0; col < 12; col++) ImGui::TableSetupColumn(headers[col], ImGuiTableColumnFlags_WidthStretch, weights[col]);
+				ImGui::TableHeadersRow();
+
+				for (uint32_t t = 0; t < scheduler.get_event_type_count(); t++)
+				{
+					const Scheduler_t::TypeStats_t& ts = stats.type[t];
+					const char* name = GBA_t::getSchedulerEventName((EventId)t);
+					const ImVec4 tint = subsystemColor(name);
+					const float share = (stats.eventsFired > 0) ? ((float)ts.fired / (float)stats.eventsFired) : 0.0f;
+					char text[48];
+
+					ImGui::TableNextRow();
+					ImGui::TableSetColumnIndex(0);  ImGui::TextColored(tint, "%s", name);
+					ImGui::TableSetColumnIndex(1);  ImGui::TextColored(colLabel, "%u", (unsigned)scheduler.get_event_priority((EventId)t));
+					ImGui::TableSetColumnIndex(2);  formatCount(text, sizeof(text), ts.scheduled); ImGui::TextUnformatted(text);
+					ImGui::TableSetColumnIndex(3);  formatCount(text, sizeof(text), ts.fired);     ImGui::TextUnformatted(text);
+
+					ImGui::TableSetColumnIndex(4);
+					snprintf(text, sizeof(text), "%.1f%%", share * 100.0f);
+					ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(tint.x, tint.y, tint.z, 0.55f));
+					ImGui::ProgressBar(share, ImVec2(-FLT_MIN, ImGui::GetTextLineHeight()), text);
+					ImGui::PopStyleColor();
+
+					ImGui::TableSetColumnIndex(5);  ImGui::Text("%llu", (unsigned long long)ts.duplicates);
+					ImGui::TableSetColumnIndex(6);
+					if (ts.dropped > 0) ImGui::TextColored(colBad, "%llu", (unsigned long long)ts.dropped);
+					else                ImGui::TextColored(colLabel, "0");
+					ImGui::TableSetColumnIndex(7);  ImGui::Text("%llu", (unsigned long long)ts.cancelled);
+					ImGui::TableSetColumnIndex(8);
+					if (ts.lateFires > 0) ImGui::TextColored(colWarn, "%llu", (unsigned long long)ts.lateFires);
+					else                  ImGui::TextColored(colLabel, "0");
+					ImGui::TableSetColumnIndex(9);  ImGui::Text("%lld", (long long)ts.maxLateness);
+
+					ImGui::TableSetColumnIndex(10);
+					if (ts.profiledFires > 0)
+					{
+						const double avgNs = (double)ts.handlerNs / (double)ts.profiledFires;
+						formatNs(text, sizeof(text), avgNs);
+						ImGui::TextColored((avgNs >= 2000.0) ? colWarn : colNeutral, "%s", text);
+					}
+					else
+					{
+						ImGui::TextColored(colLabel, "-");
+					}
+					ImGui::TableSetColumnIndex(11);
+					if (ts.profiledFires > 0)
+					{
+						formatNs(text, sizeof(text), (double)ts.maxHandlerNs);
+						ImGui::TextUnformatted(text);
+					}
+					else
+					{
+						ImGui::TextColored(colLabel, "-");
+					}
+				}
+				ImGui::EndTable();
+			}
+			if (!profiling)
+			{
+				ImGui::TextColored(colLabel, "Avg / Max are only collected while Profile handlers is ticked. They average over the timed calls only.");
+			}
+		}
+
+		// ---- Pending queue contents --------------------------------------------------
+		if (ImGui::CollapsingHeader("Pending events right now", ImGuiTreeNodeFlags_DefaultOpen))
+		{
+			const ImGuiTableFlags tableFlags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp;
+			if (ImGui::BeginTable("sched_pending", 6, tableFlags))
+			{
+				ImGui::TableSetupColumn("#", ImGuiTableColumnFlags_WidthStretch, 0.5f);
+				ImGui::TableSetupColumn("Event", ImGuiTableColumnFlags_WidthStretch, 3.0f);
+				ImGui::TableSetupColumn("Context", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+				ImGui::TableSetupColumn("Timestamp", ImGuiTableColumnFlags_WidthStretch, 2.0f);
+				ImGui::TableSetupColumn("In (cycles)", ImGuiTableColumnFlags_WidthStretch, 1.5f);
+				ImGui::TableSetupColumn("In (emulated ms)", ImGuiTableColumnFlags_WidthStretch, 1.5f);
+				ImGui::TableHeadersRow();
+
+				for (uint32_t i = 0; i < pending; i++)
+				{
+					const ScheduledEvent_t& e = scheduler.get_pending(i);
+					const char* name = GBA_t::getSchedulerEventName(e.id);
+					const int64_t inCycles = e.timestamp - nowCycles;
+					const bool overdue = (inCycles < 0);
+
+					ImGui::TableNextRow();
+					ImGui::TableSetColumnIndex(0); ImGui::TextColored(colLabel, "%u", i);
+					ImGui::TableSetColumnIndex(1); ImGui::TextColored(overdue ? colBad : subsystemColor(name), "%s", name);
+					ImGui::TableSetColumnIndex(2); ImGui::Text("%d", e.context);
+					ImGui::TableSetColumnIndex(3); ImGui::Text("%lld", (long long)e.timestamp);
+					ImGui::TableSetColumnIndex(4);
+					if (overdue) ImGui::TextColored(colBad, "%lld", (long long)inCycles);
+					else         ImGui::Text("%lld", (long long)inCycles);
+					ImGui::TableSetColumnIndex(5); ImGui::Text("%.3f", (double)inCycles / GBA_CLOCK_HZ * 1000.0);
+				}
+				ImGui::EndTable();
+			}
+			ImGui::TextColored(colLabel, "Red = already overdue. A timer with a large prescaler can legitimately be seconds away.");
+		}
+
+		ImGui::PopStyleVar(2);
+	}
+	ImGui::End();
+}
+#pragma endregion GBA_SCHEDULER_STATS_UI
+#endif // MASQ_GBA_SCHEDULER_STATS_UI
 
 #if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__)
 #pragma region NETWORK_HELPERS
@@ -2175,6 +2995,10 @@ public:
 
 	void setupPhosphorTheme()
 	{
+		// Fill every slot first (same green family) so nothing is left over from the previously selected theme,
+		// then the values below override the ones that give Phosphor its CRT look
+		MasqApplyPalette(MasqPhosphorPalette());
+
 		ImGuiStyle& style = ImGui::GetStyle();
 		ImVec4* colors = style.Colors;
 
@@ -2271,65 +3095,16 @@ public:
 			RETURN SUCCESS;
 		}
 
+		// ---- Dark / Light / Black each come from their own palette (see MASQUERADE_THEME) ----
+		// The Custom theme starts from the Dark palette and then applies the user's palette on top.
+		const MasqThemePalette_t& palette = (currentEmuTheme == SE_THEME_LIGHT) ? MasqLightPalette()
+			: ((currentEmuTheme == SE_THEME_BLACK) ? MasqBlackPalette() : MasqDarkPalette());
+		MasqApplyPalette(palette);
+		MasqApplyMetrics();
+
 		ImGuiStyle& style = ImGui::GetStyle();
 		ImVec4* colors = style.Colors;
-
-		// ---- Default Dark Base Palette ---------------------------------
-		colors[ImGuiCol_Text] = ImVec4(1.00f, 1.00f, 1.00f, 1.00f);
-		colors[ImGuiCol_TextDisabled] = ImVec4(0.60f, 0.60f, 0.60f, 0.50f);
-		colors[ImGuiCol_WindowBg] = ImVec4(0.14f, 0.14f, 0.14f, 1.00f);
-		colors[ImGuiCol_ChildBg] = ImVec4(0.19f, 0.19f, 0.19f, 0.40f);
-		colors[ImGuiCol_PopupBg] = ImVec4(0.22f, 0.22f, 0.22f, 0.92f);
-		colors[ImGuiCol_Border] = ImVec4(0.10f, 0.10f, 0.10f, 1.00f);
-		colors[ImGuiCol_BorderShadow] = ImVec4(0.00f, 0.00f, 0.00f, 0.24f);
-		colors[ImGuiCol_FrameBg] = ImVec4(0.20f, 0.20f, 0.20f, 0.90f);
-		colors[ImGuiCol_FrameBgHovered] = ImVec4(0.10f, 0.10f, 0.10f, 1.00f);
-		colors[ImGuiCol_FrameBgActive] = ImVec4(0.29f, 0.29f, 0.29f, 1.00f);
-		colors[ImGuiCol_TitleBg] = ImVec4(0.00f, 0.00f, 0.00f, 1.00f);
-		colors[ImGuiCol_TitleBgActive] = ImVec4(0.06f, 0.06f, 0.06f, 1.00f);
-		colors[ImGuiCol_TitleBgCollapsed] = ImVec4(0.00f, 0.00f, 0.00f, 1.00f);
-		colors[ImGuiCol_MenuBarBg] = ImVec4(0.10f, 0.10f, 0.10f, 1.00f);
-		colors[ImGuiCol_ScrollbarBg] = ImVec4(0.05f, 0.05f, 0.05f, 0.54f);
-		colors[ImGuiCol_ScrollbarGrab] = ImVec4(0.34f, 0.34f, 0.34f, 0.54f);
-		colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.40f, 0.40f, 0.40f, 0.54f);
-		colors[ImGuiCol_ScrollbarGrabActive] = ImVec4(0.56f, 0.56f, 0.56f, 0.54f);
-		colors[ImGuiCol_CheckMark] = ImVec4(0.33f, 0.67f, 0.86f, 1.00f);
-		colors[ImGuiCol_SliderGrab] = ImVec4(0.34f, 0.34f, 0.34f, 0.80f);
-		colors[ImGuiCol_SliderGrabActive] = ImVec4(0.56f, 0.56f, 0.56f, 0.80f);
-		colors[ImGuiCol_Button] = ImVec4(0.25f, 0.25f, 0.25f, 1.00f);
-		colors[ImGuiCol_ButtonHovered] = ImVec4(0.19f, 0.19f, 0.19f, 0.54f);
-		colors[ImGuiCol_ButtonActive] = ImVec4(0.40f, 0.40f, 0.40f, 1.00f);
-		colors[ImGuiCol_Header] = ImVec4(0.00f, 0.00f, 0.00f, 0.52f);
-		colors[ImGuiCol_HeaderHovered] = ImVec4(0.00f, 0.00f, 0.00f, 0.36f);
-		colors[ImGuiCol_HeaderActive] = ImVec4(0.20f, 0.22f, 0.23f, 0.33f);
-		colors[ImGuiCol_Separator] = ImVec4(0.28f, 0.28f, 0.28f, 0.90f);
-		colors[ImGuiCol_SeparatorHovered] = ImVec4(0.44f, 0.44f, 0.44f, 0.29f);
-		colors[ImGuiCol_SeparatorActive] = ImVec4(0.40f, 0.44f, 0.47f, 1.00f);
-		colors[ImGuiCol_ResizeGrip] = ImVec4(0.28f, 0.28f, 0.28f, 0.29f);
-		colors[ImGuiCol_ResizeGripHovered] = ImVec4(0.44f, 0.44f, 0.44f, 0.29f);
-		colors[ImGuiCol_ResizeGripActive] = ImVec4(0.40f, 0.44f, 0.47f, 1.00f);
-		colors[ImGuiCol_Tab] = ImVec4(0.00f, 0.00f, 0.00f, 0.52f);
-		colors[ImGuiCol_TabHovered] = ImVec4(0.14f, 0.14f, 0.14f, 1.00f);
-		colors[ImGuiCol_TabActive] = ImVec4(0.20f, 0.20f, 0.20f, 0.36f);
-		colors[ImGuiCol_TabUnfocused] = ImVec4(0.00f, 0.00f, 0.00f, 0.52f);
-		colors[ImGuiCol_TabUnfocusedActive] = ImVec4(0.14f, 0.14f, 0.14f, 1.00f);
-		colors[ImGuiCol_DockingPreview] = ImVec4(0.33f, 0.67f, 0.86f, 1.00f);
-		colors[ImGuiCol_DockingEmptyBg] = ImVec4(1.00f, 0.00f, 0.00f, 1.00f);
-		colors[ImGuiCol_PlotLines] = ImVec4(0.33f, 0.67f, 0.86f, 1.00f);
-		colors[ImGuiCol_PlotLinesHovered] = ImVec4(1.00f, 0.00f, 0.00f, 1.00f);
-		colors[ImGuiCol_PlotHistogram] = ImVec4(0.33f, 0.67f, 0.86f, 1.00f);
-		colors[ImGuiCol_PlotHistogramHovered] = ImVec4(1.00f, 0.00f, 0.00f, 1.00f);
-		colors[ImGuiCol_TableHeaderBg] = ImVec4(0.00f, 0.00f, 0.00f, 0.52f);
-		colors[ImGuiCol_TableBorderStrong] = ImVec4(0.00f, 0.00f, 0.00f, 0.52f);
-		colors[ImGuiCol_TableBorderLight] = ImVec4(0.28f, 0.28f, 0.28f, 0.29f);
-		colors[ImGuiCol_TableRowBg] = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
-		colors[ImGuiCol_TableRowBgAlt] = ImVec4(1.00f, 1.00f, 1.00f, 0.06f);
-		colors[ImGuiCol_TextSelectedBg] = ImVec4(0.20f, 0.22f, 0.23f, 1.00f);
-		colors[ImGuiCol_DragDropTarget] = ImVec4(0.33f, 0.67f, 0.86f, 1.00f);
-		colors[ImGuiCol_NavHighlight] = ImVec4(1.00f, 0.00f, 0.00f, 1.00f);
-		colors[ImGuiCol_NavWindowingHighlight] = ImVec4(1.00f, 0.00f, 0.00f, 0.70f);
-		colors[ImGuiCol_NavWindowingDimBg] = ImVec4(1.00f, 0.00f, 0.00f, 0.20f);
-		colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.00f, 0.00f, 0.00f, 0.60f);
+		MASQ_UNUSED(style);
 
 		// ---- Helper lambda to unpack palette colors --------------------
 		auto getPaletteColor = [](const uint8_t* palette, int idx) -> ImVec4 {
@@ -2407,56 +3182,6 @@ public:
 					colors[ImGuiCol_PlotHistogram] =
 					colors[ImGuiCol_CheckMark] = accent;
 			}
-		}
-
-		// ---- Light theme ------------------------------------------------
-		if (currentEmuTheme == SE_THEME_LIGHT)
-		{
-			for (int i = 0; i < ImGuiCol_COUNT; ++i)
-			{
-				if (i == ImGuiCol_ModalWindowDimBg || i == ImGuiCol_NavWindowingDimBg)
-					continue;
-
-				colors[i].x = 1.0f - colors[i].x;
-				colors[i].y = 1.0f - colors[i].y;
-				colors[i].z = 1.0f - colors[i].z;
-			}
-		}
-
-		// ---- Style Metrics ----------------------------------------------
-		style.WindowPadding = ImVec2(8.00f, 8.00f);
-		style.FramePadding = ImVec2(5.00f, 2.00f);
-		style.ItemSpacing = ImVec2(6.00f, 6.00f);
-		style.TouchExtraPadding = ImVec2(2.00f, 4.00f);
-		style.IndentSpacing = 25.0f;
-		style.ScrollbarSize = 15.0f;
-		style.GrabMinSize = 10.0f;
-		style.WindowBorderSize = 0.0f;
-		style.ChildBorderSize = 0.0f;
-		style.PopupBorderSize = 0.0f;
-		style.FrameBorderSize = 0.0f;
-		style.TabBorderSize = 0.0f;
-		style.WindowRounding = 0.0f;
-		style.ChildRounding = 4.0f;
-		style.FrameRounding = 0.0f;
-		style.PopupRounding = 0.0f;
-		style.ScrollbarRounding = 9.0f;
-		style.GrabRounding = 100.0f;
-		style.LogSliderDeadzone = 4.0f;
-		style.TabRounding = 4.0f;
-		style.ButtonTextAlign = ImVec2(0.5f, 0.5f);
-
-		// ---- Black theme ------------------------------------------------
-		if (currentEmuTheme == SE_THEME_BLACK)
-		{
-			colors[ImGuiCol_WindowBg] = ImVec4(0.00f, 0.00f, 0.00f, 1.00f);
-			colors[ImGuiCol_ChildBg] = ImVec4(0.00f, 0.00f, 0.00f, 1.00f);
-			colors[ImGuiCol_PopupBg] = ImVec4(0.00f, 0.00f, 0.00f, 1.00f);
-			colors[ImGuiCol_TitleBg] = ImVec4(0.00f, 0.00f, 0.00f, 1.00f);
-			colors[ImGuiCol_MenuBarBg] = ImVec4(0.00f, 0.00f, 0.00f, 1.00f);
-			colors[ImGuiCol_Button] = ImVec4(0.18f, 0.18f, 0.18f, 1.00f);
-			colors[ImGuiCol_FrameBg] = ImVec4(0.15f, 0.15f, 0.15f, 0.90f);
-			colors[ImGuiCol_ScrollbarBg] = ImVec4(0.10f, 0.10f, 0.10f, 0.60f);
 		}
 
 		RETURN SUCCESS;
@@ -3549,6 +4274,27 @@ public:
 											}
 										}
 										ImGui::Separator();
+										if (ImGui::BeginMenu("Stats"))
+										{
+#if MASQ_GBA_SCHEDULER_STATS_UI
+											if (current_instance->getEmulationID() == EMULATION_ID::GBA_ID)
+											{
+												GBA_t* gbaStats = static_cast<GBA_t*>(current_instance);
+												if (ImGui::MenuItem("Scheduler", NULL, gbaStats->schedulerStatsWindowOpen))
+													gbaStats->schedulerStatsWindowOpen = (gbaStats->schedulerStatsWindowOpen == NO) ? YES : NO;
+											}
+											else
+											{
+												ImGui::MenuItem("Scheduler", NULL, NO, DISABLED);
+												if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+													ImGui::SetTooltip("Please load a GBA ROM");
+											}
+#else
+											ImGui::MenuItem("Scheduler", NULL, NO, DISABLED);
+#endif // MASQ_GBA_SCHEDULER_STATS_UI
+											ImGui::EndMenu();
+										}
+										ImGui::Separator();
 										if (ImGui::BeginMenu("Cheats"))
 										{
 											if (ImGui::MenuItem(showCheatWin == NO ? "Open Cheat Hub" : "Close Cheat Hub"))
@@ -4009,6 +4755,8 @@ public:
 								if (showUpdWin == YES)
 								{
 #ifndef __EMSCRIPTEN__
+									ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+									ImGui::SetNextWindowSizeConstraints(ImVec2(320.0f, 0.0f), ImVec2(FLT_MAX, FLT_MAX));
 									ImGui::Begin("Updater", &showUpdWin, ImGuiWindowFlags_AlwaysAutoResize);
 									ImGui::Text("Current Version : v%.4f", VERSION);
 									ImGui::Text("Build Type : P0152 (Partial)");
@@ -4021,6 +4769,8 @@ public:
 								if (showAboutWin == YES)
 								{
 									const float columnWidth = 150.0f;
+									ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+									ImGui::SetNextWindowSizeConstraints(ImVec2(420.0f, 0.0f), ImVec2(FLT_MAX, FLT_MAX));
 									ImGui::Begin("About", &showAboutWin, ImGuiWindowFlags_AlwaysAutoResize);
 
 									if (ImGui::CollapsingHeader("Build Info"))
@@ -4282,13 +5032,24 @@ public:
 									static_cast<NES_t*>(current_instance)->renderNESDebuggerUI();
 								}
 
+								// ---- GBA scheduler stats window ---------------
+#if MASQ_GBA_SCHEDULER_STATS_UI
+								if (current_instance->getEmulationID() == EMULATION_ID::GBA_ID)
+								{
+									renderGBASchedulerStatsWindow(static_cast<GBA_t*>(current_instance));
+								}
+#endif // MASQ_GBA_SCHEDULER_STATS_UI
+
 								// ---- Cheat hub ------------------------------
 								if (showCheatWin == YES
 									&& ((current_instance->getEmulationID() == EMULATION_ID::NES_ID)
 										|| (current_instance->getEmulationID() == EMULATION_ID::GB_GBC_ID)
 										|| (current_instance->getEmulationID() == EMULATION_ID::GBA_ID)))
 								{
-									ImGui::Begin("Cheats", &showCheatWin, ImGuiWindowFlags_AlwaysAutoResize);
+									ImGui::SetNextWindowSize(ImVec2(470.0f, 430.0f), ImGuiCond_FirstUseEver);
+									ImGui::SetNextWindowSizeConstraints(ImVec2(400.0f, 280.0f), ImVec2(FLT_MAX, FLT_MAX));
+									ImGui::Begin("Cheats", &showCheatWin);
+									ImGui::PushItemWidth(-100.0f); // input fields follow the window width, their labels stay visible
 									ImGuiInputTextFlags input_text_flags = ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll;
 									FLAG atleastOneCE = NO;
 									static std::string dgg, dgs, dgar, dcb, gamegenie, gameshark, actionreplay, codebreaker;
@@ -4311,19 +5072,25 @@ public:
 									// Radio buttons -- AR v3 only shown for GBA
 									ImGui::RadioButton("GameGenie", &selectedCEMode, CheatEngine_t::CHEATING_ENGINE::GAMEGENIE);
 									if (isGBA || isGBGBC)
+									{
+										MasqSameLineIfFits("GameShark");
 										ImGui::RadioButton("GameShark", &selectedCEMode, CheatEngine_t::CHEATING_ENGINE::GAMESHARK);
+									}
 									if (isGBA)
 									{
+										MasqSameLineIfFits("Action Replay V3");
 										ImGui::RadioButton("Action Replay V3", &selectedCEMode, CheatEngine_t::CHEATING_ENGINE::ACTION_REPLAY_V3);
+										MasqSameLineIfFits("CodeBreaker");
 										ImGui::RadioButton("CodeBreaker", &selectedCEMode, CheatEngine_t::CHEATING_ENGINE::CODEBREAKER);
 									}
+									ImGui::Separator();
 
 									ceMAS->setCheatEngineMode((CheatEngine_t::CHEATING_ENGINE)selectedCEMode, current_instance->getEmulationID());
 
 									// GameGenie input
 									{
 										atleastOneCE = YES;
-										ImGui::Text("GameGenie");
+										MasqSectionLabel("GameGenie");
 										ImGui::InputText("GG Name", &dgg, input_text_flags);
 										if (ImGui::InputText("GG Code", &gamegenie, input_text_flags))
 										{
@@ -4340,7 +5107,7 @@ public:
 									if (isGBA || isGBGBC)
 									{
 										atleastOneCE = YES;
-										ImGui::Text("GameShark");
+										MasqSectionLabel("GameShark");
 										ImGui::InputText("GS Name", &dgs, input_text_flags);
 										if (ImGui::InputText("GS Code", &gameshark, input_text_flags))
 										{
@@ -4357,7 +5124,7 @@ public:
 									if (isGBA)
 									{
 										atleastOneCE = YES;
-										ImGui::Text("Action Replay V3");
+										MasqSectionLabel("Action Replay V3");
 										ImGui::InputText("AR Name", &dgar, input_text_flags);
 										if (ImGui::InputText("AR Code", &actionreplay, input_text_flags))
 										{
@@ -4368,7 +5135,7 @@ public:
 											dgar.clear(); actionreplay.clear();
 										}
 										ImGui::Separator();
-										ImGui::Text("CodeBreaker");
+										MasqSectionLabel("CodeBreaker");
 										ImGui::InputText("CB Name", &dcb, input_text_flags);
 										if (ImGui::InputText("CB Code", &codebreaker, input_text_flags))
 										{
@@ -4594,6 +5361,7 @@ public:
 										}
 									}
 
+									ImGui::PopItemWidth();
 									ImGui::End();
 								}
 

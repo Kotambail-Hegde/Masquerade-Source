@@ -1443,21 +1443,21 @@ void GBA_t::registerEvents()
 
 	static const EventSetup setup[] =
 	{
-		{ &GBA_t::exitHBlankVDrawHandler,			0 },
-		{ &GBA_t::exitHDrawVDrawHandler,			0 },
-		{ &GBA_t::exitHBlankVBlankHandler,			0 },
-		{ &GBA_t::exitHDrawVBlankHandler,			0 },
-		{ &GBA_t::apuChannelStepHandler,			1 },
-		{ &GBA_t::frameSequencerHandler,			1 },
-		{ &GBA_t::audioDownSamplingHandler,			0 },
-		{ &GBA_t::irqWriteHandler,					0 },
-		{ &GBA_t::irqAvailHandler,					1 },
-		{ &GBA_t::irqLineHandler,					2 },
-		{ &GBA_t::dmaActivationHandler,				0 },
-		{ &GBA_t::timerReloadWriteHandler,			1 },
-		{ &GBA_t::timerControlWriteHandler,			2 },
+		{ &GBA_t::exitHBlankVDrawHandler,			5 },
+		{ &GBA_t::exitHDrawVDrawHandler,			5 },
+		{ &GBA_t::exitHBlankVBlankHandler,			5 },
+		{ &GBA_t::exitHDrawVBlankHandler,			5 },
+		{ &GBA_t::apuChannelStepHandler,			2 },
+		{ &GBA_t::frameSequencerHandler,			3 },
+		{ &GBA_t::audioDownSamplingHandler,			4 },
+		{ &GBA_t::irqWriteHandler,					6 },
+		{ &GBA_t::irqAvailHandler,					7 },
+		{ &GBA_t::irqLineHandler,					8 },
+		{ &GBA_t::dmaActivationHandler,				9 },
+		{ &GBA_t::timerReloadWriteHandler,			10 },
+		{ &GBA_t::timerControlWriteHandler,			11 },
 		{ &GBA_t::timerOverflowHandler,				0 },
-		{ &GBA_t::sioTransferHandler,				0 },
+		{ &GBA_t::sioTransferHandler,				1 },
 	};
 
 	static_assert(std::size(setup) == static_cast<size_t>(GBA_EVENT::EVENT_COUNT));

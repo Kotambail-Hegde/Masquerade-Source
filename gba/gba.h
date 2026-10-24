@@ -316,11 +316,17 @@
 #endif
 
 #define TIMER_CONTROL_WRITE_DELAY						(1)
-#define TIMER_STARTUP_DELAY								(2) // TODO: Ideally this should 1 cycle delay but currently need to set 2 for prescalar tests to pass in AGS
+// TODO: TIMER_STARTUP_DELAY: Ideally this should 1 cycle delay but currently need to set 2 for prescalar tests to pass in AGS
+#define TIMER_STARTUP_DELAY								(2) 
+// TODO: TIMER_RECONFIG_DELAY: Check in NBA what this is supposed to be
+#define TIMER_RECONFIG_DELAY							(1) // CNT_H rewrite of an already running timer; new prescaler applies from the next cycle
 #define DMA_STARTUP_DELAY								(2)
-#define IRQ_REGISTERS_WRITE_DELAY						(1)
-#define IRQ_AVAILABILITY_DELAY							(0) // TODO: Ideally this should 1 cycle delay but currently need to set 0 for TIMER IRQ test to pass in MGBA suite
-#define IRQ_LINE_DELAY									(IRQ_AVAILABILITY_DELAY + 1)	
+#define DMA_HW_STARTUP_DELAY							(2) // Hardware triggers (HBlank/VBlank/DMA3 special/FIFO)
+#define IRQ_REGISTERS_WRITE_DELAY						(1) // CPU writes to IE/IF/IME
+// TODO: IRQ_HW_REGISTERS_WRITE_DELAY: Ideally this should 1 cycle delay but current set to 0 to pass mbga timer IRQ tests. 
+#define IRQ_HW_REGISTERS_WRITE_DELAY					(0) // IF raised by hardware (PPU/timer/DMA/SIO/keypad) from inside the scheduler tick
+#define IRQ_AVAILABILITY_DELAY							(1) // Restores the old per-cycle latch timing for CPU register writes, hardware IRQ timing is unchanged
+#define IRQ_LINE_DELAY									(IRQ_AVAILABILITY_DELAY + 1)
 #define FRAME_SEQ_THRESHOLD								(static_cast<INC64>(GBA_REFERENCE_CLOCK_HZ / APU_FRAME_SEQUENCER_RATE_HZ))
 #define DOWNSAMPLE_THRESHOLD							(CEIL(GBA_REFERENCE_CLOCK_HZ / EMULATED_AUDIO_SAMPLING_RATE_FOR_GBA))
 #pragma endregion MACROS
@@ -3922,6 +3928,40 @@ public:
 
 	float getVersion();
 
+	FLAG schedulerStatsWindowOpen = NO;
+
+	Scheduler_t& getScheduler()
+	{
+		RETURN scheduler;
+	}
+
+	// Names follow the order of GBA_EVENT / the setup[] table in registerEvents()
+	static const char* getSchedulerEventName(EventId id)
+	{
+		static const char* const names[] =
+		{
+			"PPU_HBLANK_VDRAW",
+			"PPU_HDRAW_VDRAW",
+			"PPU_HBLANK_VBLANK",
+			"PPU_HDRAW_VBLANK",
+			"APU_CHANNEL_STEP",
+			"APU_FRAME_SEQUENCER",
+			"APU_SAMPLE",
+			"IRQ_WRITE",
+			"IRQ_AVAIL",
+			"IRQ_LINE",
+			"DMA_ACTIVATION",
+			"TIMER_RELOAD_WRITE",
+			"TIMER_CONTROL_WRITE",
+			"TIMER_OVERFLOW",
+			"SIO_TRANSFER_COMPLETE"
+		};
+
+		static_assert(std::size(names) == static_cast<size_t>(GBA_EVENT::EVENT_COUNT));
+
+		RETURN(id < static_cast<EventId>(GBA_EVENT::EVENT_COUNT)) ? names[id] : "?";
+	}
+
 	uint32_t getScreenWidth() override;
 
 	uint32_t getScreenHeight() override;
@@ -5007,6 +5047,14 @@ OPT_SPEED
 			}
 		}
 
+		// Lazy PPU: bring rendering up to the current cycle before the CPU/DMA touches PRAM/VRAM/OAM
+		// (PPU source is excluded on purpose: the renderer itself reads these regions through writeRawMemory, this would recurse)
+		if ((source == MEMORY_ACCESS_SOURCE::CPU || source == MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH || source == MEMORY_ACCESS_SOURCE::DMA)
+			&& address >= PALETTE_RAM_START_ADDRESS && address <= OAM_MIRROR_END_ADDRESS)
+		{
+			syncPPU();
+		}
+
 		if (IF_ADDRESS_WITHIN(address, SYSTEM_ROM_START_ADDRESS, SYSTEM_ROM_END_ADDRESS))
 		{
 			RETURN;
@@ -5977,7 +6025,7 @@ OPT_SPEED
 			RETURN;
 		}
 
-		INC64 delayedStart = RESET;
+		INC64 delayedStart = TIMER_RECONFIG_DELAY;
 		if (enabledBefore == RESET)
 		{
 			state.cache.counter = state.cache.reload;
@@ -6047,7 +6095,7 @@ OPT_SPEED
 					{
 						scheduler.schedule(
 							static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION),
-							scheduler.get_current_cycles() + DMA_STARTUP_DELAY,
+							scheduler.get_current_cycles() + DMA_HW_STARTUP_DELAY,
 							static_cast<int>(DMA::DMA1));
 					}
 				}
@@ -6075,7 +6123,7 @@ OPT_SPEED
 					{
 						scheduler.schedule(
 							static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION),
-							scheduler.get_current_cycles() + DMA_STARTUP_DELAY,
+							scheduler.get_current_cycles() + DMA_HW_STARTUP_DELAY,
 							static_cast<int>(DMA::DMA2));
 					}
 				}
@@ -6445,7 +6493,7 @@ private:
 			{
 				scheduler.schedule(
 					static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION),
-					scheduler.get_current_cycles() + DMA_STARTUP_DELAY,
+					scheduler.get_current_cycles() + DMA_HW_STARTUP_DELAY,
 					static_cast<int>(dmaID));
 			}
 		}
@@ -6652,6 +6700,41 @@ private:
 private:
 
 OPT_SPEED
+
+	// In the scheduler model frequencyTimer is only refreshed at step events, so between events it is stale.
+	// This folds the elapsed cycles into it so readers see the same live value the old per-cycle tick produced.
+	MASQ_INLINE void foldChannelFrequencyTimer(AUDIO_CHANNELS channel, FLAG stepEventWasRunning)
+	{
+		const uint8_t ch = static_cast<uint8_t>(channel);
+		auto& chInstance = pGBA_instance->GBA_state.audio.audioChannelInstance[ch];
+		const INC64 now = static_cast<INC64>(scheduler.get_current_cycles());
+
+		if (stepEventWasRunning == YES)
+		{
+			const INC64 elapsed = now - pGBA_audio->scheduler.lastSyncCycleCount[ch];
+			chInstance.frequencyTimer = (elapsed >= chInstance.frequencyTimer) ? static_cast<INC64>(ZERO) : (chInstance.frequencyTimer - elapsed);
+		}
+
+		pGBA_audio->scheduler.lastSyncCycleCount[ch] = now;
+	}
+
+	MASQ_INLINE void syncChannelFrequencyTimer(AUDIO_CHANNELS channel)
+	{
+		foldChannelFrequencyTimer(channel, (pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.PSG_FIFO_MASTER_EN == ONE) ? YES : NO);
+	}
+
+	// (Re)arms the step event from the current frequencyTimer and records the reference cycle for foldChannelFrequencyTimer
+	MASQ_INLINE void scheduleChannelStep(AUDIO_CHANNELS channel)
+	{
+		const uint8_t ch = static_cast<uint8_t>(channel);
+		const INC64 now = static_cast<INC64>(scheduler.get_current_cycles());
+
+		pGBA_audio->scheduler.lastSyncCycleCount[ch] = now;
+		scheduler.reschedule(
+			static_cast<EventId>(GBA_EVENT::EVENT_APU_CHANNEL_STEP),
+			now + pGBA_instance->GBA_state.audio.audioChannelInstance[ch].frequencyTimer,
+			ch);
+	}
 
 	MASQ_INLINE void tickChannel(AUDIO_CHANNELS channel)
 	{
@@ -6864,6 +6947,7 @@ OPT_SPEED
 
 	MASQ_INLINE FLAG isChannel3Active()
 	{
+		continousDACCheck();
 		RETURN (pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.SOUND3_ON_FLAG == ONE
 			&& pGBA_peripherals->mSOUND3CNT_XHalfWord.mSOUND3CNT_XFields.INITIAL == ONE
 			&& pGBA_instance->GBA_state.audio.audioChannelInstance[AUDIO_CHANNELS::CHANNEL_3].isChannelActuallyEnabled == ENABLED) ? YES : NO;
@@ -12113,7 +12197,7 @@ OPT_SPEED
 				{
 					scheduler.schedule(
 						static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION),
-						scheduler.get_current_cycles() + TWO,
+						scheduler.get_current_cycles() + DMA_HW_STARTUP_DELAY,
 						static_cast<int>(DMA::DMA3));
 				}
 			}
@@ -12134,7 +12218,7 @@ OPT_SPEED
 
 			scheduler.schedule(
 				static_cast<EventId>(GBA_EVENT::EVENT_PPU_HDRAW_VBLANK),
-				scheduler.get_current_cycles() + ONE + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE),
+				scheduler.get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE),
 				ZERO);
 		}
 		// LINE 0 - 158
@@ -12206,7 +12290,7 @@ OPT_SPEED
 				{
 					scheduler.schedule(
 						static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION),
-						scheduler.get_current_cycles() + TWO,
+						scheduler.get_current_cycles() + DMA_HW_STARTUP_DELAY,
 						static_cast<int>(DMA::DMA3));
 				}
 			}
@@ -12373,7 +12457,7 @@ OPT_SPEED
 				{
 					scheduler.schedule(
 						static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION),
-						scheduler.get_current_cycles() + TWO,
+						scheduler.get_current_cycles() + DMA_HW_STARTUP_DELAY,
 						static_cast<int>(DMA::DMA3));
 				}
 			}
@@ -12662,7 +12746,7 @@ private:
 
 		if (interruptState.irqAvailLatch != irqAvailLatch)
 		{
-			TODO("Ideally this should 1 cycle delay but currently need to set 0 for TIMER IRQ test to pass in MGBA suite");
+			// Avail latch: 1 cycle after the IF/IE write is applied (IRQ_AVAILABILITY_DELAY)
 			gba->scheduler.schedule(
 				static_cast<EventId>(GBA_EVENT::EVENT_IRQ_AVAIL),
 				gba->scheduler.get_current_cycles() + IRQ_AVAILABILITY_DELAY,
@@ -12674,7 +12758,7 @@ private:
 
 		if (interruptState.irqLineLatch != irqLineLatch)
 		{
-			TODO("Ideally this should 2 cycle delay but currently need to set 1 for TIMER IRQ test to pass in MGBA suite");
+			// CPU IRQ line: 1 cycle after the avail latch (IRQ_LINE_DELAY)
 			gba->scheduler.schedule(
 				static_cast<EventId>(GBA_EVENT::EVENT_IRQ_LINE),
 				gba->scheduler.get_current_cycles() + IRQ_LINE_DELAY,

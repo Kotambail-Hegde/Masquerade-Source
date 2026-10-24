@@ -1,6 +1,6 @@
 //{{NO_DEPENDENCIES}}
 // Microsoft Visual C++ generated include file.
-// Used by C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-52\masquerade\masquerade.rc
+// Used by C:\Data\Workspace\Emulators\Masquerade-(Multi-Console)\Prototype-152\masquerade\masquerade.rc
 //
 #define IDI_ICON1                       101
 
