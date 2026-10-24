@@ -32,7 +32,7 @@ Current Version: **0.7x**
 - **Game Boy Advance (GBA)**
 - **Game Boy Color (GBC)**
 - **Game Boy (GB)**
-- **Super Game Boy (SGB) - [<ins>Work In Progress</ins>]**
+- **Super Game Boy (SGB)
 - **Nintendo Entertainment System (NES)**
 - **Ms Pac-Man**
 - **Pac-Man (Midway and Namco variants)**
