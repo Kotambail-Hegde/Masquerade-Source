@@ -416,6 +416,101 @@ static void MasqApplyMetrics()
 }
 #pragma endregion MASQUERADE_THEME
 
+#pragma region MASQUERADE_HOME_SCREEN
+// ---- Home screen pieces (what is shown before a game is loaded) ----------------------------------------------
+// Tint for a system. Phosphor ends up all green because its tints are green.
+[[maybe_unused]] static ImVec4 MasqSystemColor(const char* system)
+{
+	const MasqThemeSemantics_t& t = g_masqThemeSemantics;
+	if (strcmp(system, "GB") == 0)  return t.series[0];
+	if (strcmp(system, "GBC") == 0) return t.series[1];
+	if (strcmp(system, "GBA") == 0) return t.series[2];
+	if (strcmp(system, "NES") == 0) return t.series[3];
+	if (strcmp(system, "CH8") == 0) return t.series[4];
+	return t.neutral;
+}
+
+// Small rounded "GBA" / "NES" tag. The caller positions the cursor where the old plain text went (the column starts
+// FramePadding.x * 2 to its left); the chip is centred in that column so it never runs into the name next to it.
+[[maybe_unused]] static void MasqDrawSystemChip(const char* system, float columnWidth)
+{
+	ImDrawList* drawList = ImGui::GetWindowDrawList();
+	const ImVec4 tint = MasqSystemColor(system);
+	const ImVec2 cursor = ImGui::GetCursorScreenPos();
+	const ImVec2 size = ImGui::CalcTextSize(system);
+	const float columnLeft = cursor.x - ImGui::GetStyle().FramePadding.x * 2.0f;
+	const float chipWidth = size.x + 8.0f;
+	const float chipLeft = columnLeft + (columnWidth - chipWidth) * 0.5f;
+	const ImVec2 chipMin(chipLeft, cursor.y - 2.0f);
+	const ImVec2 chipMax(chipLeft + chipWidth, cursor.y + size.y + 2.0f);
+
+	drawList->AddRectFilled(chipMin, chipMax, ImGui::GetColorU32(ImVec4(tint.x, tint.y, tint.z, 0.14f)), 4.0f);
+	drawList->AddRect(chipMin, chipMax, ImGui::GetColorU32(ImVec4(tint.x, tint.y, tint.z, 0.50f)), 4.0f);
+	drawList->AddText(ImVec2(chipLeft + 4.0f, cursor.y), ImGui::GetColorU32(tint), system);
+	ImGui::Dummy(size);
+}
+
+// Height of the hero band at the top of the home screen.
+[[maybe_unused]] static float MasqHomeHeroHeight()
+{
+	return ImGui::GetFontSize() * 1.9f + ImGui::GetTextLineHeight() * 2.0f + 34.0f;
+}
+
+// Hero band: name, version, tagline, the systems Masquerade runs, and a one-line hint. Drawn with the draw list at
+// 'origin' (screen space), so it never disturbs the layout of the list below it.
+[[maybe_unused]] static void MasqDrawHomeHero(const ImVec2& origin, float width, float height, const char* title, const char* tagline, float version)
+{
+	ImDrawList* drawList = ImGui::GetWindowDrawList();
+	const ImVec4 accent = ImGui::GetStyleColorVec4(ImGuiCol_CheckMark);
+	const ImVec4 text = ImGui::GetStyleColorVec4(ImGuiCol_Text);
+	const ImVec4 background = ImGui::GetStyleColorVec4(ImGuiCol_WindowBg);
+	const ImVec4 label(text.x + (background.x - text.x) * 0.38f, text.y + (background.y - text.y) * 0.38f, text.z + (background.z - text.z) * 0.38f, 1.0f);
+	const float pad = 18.0f;
+	const float titleSize = ImGui::GetFontSize() * 1.9f;
+	const float lineHeight = ImGui::GetTextLineHeight();
+
+	// Title and version
+	drawList->AddText(ImGui::GetFont(), titleSize, ImVec2(origin.x + pad, origin.y + 10.0f), ImGui::GetColorU32(accent), title);
+	char versionText[32];
+	snprintf(versionText, sizeof(versionText), "v%.4f", version);
+	const ImVec2 versionSize = ImGui::CalcTextSize(versionText);
+	drawList->AddText(ImVec2(origin.x + width - pad - versionSize.x, origin.y + 10.0f + titleSize - lineHeight - 2.0f), ImGui::GetColorU32(label), versionText);
+
+	// Tagline
+	const float taglineY = origin.y + 10.0f + titleSize + 2.0f;
+	drawList->AddText(ImVec2(origin.x + pad, taglineY), ImGui::GetColorU32(label), tagline);
+
+	// Supported systems as chips
+	const char* systems[] = { "GB", "GBC", "NES", "GBA", "CH8" };
+	const float chipY = taglineY + lineHeight + 8.0f;
+	float x = origin.x + pad;
+	for (const char* system : systems)
+	{
+		const ImVec4 tint = MasqSystemColor(system);
+		const ImVec2 size = ImGui::CalcTextSize(system);
+		const ImVec2 chipMin(x, chipY);
+		const ImVec2 chipMax(x + size.x + 12.0f, chipY + lineHeight + 4.0f);
+
+		drawList->AddRectFilled(chipMin, chipMax, ImGui::GetColorU32(ImVec4(tint.x, tint.y, tint.z, 0.14f)), 4.0f);
+		drawList->AddRect(chipMin, chipMax, ImGui::GetColorU32(ImVec4(tint.x, tint.y, tint.z, 0.50f)), 4.0f);
+		drawList->AddText(ImVec2(x + 6.0f, chipY + 2.0f), ImGui::GetColorU32(tint), system);
+		x = chipMax.x + 8.0f;
+	}
+
+	// One-line hint, right aligned, only when it fits next to the chips
+	const char* hint = "Drop a ROM here or use the File menu";
+	const float hintWidth = ImGui::CalcTextSize(hint).x;
+	if (x + hintWidth + pad < origin.x + width)
+	{
+		drawList->AddText(ImVec2(origin.x + width - pad - hintWidth, chipY + 2.0f), ImGui::GetColorU32(label), hint);
+	}
+
+	// Thin accent line closing the band
+	const float lineY = origin.y + height - 4.0f;
+	drawList->AddLine(ImVec2(origin.x + pad, lineY), ImVec2(origin.x + width - pad, lineY), ImGui::GetColorU32(ImVec4(accent.x, accent.y, accent.z, 0.35f)), 1.0f);
+}
+#pragma endregion MASQUERADE_HOME_SCREEN
+
 // Init screen
 #ifdef __EMSCRIPTEN__
 FLAG initScreen = YES;
@@ -4297,8 +4392,13 @@ public:
 										ImGui::Separator();
 										if (ImGui::BeginMenu("Cheats"))
 										{
-											if (ImGui::MenuItem(showCheatWin == NO ? "Open Cheat Hub" : "Close Cheat Hub"))
+											// The hub only draws for NES, GB/GBC and GBA games, so say so instead of opening an invisible window
+											const EMULATION_ID cheatEmulationID = current_instance->getEmulationID();
+											const bool cheatsAvailable = (cheatEmulationID == EMULATION_ID::NES_ID) || (cheatEmulationID == EMULATION_ID::GB_GBC_ID) || (cheatEmulationID == EMULATION_ID::GBA_ID);
+											if (ImGui::MenuItem(showCheatWin == NO ? "Open Cheat Hub" : "Close Cheat Hub", NULL, false, cheatsAvailable))
 												showCheatWin = (showCheatWin == NO) ? YES : NO;
+											if (!cheatsAvailable && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+												ImGui::SetTooltip("Please load a NES, GB/GBC or GBA ROM");
 											ImGui::EndMenu();
 										}
 										ImGui::Separator();
@@ -4533,6 +4633,8 @@ public:
 											ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(ImGui::GetStyle().ItemSpacing.x, 0.0f));
 											float headerTopSpace = 10.0f;
 											if (showUpdWin || showAboutWin || showLoggerWin) headerTopSpace *= 2.0f;
+											const float homeHeroHeight = (ImGui::GetContentRegionAvail().y > 340.0f) ? MasqHomeHeroHeight() : 0.0f; // compact windows keep the old look
+											headerTopSpace += homeHeroHeight;
 											ImGui::Dummy(ImVec2(0.0f, headerTopSpace));
 
 											ImDrawList* drawList = ImGui::GetWindowDrawList();
@@ -4542,6 +4644,10 @@ public:
 											ImVec2      winMax = { shiftedPos.x + winSize.x, shiftedPos.y + winSize.y };
 
 											drawList->AddRectFilled(winPos, winMax, ImGui::GetColorU32(ImGuiCol_ChildBg));
+											if (homeHeroHeight > 0.0f)
+											{
+												MasqDrawHomeHero(winPos, winSize.x, homeHeroHeight, "Masquerade", "Multi-system emulator", VERSION);
+											}
 
 											ImVec2 textSize = ImGui::CalcTextSize(header);
 											float  headerHeight = textSize.y + ImGui::GetStyle().FramePadding.y * 2.0f;
@@ -4559,9 +4665,19 @@ public:
 
 										if (recentlyOpenedList.empty())
 										{
-											ImGui::SetCursorPosX(ImGui::GetStyle().FramePadding.x * 2.0f);
-											ImGui::SetCursorPosY(ImGui::GetStyle().FramePadding.y);
-											ImGui::TextDisabled("Nothing to display...");
+											// Friendly empty state instead of one dim line
+											{
+												const char* emptyTitle = "No recent games yet";
+												const char* emptyHint = "Drop a ROM onto this window, or open one from the File menu";
+												const float emptyWidth = ImGui::GetContentRegionAvail().x;
+												float titleX = (emptyWidth - ImGui::CalcTextSize(emptyTitle).x) * 0.5f;
+												float hintX = (emptyWidth - ImGui::CalcTextSize(emptyHint).x) * 0.5f;
+												ImGui::SetCursorPosY(ImGui::GetStyle().FramePadding.y + 18.0f);
+												ImGui::SetCursorPosX((titleX > 8.0f) ? titleX : 8.0f);
+												ImGui::TextColored(ImGui::GetStyleColorVec4(ImGuiCol_CheckMark), "%s", emptyTitle);
+												ImGui::SetCursorPosX((hintX > 8.0f) ? hintX : 8.0f);
+												ImGui::TextDisabled("%s", emptyHint);
+											}
 										}
 
 										int ii = RESET;
@@ -4588,6 +4704,15 @@ public:
 
 											ImGui::PushID(ii);
 											ImVec2 rowStartPos = ImGui::GetCursorPos();
+											// One highlight rect for the whole row, drawn BEHIND the row's widgets from last frame's hover state and height.
+											// (The old code stacked three translucent rects whose edges did not line up: seams and bright bands, most visible in Phosphor.)
+											static float rowHeightCache[_MAX_RECENTLY_USED_LIST_SIZE] = { 0.0f };
+											const ImVec2 rowTopLeft = ImGui::GetCursorScreenPos();
+											const float  rowWidth = ImGui::GetContentRegionAvail().x;
+											if (isHoveringOverPath[ii] == YES && rowHeightCache[ii] > 0.0f)
+											{
+												ImGui::GetWindowDrawList()->AddRectFilled(rowTopLeft, ImVec2(rowTopLeft.x + rowWidth, rowTopLeft.y + rowHeightCache[ii]), ImGui::GetColorU32(ImGuiCol_HeaderHovered));
+											}
 											FLAG   hoverOverGameType = NO;
 											float  leftOffset = 40.0f;
 
@@ -4610,7 +4735,7 @@ public:
 												}
 												ImGui::SetCursorPosX(rowStartPos.x + ImGui::GetStyle().FramePadding.x * 2.0f);
 												ImGui::SetCursorPosY(rowStartPos.y + romTypeSize.y * 0.5f + ImGui::GetStyle().FramePadding.y);
-												ImGui::TextDisabled("%s", romType);
+												MasqDrawSystemChip(romType, leftOffset);
 											}
 
 											// File-name selectable
@@ -4623,13 +4748,14 @@ public:
 												: ImGui::GetContentRegionAvail().x - deleteButtonW - 10.0f;
 
 											{
-												ImGui::PushStyleColor(ImGuiCol_Header, ImGui::GetStyleColorVec4(ImGuiCol_HeaderHovered));
-												ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImGui::GetStyleColorVec4(ImGuiCol_HeaderHovered));
-												if (ImGui::Selectable((filePath.stem().string() + "##file").c_str(), isHoveringOverPath[ii], 0, ImVec2(selectableWidth, 0)))
+												ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.0f, 0.0f, 0.0f, 0.0f)); // the row highlight is drawn behind the row instead
+												ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+												ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+												if (ImGui::Selectable((filePath.stem().string() + "##file").c_str(), false, 0, ImVec2(selectableWidth, 0)))
 												{
 													dynamicDragNDropAndMenuSelect.push_back(filePath.string()); itemSelected = YES;
 												}
-												ImGui::PopStyleColor(2);
+												ImGui::PopStyleColor(3);
 												if (ImGui::IsItemHovered() || hoverOverGameType == YES)
 												{
 													isHoveringOverPath[ii] = YES;
@@ -4671,18 +4797,11 @@ public:
 												ImGui::TextDisabled("%s", filePath.string().c_str());
 											}
 
-											// Hover highlight for game-type + path strips
-											if (isHoveringOverPath[ii] == YES)
-											{
-												float px = ImGui::GetStyle().FramePadding.x, py = ImGui::GetStyle().FramePadding.y;
-												ImVec2 pos = ImGui::GetItemRectMin();
-												ImVec2 bgMin = { pos.x - px * 0.5f, pos.y - py * 1.5f };
-												ImVec2 bgMax = { bgMin.x + sizeSelectable.x, bgMin.y + sizeSelectable.y + py };
-												ImGui::GetWindowDrawList()->AddRectFilled(bgMin, bgMax, ImGui::GetColorU32(colorSelectable));
-												bgMin = { posSelectable.x - leftOffset, posSelectable.y };
-												bgMax = { bgMin.x + leftOffset, bgMin.y + sizeSelectable.y * 2.0f + py };
-												ImGui::GetWindowDrawList()->AddRectFilled(bgMin, bgMax, ImGui::GetColorU32(colorSelectable));
-											}
+											// Remember this row's height so the highlight can be drawn behind it next frame
+											rowHeightCache[ii] = (ImGui::GetItemRectMax().y - rowTopLeft.y) + ImGui::GetStyle().FramePadding.y + ImGui::GetStyle().ItemSpacing.y * 0.5f;
+											MASQ_UNUSED(posSelectable);
+											MASQ_UNUSED(sizeSelectable);
+											MASQ_UNUSED(colorSelectable);
 
 											ImGui::Separator();
 											ImGui::PopID();
