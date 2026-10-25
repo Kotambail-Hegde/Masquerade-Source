@@ -3647,6 +3647,8 @@ private:
 		OBJECT_MODE gfx_obj_mode[TO_UINT(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)][TO_UINT(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)];
 		ID gfx_obj[TO_UINT(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)][TO_UINT(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)];
 		ID gfx_bg[FOUR][TO_UINT(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)][TO_UINT(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)];
+		ID gfx_bg_mosaic[FOUR][TO_UINT(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)][TO_UINT(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)];
+		INC32 gfx_obj_mosaic[ONETWENTYEIGHT][SIXTYFOUR][SIXTYFOUR];
 		union
 		{
 			Pixel imGuiBuffer1D[screen_width * screen_height];
@@ -7733,16 +7735,31 @@ OPT_SPEED
 
 						++bgListIndexer;
 
-						if (pGBA_display->gfx_bg[bgID][x][y] != ZERO)
+						ID bgPixel = pGBA_display->gfx_bg[bgID][x][y];
+
+						PPUTODO("This is waste of memory, should be optimized to not store the whole BG just for mosaic effect, but for now, we will keep it simple and store the whole BG");
+						pGBA_display->gfx_bg_mosaic[bgID][x][y] = bgPixel;
+
+						// Handle Mosaic effect for BGs
+						if (getBGxCNT(bgID) != NULL && getBGxCNT(bgID)->mBGnCNTFields.MOSAIC == SET)
+						{
+							uint32_t mosaicX = x - (x % (pGBA_peripherals->mMOSAICHalfWord.mMOSAICFields.BG_MOSAIC_H_SIZE + ONE));
+							uint32_t mosaicY = y - (y % (pGBA_peripherals->mMOSAICHalfWord.mMOSAICFields.BG_MOSAIC_V_SIZE + ONE));
+							bgPixel = pGBA_display->gfx_bg_mosaic[bgID][mosaicX][mosaicY];
+						}
+
+						if (bgPixel != ZERO)
 						{
 							pGBA_display->layersForBlending[targetLayer] = bgID;
-							pGBA_display->colorNumberForBlending[targetLayer].colorNumber = pGBA_display->gfx_bg[bgID][x][y];
+							pGBA_display->colorNumberForBlending[targetLayer].colorNumber = bgPixel;
 							pGBA_display->colorNumberForBlending[targetLayer].isObject = NO;
+
 							// Priority needs to be maintained so that we can check against OBJs
 							if (getBGxCNT(bgID) != NULL)
 							{
 								pGBA_display->priorities[targetLayer] = getBGxCNT(bgID)->mBGnCNTFields.BG_PRIORITY;
 							}
+
 							// Need to break, else we will never get the second target layer
 							BREAK;
 						}
@@ -8215,6 +8232,7 @@ OPT_SPEED
 			spriteXEnd = spriteXStart + ONE;	// only 1 pixel per VRAM stage
 		}
 
+		INC16 spriteX = ZERO;
 		INC32 transformedSpriteX = ZERO, transformedSpriteY = ZERO;
 		INC16 spriteY = objCache.spriteYPixelCoordinate;
 		SDIM32 Y = objCache.vcount;
@@ -8230,7 +8248,7 @@ OPT_SPEED
 		auto x0 = objCache.spriteWidth >> ONE;
 		auto y0 = objCache.spriteHeight >> ONE;
 
-		for (INC16 spriteX = spriteXStart; spriteX < spriteXEnd; spriteX++)
+		for (spriteX = spriteXStart; spriteX < spriteXEnd; spriteX++)
 		{
 			// NOTE: We need to get the screen coordinates before it got modified because of flip or affine
 			// other wise tranformation from screen space to affine space will get cancelled
@@ -8513,6 +8531,16 @@ OPT_SPEED
 
 					// Note: Palette is of 16 bytes, so palette index is 0, when tile data is 0 and palette index is 1, when tile data is 1
 					paletteIndex = pixelColorNumberFromTileData << ONE;
+				}
+
+				// Cache the palette index for this pixel in the mosaic array for this object
+				pGBA_display->gfx_obj_mosaic[oamID][spriteX][spriteY] = paletteIndex;
+
+				if (objCache.ObjAttribute.mOamAttr01Word.mOamAttr0HalfWord.mOamAttr0Fields.OBJ_MOSAIC == SET)
+				{
+					uint32_t mosaicX = spriteX - (spriteX % (pGBA_peripherals->mMOSAICHalfWord.mMOSAICFields.OBJ_MOSAIC_H_SIZE + ONE));
+					uint32_t mosaicY = spriteY - (spriteY % (pGBA_peripherals->mMOSAICHalfWord.mMOSAICFields.OBJ_MOSAIC_V_SIZE + ONE));
+					paletteIndex = pGBA_display->gfx_obj_mosaic[oamID][mosaicX][mosaicY];
 				}
 
 				if ((OBJECT_MODE)objCache.ObjAttribute.mOamAttr01Word.mOamAttr0HalfWord.mOamAttr0Fields.OBJ_MODE == OBJECT_MODE::OBJ_WINDOW
