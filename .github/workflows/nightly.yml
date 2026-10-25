@@ -352,8 +352,7 @@ jobs:
   build_emscripten:
     name: Build Emscripten (Web)
     needs: prepare_nightly
-    # TODO: Re-enable once Emscripten build issues are resolved
-    if: false && (github.event_name == 'schedule' || github.event.inputs.build_emscripten == 'true')
+    if: (github.event_name == 'schedule' || github.event.inputs.build_emscripten == 'true')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -376,9 +375,9 @@ jobs:
             external/emscripten-browser-file
             external/boost
             external/rapidjson
-          key: emscripten-external-all-v9-${{ hashFiles('.github/workflows/*.yml') }}
+          key: emscripten-external-all-v11-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: |
-            emscripten-external-all-v9-
+            emscripten-external-all-v11-
 
       - name: Cache SDL3 Emscripten
         id: cache-sdl-emscripten
@@ -408,18 +407,57 @@ jobs:
           mkdir -p external && cd external
           if [ ! -d "boost" ]; then
             git clone https://github.com/boostorg/boost.git --branch boost-1.89.0 --depth 1
-            cd boost && git submodule update --init --depth 1 && cd ..
+            cd boost
+            git submodule update --init --depth 1
+            cd ..
           fi
-          [ ! -d "imgui" ] && git clone https://github.com/ocornut/imgui.git --branch docking --depth 1
+
+          if [ ! -d "imgui" ]; then
+            git clone https://github.com/ocornut/imgui.git --branch docking --depth 1
+          fi
+
+          # --- Miniz
           if [ ! -d "miniz" ]; then
-            curl -L "https://github.com/richgel999/miniz/releases/download/3.0.2/miniz-3.0.2.zip" -o miniz.zip
-            mkdir -p _miniz_extract && unzip miniz.zip -d _miniz_extract
-            mv _miniz_extract miniz && rm -f miniz.zip
+            echo "=== MINIZ not found, downloading release 3.0.2 ==="
+            
+            URL="https://github.com/richgel999/miniz/releases/download/3.0.2/miniz-3.0.2.zip"
+            ZIP="miniz-3.0.2.zip"
+            TMPDIR="_miniz_extract"
+            
+            echo "Downloading $URL"
+            curl -L "$URL" -o "$ZIP"
+            
+            echo "Extracting $ZIP into $TMPDIR/"
+            mkdir -p "$TMPDIR"
+            unzip "$ZIP" -d "$TMPDIR"
+            
+            echo "Moving $TMPDIR -> miniz"
+            mv "$TMPDIR" miniz
+            
+            echo "Cleaning up"
+            rm -f "$ZIP"
+            
+            echo "=== MINIZ ready at $(pwd)/miniz ==="
+          else
+            echo "=== MINIZ already exists, skipping ==="
           fi
-          [ ! -d "stb/stb" ]   && git clone --depth 1 https://github.com/nothings/stb.git stb/stb
-          [ ! -d "rapidjson" ] && git clone --depth 1 https://github.com/Tencent/rapidjson.git rapidjson
-          [ ! -d "SDL" ]       && git clone --depth 1 https://github.com/libsdl-org/SDL.git SDL
-          [ ! -d "SDL_net" ]   && git clone --depth 1 https://github.com/libsdl-org/SDL_net.git SDL_net
+
+          if [ ! -d "stb/stb" ]; then
+            git clone --depth 1 https://github.com/nothings/stb.git stb/stb
+          fi
+
+          if [ ! -d "rapidjson" ]; then
+            git clone --depth 1 https://github.com/Tencent/rapidjson.git rapidjson
+          fi
+
+          if [ ! -d "SDL" ]; then
+            git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL
+          fi
+
+          if [ ! -d "SDL_net" ]; then
+            git clone https://github.com/libsdl-org/SDL_net.git --depth 1 SDL_net
+          fi
+
           if [ ! -d "emscripten-browser-file" ]; then
             git clone https://github.com/Armchair-Software/emscripten-browser-file.git --depth 1
           fi
@@ -461,7 +499,11 @@ jobs:
           emcmake cmake ../../SDL -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/external/SDL-install/emscripten/build \
-            -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST=OFF -DSDL_TESTS=OFF
+            -DSDL_SHARED=OFF \
+            -DSDL_STATIC=ON \
+            -DSDL_TEST=OFF \
+            -DSDL_TESTS=OFF
+
           ninja -j$(nproc) && ninja install
 
       - name: Build SDL3_net (Emscripten)
@@ -564,11 +606,11 @@ jobs:
       #     name: linux-build
       #     path: artifacts/linux
 
-      # - name: Download Emscripten artifacts
-      #   uses: actions/download-artifact@v4
-      #   with:
-      #     name: emscripten-build
-      #     path: artifacts/emscripten
+      - name: Download Emscripten artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: emscripten-build
+          path: artifacts/emscripten
 
       - name: Checkout Masquerade-Emulator
         uses: actions/checkout@v4
@@ -610,10 +652,6 @@ jobs:
             cp ../artifacts/emscripten/masquerade.html  hosting/wasm/ || true
             cp ../artifacts/emscripten/masquerade.js    hosting/wasm/ || true
             cp ../artifacts/emscripten/masquerade.wasm  hosting/wasm/ || true
-            cp ../artifacts/emscripten/masquerade.data  emscripten/   || true
-            cp ../artifacts/emscripten/masquerade.html  emscripten/   || true
-            cp ../artifacts/emscripten/masquerade.js    emscripten/   || true
-            cp ../artifacts/emscripten/masquerade.wasm  emscripten/   || true
           fi
 
           if [ -f "../artifacts/license/LICENSE.md" ]; then

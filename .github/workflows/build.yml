@@ -82,9 +82,9 @@ jobs:
             external/SDL
             external/SDL_net
             external/nativefiledialog-extended
-          key: windows-external-all-v20-${{ hashFiles('.github/workflows/*.yml') }}
+          key: windows-external-all-v21-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: |
-            windows-external-all-v20-
+            windows-external-all-v21-
 
       # --- Clone all dependencies (only if not cached)
       - name: Clone all dependencies
@@ -362,9 +362,9 @@ jobs:
             external/SDL
             external/SDL_net
             external/nativefiledialog-extended
-          key: linux-external-all-v10-${{ hashFiles('.github/workflows/*.yml') }}
+          key: linux-external-all-v11-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: |
-            linux-external-all-v10-
+            linux-external-all-v11-
 
       # --- Clone all dependencies
       - name: Clone all dependencies
@@ -551,9 +551,9 @@ jobs:
             external/emscripten-browser-file
             external/boost
             external/rapidjson
-          key: emscripten-external-all-v8-${{ hashFiles('.github/workflows/*.yml') }}
+          key: emscripten-external-all-v9-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: |
-            emscripten-external-all-v8-
+            emscripten-external-all-v9-
 
       # --- Cache SDL3 (Emscripten build + install)
       - name: Cache SDL3 Emscripten

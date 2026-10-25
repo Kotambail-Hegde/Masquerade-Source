@@ -160,9 +160,9 @@ jobs:
             external/SDL
             external/SDL_net
             external/nativefiledialog-extended
-          key: windows-external-all-v21-${{ hashFiles('.github/workflows/*.yml') }}
+          key: windows-external-all-v22-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: |
-            windows-external-all-v21-
+            windows-external-all-v22-
 
       - name: Clone all dependencies
         if: steps.cache-external.outputs.cache-hit != 'true'
@@ -434,9 +434,9 @@ jobs:
             external/SDL
             external/SDL_net
             external/nativefiledialog-extended
-          key: linux-external-all-v11-${{ hashFiles('.github/workflows/*.yml') }}
+          key: linux-external-all-v12-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: |
-            linux-external-all-v11-
+            linux-external-all-v12-
 
       - name: Clone all dependencies
         if: steps.cache-external.outputs.cache-hit != 'true'
@@ -557,9 +557,9 @@ jobs:
             external/emscripten-browser-file
             external/boost
             external/rapidjson
-          key: emscripten-external-all-v9-${{ hashFiles('.github/workflows/*.yml') }}
+          key: emscripten-external-all-v10-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: |
-            emscripten-external-all-v9-
+            emscripten-external-all-v10-
 
       - name: Cache SDL3 Emscripten
         id: cache-sdl-emscripten
@@ -855,13 +855,6 @@ jobs:
             echo "✅ Clean assets overlaid into $DEST"
           }
 
-          # ── Hosting — only replace masquerade files, keep index.html etc. ──
-          cp ../artifacts/emscripten/masquerade.data  hosting/wasm/
-          cp ../artifacts/emscripten/masquerade.html  hosting/wasm/
-          cp ../artifacts/emscripten/masquerade.js    hosting/wasm/
-          cp ../artifacts/emscripten/masquerade.wasm  hosting/wasm/
-          echo "✅ Hosting placed"
-
           # ── LICENSE.md → Emulator repo root ──────────────────────────────
           if [ -f "../artifacts/license/LICENSE.md" ]; then
             cp ../artifacts/license/LICENSE.md ./LICENSE.md
@@ -904,10 +897,10 @@ jobs:
 
           # ── Emscripten — only replace masquerade files ────────────────────
           if [ "${{ github.event.inputs.release_emscripten }}" = "true" ]; then
-            cp ../artifacts/emscripten/masquerade.data  emscripten/
-            cp ../artifacts/emscripten/masquerade.html  emscripten/
-            cp ../artifacts/emscripten/masquerade.js    emscripten/
-            cp ../artifacts/emscripten/masquerade.wasm  emscripten/
+            cp ../artifacts/emscripten/masquerade.data  hosting/wasm/
+            cp ../artifacts/emscripten/masquerade.html  hosting/wasm/
+            cp ../artifacts/emscripten/masquerade.js    hosting/wasm/
+            cp ../artifacts/emscripten/masquerade.wasm  hosting/wasm/
             echo "✅ Emscripten artifacts placed"
           else
             echo "⏭️  Emscripten not selected for this release"

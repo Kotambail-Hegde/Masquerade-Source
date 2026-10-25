@@ -332,9 +332,9 @@ static void MasqApplyPalette(const MasqThemePalette_t& p)
 	// Tabs (old names on purpose: they exist in the ImGui version Masquerade builds against)
 	c[ImGuiCol_Tab] = p.menuBarBg;
 	c[ImGuiCol_TabHovered] = mix(p.frameBgHovered, p.accent, 0.35f);
-	c[ImGuiCol_TabActive] = mix(p.frameBgActive, p.accent, 0.20f);
-	c[ImGuiCol_TabUnfocused] = p.menuBarBg;
-	c[ImGuiCol_TabUnfocusedActive] = p.frameBgHovered;
+	c[ImGuiCol_TabSelected] = mix(p.frameBgActive, p.accent, 0.20f);
+	c[ImGuiCol_TabDimmed] = p.menuBarBg;
+	c[ImGuiCol_TabDimmedSelected] = p.frameBgHovered;
 #ifdef IMGUI_HAS_DOCK
 	c[ImGuiCol_DockingPreview] = alpha(p.accent, 0.65f);
 	c[ImGuiCol_DockingEmptyBg] = mix(p.windowBg, ImVec4(0.0f, 0.0f, 0.0f, 1.0f), 0.30f);
@@ -3151,9 +3151,9 @@ public:
 
 		colors[ImGuiCol_Tab] = ImVec4(0.015f, 0.070f, 0.030f, 0.60f);
 		colors[ImGuiCol_TabHovered] = ImVec4(0.040f, 0.200f, 0.080f, 0.80f);
-		colors[ImGuiCol_TabActive] = ImVec4(0.030f, 0.150f, 0.060f, 1.00f);
-		colors[ImGuiCol_TabUnfocused] = ImVec4(0.010f, 0.040f, 0.020f, 0.60f);
-		colors[ImGuiCol_TabUnfocusedActive] = ImVec4(0.015f, 0.070f, 0.030f, 0.80f);
+		colors[ImGuiCol_TabSelected] = ImVec4(0.030f, 0.150f, 0.060f, 1.00f);
+		colors[ImGuiCol_TabDimmed] = ImVec4(0.010f, 0.040f, 0.020f, 0.60f);
+		colors[ImGuiCol_TabDimmedSelected] = ImVec4(0.015f, 0.070f, 0.030f, 0.80f);
 
 		colors[ImGuiCol_TitleBg] = titleBg;
 		colors[ImGuiCol_TitleBgActive] = titleBgActive;
@@ -3266,7 +3266,7 @@ public:
 					colors[ImGuiCol_Header] = ImVec4(tab.x, tab.y, tab.z, tab.w * 0.50f);
 				colors[ImGuiCol_TabHovered] =
 					colors[ImGuiCol_HeaderHovered] = ImVec4(tab.x, tab.y, tab.z, tab.w * 0.75f);
-				colors[ImGuiCol_TabActive] =
+				colors[ImGuiCol_TabSelected] =
 					colors[ImGuiCol_HeaderActive] = tab;
 			}
 
