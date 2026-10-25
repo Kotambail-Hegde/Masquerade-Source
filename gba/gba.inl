@@ -3578,8 +3578,10 @@ MASQ_INLINE void GBA_t::displayCompleteScreen()
 			GL_CALL(glBindTexture(GL_TEXTURE_2D, gameboyAdvance_matrix_texture));
 			GL_CALL(glUniform1i(glGetUniformLocation(shaderProgramBlend, "u_Texture"), 0));
 
-			// Set texel size (1 / 4) to repeat the matrix texture per pixel
-			float texelSize[2] = { 1.0f / 4.0f, 1.0f / 4.0f };
+			// Repeat the 4x4 matrix texture once per emulated pixel, i.e. once every FRAME_BUFFER_SCALE framebuffer pixels (the
+			// fixed-function path does the same). The old hard-coded 1/4 was only right while FRAME_BUFFER_SCALE == 4
+			const float texelScale = 1.0f / static_cast<float>(FRAME_BUFFER_SCALE);
+			float texelSize[2] = { texelScale, texelScale };
 			GL_CALL(glUniform2fv(glGetUniformLocation(shaderProgramBlend, "u_TexelSize"), 1, texelSize));
 
 			GL_CALL(glBindVertexArray(fullscreenVAO));
@@ -3596,15 +3598,29 @@ MASQ_INLINE void GBA_t::displayCompleteScreen()
 		// 5. Setup filtering for final display (e.g., ImGui::Image or screen blit)
 		GL_CALL(glBindTexture(GL_TEXTURE_2D, masquerade_texture));
 
-		filter = (currEnVFilter == VIDEO_FILTERS::LCD_FILTER) ? GL_LINEAR : GL_NEAREST;
+		const FLAG lcdFilterActive = (currEnVFilter == VIDEO_FILTERS::LCD_FILTER) ? YES : NO;
+		filter = (lcdFilterActive == YES) ? GL_LINEAR : GL_NEAREST;
 
-		// Apply filtering only when it changes
-		static GLint prevFilterFinalGBA = -1;
-		if (filter != prevFilterFinalGBA)
+		// The LCD grid is a 1 pixel pattern inside a framebuffer that is FRAME_BUFFER_SCALE times larger than the screen. When the
+		// window is smaller than that framebuffer, plain bilinear minification skips most of those pixels and the grid aliases into
+		// coarse "tiles". Mipmaps average the grid properly instead. Windows at or above the framebuffer size still magnify from
+		// level 0, so they look exactly as before. (The framebuffer is not bound here, which glGenerateMipmap requires.)
+		if (lcdFilterActive == YES)
 		{
-			GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter));
+			GL_CALL(glGenerateMipmap(GL_TEXTURE_2D));
+		}
+
+		// The texture object is re-created on every emulator init, so the cached state is keyed on the texture id as well
+		static GLint  prevFilterFinalGBA = -1;
+		static GLuint prevTexFinalGBA = 0;
+		static FLAG   prevLcdFilterFinalGBA = NO;
+		if (filter != prevFilterFinalGBA || prevTexFinalGBA != masquerade_texture || prevLcdFilterFinalGBA != lcdFilterActive)
+		{
+			GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, (lcdFilterActive == YES) ? GL_LINEAR_MIPMAP_LINEAR : filter));
 			GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter));
 			prevFilterFinalGBA = filter;
+			prevTexFinalGBA = masquerade_texture;
+			prevLcdFilterFinalGBA = lcdFilterActive;
 		}
 #endif
 	}

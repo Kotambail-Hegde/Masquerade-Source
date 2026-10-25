@@ -13,7 +13,6 @@
 
 #pragma region MACROS
 #pragma region WIP
-#define GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN	YES	// Refer : https://nba-emu.github.io/hw-docs/ppu/background.html
 #define GBA_ENABLE_ROM_SEQ_BURST_QUIRK					YES
 #define GBA_ENABLE_AGS_PATCHED_TEST						NO
 #pragma endregion WIP
@@ -7750,8 +7749,7 @@ OPT_SPEED
 					}
 				}
 
-				if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.SCREEN_DISP_OBJ == SET
-					&& pGBA_display->gfx_obj[x][y] != RESET)
+				if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.SCREEN_DISP_OBJ == SET && pGBA_display->gfx_obj[x][y] != RESET)
 				{
 					// If object pixel has higher or equal priority to current target layer 1
 					if (pGBA_display->objPriority[x][y] <= pGBA_display->priorities[ZERO])
@@ -7929,7 +7927,9 @@ OPT_SPEED
 
 			RESET_PIXEL(x, y);
 
-			if ((y < getScreenHeight()) && (x < getScreenWidth()))
+			// Use compile-time dimensions directly instead of getScreenWidth()/getScreenHeight()
+			// so Visual Studio's static analyzer can verify the array bounds and not give false positives.
+			if ((y < screen_height) && (x < screen_width))
 			{
 				pGBA_display->imGuiBuffer.imGuiBuffer2D[y][x].a = ALPHA;
 				pGBA_display->imGuiBuffer.imGuiBuffer2D[y][x].r = FIVEBIT_TO_EIGHTBIT_COLOR(finalPixel.RED);
@@ -8601,524 +8601,6 @@ OPT_SPEED
 	// MODE 0 and MODE 1 BACKGROUND RENDERING
 	// ============================================
 
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-	MASQ_INLINE void MODE0_M_BG_CYCLE(ID bgID)
-	{
-
-		uint32_t xPixelCoordinate = pGBA_display->currentBgPixel;
-		uint32_t yPixelCoordinate = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
-
-		// Early bounds check on X and Y
-		if ((xPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (yPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
-		{
-			RETURN;
-		}
-
-		// Bounds check for bgID
-		if (bgID < BG0 || bgID > BG3)
-		{
-			FATAL("Unknown BG in mode 0");
-			RETURN;
-		}
-
-		pGBA_display->bgCache[bgID].xPixelCoordinate = xPixelCoordinate;
-		pGBA_display->bgCache[bgID].yPixelCoordinate = yPixelCoordinate;
-
-		GBA_WORD bgTileMapBaseAddr = ZERO;
-		mBGnCNTHalfWord_t BGxCNT = { ZERO };
-		DIM16 hofs = ZERO;
-		DIM16 vofs = ZERO;
-
-		// Cache BG configuration values for fast access
-		auto getBGConfig = [&](ID id) -> std::tuple<int, FLAG, uint16_t, uint16_t, uint16_t>
-			{
-				switch (id)
-				{
-				case BG0:
-					RETURN{
-						static_cast<int>(pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTFields.SCREEN_BASE_BLOCK * 0x0800),
-						pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET,
-						static_cast<uint16_t>(pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTHalfWord),
-						static_cast<uint16_t>(pGBA_peripherals->mBG0HOFSHalfWord.mBGniOFSFields.OFFSET),
-						static_cast<uint16_t>(pGBA_peripherals->mBG0VOFSHalfWord.mBGniOFSFields.OFFSET)
-					};
-				case BG1:
-					RETURN{
-						static_cast<int>(pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTFields.SCREEN_BASE_BLOCK * 0x0800),
-						pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET,
-						static_cast<uint16_t>(pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTHalfWord),
-						static_cast<uint16_t>(pGBA_peripherals->mBG1HOFSHalfWord.mBGniOFSFields.OFFSET),
-						static_cast<uint16_t>(pGBA_peripherals->mBG1VOFSHalfWord.mBGniOFSFields.OFFSET)
-					};
-				case BG2:
-					RETURN{
-						static_cast<int>(pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTFields.SCREEN_BASE_BLOCK * 0x0800),
-						pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET,
-						static_cast<uint16_t>(pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTHalfWord),
-						static_cast<uint16_t>(pGBA_peripherals->mBG2HOFSHalfWord.mBGniOFSFields.OFFSET),
-						static_cast<uint16_t>(pGBA_peripherals->mBG2VOFSHalfWord.mBGniOFSFields.OFFSET)
-					};
-				case BG3:
-					RETURN{
-						static_cast<int>(pGBA_peripherals->mBG3CNTHalfWord.mBGnCNTFields.SCREEN_BASE_BLOCK * 0x0800),
-						pGBA_peripherals->mBG3CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET,
-						static_cast<uint16_t>(pGBA_peripherals->mBG3CNTHalfWord.mBGnCNTHalfWord),
-						static_cast<uint16_t>(pGBA_peripherals->mBG3HOFSHalfWord.mBGniOFSFields.OFFSET),
-						static_cast<uint16_t>(pGBA_peripherals->mBG3VOFSHalfWord.mBGniOFSFields.OFFSET)
-					};
-				default:
-					// Safe fallback to avoid undefined behavior
-					RETURN{ 0, false, 0, 0, 0 };
-				}
-			};
-
-		auto [bgTileMapBaseAddr_, is8bppMode, BGxCNT_, hofs_, vofs_] = getBGConfig(bgID);
-		bgTileMapBaseAddr = bgTileMapBaseAddr_;
-		pGBA_display->bgCache[bgID].is8bppMode = is8bppMode;
-		BGxCNT.mBGnCNTHalfWord = BGxCNT_;
-		hofs = hofs_;
-		vofs = vofs_;
-
-		/*
-		* Refer http://problemkaputt.de/gbatek-lcd-i-o-bg-control.htm
-		* BGs always wraparound, so
-		* offsets = BGxHOFS and BGxHVOFS (BG offsets within static screen)
-		* Final offsets from screen (tileMap_x and tileMap_y) = (x + BGxHOFS) % 512 and (y + BGxHVOFS) % 512
-		* Offsets in tile coordinates (tile_x and tile_y) = Final offsets from screen / 8
-		* Offsets within tile coordinates (WithinTile_x and WithinTile_y) = Final offsets from screen % 8
-		*
-		* When BGxCNT->Size = 0
-		* SC0 -> 256x256
-		* When BGxCNT->Size = 1
-		* SC0 SC1 -> 512x256
-		* When BGxCNT->Size = 2
-		* SC0 -> 256x512
-		* SC1
-		* When BGxCNT->Size = 3
-		* SC0 SC1 -> 512x512
-		* SC2 SC3
-		* SC0 is defined by the normal BG Map base address (Bit 8-12 of BGxCNT),
-		* SC1 uses same address +2K, SC2 address +4K, SC3 address +6K
-		* So, for given x, y we need to figure out in which SCn it falls...
-		* Then each SCn is 256x256, so , number of tiles i.e. tilesPerRow = bitsPerRow / 8 = 32
-		* So, withinTileOffset = (tile_x + (tile_y * tilesPerRow))
-		* But, we do a 16bit read for tile map as mentioned under Mode 0 in https://nba-emu.github.io/hw-docs/ppu/background.html and http://problemkaputt.de/gbatek-lcd-vram-bg-screen-data-format-bg-map.htm unlike non text modes
-		* So, 16withinTileOffset = 2 * withinTileOffset
-		*
-		* Final Address for tile map = [VRAM_START_ADDRESS + bgTileMapBaseAddr + (SCn * 2K) + (16withinTileOffset)]
-		*/
-
-		// Cached sum of coordinates and offsets
-		DIM16 offsetSumX = xPixelCoordinate + hofs;
-		DIM16 offsetSumY = yPixelCoordinate + vofs;
-
-		ID SCn = ZERO;
-		switch (BGxCNT.mBGnCNTFields.SCREEN_SIZE)
-		{
-			// SC0
-		case ZERO: SCn = ZERO; BREAK;
-			// SC0 SC1
-		case ONE: SCn = ((offsetSumX & 511) > 255) ? ONE : ZERO; BREAK;
-			// SC0
-			// SC1
-		case TWO: SCn = ((offsetSumY & 511) > 255) ? ONE : ZERO; BREAK;
-			// SC0 SC1
-			// SC2 SC3
-		case THREE:
-			SCn = ((offsetSumX & 511) > 255) ? ONE : ZERO;
-			SCn += ((offsetSumY & 511) > 255) ? TWO : ZERO;
-			BREAK;
-		default:
-			FATAL("Unknown screen size in mode 0");
-			RETURN;
-		}
-
-		pGBA_display->bgCache[bgID].hofs = hofs;
-		pGBA_display->bgCache[bgID].vofs = vofs;
-
-		// Within SCn
-		DIM16 tileMapX = offsetSumX & 255; // % 256 because because if more than 255, it is SC1 or SC3, but we are already accounting for SCn, so we just get tileX within SCn
-		DIM16 tileMapY = offsetSumY & 255; // % 256 because because if more than 255, it is SC2 or SC3, but we are already accounting for SCn, so we just get tileX within SCn
-
-		pGBA_display->bgCache[bgID].tileMapX = tileMapX;
-		pGBA_display->bgCache[bgID].tileMapY = tileMapY;
-
-		const DIM16 tilesPerRowInShifts = FIVE; // 1 << 5 is same as * 32; Each SCn is of 256*256, so 256 / 8 = 32
-		DIM16 tileMapOffset = (tileMapX >> THREE) + ((tileMapY >> THREE) << tilesPerRowInShifts);
-
-		// Since we have 16 bits per tile instead of 8
-		// Refer http://problemkaputt.de/gbatek-lcd-vram-bg-screen-data-format-bg-map.htm
-		tileMapOffset <<= ONE;
-
-		GBA_WORD addressInTileMapArea = VIDEO_RAM_START_ADDRESS + bgTileMapBaseAddr + (SCn * 0x800) + tileMapOffset;
-
-		// NOTE: Needed for tonc's cbb_demo
-		// Refer: https://www.coranac.com/tonc/text/regbg.htm
-		if (addressInTileMapArea < (VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
-		{
-			pGBA_display->bgCache[bgID].tileDescriptor.raw = readRawMemory<GBA_HALFWORD>(addressInTileMapArea, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
-		}
-		else
-		{
-			pGBA_display->bgCache[bgID].tileDescriptor.raw = RESET;
-			PPUTODO("As per NBA, this is set to some latched value");
-		}
-
-	}
-
-	MASQ_INLINE void MODE0_T_BG_CYCLE(ID bgID)
-	{
-
-		auto X = pGBA_display->currentBgPixel;
-		auto Y = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
-
-		// Early bounds check on X and Y
-		if ((X >= TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (Y >= TO_UINT16(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
-		{
-			RETURN;
-		}
-
-		// Bounds check for bgID
-		if (bgID < BG0 || bgID > BG3)
-		{
-			FATAL("Unknown BG in mode 0");
-			RETURN;
-		}
-
-		GBA_WORD bgTileDataBaseAddr =
-			(bgID == BG0)
-			? (pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTFields.CHARACTER_BASE_BLOCK * 0x4000)
-			: (bgID == BG1)
-			? (pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTFields.CHARACTER_BASE_BLOCK * 0x4000)
-			: (bgID == BG2)
-			? (pGBA_peripherals->mBG2CNTHalfWord.mBGnCNTFields.CHARACTER_BASE_BLOCK * 0x4000)
-			: (pGBA_peripherals->mBG3CNTHalfWord.mBGnCNTFields.CHARACTER_BASE_BLOCK * 0x4000);
-
-		auto xTileCoordinate = pGBA_display->bgCache[bgID].tileMapX & SEVEN; // % 8
-		auto yTileCoordinate = pGBA_display->bgCache[bgID].tileMapY & SEVEN; // % 8
-
-		xTileCoordinate = pGBA_display->bgCache[bgID].tileDescriptor.hflip == YES
-			? flipLUT[xTileCoordinate]
-			: xTileCoordinate;
-
-		yTileCoordinate = pGBA_display->bgCache[bgID].tileDescriptor.vflip == YES
-			? flipLUT[yTileCoordinate]
-			: yTileCoordinate;
-
-		GBA_WORD withinTileDataOffset = xTileCoordinate + (yTileCoordinate << THREE);
-		// Refer http://problemkaputt.de/gbatek-lcd-vram-character-data.htm
-		DIM16 sizeOfEachTileData = (pGBA_display->bgCache[bgID].is8bppMode == NO) ? 0x20 : 0x40;
-
-		// 4bpp mode
-		if (pGBA_display->bgCache[bgID].is8bppMode == NO)
-		{
-			// 4bpp mode
-			GBA_WORD addressInTileDataArea =
-				VIDEO_RAM_START_ADDRESS
-				+ bgTileDataBaseAddr
-				+ (sizeOfEachTileData * pGBA_display->bgCache[bgID].tileDescriptor.fetchedTileID)
-				+ (withinTileDataOffset >> ONE); // Divide by 2 because in 4bpp mode, A single halfword gives data for 4 pixels
-
-			BYTE pixelColorNumberFor2PixelsFromTileData = RESET;
-
-			// NOTE: Needed for tonc's cbb_demo
-			// Refer: https://www.coranac.com/tonc/text/regbg.htm
-			if (addressInTileDataArea < (VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
-			{
-				pixelColorNumberFor2PixelsFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
-			}
-			else
-			{
-				PPUTODO("As per NBA, pixelColorNumberFor2PixelsFromTileData is set to some latched value");
-			}
-
-			// Note: Palette is of 16 bytes, so palette index is 0, when tile data is 0 and palette index is 1, when tile data is 1
-			// Odd means we need to shift right by 4
-			pixelColorNumberFor2PixelsFromTileData >>= ((withinTileDataOffset & ONE) ? FOUR : ZERO);
-			// extract only the required 4 bits
-			BYTE pixelColorNumberPerPixel = pixelColorNumberFor2PixelsFromTileData & 0x0F;
-			INC32 paletteIndex = pixelColorNumberPerPixel << ONE;
-
-			if (paletteIndex != ZERO)
-			{
-				// Refer mode 2 bg processing to see how we determine sizeOfEachPaletteInBytes
-				const DIM16 sizeOfEachPaletteInBytesInShifts = FIVE; // 1 << 5 is same as *32
-				paletteIndex += (pGBA_display->bgCache[bgID].tileDescriptor.pb << sizeOfEachPaletteInBytesInShifts);
-			}
-			pGBA_display->gfx_bg[bgID][X][Y] = paletteIndex;
-		}
-		else
-		{
-			// 8bpp mode
-			GBA_WORD addressInTileDataArea =
-				VIDEO_RAM_START_ADDRESS
-				+ bgTileDataBaseAddr
-				+ (sizeOfEachTileData * pGBA_display->bgCache[bgID].tileDescriptor.fetchedTileID)
-				+ withinTileDataOffset;
-
-			BYTE pixelColorNumberFor1PixelFromTileData = RESET;
-
-			// NOTE: Needed for tonc's cbb_demo
-			// Refer: https://www.coranac.com/tonc/text/regbg.htm
-			if (addressInTileDataArea < (VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
-			{
-				pixelColorNumberFor1PixelFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
-			}
-			else
-			{
-				PPUTODO("As per NBA, pixelColorNumberFor1PixelFromTileData is set to some latched value");
-			}
-
-			// Note: Palette is of 16 bytes, so palette index is 0, when tile data is 0 and palette index is 1, when tile data is 1
-			INC32 paletteIndex = pixelColorNumberFor1PixelFromTileData << ONE;
-			pGBA_display->gfx_bg[bgID][X][Y] = paletteIndex;
-		}
-
-	}
-
-	MASQ_INLINE void MODE1_M_TEXT_BG_CYCLE(ID bgID)
-	{
-
-		uint32_t xPixelCoordinate = pGBA_display->currentBgPixel;
-		uint32_t yPixelCoordinate = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
-
-		// Early bounds check on X and Y
-		if ((xPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (yPixelCoordinate >= TO_UINT16(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
-		{
-			RETURN;
-		}
-
-		// Bounds check for bgID
-		if (bgID < BG0 || bgID > BG1)
-		{
-			FATAL("Unknown BG in mode 1");
-			RETURN;
-		}
-
-		pGBA_display->bgCache[bgID].xPixelCoordinate = xPixelCoordinate;
-		pGBA_display->bgCache[bgID].yPixelCoordinate = yPixelCoordinate;
-
-		GBA_WORD bgTileMapBaseAddr = ZERO;
-		mBGnCNTHalfWord_t BGxCNT = { ZERO };
-		DIM16 hofs = ZERO;
-		DIM16 vofs = ZERO;
-
-		if (bgID == BG0)
-		{
-			bgTileMapBaseAddr = (pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTFields.SCREEN_BASE_BLOCK * 0x0800);
-			pGBA_display->bgCache[BG0].is8bppMode = pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET;
-			BGxCNT.mBGnCNTHalfWord = pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTHalfWord;
-			hofs = pGBA_peripherals->mBG0HOFSHalfWord.mBGniOFSFields.OFFSET;
-			vofs = pGBA_peripherals->mBG0VOFSHalfWord.mBGniOFSFields.OFFSET;
-		}
-		else if (bgID == BG1)
-		{
-			bgTileMapBaseAddr = (pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTFields.SCREEN_BASE_BLOCK * 0x0800);
-			pGBA_display->bgCache[BG1].is8bppMode = pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTFields.COLOR_PALETTES == SET;
-			BGxCNT.mBGnCNTHalfWord = pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTHalfWord;
-			hofs = pGBA_peripherals->mBG1HOFSHalfWord.mBGniOFSFields.OFFSET;
-			vofs = pGBA_peripherals->mBG1VOFSHalfWord.mBGniOFSFields.OFFSET;
-		}
-		else
-		{
-			FATAL("Unknown BG in mode 1 text mode");
-			RETURN;
-		}
-
-		/*
-		* Refer http://problemkaputt.de/gbatek-lcd-i-o-bg-control.htm
-		* BGs always wraparound, so
-		* offsets = BGxHOFS and BGxHVOFS (BG offsets within static screen)
-		* Final offsets from screen (tileMap_x and tileMap_y) = (x + BGxHOFS) % 512 and (y + BGxHVOFS) % 512
-		* Offsets in tile coordinates (tile_x and tile_y) = Final offsets from screen / 8
-		* Offsets within tile coordinates (WithinTile_x and WithinTile_y) = Final offsets from screen % 8
-		*
-		* When BGxCNT->Size = 0
-		* SC0 -> 256x256
-		* When BGxCNT->Size = 1
-		* SC0 SC1 -> 512x256
-		* When BGxCNT->Size = 2
-		* SC0 -> 256x512
-		* SC1
-		* When BGxCNT->Size = 3
-		* SC0 SC1 -> 512x512
-		* SC2 SC3
-		* SC0 is defined by the normal BG Map base address (Bit 8-12 of BGxCNT),
-		* SC1 uses same address +2K, SC2 address +4K, SC3 address +6K
-		* So, for given x, y we need to figure out in which SCn it falls...
-		* Then each SCn is 256x256, so , number of tiles i.e. tilesPerRow = bitsPerRow / 8 = 32
-		* So, withinTileOffset = (tile_x + (tile_y * tilesPerRow))
-		* But, we do a 16bit read for tile map as mentioned under Mode 0 in https://nba-emu.github.io/hw-docs/ppu/background.html and http://problemkaputt.de/gbatek-lcd-vram-bg-screen-data-format-bg-map.htm unlike non text modes
-		* So, 16withinTileOffset = 2 * withinTileOffset
-		*
-		* Final Address for tile map = [VRAM_START_ADDRESS + bgTileMapBaseAddr + (SCn * 2K) + (16withinTileOffset)]
-		*
-		*/
-
-		// Cached sum of coordinates and offsets
-		DIM16 offsetSumX = xPixelCoordinate + hofs;
-		DIM16 offsetSumY = yPixelCoordinate + vofs;
-
-		ID SCn = ZERO;
-		switch (BGxCNT.mBGnCNTFields.SCREEN_SIZE)
-		{
-			// SC0
-		case ZERO: SCn = ZERO; BREAK;
-			// SC0 SC1
-		case ONE: SCn = ((offsetSumX & 511) > 255) ? ONE : ZERO; BREAK;
-			// SC0
-			// SC1
-		case TWO: SCn = ((offsetSumY & 511) > 255) ? ONE : ZERO; BREAK;
-			// SC0 SC1
-			// SC2 SC3
-		case THREE:
-			SCn = ((offsetSumX & 511) > 255) ? ONE : ZERO;
-			SCn += ((offsetSumY & 511) > 255) ? TWO : ZERO;
-			BREAK;
-		default:
-			FATAL("Unknown screen size in mode 0");
-			RETURN;
-		}
-
-		pGBA_display->bgCache[bgID].hofs = hofs;
-		pGBA_display->bgCache[bgID].vofs = vofs;
-
-		// Within SCn
-		DIM16 tileMapX = offsetSumX & 255; // % 256 because because if more than 255, it is SC1 or SC3, but we are already accounting for SCn, so we just get tileX within SCn
-		DIM16 tileMapY = offsetSumY & 255; // % 256 because because if more than 255, it is SC2 or SC3, but we are already accounting for SCn, so we just get tileX within SCn
-
-		pGBA_display->bgCache[bgID].tileMapX = tileMapX;
-		pGBA_display->bgCache[bgID].tileMapY = tileMapY;
-
-		const DIM16 tilesPerRowInShifts = FIVE; // 1 << 5 is same as * 32; Each SCn is of 256*256, so 256 / 8 = 32
-		DIM16 tileMapOffset = (tileMapX >> THREE) + ((tileMapY >> THREE) << tilesPerRowInShifts);
-
-		// Since we have 16 bits per tile instead of 8
-		// Refer http://problemkaputt.de/gbatek-lcd-vram-bg-screen-data-format-bg-map.htm
-		tileMapOffset <<= ONE;
-
-		GBA_WORD addressInTileMapArea = VIDEO_RAM_START_ADDRESS + bgTileMapBaseAddr + (SCn * 0x800) + tileMapOffset;
-
-		// NOTE: Needed for tonc's cbb_demo
-		// Refer: https://www.coranac.com/tonc/text/regbg.htm
-		if (addressInTileMapArea < (VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
-		{
-			pGBA_display->bgCache[bgID].tileDescriptor.raw = readRawMemory<GBA_HALFWORD>(addressInTileMapArea, MEMORY_ACCESS_WIDTH::SIXTEEN_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
-		}
-		else
-		{
-			pGBA_display->bgCache[bgID].tileDescriptor.raw = RESET;
-			PPUTODO("As per NBA, this is set to some latched value");
-		}
-
-	}
-
-	MASQ_INLINE void MODE1_T_TEXT_BG_CYCLE(ID bgID)
-	{
-
-		auto X = pGBA_display->currentBgPixel;
-		auto Y = pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY;
-
-		// Early bounds check on X and Y
-		if ((X >= TO_UINT16(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (Y >= TO_UINT16(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
-		{
-			RETURN;
-		}
-
-		// Bounds check for bgID
-		if (bgID < BG0 || bgID > BG1)
-		{
-			FATAL("Unknown BG in mode 1");
-			RETURN;
-		}
-
-		GBA_WORD bgTileDataBaseAddr = (bgID == BG0)
-			? (pGBA_peripherals->mBG0CNTHalfWord.mBGnCNTFields.CHARACTER_BASE_BLOCK * 0x4000)
-			: (pGBA_peripherals->mBG1CNTHalfWord.mBGnCNTFields.CHARACTER_BASE_BLOCK * 0x4000);
-
-		auto xTileCoordinate = pGBA_display->bgCache[bgID].tileMapX & SEVEN; // % 8
-		auto yTileCoordinate = pGBA_display->bgCache[bgID].tileMapY & SEVEN; // % 8
-
-		xTileCoordinate = pGBA_display->bgCache[bgID].tileDescriptor.hflip == YES
-			? flipLUT[xTileCoordinate]
-			: xTileCoordinate;
-
-		yTileCoordinate = pGBA_display->bgCache[bgID].tileDescriptor.vflip == YES
-			? flipLUT[yTileCoordinate]
-			: yTileCoordinate;
-
-		GBA_WORD withinTileDataOffset = xTileCoordinate + (yTileCoordinate << THREE);
-		// Refer http://problemkaputt.de/gbatek-lcd-vram-character-data.htm
-		DIM16 sizeOfEachTileData = (pGBA_display->bgCache[bgID].is8bppMode == NO) ? 0x20 : 0x40;
-
-		// 4bpp mode
-		if (pGBA_display->bgCache[bgID].is8bppMode == NO)
-		{
-			GBA_WORD addressInTileDataArea =
-				VIDEO_RAM_START_ADDRESS
-				+ bgTileDataBaseAddr
-				+ (sizeOfEachTileData * pGBA_display->bgCache[bgID].tileDescriptor.fetchedTileID)
-				+ (withinTileDataOffset >> ONE); // Divide by 2 because in 4bpp mode, A single halfword gives data for 4 pixels
-
-			BYTE pixelColorNumberFor2PixelsFromTileData = RESET;
-
-			// NOTE: Needed for tonc's cbb_demo
-			// Refer: https://www.coranac.com/tonc/text/regbg.htm
-			if (addressInTileDataArea < (VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
-			{
-				pixelColorNumberFor2PixelsFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
-			}
-			else
-			{
-				PPUTODO("As per NBA, pixelColorNumberFor2PixelsFromTileData is set to some latched value");
-			}
-
-			// Note: Palette is of 16 bytes, so palette index is 0, when tile data is 0 and palette index is 1, when tile data is 1
-			// Odd means we need to shift right by 4
-			pixelColorNumberFor2PixelsFromTileData >>= ((withinTileDataOffset & ONE) ? FOUR : ZERO);
-			// extract only the required 4 bits
-			BYTE pixelColorNumberPerPixel = pixelColorNumberFor2PixelsFromTileData & 0x0F;
-			INC32 paletteIndex = pixelColorNumberPerPixel << ONE;
-
-			if (paletteIndex != ZERO)
-			{
-				// Refer mode 2 bg processing to see how we determine sizeOfEachPaletteInBytes
-				const DIM16 sizeOfEachPaletteInBytesInShifts = FIVE; // 1 << 5 is same as *32
-				paletteIndex += (pGBA_display->bgCache[bgID].tileDescriptor.pb << sizeOfEachPaletteInBytesInShifts);
-			}
-			pGBA_display->gfx_bg[bgID][X][Y] = paletteIndex;
-		}
-		// 8bpp mode
-		else
-		{
-			// 8bpp mode
-			GBA_WORD addressInTileDataArea =
-				VIDEO_RAM_START_ADDRESS
-				+ bgTileDataBaseAddr
-				+ (sizeOfEachTileData * pGBA_display->bgCache[bgID].tileDescriptor.fetchedTileID)
-				+ withinTileDataOffset;
-
-			BYTE pixelColorNumberFor1PixelFromTileData = RESET;
-
-			// NOTE: Needed for tonc's cbb_demo
-			// Refer: https://www.coranac.com/tonc/text/regbg.htm
-			if (addressInTileDataArea < (VIDEO_RAM_START_ADDRESS + ((pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE >= MODE3) ? 0x14000 : 0x10000)))
-			{
-				pixelColorNumberFor1PixelFromTileData = readRawMemory<BYTE>(addressInTileDataArea, MEMORY_ACCESS_WIDTH::EIGHT_BIT, MEMORY_ACCESS_SOURCE::PPU, MEMORY_ACCESS_TYPE::AUTOMATIC);
-			}
-			else
-			{
-				PPUTODO("As per NBA, pixelColorNumberFor1PixelFromTileData is set to some latched value");
-			}
-
-			// Note: Palette is of 16 bytes, so palette index is 0, when tile data is 0 and palette index is 1, when tile data is 1
-			INC32 paletteIndex = pixelColorNumberFor1PixelFromTileData << ONE;
-			pGBA_display->gfx_bg[bgID][X][Y] = paletteIndex;
-		}
-
-	}
-
-#else
 	MASQ_INLINE void RENDER_MODE0_MODE1_PIXEL_X(ID bgID, GBA_HALFWORD pixelData, STATE8 state)
 	{
 
@@ -9792,7 +9274,6 @@ OPT_SPEED
 		}
 
 	}
-#endif
 
 	MASQ_INLINE void MODE1_M_AFFINE_BG_CYCLE()
 	{
@@ -9925,310 +9406,185 @@ OPT_SPEED
 
 	MASQ_INLINE void MODE0_BG_SEQUENCE(SSTATE32 state)
 	{
-
 		switch (state)
 		{
 		case ZERO:
 		{
 			MODE0_M_BG_CYCLE(BG0);
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE0_T_BG_CYCLE(BG0);
-#endif
 			BREAK;
 		}
 		case ONE:
 		{
 			MODE0_M_BG_CYCLE(BG1);
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE0_T_BG_CYCLE(BG1);
-#endif
 			BREAK;
 		}
 		case TWO:
 		{
 			MODE0_M_BG_CYCLE(BG2);
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE0_T_BG_CYCLE(BG2);
-#endif
 			BREAK;
 		}
 		case THREE:
 		{
 			MODE0_M_BG_CYCLE(BG3);
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE0_T_BG_CYCLE(BG3);
-#endif
 			++pGBA_display->currentBgPixel;
 			BREAK;
 		}
 		case FOUR:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE0_M_BG_CYCLE(BG0);
-#endif
 			MODE0_T_BG_CYCLE(BG0);
 			BREAK;
 		}
 		case FIVE:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE0_M_BG_CYCLE(BG1);
-#endif
 			MODE0_T_BG_CYCLE(BG1);
 			BREAK;
 		}
 		case SIX:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE0_M_BG_CYCLE(BG2);
-#endif
 			MODE0_T_BG_CYCLE(BG2);
 			BREAK;
 		}
 		case SEVEN:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE0_M_BG_CYCLE(BG3);
-#endif
 			MODE0_T_BG_CYCLE(BG3);
 			++pGBA_display->currentBgPixel;
 			BREAK;
 		}
 		case EIGHT:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE0_M_BG_CYCLE(BG0);
-			MODE0_T_BG_CYCLE(BG0);
-#endif
 			BREAK;
 		}
 		case NINE:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE0_M_BG_CYCLE(BG1);
-			MODE0_T_BG_CYCLE(BG1);
-#endif
 			BREAK;
 		}
 		case TEN:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE0_M_BG_CYCLE(BG2);
-			MODE0_T_BG_CYCLE(BG2);
-#endif
 			BREAK;
 		}
 		case ELEVEN:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE0_M_BG_CYCLE(BG3);
-			MODE0_T_BG_CYCLE(BG3);
-#endif
 			++pGBA_display->currentBgPixel;
 			BREAK;
 		}
 		case TWELVE:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE0_M_BG_CYCLE(BG0);
-			MODE0_T_BG_CYCLE(BG0);
-#else
 			if (pGBA_display->bgCache[BG0].is8bppMode == YES)
 			{
 				MODE0_T_BG_CYCLE(BG0);
 			}
-#endif
 			BREAK;
 		}
 		case THIRTEEN:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE0_M_BG_CYCLE(BG1);
-			MODE0_T_BG_CYCLE(BG1);
-#else
 			if (pGBA_display->bgCache[BG1].is8bppMode == YES)
 			{
 				MODE0_T_BG_CYCLE(BG1);
 			}
-#endif
 			BREAK;
 		}
 		case FOURTEEN:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE0_M_BG_CYCLE(BG2);
-			MODE0_T_BG_CYCLE(BG2);
-#else
 			if (pGBA_display->bgCache[BG2].is8bppMode == YES)
 			{
 				MODE0_T_BG_CYCLE(BG2);
 			}
-#endif
 			BREAK;
 		}
 		case FIFTEEN:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE0_M_BG_CYCLE(BG3);
-			MODE0_T_BG_CYCLE(BG3);
-#else
 			if (pGBA_display->bgCache[BG3].is8bppMode == YES)
 			{
 				MODE0_T_BG_CYCLE(BG3);
 			}
-#endif
 			++pGBA_display->currentBgPixel;
 			BREAK;
 		}
 		case SIXTEEN:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE0_M_BG_CYCLE(BG0);
-			MODE0_T_BG_CYCLE(BG0);
-#endif
 			BREAK;
 		}
 		case SEVENTEEN:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE0_M_BG_CYCLE(BG1);
-			MODE0_T_BG_CYCLE(BG1);
-#endif
 			BREAK;
 		}
 		case EIGHTEEN:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE0_M_BG_CYCLE(BG2);
-			MODE0_T_BG_CYCLE(BG2);
-#endif
 			BREAK;
 		}
 		case NINETEEN:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE0_M_BG_CYCLE(BG3);
-			MODE0_T_BG_CYCLE(BG3);
-#endif
 			++pGBA_display->currentBgPixel;
 			BREAK;
 		}
 		case TWENTY:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE0_M_BG_CYCLE(BG0);
-#endif
 			MODE0_T_BG_CYCLE(BG0);
 			BREAK;
 		}
 		case TWENTYONE:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE0_M_BG_CYCLE(BG1);
-#endif
 			MODE0_T_BG_CYCLE(BG1);
 			BREAK;
 		}
 		case TWENTYTWO:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE0_M_BG_CYCLE(BG2);
-#endif
 			MODE0_T_BG_CYCLE(BG2);
 			BREAK;
 		}
 		case TWENTYTHREE:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE0_M_BG_CYCLE(BG3);
-#endif
 			MODE0_T_BG_CYCLE(BG3);
 			++pGBA_display->currentBgPixel;
 			BREAK;
 		}
 		case TWENTYFOUR:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE0_M_BG_CYCLE(BG0);
-			MODE0_T_BG_CYCLE(BG0);
-#endif
 			BREAK;
 		}
 		case TWENTYFIVE:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE0_M_BG_CYCLE(BG1);
-			MODE0_T_BG_CYCLE(BG1);
-#endif
 			BREAK;
 		}
 		case TWENTYSIX:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE0_M_BG_CYCLE(BG2);
-			MODE0_T_BG_CYCLE(BG2);
-#endif
 			BREAK;
 		}
 		case TWENTYSEVEN:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE0_M_BG_CYCLE(BG3);
-			MODE0_T_BG_CYCLE(BG3);
-#endif
 			++pGBA_display->currentBgPixel;
 			BREAK;
 		}
 		case TWENTYEIGHT:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE0_M_BG_CYCLE(BG0);
-			MODE0_T_BG_CYCLE(BG0);
-#else
 			if (pGBA_display->bgCache[BG0].is8bppMode == YES)
 			{
 				MODE0_T_BG_CYCLE(BG0);
 			}
-#endif
 			BREAK;
 		}
 		case TWENTYNINE:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE0_M_BG_CYCLE(BG1);
-			MODE0_T_BG_CYCLE(BG1);
-#else
 			if (pGBA_display->bgCache[BG1].is8bppMode == YES)
 			{
 				MODE0_T_BG_CYCLE(BG1);
 			}
-#endif
 			BREAK;
 		}
 		case THIRTY:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE0_M_BG_CYCLE(BG2);
-			MODE0_T_BG_CYCLE(BG2);
-#else
 			if (pGBA_display->bgCache[BG2].is8bppMode == YES)
 			{
 				MODE0_T_BG_CYCLE(BG2);
 			}
-#endif
 			BREAK;
 		}
 		case THIRTYONE:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE0_M_BG_CYCLE(BG3);
-			MODE0_T_BG_CYCLE(BG3);
-#else
 			if (pGBA_display->bgCache[BG3].is8bppMode == YES)
 			{
 				MODE0_T_BG_CYCLE(BG3);
 			}
-#endif
 			++pGBA_display->currentBgPixel;
 			BREAK;
 		}
@@ -10237,28 +9593,20 @@ OPT_SPEED
 			FATAL("PPU mode 0 (BG) out of sync");
 		}
 		}
-
 	}
 
 	MASQ_INLINE void MODE1_BG_SEQUENCE(SSTATE32 state)
 	{
-
 		switch (state)
 		{
 		case ZERO:
 		{
 			MODE1_M_TEXT_BG_CYCLE(BG0);
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE1_T_TEXT_BG_CYCLE(BG0);
-#endif
 			BREAK;
 		}
 		case ONE:
 		{
 			MODE1_M_TEXT_BG_CYCLE(BG1);
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE1_T_TEXT_BG_CYCLE(BG1);
-#endif
 			BREAK;
 		}
 		case TWO:
@@ -10274,17 +9622,11 @@ OPT_SPEED
 		}
 		case FOUR:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE1_M_TEXT_BG_CYCLE(BG0);
-#endif
 			MODE1_T_TEXT_BG_CYCLE(BG0);
 			BREAK;
 		}
 		case FIVE:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE1_M_TEXT_BG_CYCLE(BG1);
-#endif
 			MODE1_T_TEXT_BG_CYCLE(BG1);
 			BREAK;
 		}
@@ -10301,18 +9643,10 @@ OPT_SPEED
 		}
 		case EIGHT:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE1_M_TEXT_BG_CYCLE(BG0);
-			MODE1_T_TEXT_BG_CYCLE(BG0);
-#endif
 			BREAK;
 		}
 		case NINE:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE1_M_TEXT_BG_CYCLE(BG1);
-			MODE1_T_TEXT_BG_CYCLE(BG1);
-#endif
 			BREAK;
 		}
 		case TEN:
@@ -10328,28 +9662,18 @@ OPT_SPEED
 		}
 		case TWELVE:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE1_M_TEXT_BG_CYCLE(BG0);
-			MODE1_T_TEXT_BG_CYCLE(BG0);
-#else
 			if (pGBA_display->bgCache[BG0].is8bppMode == YES)
 			{
 				MODE1_T_TEXT_BG_CYCLE(BG0);
 			}
-#endif
 			BREAK;
 		}
 		case THIRTEEN:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE1_M_TEXT_BG_CYCLE(BG1);
-			MODE1_T_TEXT_BG_CYCLE(BG1);
-#else
 			if (pGBA_display->bgCache[BG1].is8bppMode == YES)
 			{
 				MODE1_T_TEXT_BG_CYCLE(BG1);
 			}
-#endif
 			BREAK;
 		}
 		case FOURTEEN:
@@ -10365,18 +9689,10 @@ OPT_SPEED
 		}
 		case SIXTEEN:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE1_M_TEXT_BG_CYCLE(BG0);
-			MODE1_T_TEXT_BG_CYCLE(BG0);
-#endif
 			BREAK;
 		}
 		case SEVENTEEN:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE1_M_TEXT_BG_CYCLE(BG1);
-			MODE1_T_TEXT_BG_CYCLE(BG1);
-#endif
 			BREAK;
 		}
 		case EIGHTEEN:
@@ -10392,17 +9708,11 @@ OPT_SPEED
 		}
 		case TWENTY:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE1_M_TEXT_BG_CYCLE(BG0);
-#endif
 			MODE1_T_TEXT_BG_CYCLE(BG0);
 			BREAK;
 		}
 		case TWENTYONE:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE1_M_TEXT_BG_CYCLE(BG1);
-#endif
 			MODE1_T_TEXT_BG_CYCLE(BG1);
 			BREAK;
 		}
@@ -10419,18 +9729,10 @@ OPT_SPEED
 		}
 		case TWENTYFOUR:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE1_M_TEXT_BG_CYCLE(BG0);
-			MODE1_T_TEXT_BG_CYCLE(BG0);
-#endif
 			BREAK;
 		}
 		case TWENTYFIVE:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE1_M_TEXT_BG_CYCLE(BG1);
-			MODE1_T_TEXT_BG_CYCLE(BG1);
-#endif
 			BREAK;
 		}
 		case TWENTYSIX:
@@ -10446,30 +9748,18 @@ OPT_SPEED
 		}
 		case TWENTYEIGHT:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE1_M_TEXT_BG_CYCLE(BG0);
-			MODE1_T_TEXT_BG_CYCLE(BG0);
-#else
 			if (pGBA_display->bgCache[BG0].is8bppMode == YES)
 			{
 				MODE1_T_TEXT_BG_CYCLE(BG0);
-
 			}
-#endif
 			BREAK;
 		}
 		case TWENTYNINE:
 		{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-			MODE1_M_TEXT_BG_CYCLE(BG1);
-			MODE1_T_TEXT_BG_CYCLE(BG1);
-#else
 			if (pGBA_display->bgCache[BG1].is8bppMode == YES)
 			{
 				MODE1_T_TEXT_BG_CYCLE(BG1);
-
 			}
-#endif
 			BREAK;
 		}
 		case THIRTY:
@@ -10488,7 +9778,6 @@ OPT_SPEED
 			FATAL("PPU mode 1 out of sync");
 		}
 		}
-
 	}
 
 	// ============================================
@@ -11613,7 +10902,6 @@ OPT_SPEED
 
 			if (performBgRenderring == YES && renderBG == YES)
 			{
-#if (ENABLED)
 				// Cache the state once before the loop to avoid repeated array access
 				auto& bgState = pGBA_display->bgAccessPatternState[currentMode];
 
@@ -11702,395 +10990,6 @@ OPT_SPEED
 					FATAL("Unknown BG mode");
 				}
 				}
-#else
-				while (currentCycles < targetCycles)
-				{
-					switch (pGBA_display->bgAccessPatternState[currentMode])
-					{
-					case ZERO:
-					{
-						CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG0));
-						CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG0));
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-						CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG0));
-						CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG0));
-#endif
-						CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG3));
-						BREAK;
-					}
-					case ONE:
-					{
-						CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG1));
-						CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG1));
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-						CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG1));
-						CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG1));
-#endif
-						CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG3));
-						BREAK;
-					}
-					case TWO:
-					{
-						CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG2));
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-						CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG2));
-#endif
-						CONDITIONAL(currentMode == MODE1, MODE1_M_AFFINE_BG_CYCLE());
-						CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG2));
-						BREAK;
-					}
-					case THREE:
-					{
-						CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG3));
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-						CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG3));
-#endif
-						CONDITIONAL(currentMode == MODE1, MODE1_T_AFFINE_BG_CYCLE());
-						CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG2));
-						CONDITIONAL(currentMode == MODE3, MODE3_B_BG_CYCLE());
-						CONDITIONAL(currentMode == MODE4, MODE4_B_BG_CYCLE());
-						CONDITIONAL(currentMode == MODE5, MODE5_B_BG_CYCLE());
-						++pGBA_display->currentBgPixel;
-						BREAK;
-					}
-					case FOUR:
-					{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-						CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG0));
-						CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG0));
-#endif
-						CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG0));
-						CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG0));
-						CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG3));
-						BREAK;
-					}
-					case FIVE:
-					{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-						CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG1));
-						CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG1));
-#endif
-						CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG1));
-						CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG1));
-						CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG3));
-						BREAK;
-					}
-					case SIX:
-					{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-						CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG2));
-#endif
-						CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG2));
-						CONDITIONAL(currentMode == MODE1, MODE1_M_AFFINE_BG_CYCLE());
-						CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG2));
-						BREAK;
-					}
-					case SEVEN:
-					{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-						CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG3));
-#endif
-						CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG3));
-						CONDITIONAL(currentMode == MODE1, MODE1_T_AFFINE_BG_CYCLE());
-						CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG2));
-						CONDITIONAL(currentMode == MODE3, MODE3_B_BG_CYCLE());
-						CONDITIONAL(currentMode == MODE4, MODE4_B_BG_CYCLE());
-						CONDITIONAL(currentMode == MODE5, MODE5_B_BG_CYCLE());
-						++pGBA_display->currentBgPixel;
-						BREAK;
-					}
-					case EIGHT:
-					{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-						CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG0));
-						CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG0));
-						CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG0));
-						CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG0));
-#endif
-						CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG3));
-						BREAK;
-					}
-					case NINE:
-					{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-						CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG1));
-						CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG1));
-						CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG1));
-						CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG1));
-#endif
-						CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG3));
-						BREAK;
-					}
-					case TEN:
-					{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-						CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG2));
-						CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG2));
-#endif
-						CONDITIONAL(currentMode == MODE1, MODE1_M_AFFINE_BG_CYCLE());
-						CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG2));
-						BREAK;
-					}
-					case ELEVEN:
-					{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-						CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG3));
-						CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG3));
-#endif
-						CONDITIONAL(currentMode == MODE1, MODE1_T_AFFINE_BG_CYCLE());
-						CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG2));
-						CONDITIONAL(currentMode == MODE3, MODE3_B_BG_CYCLE());
-						CONDITIONAL(currentMode == MODE4, MODE4_B_BG_CYCLE());
-						CONDITIONAL(currentMode == MODE5, MODE5_B_BG_CYCLE());
-						++pGBA_display->currentBgPixel;
-						BREAK;
-					}
-					case TWELVE:
-					{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-						CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG0));
-						CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG0));
-#endif
-						CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG0));
-						CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG0));
-						CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG3));
-						BREAK;
-					}
-					case THIRTEEN:
-					{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-						CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG1));
-						CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG1));
-#endif
-						CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG1));
-						CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG1));
-						CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG3));
-						BREAK;
-					}
-					case FOURTEEN:
-					{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-						CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG2));
-#endif
-						CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG2));
-						CONDITIONAL(currentMode == MODE1, MODE1_M_AFFINE_BG_CYCLE());
-						CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG2));
-						BREAK;
-					}
-					case FIFTEEN:
-					{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-						CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG3));
-#endif
-						CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG3));
-						CONDITIONAL(currentMode == MODE1, MODE1_T_AFFINE_BG_CYCLE());
-						CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG2));
-						CONDITIONAL(currentMode == MODE3, MODE3_B_BG_CYCLE());
-						CONDITIONAL(currentMode == MODE4, MODE4_B_BG_CYCLE());
-						CONDITIONAL(currentMode == MODE5, MODE5_B_BG_CYCLE());
-						++pGBA_display->currentBgPixel;
-						BREAK;
-					}
-					case SIXTEEN:
-					{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-						CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG0));
-						CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG0));
-						CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG0));
-						CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG0));
-#endif
-						CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG3));
-						BREAK;
-					}
-					case SEVENTEEN:
-					{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-						CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG1));
-						CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG1));
-						CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG1));
-						CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG1));
-#endif
-						CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG3));
-						BREAK;
-					}
-					case EIGHTEEN:
-					{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-						CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG2));
-						CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG2));
-#endif
-						CONDITIONAL(currentMode == MODE1, MODE1_M_AFFINE_BG_CYCLE());
-						CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG2));
-						BREAK;
-					}
-					case NINETEEN:
-					{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-						CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG3));
-						CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG3));
-#endif
-						CONDITIONAL(currentMode == MODE1, MODE1_T_AFFINE_BG_CYCLE());
-						CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG2));
-						CONDITIONAL(currentMode == MODE3, MODE3_B_BG_CYCLE());
-						CONDITIONAL(currentMode == MODE4, MODE4_B_BG_CYCLE());
-						CONDITIONAL(currentMode == MODE5, MODE5_B_BG_CYCLE());
-						++pGBA_display->currentBgPixel;
-						BREAK;
-					}
-					case TWENTY:
-					{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-						CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG0));
-						CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG0));
-#endif
-						CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG0));
-						CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG0));
-						CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG3));
-						BREAK;
-					}
-					case TWENTYONE:
-					{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-						CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG1));
-						CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG1));
-#endif
-						CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG1));
-						CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG1));
-						CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG3));
-						BREAK;
-					}
-					case TWENTYTWO:
-					{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-						CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG2));
-#endif
-						CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG2));
-						CONDITIONAL(currentMode == MODE1, MODE1_M_AFFINE_BG_CYCLE());
-						CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG2));
-						BREAK;
-					}
-					case TWENTYTHREE:
-					{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-						CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG3));
-#endif
-						CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG3));
-						CONDITIONAL(currentMode == MODE1, MODE1_T_AFFINE_BG_CYCLE());
-						CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG2));
-						CONDITIONAL(currentMode == MODE3, MODE3_B_BG_CYCLE());
-						CONDITIONAL(currentMode == MODE4, MODE4_B_BG_CYCLE());
-						CONDITIONAL(currentMode == MODE5, MODE5_B_BG_CYCLE());
-						++pGBA_display->currentBgPixel;
-						BREAK;
-					}
-					case TWENTYFOUR:
-					{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-						CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG0));
-						CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG0));
-						CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG0));
-						CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG0));
-#endif
-						CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG3));
-						BREAK;
-					}
-					case TWENTYFIVE:
-					{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-						CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG1));
-						CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG1));
-						CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG1));
-						CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG1));
-#endif
-						CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG3));
-						BREAK;
-					}
-					case TWENTYSIX:
-					{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-						CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG2));
-						CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG2));
-#endif
-						CONDITIONAL(currentMode == MODE1, MODE1_M_AFFINE_BG_CYCLE());
-						CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG2));
-						BREAK;
-					}
-					case TWENTYSEVEN:
-					{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-						CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG3));
-						CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG3));
-#endif
-						CONDITIONAL(currentMode == MODE1, MODE1_T_AFFINE_BG_CYCLE());
-						CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG2));
-						CONDITIONAL(currentMode == MODE3, MODE3_B_BG_CYCLE());
-						CONDITIONAL(currentMode == MODE4, MODE4_B_BG_CYCLE());
-						CONDITIONAL(currentMode == MODE5, MODE5_B_BG_CYCLE());
-						++pGBA_display->currentBgPixel;
-						BREAK;
-					}
-					case TWENTYEIGHT:
-					{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-						CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG0));
-						CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG0));
-#endif
-						CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG0));
-						CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG0));
-						CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG3));
-						BREAK;
-					}
-					case TWENTYNINE:
-					{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-						CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG1));
-						CONDITIONAL(currentMode == MODE1, MODE1_M_TEXT_BG_CYCLE(BG1));
-#endif
-						CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG1));
-						CONDITIONAL(currentMode == MODE1, MODE1_T_TEXT_BG_CYCLE(BG1));
-						CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG3));
-						BREAK;
-					}
-					case THIRTY:
-					{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-						CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG2));
-#endif
-						CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG2));
-						CONDITIONAL(currentMode == MODE1, MODE1_M_AFFINE_BG_CYCLE());
-						CONDITIONAL(currentMode == MODE2, MODE2_M_BG_CYCLE(BG2));
-						BREAK;
-					}
-					case THIRTYONE:
-					{
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == NO)
-						CONDITIONAL(currentMode == MODE0, MODE0_M_BG_CYCLE(BG3));
-#endif
-						CONDITIONAL(currentMode == MODE0, MODE0_T_BG_CYCLE(BG3));
-						CONDITIONAL(currentMode == MODE1, MODE1_T_AFFINE_BG_CYCLE());
-						CONDITIONAL(currentMode == MODE2, MODE2_T_BG_CYCLE(BG2));
-						CONDITIONAL(currentMode == MODE3, MODE3_B_BG_CYCLE());
-						CONDITIONAL(currentMode == MODE4, MODE4_B_BG_CYCLE());
-						CONDITIONAL(currentMode == MODE5, MODE5_B_BG_CYCLE());
-						++pGBA_display->currentBgPixel;
-						BREAK;
-					}
-					default:
-					{
-						FATAL("PPU mode %d (BG) out of sync", currentMode);
-					}
-					}
-
-					++pGBA_display->bgAccessPatternState[currentMode];
-					if (pGBA_display->bgAccessPatternState[currentMode] >= THIRTYTWO)
-					{
-						pGBA_display->bgAccessPatternState[currentMode] = ZERO;
-					}
-
-					// next cycle...
-					++currentCycles;
-				}
-#endif
 			}
 
 			currentCycles = ZERO;
@@ -12151,12 +11050,10 @@ OPT_SPEED
 	{
 		pGBA_display->currentMergePixel = RESET;
 		pGBA_display->currentBgPixel = RESET;
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == YES)
 		pGBA_display->currentBgPixelInTextMode[BG0] = RESET;
 		pGBA_display->currentBgPixelInTextMode[BG1] = RESET;
 		pGBA_display->currentBgPixelInTextMode[BG2] = RESET;
 		pGBA_display->currentBgPixelInTextMode[BG3] = RESET;
-#endif
 		pGBA_display->currentWinPixel = RESET;
 		pGBA_display->mergeWaitCyclesDone = CLEAR;
 		pGBA_display->winWaitCyclesDone = CLEAR;
@@ -12364,12 +11261,10 @@ OPT_SPEED
 	{
 		pGBA_display->currentMergePixel = RESET;
 		pGBA_display->currentBgPixel = RESET;
-#if (GBA_ENABLE_CYCLE_ACCURATE_PPU_ACCESS_PATTERN == YES)
 		pGBA_display->currentBgPixelInTextMode[BG0] = RESET;
 		pGBA_display->currentBgPixelInTextMode[BG1] = RESET;
 		pGBA_display->currentBgPixelInTextMode[BG2] = RESET;
 		pGBA_display->currentBgPixelInTextMode[BG3] = RESET;
-#endif
 		pGBA_display->currentWinPixel = RESET;
 		pGBA_display->mergeWaitCyclesDone = CLEAR;
 		pGBA_display->winWaitCyclesDone = CLEAR;
