@@ -4369,7 +4369,7 @@ public:
 											}
 										}
 										ImGui::Separator();
-										if (ImGui::BeginMenu("Stats"))
+										if (ImGui::BeginMenu("Statistics"))
 										{
 #if MASQ_GBA_SCHEDULER_STATS_UI
 											if (current_instance->getEmulationID() == EMULATION_ID::GBA_ID)
