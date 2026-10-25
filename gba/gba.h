@@ -8241,6 +8241,16 @@ OPT_SPEED
 		// check if this needs to be the last vram cycle for this object
 		pGBA_display->lastVRAMCycleForObjFSM = (spriteXEnd == objCache.spriteXEnd) ? YES : NO;
 
+		// In bitmap modes (3-5) the lower 16K of OBJ VRAM belongs to the bitmap, so objects that use tiles 0-511 are ignored and
+		// not displayed (GBATEK "LCD OBJ - OAM Attributes", OBJ Tile Number, note 2). The fetch cycles above still run, so timing
+		// is unchanged; only the pixels are dropped. Without this, an all-zero OAM entry (tile 0 at 0,0) draws the first bytes of
+		// the bitmap through the OBJ palette as an 8x8 block in the top-left corner.
+		PPUTODO("Note that ignoring OBJ tiles 0-511 in bitmap modes is done based on base tile ID. Not sure of the actual behaviour when the sprite straddles around tile 511 and 512");
+		if (pGBA_display->currentPPUMode >= MODE3 && objCache.baseTileID < 512)
+		{
+			RETURN;
+		}
+
 		auto pa = objCache.affine.pa;
 		auto pb = objCache.affine.pb;
 		auto pc = objCache.affine.pc;
