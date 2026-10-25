@@ -7737,9 +7737,6 @@ OPT_SPEED
 
 						ID bgPixel = pGBA_display->gfx_bg[bgID][x][y];
 
-						PPUTODO("This is waste of memory, should be optimized to not store the whole BG just for mosaic effect, but for now, we will keep it simple and store the whole BG");
-						pGBA_display->gfx_bg_mosaic[bgID][x][y] = bgPixel;
-
 						// Handle Mosaic effect for BGs
 						if (getBGxCNT(bgID) != NULL && getBGxCNT(bgID)->mBGnCNTFields.MOSAIC == SET)
 						{
@@ -8685,7 +8682,10 @@ OPT_SPEED
 						const DIM16 sizeOfEachPaletteInBytesInShifts = FIVE; // 1 << 5 is same as *32
 						paletteIndex += (pGBA_display->bgCache[bgID].tileDescriptor.pb << sizeOfEachPaletteInBytesInShifts);
 					}
-					pGBA_display->gfx_bg[bgID][pGBA_display->currentBgPixelInTextMode[bgID]++][Y] = paletteIndex;
+					pGBA_display->gfx_bg[bgID][pGBA_display->currentBgPixelInTextMode[bgID]][Y] = paletteIndex;
+					PPUTODO("This is waste of memory, should be optimized to not store the whole BG just for mosaic effect, but for now, we will keep it simple and store the whole BG");
+					pGBA_display->gfx_bg_mosaic[bgID][pGBA_display->currentBgPixelInTextMode[bgID]][Y] = paletteIndex;
+					pGBA_display->currentBgPixelInTextMode[bgID]++;
 					++pGBA_display->bgCache[bgID].subTileIndexer;
 				}
 			}
@@ -8719,7 +8719,10 @@ OPT_SPEED
 				paletteIndex = pixelColorNumberPerPixel << ONE;
 				if (pGBA_display->bgCache[bgID].subTileScrollingPixelDrops <= ZERO)
 				{
-					pGBA_display->gfx_bg[bgID][pGBA_display->currentBgPixelInTextMode[bgID]++][Y] = paletteIndex;
+					pGBA_display->gfx_bg[bgID][pGBA_display->currentBgPixelInTextMode[bgID]][Y] = paletteIndex;
+					PPUTODO("This is waste of memory, should be optimized to not store the whole BG just for mosaic effect, but for now, we will keep it simple and store the whole BG");
+					pGBA_display->gfx_bg_mosaic[bgID][pGBA_display->currentBgPixelInTextMode[bgID]][Y] = paletteIndex;
+					pGBA_display->currentBgPixelInTextMode[bgID]++;
 					++pGBA_display->bgCache[bgID].subTileIndexer;
 				}
 			}
@@ -9439,6 +9442,8 @@ OPT_SPEED
 
 		// Now use the screen coordinates and fill the gfx buffer with data obtained from texture coordinates (Affine)
 		pGBA_display->gfx_bg[BG2][xPixelCoordinate][yPixelCoordinate] = paletteIndex;
+		PPUTODO("This is waste of memory, should be optimized to not store the whole BG just for mosaic effect, but for now, we will keep it simple and store the whole BG");
+		pGBA_display->gfx_bg_mosaic[BG2][xPixelCoordinate][yPixelCoordinate] = paletteIndex;
 
 	}
 
@@ -9967,6 +9972,8 @@ OPT_SPEED
 
 		// Now use the screen coordinates and fill the gfx buffer with data obtained from texture coordinates (Affine)
 		pGBA_display->gfx_bg[bgID][xPixelCoordinate][yPixelCoordinate] = paletteIndex;
+		PPUTODO("This is waste of memory, should be optimized to not store the whole BG just for mosaic effect, but for now, we will keep it simple and store the whole BG");
+		pGBA_display->gfx_bg_mosaic[bgID][xPixelCoordinate][yPixelCoordinate] = paletteIndex;
 
 	}
 
@@ -10176,6 +10183,8 @@ OPT_SPEED
 		if (xPixelCoordinateAffine >= getScreenWidth() || yPixelCoordinateAffine >= getScreenHeight())
 		{
 			pGBA_display->gfx_bg[BG2][xPixelCoordinate][yPixelCoordinate] = ZERO;
+			PPUTODO("This is waste of memory, should be optimized to not store the whole BG just for mosaic effect, but for now, we will keep it simple and store the whole BG");
+			pGBA_display->gfx_bg_mosaic[BG2][xPixelCoordinate][yPixelCoordinate] = ZERO;
 		}
 		else
 		{
@@ -10200,6 +10209,8 @@ OPT_SPEED
 			}
 
 			pGBA_display->gfx_bg[BG2][xPixelCoordinate][yPixelCoordinate] = (colorFor1Pixel | IS_COLOR_NOT_PALETTE);
+			PPUTODO("This is waste of memory, should be optimized to not store the whole BG just for mosaic effect, but for now, we will keep it simple and store the whole BG");
+			pGBA_display->gfx_bg_mosaic[BG2][xPixelCoordinate][yPixelCoordinate] = (colorFor1Pixel | IS_COLOR_NOT_PALETTE);
 		}
 
 		// For points (2) and (4) of PPU:03 AND point (6) of PPU:03
@@ -10290,6 +10301,8 @@ OPT_SPEED
 		if (xPixelCoordinateAffine >= getScreenWidth() || yPixelCoordinateAffine >= getScreenHeight())
 		{
 			pGBA_display->gfx_bg[BG2][xPixelCoordinate][yPixelCoordinate] = ZERO;
+			PPUTODO("This is waste of memory, should be optimized to not store the whole BG just for mosaic effect, but for now, we will keep it simple and store the whole BG");
+			pGBA_display->gfx_bg_mosaic[BG2][xPixelCoordinate][yPixelCoordinate] = ZERO;
 		}
 		else
 		{
@@ -10314,6 +10327,8 @@ OPT_SPEED
 			ID paletteIndex = pixelColorNumberFromTileData << ONE;
 
 			pGBA_display->gfx_bg[BG2][xPixelCoordinate][yPixelCoordinate] = paletteIndex;
+			PPUTODO("This is waste of memory, should be optimized to not store the whole BG just for mosaic effect, but for now, we will keep it simple and store the whole BG");
+			pGBA_display->gfx_bg_mosaic[BG2][xPixelCoordinate][yPixelCoordinate] = paletteIndex;
 		}
 
 		// For points (2) and (4) of PPU:03 AND point (6) of PPU:03
@@ -10404,6 +10419,8 @@ OPT_SPEED
 		if (xPixelCoordinateAffine >= ONEHUNDREDSIXTY || yPixelCoordinateAffine >= ONETWENTYEIGHT)
 		{
 			pGBA_display->gfx_bg[BG2][xPixelCoordinate][yPixelCoordinate] = ZERO;
+			PPUTODO("This is waste of memory, should be optimized to not store the whole BG just for mosaic effect, but for now, we will keep it simple and store the whole BG");
+			pGBA_display->gfx_bg_mosaic[BG2][xPixelCoordinate][yPixelCoordinate] = ZERO;
 		}
 		else
 		{
@@ -10428,6 +10445,8 @@ OPT_SPEED
 			}
 
 			pGBA_display->gfx_bg[BG2][xPixelCoordinate][yPixelCoordinate] = (colorFor1Pixel | IS_COLOR_NOT_PALETTE);
+			PPUTODO("This is waste of memory, should be optimized to not store the whole BG just for mosaic effect, but for now, we will keep it simple and store the whole BG");
+			pGBA_display->gfx_bg_mosaic[BG2][xPixelCoordinate][yPixelCoordinate] = (colorFor1Pixel | IS_COLOR_NOT_PALETTE);
 		}
 
 		// For points (2) and (4) of PPU:03 AND point (6) of PPU:03
