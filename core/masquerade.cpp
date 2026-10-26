@@ -6360,7 +6360,10 @@ FLAG startMasquerade(int nFiles,
 
 	currentEmuTheme = TO_UINT8(configToEmuThemes.at(config.get<std::string>("mods._EMULATOR_THEME", "DARK")));
 	previousEmuTheme = currentEmuTheme;
+#ifndef __EMSCRIPTEN__
+	// To improve the FPS in emscripten builds...
 	currEnVFilter = configToVFilters.at(config.get<std::string>("mods._VIDEO_EFFECTS", "LCD_FILTER"));
+#endif
 #endif // !__RPI_PICO__
 
 	numberOfRomsSelected = nFiles;

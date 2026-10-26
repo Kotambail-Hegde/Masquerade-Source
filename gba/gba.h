@@ -3422,11 +3422,11 @@ private:
 		audioChannelInstance_t audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::TOTAL_CHANNELS)];
 		GBA_AUDIO_SAMPLE_TYPE audioBuffer[AUDIO_BUFFER_SIZE_FOR_GBA];
 		float emulatorVolume;
-		struct scheduler_t
+		struct
 		{
 			INC64 apuStartCycleCount[TO_UINT8(AUDIO_CHANNELS::TOTAL_CHANNELS)];
 			INC64 lastSyncCycleCount[TO_UINT8(AUDIO_CHANNELS::TOTAL_CHANNELS)];
-		} scheduler;
+		} apu_stats;
 	} audio_t;
 
 private:
@@ -3655,11 +3655,11 @@ private:
 			Pixel imGuiBuffer2D[screen_height][screen_width];
 		} imGuiBuffer;
 		uint64_t filters;
-		struct scheduler_t
+		struct
 		{
 			INC64 ppuStartCycleCount;
 			INC64 lastSyncCycleCount;
-		} scheduler;
+		} ppu_stats;
 	} display_t;
 
 private:
@@ -3683,8 +3683,6 @@ private:
 	} interrupt_t;
 
 private:
-
-	Scheduler_t scheduler;
 
 	enum class GBA_EVENT : EventId
 	{
@@ -3720,6 +3718,7 @@ private:
 		display_t display;
 		quirks_t quirks;
 		emulatorStatus_t emulatorStatus;
+		Scheduler_t Scheduler;
 	} GBA_state_t;
 
 	typedef union
@@ -3769,6 +3768,7 @@ private:
 	gbaMemory_t* pGBA_memory = nullptr;									// for readability
 	audio_t* pGBA_audio = nullptr;										// for readability
 	display_t* pGBA_display = nullptr;									// for readability
+	Scheduler_t* pGBA_scheduler = nullptr;								// for readability	
 	GBA_instance_t* pGBA_instance = nullptr;							// for readability
 	std::shared_ptr <absolute_GBA_instance_t> pAbsolute_GBA_instance;
 
@@ -3933,7 +3933,7 @@ public:
 
 	Scheduler_t& getScheduler()
 	{
-		RETURN scheduler;
+		RETURN pGBA_instance->GBA_state.Scheduler;
 	}
 
 	// Names follow the order of GBA_EVENT / the setup[] table in registerEvents()
@@ -4289,6 +4289,39 @@ OPT_DEFAULT
 
 OPT_SPEED
 
+	MASQ_INLINE FLAG isLCDMemoryAccessBlocked(uint32_t address)
+	{
+#if DISABLED
+		if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.FORCED_BLANK != RESET)
+		{
+			RETURN NO;
+		}
+
+		const FLAG isVRAMOrPalette =
+			IF_ADDRESS_WITHIN(address, PALETTE_RAM_START_ADDRESS, PALETTE_RAM_END_ADDRESS)
+			|| IF_ADDRESS_WITHIN(address, PALETTE_RAM_MIRROR_START_ADDRESS, PALETTE_RAM_MIRROR_END_ADDRESS)
+			|| IF_ADDRESS_WITHIN(address, VIDEO_RAM_START_ADDRESS, VIDEO_RAM_END_ADDRESS)
+			|| IF_ADDRESS_WITHIN(address, VIDEO_RAM_MIRROR_START_ADDRESS, VIDEO_RAM_MIRROR_END_ADDRESS);
+
+		const FLAG isOAM =
+			IF_ADDRESS_WITHIN(address, OAM_START_ADDRESS, OAM_END_ADDRESS)
+			|| IF_ADDRESS_WITHIN(address, OAM_MIRROR_START_ADDRESS, OAM_MIRROR_END_ADDRESS);
+
+		switch (pGBA_display->currentLCDMode)
+		{
+		case LCD_MODES::MODE_LCD_H_DRAW_V_DRAW:
+			RETURN isVRAMOrPalette || isOAM;
+		case LCD_MODES::MODE_LCD_H_BLANK_V_DRAW:
+			RETURN isOAM && pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.HBLANK_INTERVAL_FREE == RESET;
+		default:
+			RETURN NO;
+		}
+#else
+	TODO("Implement GBA video memory access restrictions for Forced Blank and H-Blank Interval Free (currently all accesses are allowed), Line: %d in File %s", __LINE__, __FILE__);
+	RETURN NO;
+#endif
+	}
+
 	// NOTE: For memory mirrors, refer http://problemkaputt.de/gbatek-gba-unpredictable-things.htm
 	template <typename T>
 	T readRawMemoryInternal(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType, FLAG LOCK = NO)
@@ -4327,41 +4360,9 @@ OPT_SPEED
 
 		if (source == MEMORY_ACCESS_SOURCE::CPU || source == MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH)
 		{
-			TODO("Support for FORCED_BLANK needs to be added at line %d of file %s", __LINE__, __FILE__);
-#if (DISABLED)
-			if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.FORCED_BLANK == RESET)
-			{
-				if (pGBA_display->currentLCDMode == LCD_MODES::MODE_LCD_H_DRAW_V_DRAW)
-				{
-					if (IF_ADDRESS_WITHIN(address, PALETTE_RAM_START_ADDRESS, PALETTE_RAM_END_ADDRESS)
-						|| (IF_ADDRESS_WITHIN(address, PALETTE_RAM_MIRROR_START_ADDRESS, PALETTE_RAM_MIRROR_END_ADDRESS))
-						|| (IF_ADDRESS_WITHIN(address, VIDEO_RAM_START_ADDRESS, VIDEO_RAM_END_ADDRESS))
-						|| (IF_ADDRESS_WITHIN(address, VIDEO_RAM_MIRROR_START_ADDRESS, VIDEO_RAM_MIRROR_END_ADDRESS))
-						|| (IF_ADDRESS_WITHIN(address, OAM_START_ADDRESS, OAM_END_ADDRESS))
-						|| (IF_ADDRESS_WITHIN(address, OAM_MIRROR_START_ADDRESS, OAM_MIRROR_END_ADDRESS)))
-					{
-						tick();
-						RETURN ZERO;
-					}
-				}
-				else if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.HBLANK_INTERVAL_FREE == RESET)
-				{
-					if (pGBA_display->currentLCDMode == LCD_MODES::MODE_LCD_H_BLANK_V_BLANK
-						|| pGBA_display->currentLCDMode == LCD_MODES::MODE_LCD_H_BLANK_V_DRAW)
-					{
-						if ((IF_ADDRESS_WITHIN(address, OAM_START_ADDRESS, OAM_END_ADDRESS))
-							|| (IF_ADDRESS_WITHIN(address, OAM_MIRROR_START_ADDRESS, OAM_MIRROR_END_ADDRESS)))
-						{
-							tick();
-							RETURN ZERO;
-						}
-					}
-				}
-			}
-#endif
 			uint32_t cpuTicks = getMemoryAccessCycles(address, accessWidth, source, accessType);
 #if (ENABLE_ARM7TDMI_SST == YES)
-			if (ROM_TYPE == ROM::TEST_SST) MASQ_UNLIKELY
+			if (ROM_TYPE == ROM::TEST_SST)
 			{
 				// If this SST entry is already active, keep incrementing it
 				if (sst.internal[sst.index].cycle != 0)
@@ -4381,52 +4382,34 @@ OPT_SPEED
 			}
 			}
 #endif
-				while (cpuTicks)
-				{
-					tick();
-					--cpuTicks;
-				}
+			while (cpuTicks)
+			{
+				tick();
+				--cpuTicks;
+			}
+
+			// Refer : https://rust-console.github.io/gbatek-gbaonly/?utm_source=chatgpt.com#vram-oam-and-palette-ram-access
+			if (isLCDMemoryAccessBlocked(address))
+			{
+				tick();
+				RETURN ZERO;
+			}
 		}
 
 		if (source == MEMORY_ACCESS_SOURCE::DMA)
 		{
-			TODO("Support for FORCED_BLANK needs to be added at line %d of file %s", __LINE__, __FILE__);
-#if (DISABLED)
-			if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.FORCED_BLANK == RESET)
-			{
-				if (pGBA_display->currentLCDMode == LCD_MODES::MODE_LCD_H_DRAW_V_DRAW)
-				{
-					if (IF_ADDRESS_WITHIN(address, PALETTE_RAM_START_ADDRESS, PALETTE_RAM_END_ADDRESS)
-						|| (IF_ADDRESS_WITHIN(address, PALETTE_RAM_MIRROR_START_ADDRESS, PALETTE_RAM_MIRROR_END_ADDRESS))
-						|| (IF_ADDRESS_WITHIN(address, VIDEO_RAM_START_ADDRESS, VIDEO_RAM_END_ADDRESS))
-						|| (IF_ADDRESS_WITHIN(address, VIDEO_RAM_MIRROR_START_ADDRESS, VIDEO_RAM_MIRROR_END_ADDRESS))
-						|| (IF_ADDRESS_WITHIN(address, OAM_START_ADDRESS, OAM_END_ADDRESS))
-						|| (IF_ADDRESS_WITHIN(address, OAM_MIRROR_START_ADDRESS, OAM_MIRROR_END_ADDRESS)))
-					{
-						tick();
-						RETURN ZERO;
-					}
-				}
-				else if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.HBLANK_INTERVAL_FREE == RESET)
-				{
-					if (pGBA_display->currentLCDMode == LCD_MODES::MODE_LCD_H_BLANK_V_BLANK
-						|| pGBA_display->currentLCDMode == LCD_MODES::MODE_LCD_H_BLANK_V_DRAW)
-					{
-						if ((IF_ADDRESS_WITHIN(address, OAM_START_ADDRESS, OAM_END_ADDRESS))
-							|| (IF_ADDRESS_WITHIN(address, OAM_MIRROR_START_ADDRESS, OAM_MIRROR_END_ADDRESS)))
-						{
-							tick();
-							RETURN ZERO;
-						}
-					}
-				}
-			}
-#endif
 			uint32_t dmaTicks = getMemoryAccessCycles(address, accessWidth, source, accessType);
 			while (dmaTicks)
 			{
 				tick(TICK_TYPE::DMA_TICK);
 				--dmaTicks;
+			}
+
+			// Refer : https://rust-console.github.io/gbatek-gbaonly/?utm_source=chatgpt.com#vram-oam-and-palette-ram-access
+			if (isLCDMemoryAccessBlocked(address))
+			{
+				tick(TICK_TYPE::DMA_TICK);
+				RETURN ZERO;
 			}
 		}
 
@@ -4939,41 +4922,6 @@ OPT_SPEED
 
 		if (source == MEMORY_ACCESS_SOURCE::CPU || source == MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH)
 		{
-			TODO("Support for FORCED_BLANK needs to be added at line %d of file %s", __LINE__, __FILE__);
-#if (DISABLED)
-			if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.FORCED_BLANK == RESET)
-			{
-				if (pGBA_display->currentLCDMode == LCD_MODES::MODE_LCD_H_DRAW_V_DRAW)
-				{
-					if (IF_ADDRESS_WITHIN(address, PALETTE_RAM_START_ADDRESS, PALETTE_RAM_END_ADDRESS)
-						|| (IF_ADDRESS_WITHIN(address, PALETTE_RAM_MIRROR_START_ADDRESS, PALETTE_RAM_MIRROR_END_ADDRESS))
-						|| (IF_ADDRESS_WITHIN(address, VIDEO_RAM_START_ADDRESS, VIDEO_RAM_END_ADDRESS))
-						|| (IF_ADDRESS_WITHIN(address, VIDEO_RAM_MIRROR_START_ADDRESS, VIDEO_RAM_MIRROR_END_ADDRESS))
-						|| (IF_ADDRESS_WITHIN(address, OAM_START_ADDRESS, OAM_END_ADDRESS))
-						|| (IF_ADDRESS_WITHIN(address, OAM_MIRROR_START_ADDRESS, OAM_MIRROR_END_ADDRESS)))
-					{
-						tick();
-						RETURN;
-					}
-				}
-				else
-				{
-					if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.HBLANK_INTERVAL_FREE == RESET)
-					{
-						if (pGBA_display->currentLCDMode == LCD_MODES::MODE_LCD_H_BLANK_V_BLANK
-							|| pGBA_display->currentLCDMode == LCD_MODES::MODE_LCD_H_BLANK_V_DRAW)
-						{
-							if ((IF_ADDRESS_WITHIN(address, OAM_START_ADDRESS, OAM_END_ADDRESS))
-								|| (IF_ADDRESS_WITHIN(address, OAM_MIRROR_START_ADDRESS, OAM_MIRROR_END_ADDRESS)))
-							{
-								tick();
-								RETURN;
-							}
-						}
-					}
-				}
-			}
-#endif
 			uint32_t cpuTicks = getMemoryAccessCycles(address, accessWidth, source, accessType);
 #if (ENABLE_ARM7TDMI_SST == YES)
 			if (ROM_TYPE == ROM::TEST_SST) MASQ_UNLIKELY
@@ -5001,50 +4949,29 @@ OPT_SPEED
 				tick();
 				--cpuTicks;
 			}
+
+			// Refer : https://rust-console.github.io/gbatek-gbaonly/?utm_source=chatgpt.com#vram-oam-and-palette-ram-access
+			if (isLCDMemoryAccessBlocked(address))
+			{
+				tick();
+				RETURN;
+			}
 		}
 
 		if (source == MEMORY_ACCESS_SOURCE::DMA)
 		{
-			TODO("Support for FORCED_BLANK needs to be added at line %d of file %s", __LINE__, __FILE__);
-#if (DISABLED)
-			if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.FORCED_BLANK == RESET)
-			{
-				if (pGBA_display->currentLCDMode == LCD_MODES::MODE_LCD_H_DRAW_V_DRAW)
-				{
-					if (IF_ADDRESS_WITHIN(address, PALETTE_RAM_START_ADDRESS, PALETTE_RAM_END_ADDRESS)
-						|| (IF_ADDRESS_WITHIN(address, PALETTE_RAM_MIRROR_START_ADDRESS, PALETTE_RAM_MIRROR_END_ADDRESS))
-						|| (IF_ADDRESS_WITHIN(address, VIDEO_RAM_START_ADDRESS, VIDEO_RAM_END_ADDRESS))
-						|| (IF_ADDRESS_WITHIN(address, VIDEO_RAM_MIRROR_START_ADDRESS, VIDEO_RAM_MIRROR_END_ADDRESS))
-						|| (IF_ADDRESS_WITHIN(address, OAM_START_ADDRESS, OAM_END_ADDRESS))
-						|| (IF_ADDRESS_WITHIN(address, OAM_MIRROR_START_ADDRESS, OAM_MIRROR_END_ADDRESS)))
-					{
-						tick();
-						RETURN;
-					}
-				}
-				else
-				{
-					if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.HBLANK_INTERVAL_FREE == RESET)
-					{
-						if (pGBA_display->currentLCDMode == LCD_MODES::MODE_LCD_H_BLANK_V_BLANK
-							|| pGBA_display->currentLCDMode == LCD_MODES::MODE_LCD_H_BLANK_V_DRAW)
-						{
-							if ((IF_ADDRESS_WITHIN(address, OAM_START_ADDRESS, OAM_END_ADDRESS))
-								|| (IF_ADDRESS_WITHIN(address, OAM_MIRROR_START_ADDRESS, OAM_MIRROR_END_ADDRESS)))
-							{
-								tick();
-								RETURN;
-							}
-						}
-					}
-				}
-			}
-#endif
 			uint32_t dmaTicks = getMemoryAccessCycles(address, accessWidth, source, accessType);
 			while (dmaTicks)
 			{
 				tick(TICK_TYPE::DMA_TICK);
 				--dmaTicks;
+			}
+
+			// Refer : https://rust-console.github.io/gbatek-gbaonly/?utm_source=chatgpt.com#vram-oam-and-palette-ram-access
+			if (isLCDMemoryAccessBlocked(address))
+			{
+				tick(TICK_TYPE::DMA_TICK);
+				RETURN;
 			}
 		}
 
@@ -5878,7 +5805,7 @@ private:
 		processBackup();
 
 		// Tick the scheduler
-		scheduler.tick();
+		pGBA_scheduler->tick();
 
 		// Cache state pointer to reduce dereferencing overhead
 		auto* state = &pGBA_instance->GBA_state;
@@ -5959,7 +5886,7 @@ OPT_SPEED
 			RETURN state.cache.counter;
 		}
 
-		const int64_t now = (int64_t)scheduler.get_current_cycles();
+		const int64_t now = (int64_t)pGBA_scheduler->get_current_cycles();
 		// The reason for "+ ONE" is the firstTick is a tick in future, and when that happens, the ticks should be 1, not 0. So we add ONE to account for that.
 		const uint64_t ticks = (now >= state.cache.stats.firstTick) ? ((uint64_t)((now - state.cache.stats.firstTick) / getTimerPrescalar(timer)) + ONE) : 0;
 
@@ -5973,7 +5900,7 @@ OPT_SPEED
 		const int64_t prescalar = getTimerPrescalar(timer);
 
 		// Capture the master CPU cycle from the scheduler.
-		const int64_t now = (int64_t)scheduler.get_current_cycles();
+		const int64_t now = (int64_t)pGBA_scheduler->get_current_cycles();
 		const int64_t activationTime = now + delayedStart;
 
 		// First prescaler boundary at or after the activation time
@@ -5987,7 +5914,7 @@ OPT_SPEED
 		const int64_t overflowAt = cyclesTofirstTick + ((int64_t)(0x10000 - state.cache.counter - 1) * prescalar);
 
 		// Register the absolute cycle target with the master event scheduler queue.
-		scheduler.schedule(static_cast<EventId>(GBA_EVENT::EVENT_TIMER_OVERFLOW), (uint64_t)overflowAt, (int)timer);
+		pGBA_scheduler->schedule(static_cast<EventId>(GBA_EVENT::EVENT_TIMER_OVERFLOW), (uint64_t)overflowAt, (int)timer);
 	}
 
 	MASQ_INLINE void stopTimer(TIMER timer)
@@ -6000,7 +5927,7 @@ OPT_SPEED
 		}
 
 		state.cache.counter = readTimerCounter(timer);
-		scheduler.cancel(static_cast<EventId>(GBA_EVENT::EVENT_TIMER_OVERFLOW), (int)timer);
+		pGBA_scheduler->cancel(static_cast<EventId>(GBA_EVENT::EVENT_TIMER_OVERFLOW), (int)timer);
 		state.currentState = DISABLED;
 	}
 
@@ -6045,7 +5972,7 @@ OPT_SPEED
 			// may be different that the current timer's prescalar
 			// readyAt: Acts as a startup latency threshold. Prevents the cascade timer 
 			// from incrementing on previous timer's overflow if this happened before the delay has elapsed.
-			state.cache.stats.readyAt = (int64_t)scheduler.get_current_cycles() + delayedStart;
+			state.cache.stats.readyAt = (int64_t)pGBA_scheduler->get_current_cycles() + delayedStart;
 		}
 		else
 		{
@@ -6094,9 +6021,9 @@ OPT_SPEED
 					if (dmacntH.mDMAnCNT_HFields.DMA_EN == SET
 						&& dmacntH.mDMAnCNT_HFields.DMA_START_TIMING == DMA_TIMING::SPECIAL)
 					{
-						scheduler.schedule(
+						pGBA_scheduler->schedule(
 							static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION),
-							scheduler.get_current_cycles() + DMA_HW_STARTUP_DELAY,
+							pGBA_scheduler->get_current_cycles() + DMA_HW_STARTUP_DELAY,
 							static_cast<int>(DMA::DMA1));
 					}
 				}
@@ -6122,9 +6049,9 @@ OPT_SPEED
 					if (dmacntH.mDMAnCNT_HFields.DMA_EN == SET
 						&& dmacntH.mDMAnCNT_HFields.DMA_START_TIMING == DMA_TIMING::SPECIAL)
 					{
-						scheduler.schedule(
+						pGBA_scheduler->schedule(
 							static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION),
-							scheduler.get_current_cycles() + DMA_HW_STARTUP_DELAY,
+							pGBA_scheduler->get_current_cycles() + DMA_HW_STARTUP_DELAY,
 							static_cast<int>(DMA::DMA2));
 					}
 				}
@@ -6141,7 +6068,7 @@ OPT_SPEED
 				&& isTimerCountUp(nextTimer) == YES
 				// Below condition is very rare but possible
 				// i.e when previous timer overflowed but current cascade timer's delay has not elapsed
-				&& (int64_t)scheduler.get_current_cycles() >= nextState.cache.stats.readyAt)
+				&& (int64_t)pGBA_scheduler->get_current_cycles() >= nextState.cache.stats.readyAt)
 			{
 				const uint32_t value = (uint32_t)nextState.cache.counter + ONE;
 				if (value > 0xFFFF)
@@ -6439,9 +6366,9 @@ private:
 			// Activate if IMMEDIATE
 			if (cache.scheduleType == DMA_TIMING::IMMEDIATE)
 			{
-				scheduler.schedule(
+				pGBA_scheduler->schedule(
 					static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION),
-					scheduler.get_current_cycles() + DMA_STARTUP_DELAY,
+					pGBA_scheduler->get_current_cycles() + DMA_STARTUP_DELAY,
 					static_cast<int>(dmaID));
 			}
 		}
@@ -6451,7 +6378,7 @@ private:
 			cache.currentState = NO;
 			UNSETBIT(pGBA_instance->GBA_state.dma.runnableSet, dmaID);
 
-			scheduler.cancel(static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION), (int)dmaID);
+			pGBA_scheduler->cancel(static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION), (int)dmaID);
 
 			// Remove from all trigger maps (already done above, but keeping for clarity)
 			for (int timing = DMA_TIMING::IMMEDIATE; timing < DMA_TIMING::TOTAL_DMA_TIMING; timing++)
@@ -6492,9 +6419,9 @@ private:
 		{
 			if (GETBIT(dmaID, dmaMap))
 			{
-				scheduler.schedule(
+				pGBA_scheduler->schedule(
 					static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION),
-					scheduler.get_current_cycles() + DMA_HW_STARTUP_DELAY,
+					pGBA_scheduler->get_current_cycles() + DMA_HW_STARTUP_DELAY,
 					static_cast<int>(dmaID));
 			}
 		}
@@ -6708,15 +6635,15 @@ OPT_SPEED
 	{
 		const uint8_t ch = static_cast<uint8_t>(channel);
 		auto& chInstance = pGBA_instance->GBA_state.audio.audioChannelInstance[ch];
-		const INC64 now = static_cast<INC64>(scheduler.get_current_cycles());
+		const INC64 now = static_cast<INC64>(pGBA_scheduler->get_current_cycles());
 
 		if (stepEventWasRunning == YES)
 		{
-			const INC64 elapsed = now - pGBA_audio->scheduler.lastSyncCycleCount[ch];
+			const INC64 elapsed = now - pGBA_audio->apu_stats.lastSyncCycleCount[ch];
 			chInstance.frequencyTimer = (elapsed >= chInstance.frequencyTimer) ? static_cast<INC64>(ZERO) : (chInstance.frequencyTimer - elapsed);
 		}
 
-		pGBA_audio->scheduler.lastSyncCycleCount[ch] = now;
+		pGBA_audio->apu_stats.lastSyncCycleCount[ch] = now;
 	}
 
 	MASQ_INLINE void syncChannelFrequencyTimer(AUDIO_CHANNELS channel)
@@ -6728,10 +6655,10 @@ OPT_SPEED
 	MASQ_INLINE void scheduleChannelStep(AUDIO_CHANNELS channel)
 	{
 		const uint8_t ch = static_cast<uint8_t>(channel);
-		const INC64 now = static_cast<INC64>(scheduler.get_current_cycles());
+		const INC64 now = static_cast<INC64>(pGBA_scheduler->get_current_cycles());
 
-		pGBA_audio->scheduler.lastSyncCycleCount[ch] = now;
-		scheduler.reschedule(
+		pGBA_audio->apu_stats.lastSyncCycleCount[ch] = now;
+		pGBA_scheduler->reschedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_APU_CHANNEL_STEP),
 			now + pGBA_instance->GBA_state.audio.audioChannelInstance[ch].frequencyTimer,
 			ch);
@@ -11149,9 +11076,9 @@ OPT_SPEED
 					&&
 					pGBA_instance->GBA_state.dma.cache[DMA::DMA3].scheduleType == DMA_TIMING::SPECIAL)
 				{
-					scheduler.schedule(
+					pGBA_scheduler->schedule(
 						static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION),
-						scheduler.get_current_cycles() + DMA_HW_STARTUP_DELAY,
+						pGBA_scheduler->get_current_cycles() + DMA_HW_STARTUP_DELAY,
 						static_cast<int>(DMA::DMA3));
 				}
 			}
@@ -11170,9 +11097,9 @@ OPT_SPEED
 			pGBA_display->currentLCDMode = LCD_MODES::MODE_LCD_H_DRAW_V_BLANK;
 			PPUINFO("Entering MODE_LCD_H_DRAW_V_BLANK");
 
-			scheduler.schedule(
+			pGBA_scheduler->schedule(
 				static_cast<EventId>(GBA_EVENT::EVENT_PPU_HDRAW_VBLANK),
-				scheduler.get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE),
+				pGBA_scheduler->get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE),
 				ZERO);
 		}
 		// LINE 0 - 158
@@ -11242,9 +11169,9 @@ OPT_SPEED
 					&&
 					pGBA_instance->GBA_state.dma.cache[DMA::DMA3].scheduleType == DMA_TIMING::SPECIAL)
 				{
-					scheduler.schedule(
+					pGBA_scheduler->schedule(
 						static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION),
-						scheduler.get_current_cycles() + DMA_HW_STARTUP_DELAY,
+						pGBA_scheduler->get_current_cycles() + DMA_HW_STARTUP_DELAY,
 						static_cast<int>(DMA::DMA3));
 				}
 			}
@@ -11255,9 +11182,9 @@ OPT_SPEED
 			pGBA_display->currentLCDMode = LCD_MODES::MODE_LCD_H_DRAW_V_DRAW;
 			PPUINFO("Entering MODE_LCD_H_DRAW_V_DRAW");
 
-			scheduler.schedule(
+			pGBA_scheduler->schedule(
 				static_cast<EventId>(GBA_EVENT::EVENT_PPU_HDRAW_VDRAW),
-				scheduler.get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE),
+				pGBA_scheduler->get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE),
 				ZERO);
 		}
 	}
@@ -11282,9 +11209,9 @@ OPT_SPEED
 		pGBA_display->currentLCDMode = LCD_MODES::MODE_LCD_H_BLANK_V_BLANK;
 		PPUINFO("Entering MODE_LCD_H_BLANK_V_BLANK");
 
-		scheduler.schedule(
+		pGBA_scheduler->schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_PPU_HBLANK_VBLANK),
-			scheduler.get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK),
+			pGBA_scheduler->get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK),
 			ZERO);
 	}
 
@@ -11308,9 +11235,9 @@ OPT_SPEED
 		pGBA_display->currentLCDMode = LCD_MODES::MODE_LCD_H_BLANK_V_DRAW;
 		PPUINFO("Entering MODE_LCD_H_BLANK_V_DRAW");
 
-		scheduler.schedule(
+		pGBA_scheduler->schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_PPU_HBLANK_VDRAW),
-			scheduler.get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK),
+			pGBA_scheduler->get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK),
 			ZERO);
 	}
 
@@ -11375,9 +11302,9 @@ OPT_SPEED
 			pGBA_display->currentLCDMode = LCD_MODES::MODE_LCD_H_DRAW_V_DRAW;
 			PPUINFO("Entering MODE_LCD_H_DRAW_V_DRAW");
 
-			scheduler.schedule(
+			pGBA_scheduler->schedule(
 				static_cast<EventId>(GBA_EVENT::EVENT_PPU_HDRAW_VDRAW),
-				scheduler.get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE),
+				pGBA_scheduler->get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE),
 				ZERO);
 		}
 		// LINE 160 to 226
@@ -11407,9 +11334,9 @@ OPT_SPEED
 					&&
 					pGBA_instance->GBA_state.dma.cache[DMA::DMA3].scheduleType == DMA_TIMING::SPECIAL)
 				{
-					scheduler.schedule(
+					pGBA_scheduler->schedule(
 						static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION),
-						scheduler.get_current_cycles() + DMA_HW_STARTUP_DELAY,
+						pGBA_scheduler->get_current_cycles() + DMA_HW_STARTUP_DELAY,
 						static_cast<int>(DMA::DMA3));
 				}
 			}
@@ -11431,25 +11358,25 @@ OPT_SPEED
 			pGBA_display->currentLCDMode = LCD_MODES::MODE_LCD_H_DRAW_V_BLANK;
 			PPUINFO("Entering MODE_LCD_H_DRAW_V_BLANK");
 
-			scheduler.schedule(
+			pGBA_scheduler->schedule(
 				static_cast<EventId>(GBA_EVENT::EVENT_PPU_HDRAW_VBLANK),
-				scheduler.get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE),
+				pGBA_scheduler->get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE),
 				ZERO);
 		}
 	}
 
 	MASQ_INLINE void syncPPU()
 	{
-		INC64 currentCycles = scheduler.get_current_cycles();
+		INC64 currentCycles = pGBA_scheduler->get_current_cycles();
 		// If nothing has advanced, exit immediately.
-		if (pGBA_display->scheduler.lastSyncCycleCount == currentCycles)
+		if (pGBA_display->ppu_stats.lastSyncCycleCount == currentCycles)
 		{
 			RETURN;
 		}
-		ASSERT(pGBA_display->scheduler.lastSyncCycleCount < currentCycles);
-		INC64 catchupCycles = currentCycles - pGBA_display->scheduler.lastSyncCycleCount;
+		ASSERT(pGBA_display->ppu_stats.lastSyncCycleCount < currentCycles);
+		INC64 catchupCycles = currentCycles - pGBA_display->ppu_stats.lastSyncCycleCount;
 		processPPU(catchupCycles);
-		pGBA_display->scheduler.lastSyncCycleCount = currentCycles;
+		pGBA_display->ppu_stats.lastSyncCycleCount = currentCycles;
 	}
 
 	void processPPU(INC64 ppuCycles);
@@ -11510,22 +11437,17 @@ private:
 				}
 
 				// Cancel any existing pending transfer event before scheduling the new one
-				scheduler.cancel(static_cast<EventId>(GBA_EVENT::EVENT_SIO_TRANSFER_COMPLETE));
+				pGBA_scheduler->cancel(static_cast<EventId>(GBA_EVENT::EVENT_SIO_TRANSFER_COMPLETE));
 
-				scheduler.schedule(
+				pGBA_scheduler->schedule(
 					static_cast<EventId>(GBA_EVENT::EVENT_SIO_TRANSFER_COMPLETE),
-					scheduler.get_current_cycles() + cyclesToTxRxData,
+					pGBA_scheduler->get_current_cycles() + cyclesToTxRxData,
 					ZERO);
 			}
 		}
 	}
 
 private:
-
-	// ============================================
-	// AGGRESSIVE OPTIMIZATION - processBackup
-	// 100% accuracy maintained
-	// ============================================
 
 	MASQ_INLINE void processBackup()
 	{
@@ -11699,9 +11621,9 @@ private:
 		if (interruptState.irqAvailLatch != irqAvailLatch)
 		{
 			// Avail latch: 1 cycle after the IF/IE write is applied (IRQ_AVAILABILITY_DELAY)
-			gba->scheduler.schedule(
+			gba->pGBA_scheduler->schedule(
 				static_cast<EventId>(GBA_EVENT::EVENT_IRQ_AVAIL),
-				gba->scheduler.get_current_cycles() + IRQ_AVAILABILITY_DELAY,
+				gba->pGBA_scheduler->get_current_cycles() + IRQ_AVAILABILITY_DELAY,
 				irqAvailLatch);
 		}
 
@@ -11711,9 +11633,9 @@ private:
 		if (interruptState.irqLineLatch != irqLineLatch)
 		{
 			// CPU IRQ line: 1 cycle after the avail latch (IRQ_LINE_DELAY)
-			gba->scheduler.schedule(
+			gba->pGBA_scheduler->schedule(
 				static_cast<EventId>(GBA_EVENT::EVENT_IRQ_LINE),
-				gba->scheduler.get_current_cycles() + IRQ_LINE_DELAY,
+				gba->pGBA_scheduler->get_current_cycles() + IRQ_LINE_DELAY,
 				irqLineLatch);
 
 			// "irqLineLatch" which is the IRQ line in SOC is instantenous but IRQ line in CPU i.e. "cpuIrqLineLatch" is delayed (handled in irqLineHandler)  
@@ -11779,14 +11701,14 @@ private:
 		gba->timerOverflowWork(timer);
 
 		// The counter is the reload value as of this cycle, the next tick is one period away
-		const int64_t now = (int64_t)gba->scheduler.get_current_cycles();
+		const int64_t now = (int64_t)gba->pGBA_scheduler->get_current_cycles();
 		const int64_t prescalar = gba->getTimerPrescalar(timer);
 
 		// Point to the next future tick
 		state.cache.stats.firstTick = now + prescalar;
 
 		const int64_t overflowAt = state.cache.stats.firstTick + ((int64_t)(0x10000 - state.cache.counter - 1) * prescalar);
-		gba->scheduler.schedule(static_cast<EventId>(GBA_EVENT::EVENT_TIMER_OVERFLOW), (uint64_t)overflowAt, timerId);
+		gba->pGBA_scheduler->schedule(static_cast<EventId>(GBA_EVENT::EVENT_TIMER_OVERFLOW), (uint64_t)overflowAt, timerId);
 	}
 
 	static void sioTransferHandler(void* userData, MASQ_MAYBE_UNUSED int context)
@@ -11850,12 +11772,12 @@ private:
 
 		gba->tickChannel(static_cast<AUDIO_CHANNELS>(channel));
 
-		gba->pGBA_audio->scheduler.lastSyncCycleCount[channel] = gba->scheduler.get_current_cycles();
+		gba->pGBA_audio->apu_stats.lastSyncCycleCount[channel] = gba->pGBA_scheduler->get_current_cycles();
 
 		// Schedule channel step
-		gba->scheduler.schedule(
+		gba->pGBA_scheduler->schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_APU_CHANNEL_STEP),
-			gba->scheduler.get_current_cycles() + chInstance.frequencyTimer,
+			gba->pGBA_scheduler->get_current_cycles() + chInstance.frequencyTimer,
 			channel);
 	}
 
@@ -11866,9 +11788,9 @@ private:
 		gba->frameSequencer();
 
 		// Schedule the Framesequencer
-		gba->scheduler.schedule(
+		gba->pGBA_scheduler->schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_APU_FRAME_SEQUENCER),
-			gba->scheduler.get_current_cycles() + FRAME_SEQ_THRESHOLD,
+			gba->pGBA_scheduler->get_current_cycles() + FRAME_SEQ_THRESHOLD,
 			ZERO);
 	}
 
@@ -11879,9 +11801,9 @@ private:
 		gba->captureDownsampledAudioSamples();
 
 		// Schedule the Downsampler
-		gba->scheduler.schedule(
+		gba->pGBA_scheduler->schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_APU_SAMPLE),
-			gba->scheduler.get_current_cycles() + DOWNSAMPLE_THRESHOLD,
+			gba->pGBA_scheduler->get_current_cycles() + DOWNSAMPLE_THRESHOLD,
 			ZERO);
 	}
 

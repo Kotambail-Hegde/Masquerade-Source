@@ -1955,10 +1955,10 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 				pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_4)].isChannelActuallyEnabled = DISABLED;
 
 				// Disable the scheduled events for the APU channel stepping as PSG FIFO is disabled
-				scheduler.cancel(static_cast<EventId>(GBA_EVENT::EVENT_APU_CHANNEL_STEP), TO_UINT8(AUDIO_CHANNELS::CHANNEL_1));
-				scheduler.cancel(static_cast<EventId>(GBA_EVENT::EVENT_APU_CHANNEL_STEP), TO_UINT8(AUDIO_CHANNELS::CHANNEL_2));
-				scheduler.cancel(static_cast<EventId>(GBA_EVENT::EVENT_APU_CHANNEL_STEP), TO_UINT8(AUDIO_CHANNELS::CHANNEL_3));
-				scheduler.cancel(static_cast<EventId>(GBA_EVENT::EVENT_APU_CHANNEL_STEP), TO_UINT8(AUDIO_CHANNELS::CHANNEL_4));
+				pGBA_scheduler->cancel(static_cast<EventId>(GBA_EVENT::EVENT_APU_CHANNEL_STEP), TO_UINT8(AUDIO_CHANNELS::CHANNEL_1));
+				pGBA_scheduler->cancel(static_cast<EventId>(GBA_EVENT::EVENT_APU_CHANNEL_STEP), TO_UINT8(AUDIO_CHANNELS::CHANNEL_2));
+				pGBA_scheduler->cancel(static_cast<EventId>(GBA_EVENT::EVENT_APU_CHANNEL_STEP), TO_UINT8(AUDIO_CHANNELS::CHANNEL_3));
+				pGBA_scheduler->cancel(static_cast<EventId>(GBA_EVENT::EVENT_APU_CHANNEL_STEP), TO_UINT8(AUDIO_CHANNELS::CHANNEL_4));
 			}
 			// Channel OFF -> Channel ON
 			else if (APU_POWER_WAS == ZERO && pGBA_peripherals->mSOUNDCNT_XHalfWord.mSOUNDCNT_XFields.PSG_FIFO_MASTER_EN == ONE)
@@ -2239,9 +2239,9 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 	case IO_TM0CNT_L:
 	{
 		pGBA_instance->GBA_state.timer[TIMER::TIMER0].cache.io_tmxcnt_l = data;
-		scheduler.schedule(
+		pGBA_scheduler->schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_RELOAD_WRITE),
-			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
+			pGBA_scheduler->get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
 			static_cast<int>(TIMER::TIMER0));
 		RETURN;
 	}
@@ -2249,18 +2249,18 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 	{
 		REJECT_IO8(accessWidth);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER0].cache.io_tmxcnt_h = data;
-		scheduler.schedule(
+		pGBA_scheduler->schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
-			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
+			pGBA_scheduler->get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
 			static_cast<int>(TIMER::TIMER0));
 		RETURN;
 	}
 	case IO_TM1CNT_L:
 	{
 		pGBA_instance->GBA_state.timer[TIMER::TIMER1].cache.io_tmxcnt_l = data;
-		scheduler.schedule(
+		pGBA_scheduler->schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_RELOAD_WRITE),
-			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
+			pGBA_scheduler->get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
 			static_cast<int>(TIMER::TIMER1));
 		RETURN;
 	}
@@ -2268,18 +2268,18 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 	{
 		REJECT_IO8(accessWidth);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER1].cache.io_tmxcnt_h = data;
-		scheduler.schedule(
+		pGBA_scheduler->schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
-			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
+			pGBA_scheduler->get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
 			static_cast<int>(TIMER::TIMER1));
 		RETURN;
 	}
 	case IO_TM2CNT_L:
 	{
 		pGBA_instance->GBA_state.timer[TIMER::TIMER2].cache.io_tmxcnt_l = data;
-		scheduler.schedule(
+		pGBA_scheduler->schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_RELOAD_WRITE),
-			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
+			pGBA_scheduler->get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
 			static_cast<int>(TIMER::TIMER2));
 		RETURN;
 	}
@@ -2287,18 +2287,18 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 	{
 		REJECT_IO8(accessWidth);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER2].cache.io_tmxcnt_h = data;
-		scheduler.schedule(
+		pGBA_scheduler->schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
-			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
+			pGBA_scheduler->get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
 			static_cast<int>(TIMER::TIMER2));
 		RETURN;
 	}
 	case IO_TM3CNT_L:
 	{
 		pGBA_instance->GBA_state.timer[TIMER::TIMER3].cache.io_tmxcnt_l = data;
-		scheduler.schedule(
+		pGBA_scheduler->schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_RELOAD_WRITE),
-			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
+			pGBA_scheduler->get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
 			static_cast<int>(TIMER::TIMER3));
 		RETURN;
 	}
@@ -2306,9 +2306,9 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 	{
 		REJECT_IO8(accessWidth);
 		pGBA_instance->GBA_state.timer[TIMER::TIMER3].cache.io_tmxcnt_h = data;
-		scheduler.schedule(
+		pGBA_scheduler->schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
-			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
+			pGBA_scheduler->get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
 			static_cast<int>(TIMER::TIMER3));
 		RETURN;
 	}
@@ -2412,9 +2412,9 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 	case IO_IE:
 	{
 		pGBA_instance->GBA_state.interrupt.iePend = data & 0x3FFF;
-		scheduler.schedule(
+		pGBA_scheduler->schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_IRQ_WRITE),
-			scheduler.get_current_cycles() + IRQ_REGISTERS_WRITE_DELAY,
+			pGBA_scheduler->get_current_cycles() + IRQ_REGISTERS_WRITE_DELAY,
 			ZERO);
 		RETURN;
 	}
@@ -2424,9 +2424,9 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 		// Writing from CPU is always an ACK, so this is basically W1C register for CPU
 		// Masters other than CPU should be able to write this without triggering W1C
 		pGBA_instance->GBA_state.interrupt.ifPend &= ~data;
-		scheduler.schedule(
+		pGBA_scheduler->schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_IRQ_WRITE),
-			scheduler.get_current_cycles() + IRQ_REGISTERS_WRITE_DELAY,
+			pGBA_scheduler->get_current_cycles() + IRQ_REGISTERS_WRITE_DELAY,
 			ZERO);
 		RETURN;
 	}
@@ -2572,9 +2572,9 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 	case IO_IME:
 	{
 		pGBA_instance->GBA_state.interrupt.imePend = data & 0x01;
-		scheduler.schedule(
+		pGBA_scheduler->schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_IRQ_WRITE),
-			scheduler.get_current_cycles() + IRQ_REGISTERS_WRITE_DELAY,
+			pGBA_scheduler->get_current_cycles() + IRQ_REGISTERS_WRITE_DELAY,
 			ZERO);
 		RETURN;
 	}
@@ -2640,36 +2640,36 @@ MASQ_INLINE void GBA_t::writeIO8(uint32_t address, BYTE data, MEMORY_ACCESS_WIDT
 	case IO_TM0CNT_H:
 	{
 		pGBA_instance->GBA_state.timer[TIMER::TIMER0].cache.io_tmxcnt_h = data;
-		scheduler.schedule(
+		pGBA_scheduler->schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
-			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
+			pGBA_scheduler->get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
 			static_cast<int>(TIMER::TIMER0));
 		RETURN;
 	}
 	case IO_TM1CNT_H:
 	{
 		pGBA_instance->GBA_state.timer[TIMER::TIMER1].cache.io_tmxcnt_h = data;
-		scheduler.schedule(
+		pGBA_scheduler->schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
-			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
+			pGBA_scheduler->get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
 			static_cast<int>(TIMER::TIMER1));
 		RETURN;
 	}
 	case IO_TM2CNT_H:
 	{
 		pGBA_instance->GBA_state.timer[TIMER::TIMER2].cache.io_tmxcnt_h = data;
-		scheduler.schedule(
+		pGBA_scheduler->schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
-			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
+			pGBA_scheduler->get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
 			static_cast<int>(TIMER::TIMER2));
 		RETURN;
 	}
 	case IO_TM3CNT_H:
 	{
 		pGBA_instance->GBA_state.timer[TIMER::TIMER3].cache.io_tmxcnt_h = data;
-		scheduler.schedule(
+		pGBA_scheduler->schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_TIMER_CONTROL_WRITE),
-			scheduler.get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
+			pGBA_scheduler->get_current_cycles() + TIMER_CONTROL_WRITE_DELAY,
 			static_cast<int>(TIMER::TIMER3));
 		RETURN;
 	}
@@ -3246,9 +3246,9 @@ MASQ_INLINE void GBA_t::requestInterrupts(GBA_INTERRUPT interrupt)
 	pGBA_instance->GBA_state.interrupt.ifPend |= (ONE << TO_UINT(interrupt));
 
 	TODO("Ideally this should be 1 cycle delay but currently need to set 0 for TIMER IRQ test to pass in MGBA suite");
-	scheduler.schedule(
+	pGBA_scheduler->schedule(
 		static_cast<EventId>(GBA_EVENT::EVENT_IRQ_WRITE),
-		scheduler.get_current_cycles() + IRQ_HW_REGISTERS_WRITE_DELAY,
+		pGBA_scheduler->get_current_cycles() + IRQ_HW_REGISTERS_WRITE_DELAY,
 		ZERO);
 }
 
@@ -3418,7 +3418,7 @@ MASQ_INLINE void GBA_t::displayCompleteScreen()
 
 		glDisable(GL_BLEND);
 
-		// Handle for gameboy system's texture
+		// Handle for gameboy advance system's texture
 
 		glBindTexture(GL_TEXTURE_2D, gameboyAdvance_texture);
 		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, getScreenWidth(), getScreenHeight(), GL_RGBA, GL_UNSIGNED_BYTE, (GLvoid*)pGBA_instance->GBA_state.display.imGuiBuffer.imGuiBuffer1D);
