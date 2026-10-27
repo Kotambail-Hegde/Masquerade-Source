@@ -61,11 +61,22 @@ bool GBA_t::loadState(uint8_t id)
 	static_assert(std::is_standard_layout<GBA_instance_t>::value, "not standard layout");
 
 	save.open(saveStateNameForThisROM, std::ios::binary);
-	save.read(reinterpret_cast<char*>(&(pGBA_instance->GBA_memoryState)), sizeof(pGBA_instance->GBA_memoryState));
+	if (!save.is_open())
+	{
+		RETURN false;
+	}
+
+	// 1. Snapshot scheduler with valid handlers
+	Scheduler_t tempScheduler = pGBA_instance->GBA_state.Scheduler;
+
+	// 2. Read the binary state blob
+	save.read(reinterpret_cast<char*>(&(pGBA_instance->GBA_state)), sizeof(pGBA_instance->GBA_state));
 	save.close();
 
-	status = true;
+	// 3. Fix up handlers and recompute timings internally
+	pGBA_instance->GBA_state.Scheduler.post_load_fixup(tempScheduler);
 
+	status = true;
 	RETURN status;
 }
 
@@ -127,20 +138,29 @@ bool GBA_t::absoluteLoadState(uint8_t id)
 	);
 
 	saveStateNameForThisROM = "_absolute_" + saveStateNameForThisROM + std::to_string(id);
+	saveStateNameForThisROM = _SAVE_LOCATION + "\\" + saveStateNameForThisROM;
 
 	std::ifstream save;
-
-	saveStateNameForThisROM = _SAVE_LOCATION + "\\" + saveStateNameForThisROM;
+	save.open(saveStateNameForThisROM, std::ios::binary);
+	if (!save.is_open())
+	{
+		RETURN false;
+	}
 
 	static_assert(std::is_trivially_copyable<absolute_GBA_instance_t>::value, "not trivially copyable");
 	static_assert(std::is_standard_layout<absolute_GBA_instance_t>::value, "not standard layout");
 
-	save.open(saveStateNameForThisROM, std::ios::binary);
+	// 1. Snapshot scheduler with valid handlers
+	Scheduler_t tempScheduler = pAbsolute_GBA_instance->absolute_GBA_state.GBA_instance.GBA_state.Scheduler;
+
+	// 2. Read the absolute state binary blob
 	save.read(reinterpret_cast<char*>(&(pAbsolute_GBA_instance->GBA_absoluteMemoryState)), sizeof(pAbsolute_GBA_instance->GBA_absoluteMemoryState));
 	save.close();
 
-	status = true;
+	// 3. Fix up handlers and recompute timings internally
+	pAbsolute_GBA_instance->absolute_GBA_state.GBA_instance.GBA_state.Scheduler.post_load_fixup(tempScheduler);
 
+	status = true;
 	RETURN status;
 }
 
