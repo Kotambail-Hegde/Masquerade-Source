@@ -3644,12 +3644,19 @@ private:
 		BYTE oamAttributes[ONETWENTYEIGHT][FOUR];
 		BYTE objPriority[TO_UINT(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)][TO_UINT(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)];
 		FLAG gfx_obj_window[TO_UINT(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)][TO_UINT(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)];
+		FLAG gfx_obj_mosaic_flag[TO_UINT(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)][TO_UINT(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)];
+		struct objMosaicLatch_t
+		{
+			ID colorNumber;
+			BYTE priority;
+			OBJECT_MODE mode;
+			FLAG isMosaic;
+		} objMosaicLatch;
 		FLAG gfx_window[TWO][TO_UINT(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)][TO_UINT(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)];
 		OBJECT_MODE gfx_obj_mode[TO_UINT(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)][TO_UINT(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)];
 		ID gfx_obj[TO_UINT(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)][TO_UINT(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)];
 		ID gfx_bg[FOUR][TO_UINT(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)][TO_UINT(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)];
 		ID gfx_bg_mosaic[FOUR][TO_UINT(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)][TO_UINT(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)];
-		INC32 gfx_obj_mosaic[ONETWENTYEIGHT][SIXTYFOUR][SIXTYFOUR];
 		union
 		{
 			Pixel imGuiBuffer1D[screen_width * screen_height];
@@ -7273,6 +7280,7 @@ OPT_SPEED
 		pGBA_display->objPriority[x][y] = DEFAULT_OBJ_PRIORITY;
 		pGBA_display->gfx_obj_window[x][y] = DISABLED;
 		pGBA_display->gfx_obj_mode[x][y] = OBJECT_MODE::NORMAL;
+		pGBA_display->gfx_obj_mosaic_flag[x][y] = NO;
 		for (ID bgID = BG0; bgID < BG3; bgID++)
 		{
 			pGBA_display->gfx_bg[bgID][x][y] = ZERO;
@@ -7357,12 +7365,13 @@ OPT_SPEED
 
 	}
 
-	MASQ_INLINE void HANDLE_WINDOW_FOR_BG(uint32_t x, uint32_t y, ID bgID)
+	// Returns whether the windows let this BG show at (x, y). Pixels outside the visible area are never displayed, so they count as allowed.
+	MASQ_INLINE FLAG IS_WINDOW_ALLOWING_BG(uint32_t x, uint32_t y, ID bgID)
 	{
 
 		if ((x >= ((uint16_t)LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (y >= ((uint16_t)LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
 		{
-			RETURN;
+			RETURN YES;
 		}
 
 		FLAG isWindowAllowingBG = YES;
@@ -7409,7 +7418,7 @@ OPT_SPEED
 		default:
 		{
 			FATAL("Unknown BG Layer");
-			RETURN;
+			RETURN YES;
 		}
 		}
 
@@ -7422,7 +7431,15 @@ OPT_SPEED
 			, objin
 		);
 
-		if (isWindowAllowingBG == NO)
+		RETURN isWindowAllowingBG;
+
+	}
+
+	// Clears the stored BG pixel when the windows hide it
+	MASQ_INLINE void HANDLE_WINDOW_FOR_BG(uint32_t x, uint32_t y, ID bgID)
+	{
+
+		if (IS_WINDOW_ALLOWING_BG(x, y, bgID) == NO)
 		{
 			pGBA_display->gfx_bg[bgID][x][y] = ZERO;
 		}
@@ -7626,11 +7643,36 @@ OPT_SPEED
 				ID minBG = MIN_MAX_BG_LAYERS[pGBA_display->currentPPUMode][ZERO];
 				ID maxBG = MIN_MAX_BG_LAYERS[pGBA_display->currentPPUMode][ONE];
 
-				// Check if window layer is allowing the bg, if not, marks the pixel as transparent
-				for (ID bgID = minBG; bgID <= maxBG; bgID++)
+				// BG windows are applied below, AFTER mosaic has picked each BG pixel: mosaic belongs to the layer, windows only mask its output
+
+				// Horizontal OBJ mosaic. On hardware it is a post-process on the sprite buffer in screen space (not blocks anchored on each
+				// sprite): the pixel that gets displayed is the one held in a latch, and the latch takes the current sprite pixel when
+				//   1. x is a multiple of the mosaic width, or
+				//   2. the current pixel does not have the mosaic flag, or
+				//   3. the latched pixel does not have the mosaic flag, or
+				//   4. the current pixel has a numerically lower priority value than the latched one.
+				// Transparent pixels of mosaic sprites carry the flag too. (Behaviour worked out by fleroviux, NBA author: mGBA issue #2933.)
+				// This runs before the OBJ window mask so the mask applies to what is displayed.
 				{
-					HANDLE_WINDOW_FOR_BG(x, y, bgID);
+					auto& objMosaicLatch = pGBA_display->objMosaicLatch;
+					const BYTE currentObjPriority = pGBA_display->objPriority[x][y];
+					const FLAG currentObjMosaic = pGBA_display->gfx_obj_mosaic_flag[x][y];
+					const uint32_t objMosaicWidth = pGBA_peripherals->mMOSAICHalfWord.mMOSAICFields.OBJ_MOSAIC_H_SIZE + ONE;
+
+					if ((x % objMosaicWidth) == ZERO || currentObjMosaic == NO || objMosaicLatch.isMosaic == NO || currentObjPriority < objMosaicLatch.priority)
+					{
+						objMosaicLatch.colorNumber = pGBA_display->gfx_obj[x][y];
+						objMosaicLatch.priority = currentObjPriority;
+						objMosaicLatch.mode = pGBA_display->gfx_obj_mode[x][y];
+						objMosaicLatch.isMosaic = currentObjMosaic;
+					}
+
+					// The latched pixel is what gets displayed
+					pGBA_display->gfx_obj[x][y] = objMosaicLatch.colorNumber;
+					pGBA_display->objPriority[x][y] = objMosaicLatch.priority;
+					pGBA_display->gfx_obj_mode[x][y] = objMosaicLatch.mode;
 				}
+
 				// Check if window layer is allowing the obj, if not, marks the pixel as transparent
 				HANDLE_WINDOW_FOR_OBJ(x, y);
 
@@ -7668,6 +7710,12 @@ OPT_SPEED
 							uint32_t mosaicX = x - (x % (pGBA_peripherals->mMOSAICHalfWord.mMOSAICFields.BG_MOSAIC_H_SIZE + ONE));
 							uint32_t mosaicY = y - (y % (pGBA_peripherals->mMOSAICHalfWord.mMOSAICFields.BG_MOSAIC_V_SIZE + ONE));
 							bgPixel = pGBA_display->gfx_bg_mosaic[bgID][mosaicX][mosaicY];
+						}
+
+						// Windows mask the layer's OUTPUT, so they are applied after mosaic has picked the pixel
+						if (bgPixel != ZERO && IS_WINDOW_ALLOWING_BG(x, y, bgID) == NO)
+						{
+							bgPixel = ZERO;
 						}
 
 						if (bgPixel != ZERO)
@@ -8158,6 +8206,19 @@ OPT_SPEED
 		INC32 transformedSpriteX = ZERO, transformedSpriteY = ZERO;
 		INC16 spriteY = objCache.spriteYPixelCoordinate;
 		SDIM32 Y = objCache.vcount;
+
+		MASQ_UNUSED(oamID);
+
+		const FLAG isObjMosaic = (objCache.ObjAttribute.mOamAttr01Word.mOamAttr0HalfWord.mOamAttr0Fields.OBJ_MOSAIC == SET) ? YES : NO;
+		if (isObjMosaic == YES)
+		{
+			// Vertical OBJ mosaic: every line of a block shows the sprite row of the block's first SCREEN line (blocks are anchored on
+			// the screen, not on the sprite). If that line is above the sprite, the sprite's first row is used.
+			// This happens before flip / affine, so those act on the mosaiced row.
+			// (Horizontal mosaic is a screen-space post-process in MERGE_AND_DISPLAY_PHASE1)
+			const INC16 mosaicRowOffset = static_cast<INC16>(Y % (pGBA_peripherals->mMOSAICHalfWord.mMOSAICFields.OBJ_MOSAIC_V_SIZE + ONE));
+			spriteY = (spriteY > mosaicRowOffset) ? static_cast<INC16>(spriteY - mosaicRowOffset) : static_cast<INC16>(ZERO);
+		}
 		// update the spriteX coordinates (needed for next VRAM stages)
 		objCache.spriteXPixelCoordinate = spriteXEnd;
 		// check if this needs to be the last vram cycle for this object
@@ -8465,16 +8526,6 @@ OPT_SPEED
 					paletteIndex = pixelColorNumberFromTileData << ONE;
 				}
 
-				// Cache the palette index for this pixel in the mosaic array for this object
-				pGBA_display->gfx_obj_mosaic[oamID][spriteX][spriteY] = paletteIndex;
-
-				if (objCache.ObjAttribute.mOamAttr01Word.mOamAttr0HalfWord.mOamAttr0Fields.OBJ_MOSAIC == SET)
-				{
-					uint32_t mosaicX = spriteX - (spriteX % (pGBA_peripherals->mMOSAICHalfWord.mMOSAICFields.OBJ_MOSAIC_H_SIZE + ONE));
-					uint32_t mosaicY = spriteY - (spriteY % (pGBA_peripherals->mMOSAICHalfWord.mMOSAICFields.OBJ_MOSAIC_V_SIZE + ONE));
-					paletteIndex = pGBA_display->gfx_obj_mosaic[oamID][mosaicX][mosaicY];
-				}
-
 				if ((OBJECT_MODE)objCache.ObjAttribute.mOamAttr01Word.mOamAttr0HalfWord.mOamAttr0Fields.OBJ_MODE == OBJECT_MODE::OBJ_WINDOW
 					&&
 					paletteIndex != ZERO)
@@ -8492,6 +8543,8 @@ OPT_SPEED
 						pGBA_display->gfx_obj_mode[X][Y] = (OBJECT_MODE)objCache.ObjAttribute.mOamAttr01Word.mOamAttr0HalfWord.mOamAttr0Fields.OBJ_MODE;
 					}
 					pGBA_display->objPriority[X][Y] = objCache.ObjAttribute.mOamAttr23Word.mOamAttr2HalfWord.mOamAttr2Fields.PRIORITY;
+					// The mosaic flag follows the sprite buffer entry, also for transparent pixels (the merge stage needs it)
+					pGBA_display->gfx_obj_mosaic_flag[X][Y] = isObjMosaic;
 				}
 			}
 		}
