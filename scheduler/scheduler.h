@@ -98,6 +98,8 @@ public:
 	void cancel(EventId id, int context = 0);
 	void reschedule(EventId id, int64_t new_target_cycle, int context = 0);
 
+	void post_load_fixup(const Scheduler_t& referenceInstance);
+
 	// Called every cycle, advances the clock by one and fires the events that are due
 	MASQ_INLINE void tick()
 	{
