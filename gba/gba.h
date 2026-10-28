@@ -1402,7 +1402,8 @@ private:
 
 	enum class BACKUP_FLASH_CMDS
 	{
-		NO_OPERATION = 0x00,
+		NO_OPERATION_00 = 0x00,
+		NO_OPERATION_FF = 0xFF,
 		CMD_1 = 0xAA,
 		CMD_2 = 0x55,
 		ENTER_CHIP_INDENTIFICATION_MODE = 0x90,
@@ -4837,26 +4838,21 @@ OPT_SPEED
 			case BACKUP_TYPE::FLASH64K:
 			case BACKUP_TYPE::FLASH128K:
 			{
-				while (address >= GAMEPAK_SRAM_MIRROR_START_ADDRESS)
-				{
-					address = (address % GAMEPAK_SRAM_MIRROR_START_ADDRESS) + GAMEPAK_SRAM_START_ADDRESS;
-				}
-
-				auto currentMemoryBank = TO_UINT8(pGBA_instance->GBA_state.emulatorStatus.backup.flash.currentMemoryBank);
+				const BYTE flashByte = flashReadByte(address);
 
 				if (accessWidth == MEMORY_ACCESS_WIDTH::EIGHT_BIT)
 				{
-					RETURN static_cast<T>(pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[currentMemoryBank][address - GAMEPAK_SRAM_START_ADDRESS]);
+					RETURN static_cast<T>(flashByte);
 				}
 				else if (accessWidth == MEMORY_ACCESS_WIDTH::SIXTEEN_BIT)
 				{
 					// Refer : http://problemkaputt.de/gbatek-gba-unpredictable-things.htm
-					RETURN static_cast<T>((GBA_HALFWORD)pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[currentMemoryBank][address - GAMEPAK_SRAM_START_ADDRESS] * 0x0101);
+					RETURN static_cast<T>((GBA_HALFWORD)flashByte * 0x0101);
 				}
 				else if (accessWidth == MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT)
 				{
 					// Refer : http://problemkaputt.de/gbatek-gba-unpredictable-things.htm
-					RETURN static_cast<T>((GBA_WORD)pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[currentMemoryBank][address - GAMEPAK_SRAM_START_ADDRESS] * 0x01010101);
+					RETURN static_cast<T>((GBA_WORD)flashByte * 0x01010101);
 				}
 				BREAK;
 			}
@@ -5313,54 +5309,7 @@ OPT_SPEED
 			case BACKUP_TYPE::FLASH64K:
 			case BACKUP_TYPE::FLASH128K:
 			{
-				while (address >= GAMEPAK_SRAM_MIRROR_START_ADDRESS)
-				{
-					address = (address % GAMEPAK_SRAM_MIRROR_START_ADDRESS) + GAMEPAK_SRAM_START_ADDRESS;
-				}
-
-				auto currentMemoryBank = TO_UINT8(pGBA_instance->GBA_state.emulatorStatus.backup.flash.currentMemoryBank);
-
-				if (pGBA_instance->GBA_state.emulatorStatus.backup.flash.chooseMemoryBank == YES)
-				{
-					if (address == FLASH_ACCESS_MEMORY0)
-					{
-						pGBA_instance->GBA_state.emulatorStatus.backup.flash.currentMemoryBank =
-							((data == ZERO) ? BACKUP_FLASH_MEMORY_BANK::BANK0 : BACKUP_FLASH_MEMORY_BANK::BANK1);
-						pGBA_instance->GBA_state.emulatorStatus.backup.flash.chooseMemoryBank = NO;
-					}
-					else
-					{
-						WARN("Memory Bank Not Chosen!");
-					}
-				}
-				else if
-					(
-						(address == FLASH_ACCESS_MEMORY2)
-						||
-						(address == FLASH_ACCESS_MEMORY3)
-						)
-				{
-					pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[currentMemoryBank][address - GAMEPAK_SRAM_START_ADDRESS] = TO_UINT8(data);
-				}
-				// TO handle for "Erase 4KB sector"
-				else if (pGBA_instance->GBA_state.emulatorStatus.backup.flash.previousFlashCommand == BACKUP_FLASH_CMDS::START_ERASE_CMD)
-				{
-					pGBA_instance->GBA_state.emulatorStatus.backup.flash.erase4kbStartAddr = address;
-					pGBA_instance->GBA_state.emulatorStatus.backup.flash.erase4kbPageNumber = ((address & 0xF000) >> TWELVE);
-
-					pGBA_instance->GBA_state.emulatorStatus.backup.flash.currentFlashCommand = (BACKUP_FLASH_CMDS)data;
-				}
-				else if (pGBA_instance->GBA_state.emulatorStatus.backup.flash.allowFlashWrite == YES)
-				{
-					pGBA_instance->GBA_state.emulatorStatus.backup.flash.allowFlashWrite = NO;
-
-					if (pGBA_instance->GBA_state.emulatorStatus.backup.flash.isErased[currentMemoryBank][address - GAMEPAK_SRAM_START_ADDRESS] == YES)
-					{
-						pGBA_instance->GBA_state.emulatorStatus.backup.flash.isErased[currentMemoryBank][address - GAMEPAK_SRAM_START_ADDRESS] = NO;
-
-						pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[currentMemoryBank][address - GAMEPAK_SRAM_START_ADDRESS] = TO_UINT8(data);
-					}
-				}
+				flashWriteByte(address, TO_UINT8(data));
 				BREAK;
 			}
 			case BACKUP_TYPE::EEPROM:
@@ -11500,153 +11449,169 @@ private:
 
 private:
 
-	MASQ_INLINE void processBackup()
+	// ---- Flash backup chip (64K / 128K) ---------------------------------------------------------------------------
+// Commands are decoded when the write happens, as a real state machine: what a write means depends on the state the chip is in.
+// (Reference: https://dillonbeliveau.com/2020/06/05/GBA-FLASH.html and GBATEK "GBA Cart Backup Flash ROM")
+// The previous version stored command bytes in the data array and polled them every tick. That cannot work because 0x5555 and
+// 0x2AAA are ordinary data addresses too: every command cycle overwrote the save data at those two offsets with 0xFF, and a program
+// command whose data byte goes to 0x5555 or 0x2AAA was mistaken for a command write. The state machine below never stores command
+// bytes, and the data byte of a program command goes to the address it is written to, whatever that address is.
+
+	MASQ_INLINE void resetFlashChip()
 	{
+		auto& flash = pGBA_instance->GBA_state.emulatorStatus.backup.flash;
+
+		flash.currentMemoryBank = BACKUP_FLASH_MEMORY_BANK::BANK0;
+		flash.chooseMemoryBank = NO;
+		flash.allowFlashWrite = NO;
+		flash.previousFlashCommand = BACKUP_FLASH_CMDS::NO_OPERATION_00; // "erase armed" lives here
+		flash.currentFlashCommand = BACKUP_FLASH_CMDS::NO_OPERATION_00;  // "identification mode" lives here
+		flash.flashFsmState = BACKUP_FLASH_FSM::STATE0;
+	}
+
+	MASQ_INLINE BYTE flashReadByte(uint32_t address)
+	{
+		auto& flash = pGBA_instance->GBA_state.emulatorStatus.backup.flash;
+
+		while (address >= GAMEPAK_SRAM_MIRROR_START_ADDRESS)
+		{
+			address = (address % GAMEPAK_SRAM_MIRROR_START_ADDRESS) + GAMEPAK_SRAM_START_ADDRESS;
+		}
+
+		const uint32_t offset = address - GAMEPAK_SRAM_START_ADDRESS;
+		const ID bank = (flash.currentMemoryBank == BACKUP_FLASH_MEMORY_BANK::BANK1) ? ONE : ZERO;
+
+		// In chip identification mode the first two bytes are replaced by the manufacturer and device ID
+		if (flash.currentFlashCommand == BACKUP_FLASH_CMDS::ENTER_CHIP_INDENTIFICATION_MODE && offset < TWO)
+		{
+			if (pGBA_instance->GBA_state.emulatorStatus.backup.backupType == BACKUP_TYPE::FLASH64K)
+			{
+				RETURN(offset == ZERO) ? 0x32 : 0x1B; // Panasonic
+			}
+			RETURN(offset == ZERO) ? 0x62 : 0x13; // Sanyo
+		}
+
+		RETURN pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[bank][offset];
+	}
+
+	MASQ_INLINE void flashWriteByte(uint32_t address, BYTE data)
+	{
+		auto& flash = pGBA_instance->GBA_state.emulatorStatus.backup.flash;
 		const BACKUP_TYPE backupType = pGBA_instance->GBA_state.emulatorStatus.backup.backupType;
 
-		if (backupType != BACKUP_TYPE::FLASH64K && backupType != BACKUP_TYPE::FLASH128K) MASQ_UNLIKELY
-			RETURN;
-
-		auto& flash = pGBA_instance->GBA_state.emulatorStatus.backup.flash;
-		const ID currentMemoryBank = (flash.currentMemoryBank == BACKUP_FLASH_MEMORY_BANK::BANK1) ? ONE : ZERO;
-
-		// KEEP direct pointer (DO NOT REMOVE)
-		auto* flashMem = pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[currentMemoryBank];
-
-		const BACKUP_FLASH_FSM state = flash.flashFsmState;
-
-		// Helper lambda for READ via API
-		auto READ_FLASH = [&](uint32_t addr) -> uint8_t
-			{
-				RETURN readRawMemoryInternal<uint8_t>(
-					addr,
-					MEMORY_ACCESS_WIDTH::EIGHT_BIT,
-					MEMORY_ACCESS_SOURCE::HOST,
-					MEMORY_ACCESS_TYPE::AUTOMATIC,
-					YES   // IMPORTANT: LOCK = YES (avoid recursion / DMA side effects)
-				);
-			};
-
-		if (state == BACKUP_FLASH_FSM::STATE0) MASQ_LIKELY
+		while (address >= GAMEPAK_SRAM_MIRROR_START_ADDRESS)
 		{
-			if (READ_FLASH(FLASH_ACCESS_MEMORY2) == TO_UINT8(BACKUP_FLASH_CMDS::CMD_1)) MASQ_UNLIKELY
+			address = (address % GAMEPAK_SRAM_MIRROR_START_ADDRESS) + GAMEPAK_SRAM_START_ADDRESS;
+		}
+
+		const uint32_t offset = address - GAMEPAK_SRAM_START_ADDRESS;
+		const ID bank = (flash.currentMemoryBank == BACKUP_FLASH_MEMORY_BANK::BANK1) ? ONE : ZERO;
+		auto* memory = pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit;
+
+		// 1) The write that follows "set memory bank" (0xB0) must go to 0x0E000000 and selects the bank for ALL later accesses
+		if (flash.chooseMemoryBank == YES)
+		{
+			flash.chooseMemoryBank = NO;
+			if (offset == ZERO)
+			{
+				flash.currentMemoryBank = ((data & ONE) == ZERO) ? BACKUP_FLASH_MEMORY_BANK::BANK0 : BACKUP_FLASH_MEMORY_BANK::BANK1;
+			}
+			RETURN;
+		}
+
+		// 2) The write that follows "program single byte" (0xA0) is the data byte, at ANY address (0x5555 and 0x2AAA included).
+		// Programming can only clear bits, so the result is the old value AND the new one
+		if (flash.allowFlashWrite == YES)
+		{
+			flash.allowFlashWrite = NO;
+			memory[bank][offset] &= data;
+			RETURN;
+		}
+
+		// 3) Command cycles: 0xAA to 0x5555, 0x55 to 0x2AAA, then the command (to 0x5555, or for sector erase 0x30 to the sector address)
+		switch (flash.flashFsmState)
+		{
+		case BACKUP_FLASH_FSM::STATE0:
+		{
+			if (offset == 0x5555 && data == TO_UINT8(BACKUP_FLASH_CMDS::CMD_1))
 			{
 				flash.flashFsmState = BACKUP_FLASH_FSM::STATE1;
-				flashMem[FLASH_ACCESS_MEMORY2 - GAMEPAK_SRAM_START_ADDRESS] = RESET;
 			}
+			// A single 0xF0 write is the "terminate write/erase" command: nothing to do, operations complete instantly here
+			BREAK;
 		}
-		else if (state == BACKUP_FLASH_FSM::STATE1) MASQ_UNLIKELY
+		case BACKUP_FLASH_FSM::STATE1:
 		{
-			if (READ_FLASH(FLASH_ACCESS_MEMORY3) == TO_UINT8(BACKUP_FLASH_CMDS::CMD_2)) MASQ_UNLIKELY
+			if (offset == 0x2AAA && data == TO_UINT8(BACKUP_FLASH_CMDS::CMD_2))
 			{
 				flash.flashFsmState = BACKUP_FLASH_FSM::STATE2;
-				flashMem[FLASH_ACCESS_MEMORY3 - GAMEPAK_SRAM_START_ADDRESS] = RESET;
-			}
-		}
-		else if (state == BACKUP_FLASH_FSM::STATE2) MASQ_UNLIKELY
-		{
-			if (flash.previousFlashCommand == BACKUP_FLASH_CMDS::START_ERASE_CMD
-				&& flash.erase4kbPageNumber != INVALID) MASQ_UNLIKELY
-			{
-				flash.flashFsmState = BACKUP_FLASH_FSM::STATE0;
-				flash.erase4kbPageNumber = INVALID;
-
-				const GBA_WORD eraseStartAddr = flash.erase4kbStartAddr;
-				flash.erase4kbStartAddr = RESET;
-
-				if (eraseStartAddr < GAMEPAK_SRAM_START_ADDRESS + 0x10000) MASQ_LIKELY
-				{
-					memset(&flashMem[eraseStartAddr - GAMEPAK_SRAM_START_ADDRESS], 0xFF, 0x1000);
-					memset(&flash.isErased[currentMemoryBank][eraseStartAddr - GAMEPAK_SRAM_START_ADDRESS], YES, 0x1000);
-				}
 			}
 			else
 			{
-				const BACKUP_FLASH_CMDS currentCmd =
-					(BACKUP_FLASH_CMDS)READ_FLASH(FLASH_ACCESS_MEMORY2);
-
-				flashMem[FLASH_ACCESS_MEMORY2 - GAMEPAK_SRAM_START_ADDRESS] = RESET;
-				flash.currentFlashCommand = currentCmd;
-
-				if (currentCmd == BACKUP_FLASH_CMDS::NO_OPERATION) MASQ_LIKELY
-				{
-					// do nothing
-				}
-				else if (currentCmd == BACKUP_FLASH_CMDS::ENTER_CHIP_INDENTIFICATION_MODE) MASQ_UNLIKELY
-				{
-					flash.flashFsmState = BACKUP_FLASH_FSM::STATE0;
-
-					if (flash.previousFlashCommand != BACKUP_FLASH_CMDS::START_ERASE_CMD)
-					{
-						flash.ogByteAtFlashAccessMem0 = flashMem[FLASH_ACCESS_MEMORY0 - GAMEPAK_SRAM_START_ADDRESS];
-						flash.ogByteAtFlashAccessMem1 = flashMem[FLASH_ACCESS_MEMORY1 - GAMEPAK_SRAM_START_ADDRESS];
-
-						if (backupType == BACKUP_TYPE::FLASH64K)
-						{
-							flashMem[ZERO] = 0x32;
-							flashMem[ONE] = 0x1B;
-						}
-						else
-						{
-							flashMem[ZERO] = 0x62;
-							flashMem[ONE] = 0x13;
-						}
-					}
-				}
-				else if (currentCmd == BACKUP_FLASH_CMDS::EXIT_CHIP_INDENTIFICATION_MODE) MASQ_UNLIKELY
-				{
-					flash.flashFsmState = BACKUP_FLASH_FSM::STATE0;
-
-					if (flash.previousFlashCommand != BACKUP_FLASH_CMDS::START_ERASE_CMD)
-					{
-						flashMem[FLASH_ACCESS_MEMORY0 - GAMEPAK_SRAM_START_ADDRESS] = flash.ogByteAtFlashAccessMem0;
-						flashMem[FLASH_ACCESS_MEMORY1 - GAMEPAK_SRAM_START_ADDRESS] = flash.ogByteAtFlashAccessMem1;
-					}
-				}
-				else if (currentCmd == BACKUP_FLASH_CMDS::START_ERASE_CMD) MASQ_UNLIKELY
-				{
-					flash.flashFsmState = BACKUP_FLASH_FSM::STATE0;
-				}
-				else if (currentCmd == BACKUP_FLASH_CMDS::ERASE_ENTIRE_CHIP) MASQ_UNLIKELY
-				{
-					flash.flashFsmState = BACKUP_FLASH_FSM::STATE0;
-
-					if (flash.previousFlashCommand == BACKUP_FLASH_CMDS::START_ERASE_CMD)
-					{
-						if (backupType == BACKUP_TYPE::FLASH64K)
-						{
-							memset(flashMem, 0xFF, 0x10000);
-							memset(flash.isErased[currentMemoryBank], YES, 0x10000);
-						}
-						else if (flash.currentMemoryBank == BACKUP_FLASH_MEMORY_BANK::BANK0)
-						{
-							memset(flashMem, 0xFF, 0x10000);
-							memset(flash.isErased[currentMemoryBank], YES, 0x10000);
-						}
-						else
-						{
-							memset(&flashMem[0x10000], 0xFF, 0x10000);
-							memset(&flash.isErased[currentMemoryBank][0x10000], YES, 0x10000);
-						}
-					}
-				}
-				else if (currentCmd == BACKUP_FLASH_CMDS::START_1BYTE_WRITE_CMD) MASQ_UNLIKELY
-				{
-					flash.flashFsmState = BACKUP_FLASH_FSM::STATE0;
-					flash.allowFlashWrite = YES;
-				}
-				else if (currentCmd == BACKUP_FLASH_CMDS::SET_MEMORY_BANK) MASQ_UNLIKELY
-				{
-					flash.flashFsmState = BACKUP_FLASH_FSM::STATE0;
-					flash.chooseMemoryBank = YES;
-				}
-
-				if (currentCmd != BACKUP_FLASH_CMDS::NO_OPERATION)
-				{
-					flash.previousFlashCommand = currentCmd;
-				}
+				// Anything else cancels the sequence (a new 0xAA to 0x5555 restarts it)
+				flash.flashFsmState = (offset == 0x5555 && data == TO_UINT8(BACKUP_FLASH_CMDS::CMD_1)) ? BACKUP_FLASH_FSM::STATE1 : BACKUP_FLASH_FSM::STATE0;
 			}
+			BREAK;
 		}
+		default: // STATE2: this write is the command
+		{
+			flash.flashFsmState = BACKUP_FLASH_FSM::STATE0;
+
+			// Second command cycle after "prepare erase" (0x80): chip erase or 4KB sector erase
+			if (flash.previousFlashCommand == BACKUP_FLASH_CMDS::START_ERASE_CMD)
+			{
+				flash.previousFlashCommand = BACKUP_FLASH_CMDS::NO_OPERATION_00;
+
+				if (offset == 0x5555 && data == TO_UINT8(BACKUP_FLASH_CMDS::ERASE_ENTIRE_CHIP))
+				{
+					const ID bankCount = (backupType == BACKUP_TYPE::FLASH128K) ? TO_UINT8(BACKUP_FLASH_MEMORY_BANK::TOTAL) : ONE;
+					for (ID eraseBank = ZERO; eraseBank < bankCount; ++eraseBank)
+					{
+						memset(memory[eraseBank], 0xFF, 0x10000);
+					}
+				}
+				else if (data == TO_UINT8(BACKUP_FLASH_CMDS::ERASE_4KB_SECTOR))
+				{
+					// The low 12 bits of the address are ignored
+					memset(&memory[bank][offset & 0xF000], 0xFF, 0x1000);
+				}
+				BREAK;
+			}
+
+			if (offset != 0x5555)
+			{
+				BREAK;
+			}
+
+			switch (static_cast<BACKUP_FLASH_CMDS>(data))
+			{
+			case BACKUP_FLASH_CMDS::ENTER_CHIP_INDENTIFICATION_MODE:
+				flash.currentFlashCommand = BACKUP_FLASH_CMDS::ENTER_CHIP_INDENTIFICATION_MODE;
+				BREAK;
+			case BACKUP_FLASH_CMDS::EXIT_CHIP_INDENTIFICATION_MODE:
+				flash.currentFlashCommand = BACKUP_FLASH_CMDS::NO_OPERATION_00;
+				BREAK;
+			case BACKUP_FLASH_CMDS::START_ERASE_CMD:
+				flash.previousFlashCommand = BACKUP_FLASH_CMDS::START_ERASE_CMD;
+				BREAK;
+			case BACKUP_FLASH_CMDS::START_1BYTE_WRITE_CMD:
+				flash.allowFlashWrite = YES;
+				BREAK;
+			case BACKUP_FLASH_CMDS::SET_MEMORY_BANK:
+				// Only 128KB devices have two banks
+				flash.chooseMemoryBank = (backupType == BACKUP_TYPE::FLASH128K) ? YES : NO;
+				BREAK;
+			default:
+				BREAK;
+			}
+			BREAK;
+		}
+		}
+	}
+
+	MASQ_INLINE void processBackup()
+	{
+		DO_NOTHING;
 	}
 
 private:

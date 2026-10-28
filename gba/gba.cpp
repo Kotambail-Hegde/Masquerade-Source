@@ -1968,6 +1968,11 @@ FLAG GBA_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 			case BACKUP_TYPE::FLASH64K:
 			case BACKUP_TYPE::FLASH128K:
 			{
+				resetFlashChip();
+
+				memset(pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit, 0xFF,
+					sizeof(pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit));
+
 				if (pGBA_instance->GBA_state.emulatorStatus.backup.backupType == BACKUP_TYPE::FLASH128K)
 				{
 					sizeOfSRAMSlot = 0x10000;
