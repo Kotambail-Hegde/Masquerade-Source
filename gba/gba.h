@@ -14,6 +14,7 @@
 #pragma region MACROS
 #pragma region WIP
 #define GBA_ENABLE_ROM_SEQ_BURST_QUIRK					YES
+#define GBA_ENABLE_VIDEO_MEMORY_STALLS					YES
 #define GBA_ENABLE_AGS_PATCHED_TEST						NO
 #pragma endregion WIP
 
@@ -4289,9 +4290,9 @@ OPT_DEFAULT
 
 OPT_SPEED
 
-	MASQ_INLINE FLAG isLCDMemoryAccessBlocked(uint32_t address)
+	MASQ_INLINE FLAG isLCDMemoryAccessStalled(uint32_t address)
 	{
-#if DISABLED
+#if (GBA_ENABLE_VIDEO_MEMORY_STALLS == YES)
 		if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.FORCED_BLANK != RESET)
 		{
 			RETURN NO;
@@ -4312,13 +4313,14 @@ OPT_SPEED
 		case LCD_MODES::MODE_LCD_H_DRAW_V_DRAW:
 			RETURN isVRAMOrPalette || isOAM;
 		case LCD_MODES::MODE_LCD_H_BLANK_V_DRAW:
+			// OAM is still used for sprite evaluation in H-Blank unless H-Blank Interval Free is set
 			RETURN isOAM && pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.HBLANK_INTERVAL_FREE == RESET;
 		default:
 			RETURN NO;
 		}
-#else
-	TODO("Implement GBA video memory access restrictions for Forced Blank and H-Blank Interval Free (currently all accesses are allowed), Line: %d in File %s", __LINE__, __FILE__);
-	RETURN NO;
+	#else
+		MASQ_UNUSED(address);
+		RETURN NO;
 #endif
 	}
 
@@ -4388,11 +4390,10 @@ OPT_SPEED
 				--cpuTicks;
 			}
 
-			// Refer : https://rust-console.github.io/gbatek-gbaonly/?utm_source=chatgpt.com#vram-oam-and-palette-ram-access
-			if (isLCDMemoryAccessBlocked(address))
+			// The access still happens; the display controller using the memory only costs one wait cycle
+			if (isLCDMemoryAccessStalled(address))
 			{
 				tick();
-				RETURN ZERO;
 			}
 		}
 
@@ -4406,10 +4407,9 @@ OPT_SPEED
 			}
 
 			// Refer : https://rust-console.github.io/gbatek-gbaonly/?utm_source=chatgpt.com#vram-oam-and-palette-ram-access
-			if (isLCDMemoryAccessBlocked(address))
+			if (isLCDMemoryAccessStalled(address))
 			{
 				tick(TICK_TYPE::DMA_TICK);
-				RETURN ZERO;
 			}
 		}
 
@@ -4951,10 +4951,9 @@ OPT_SPEED
 			}
 
 			// Refer : https://rust-console.github.io/gbatek-gbaonly/?utm_source=chatgpt.com#vram-oam-and-palette-ram-access
-			if (isLCDMemoryAccessBlocked(address))
+			if (isLCDMemoryAccessStalled(address))
 			{
 				tick();
-				RETURN;
 			}
 		}
 
@@ -4968,10 +4967,9 @@ OPT_SPEED
 			}
 
 			// Refer : https://rust-console.github.io/gbatek-gbaonly/?utm_source=chatgpt.com#vram-oam-and-palette-ram-access
-			if (isLCDMemoryAccessBlocked(address))
+			if (isLCDMemoryAccessStalled(address))
 			{
 				tick(TICK_TYPE::DMA_TICK);
-				RETURN;
 			}
 		}
 
