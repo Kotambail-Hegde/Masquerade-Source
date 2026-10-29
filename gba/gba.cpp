@@ -214,7 +214,6 @@ GBA_t::GBA_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 
 	this->ceGBA->setCheatEngineMode(CheatEngine_t::CHEATING_ENGINE::GAMEGENIE, EMULATION_ID::GBA_ID);
 
-	registerEvents();
 	LOG("Setup the event handlers in the scheduler for GBA emulator");
 
 #ifndef __EMSCRIPTEN__
@@ -812,11 +811,11 @@ void GBA_t::initializeGraphics()
 	pGBA_display->objCache[TO_UINT(OBJECT_STAGE::OBJECT_FETCH_STAGE)].vcount = ((pGBA_peripherals->mVCOUNTHalfWord.mVCOUNTFields.CURRENT_SCANLINE_LY + ONE) % 228);
 	pGBA_display->allObjectsRenderedForScanline = YES;
 
-	pGBA_display->scheduler.ppuStartCycleCount = scheduler.get_current_cycles();
-	pGBA_display->scheduler.lastSyncCycleCount = pGBA_display->scheduler.ppuStartCycleCount;
-	scheduler.schedule(
+	pGBA_display->ppu_stats.ppuStartCycleCount = pGBA_scheduler->get_current_cycles();
+	pGBA_display->ppu_stats.lastSyncCycleCount = pGBA_display->ppu_stats.ppuStartCycleCount;
+	pGBA_scheduler->schedule(
 		static_cast<EventId>(GBA_EVENT::EVENT_PPU_HBLANK_VBLANK),
-		scheduler.get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK),
+		pGBA_scheduler->get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK),
 		ZERO);
 }
 
@@ -845,20 +844,20 @@ void GBA_t::initializeAudio()
 
 	for (INC8 ii = 0; ii < TO_UINT8(AUDIO_CHANNELS::TOTAL_CHANNELS); ii++)
 	{
-		pGBA_audio->scheduler.apuStartCycleCount[ii] = scheduler.get_current_cycles();
-		pGBA_audio->scheduler.lastSyncCycleCount[ii] = pGBA_audio->scheduler.apuStartCycleCount[ii];
+		pGBA_audio->apu_stats.apuStartCycleCount[ii] = pGBA_scheduler->get_current_cycles();
+		pGBA_audio->apu_stats.lastSyncCycleCount[ii] = pGBA_audio->apu_stats.apuStartCycleCount[ii];
 	}
 
 	// Schedule the Framesequencer
-	scheduler.schedule(
+	pGBA_scheduler->schedule(
 		static_cast<EventId>(GBA_EVENT::EVENT_APU_FRAME_SEQUENCER),
-		scheduler.get_current_cycles() + FRAME_SEQ_THRESHOLD,
+		pGBA_scheduler->get_current_cycles() + FRAME_SEQ_THRESHOLD,
 		ZERO);
 
 	// Schedule the Downsampler
-	scheduler.schedule(
+	pGBA_scheduler->schedule(
 		static_cast<EventId>(GBA_EVENT::EVENT_APU_SAMPLE),
-		scheduler.get_current_cycles() + DOWNSAMPLE_THRESHOLD,
+		pGBA_scheduler->get_current_cycles() + DOWNSAMPLE_THRESHOLD,
 		ZERO);
 }
 
@@ -1464,7 +1463,7 @@ void GBA_t::registerEvents()
 
 	for (EventId i = 0; i < static_cast<EventId>(GBA_EVENT::EVENT_COUNT); i++)
 	{
-		const EventId id = scheduler.register_event(setup[i].handler, this, setup[i].priority);
+		const EventId id = pGBA_scheduler->register_event(setup[i].handler, this, setup[i].priority);
 		ASSERT(id == i);
 	}
 }
@@ -1479,10 +1478,6 @@ FLAG GBA_t::initializeEmulator()
 
 	memset(pAbsolute_GBA_instance->GBA_absoluteMemoryState, RESET, sizeof(absolute_GBA_state_t));
 
-	// Reset the scheduler
-
-	scheduler.reset();
-
 	// for readability
 
 	pGBA_instance = (GBA_instance_t*)&(pAbsolute_GBA_instance->absolute_GBA_state.GBA_instance);
@@ -1492,6 +1487,15 @@ FLAG GBA_t::initializeEmulator()
 	pGBA_peripherals = &(pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mIO.mIOFields);
 	pGBA_audio = &(pGBA_instance->GBA_state.audio);
 	pGBA_display = &(pGBA_instance->GBA_state.display);
+	pGBA_scheduler = &(pGBA_instance->GBA_state.Scheduler);
+
+	// Register the scheduler events
+
+	registerEvents();
+
+	// Reset the scheduler
+
+	pGBA_scheduler->reset();
 
 	pGBA_instance->GBA_state.dma.currentlyActiveDMA = DMA::NO_DMA;
 
@@ -1964,6 +1968,11 @@ FLAG GBA_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 			case BACKUP_TYPE::FLASH64K:
 			case BACKUP_TYPE::FLASH128K:
 			{
+				resetFlashChip();
+
+				memset(pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit, 0xFF,
+					sizeof(pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit));
+
 				if (pGBA_instance->GBA_state.emulatorStatus.backup.backupType == BACKUP_TYPE::FLASH128K)
 				{
 					sizeOfSRAMSlot = 0x10000;

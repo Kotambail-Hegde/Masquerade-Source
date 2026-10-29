@@ -14,6 +14,7 @@
 #pragma region MACROS
 #pragma region WIP
 #define GBA_ENABLE_ROM_SEQ_BURST_QUIRK					YES
+#define GBA_ENABLE_VIDEO_MEMORY_STALLS					YES
 #define GBA_ENABLE_AGS_PATCHED_TEST						NO
 #pragma endregion WIP
 
@@ -1401,7 +1402,8 @@ private:
 
 	enum class BACKUP_FLASH_CMDS
 	{
-		NO_OPERATION = 0x00,
+		NO_OPERATION_00 = 0x00,
+		NO_OPERATION_FF = 0xFF,
 		CMD_1 = 0xAA,
 		CMD_2 = 0x55,
 		ENTER_CHIP_INDENTIFICATION_MODE = 0x90,
@@ -3422,11 +3424,11 @@ private:
 		audioChannelInstance_t audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::TOTAL_CHANNELS)];
 		GBA_AUDIO_SAMPLE_TYPE audioBuffer[AUDIO_BUFFER_SIZE_FOR_GBA];
 		float emulatorVolume;
-		struct scheduler_t
+		struct
 		{
 			INC64 apuStartCycleCount[TO_UINT8(AUDIO_CHANNELS::TOTAL_CHANNELS)];
 			INC64 lastSyncCycleCount[TO_UINT8(AUDIO_CHANNELS::TOTAL_CHANNELS)];
-		} scheduler;
+		} apu_stats;
 	} audio_t;
 
 private:
@@ -3643,23 +3645,30 @@ private:
 		BYTE oamAttributes[ONETWENTYEIGHT][FOUR];
 		BYTE objPriority[TO_UINT(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)][TO_UINT(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)];
 		FLAG gfx_obj_window[TO_UINT(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)][TO_UINT(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)];
+		FLAG gfx_obj_mosaic_flag[TO_UINT(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)][TO_UINT(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)];
+		struct objMosaicLatch_t
+		{
+			ID colorNumber;
+			BYTE priority;
+			OBJECT_MODE mode;
+			FLAG isMosaic;
+		} objMosaicLatch;
 		FLAG gfx_window[TWO][TO_UINT(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)][TO_UINT(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)];
 		OBJECT_MODE gfx_obj_mode[TO_UINT(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)][TO_UINT(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)];
 		ID gfx_obj[TO_UINT(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)][TO_UINT(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)];
 		ID gfx_bg[FOUR][TO_UINT(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)][TO_UINT(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)];
 		ID gfx_bg_mosaic[FOUR][TO_UINT(LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)][TO_UINT(LCD_DIMENSIONS::LCD_TOTAL_V_LINES)];
-		INC32 gfx_obj_mosaic[ONETWENTYEIGHT][SIXTYFOUR][SIXTYFOUR];
 		union
 		{
 			Pixel imGuiBuffer1D[screen_width * screen_height];
 			Pixel imGuiBuffer2D[screen_height][screen_width];
 		} imGuiBuffer;
 		uint64_t filters;
-		struct scheduler_t
+		struct
 		{
 			INC64 ppuStartCycleCount;
 			INC64 lastSyncCycleCount;
-		} scheduler;
+		} ppu_stats;
 	} display_t;
 
 private:
@@ -3683,8 +3692,6 @@ private:
 	} interrupt_t;
 
 private:
-
-	Scheduler_t scheduler;
 
 	enum class GBA_EVENT : EventId
 	{
@@ -3720,6 +3727,7 @@ private:
 		display_t display;
 		quirks_t quirks;
 		emulatorStatus_t emulatorStatus;
+		Scheduler_t Scheduler;
 	} GBA_state_t;
 
 	typedef union
@@ -3769,6 +3777,7 @@ private:
 	gbaMemory_t* pGBA_memory = nullptr;									// for readability
 	audio_t* pGBA_audio = nullptr;										// for readability
 	display_t* pGBA_display = nullptr;									// for readability
+	Scheduler_t* pGBA_scheduler = nullptr;								// for readability	
 	GBA_instance_t* pGBA_instance = nullptr;							// for readability
 	std::shared_ptr <absolute_GBA_instance_t> pAbsolute_GBA_instance;
 
@@ -3933,7 +3942,7 @@ public:
 
 	Scheduler_t& getScheduler()
 	{
-		RETURN scheduler;
+		RETURN pGBA_instance->GBA_state.Scheduler;
 	}
 
 	// Names follow the order of GBA_EVENT / the setup[] table in registerEvents()
@@ -4289,6 +4298,40 @@ OPT_DEFAULT
 
 OPT_SPEED
 
+	MASQ_INLINE FLAG isLCDMemoryAccessStalled(uint32_t address)
+	{
+#if (GBA_ENABLE_VIDEO_MEMORY_STALLS == YES)
+		if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.FORCED_BLANK != RESET)
+		{
+			RETURN NO;
+		}
+
+		const FLAG isVRAMOrPalette =
+			IF_ADDRESS_WITHIN(address, PALETTE_RAM_START_ADDRESS, PALETTE_RAM_END_ADDRESS)
+			|| IF_ADDRESS_WITHIN(address, PALETTE_RAM_MIRROR_START_ADDRESS, PALETTE_RAM_MIRROR_END_ADDRESS)
+			|| IF_ADDRESS_WITHIN(address, VIDEO_RAM_START_ADDRESS, VIDEO_RAM_END_ADDRESS)
+			|| IF_ADDRESS_WITHIN(address, VIDEO_RAM_MIRROR_START_ADDRESS, VIDEO_RAM_MIRROR_END_ADDRESS);
+
+		const FLAG isOAM =
+			IF_ADDRESS_WITHIN(address, OAM_START_ADDRESS, OAM_END_ADDRESS)
+			|| IF_ADDRESS_WITHIN(address, OAM_MIRROR_START_ADDRESS, OAM_MIRROR_END_ADDRESS);
+
+		switch (pGBA_display->currentLCDMode)
+		{
+		case LCD_MODES::MODE_LCD_H_DRAW_V_DRAW:
+			RETURN isVRAMOrPalette || isOAM;
+		case LCD_MODES::MODE_LCD_H_BLANK_V_DRAW:
+			// OAM is still used for sprite evaluation in H-Blank unless H-Blank Interval Free is set
+			RETURN isOAM && pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.HBLANK_INTERVAL_FREE == RESET;
+		default:
+			RETURN NO;
+		}
+	#else
+		MASQ_UNUSED(address);
+		RETURN NO;
+#endif
+	}
+
 	// NOTE: For memory mirrors, refer http://problemkaputt.de/gbatek-gba-unpredictable-things.htm
 	template <typename T>
 	T readRawMemoryInternal(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType, FLAG LOCK = NO)
@@ -4327,41 +4370,9 @@ OPT_SPEED
 
 		if (source == MEMORY_ACCESS_SOURCE::CPU || source == MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH)
 		{
-			TODO("Support for FORCED_BLANK needs to be added at line %d of file %s", __LINE__, __FILE__);
-#if (DISABLED)
-			if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.FORCED_BLANK == RESET)
-			{
-				if (pGBA_display->currentLCDMode == LCD_MODES::MODE_LCD_H_DRAW_V_DRAW)
-				{
-					if (IF_ADDRESS_WITHIN(address, PALETTE_RAM_START_ADDRESS, PALETTE_RAM_END_ADDRESS)
-						|| (IF_ADDRESS_WITHIN(address, PALETTE_RAM_MIRROR_START_ADDRESS, PALETTE_RAM_MIRROR_END_ADDRESS))
-						|| (IF_ADDRESS_WITHIN(address, VIDEO_RAM_START_ADDRESS, VIDEO_RAM_END_ADDRESS))
-						|| (IF_ADDRESS_WITHIN(address, VIDEO_RAM_MIRROR_START_ADDRESS, VIDEO_RAM_MIRROR_END_ADDRESS))
-						|| (IF_ADDRESS_WITHIN(address, OAM_START_ADDRESS, OAM_END_ADDRESS))
-						|| (IF_ADDRESS_WITHIN(address, OAM_MIRROR_START_ADDRESS, OAM_MIRROR_END_ADDRESS)))
-					{
-						tick();
-						RETURN ZERO;
-					}
-				}
-				else if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.HBLANK_INTERVAL_FREE == RESET)
-				{
-					if (pGBA_display->currentLCDMode == LCD_MODES::MODE_LCD_H_BLANK_V_BLANK
-						|| pGBA_display->currentLCDMode == LCD_MODES::MODE_LCD_H_BLANK_V_DRAW)
-					{
-						if ((IF_ADDRESS_WITHIN(address, OAM_START_ADDRESS, OAM_END_ADDRESS))
-							|| (IF_ADDRESS_WITHIN(address, OAM_MIRROR_START_ADDRESS, OAM_MIRROR_END_ADDRESS)))
-						{
-							tick();
-							RETURN ZERO;
-						}
-					}
-				}
-			}
-#endif
 			uint32_t cpuTicks = getMemoryAccessCycles(address, accessWidth, source, accessType);
 #if (ENABLE_ARM7TDMI_SST == YES)
-			if (ROM_TYPE == ROM::TEST_SST) MASQ_UNLIKELY
+			if (ROM_TYPE == ROM::TEST_SST)
 			{
 				// If this SST entry is already active, keep incrementing it
 				if (sst.internal[sst.index].cycle != 0)
@@ -4381,52 +4392,32 @@ OPT_SPEED
 			}
 			}
 #endif
-				while (cpuTicks)
-				{
-					tick();
-					--cpuTicks;
-				}
+			while (cpuTicks)
+			{
+				tick();
+				--cpuTicks;
+			}
+
+			// The access still happens; the display controller using the memory only costs one wait cycle
+			if (isLCDMemoryAccessStalled(address))
+			{
+				tick();
+			}
 		}
 
 		if (source == MEMORY_ACCESS_SOURCE::DMA)
 		{
-			TODO("Support for FORCED_BLANK needs to be added at line %d of file %s", __LINE__, __FILE__);
-#if (DISABLED)
-			if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.FORCED_BLANK == RESET)
-			{
-				if (pGBA_display->currentLCDMode == LCD_MODES::MODE_LCD_H_DRAW_V_DRAW)
-				{
-					if (IF_ADDRESS_WITHIN(address, PALETTE_RAM_START_ADDRESS, PALETTE_RAM_END_ADDRESS)
-						|| (IF_ADDRESS_WITHIN(address, PALETTE_RAM_MIRROR_START_ADDRESS, PALETTE_RAM_MIRROR_END_ADDRESS))
-						|| (IF_ADDRESS_WITHIN(address, VIDEO_RAM_START_ADDRESS, VIDEO_RAM_END_ADDRESS))
-						|| (IF_ADDRESS_WITHIN(address, VIDEO_RAM_MIRROR_START_ADDRESS, VIDEO_RAM_MIRROR_END_ADDRESS))
-						|| (IF_ADDRESS_WITHIN(address, OAM_START_ADDRESS, OAM_END_ADDRESS))
-						|| (IF_ADDRESS_WITHIN(address, OAM_MIRROR_START_ADDRESS, OAM_MIRROR_END_ADDRESS)))
-					{
-						tick();
-						RETURN ZERO;
-					}
-				}
-				else if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.HBLANK_INTERVAL_FREE == RESET)
-				{
-					if (pGBA_display->currentLCDMode == LCD_MODES::MODE_LCD_H_BLANK_V_BLANK
-						|| pGBA_display->currentLCDMode == LCD_MODES::MODE_LCD_H_BLANK_V_DRAW)
-					{
-						if ((IF_ADDRESS_WITHIN(address, OAM_START_ADDRESS, OAM_END_ADDRESS))
-							|| (IF_ADDRESS_WITHIN(address, OAM_MIRROR_START_ADDRESS, OAM_MIRROR_END_ADDRESS)))
-						{
-							tick();
-							RETURN ZERO;
-						}
-					}
-				}
-			}
-#endif
 			uint32_t dmaTicks = getMemoryAccessCycles(address, accessWidth, source, accessType);
 			while (dmaTicks)
 			{
 				tick(TICK_TYPE::DMA_TICK);
 				--dmaTicks;
+			}
+
+			// Refer : https://rust-console.github.io/gbatek-gbaonly/?utm_source=chatgpt.com#vram-oam-and-palette-ram-access
+			if (isLCDMemoryAccessStalled(address))
+			{
+				tick(TICK_TYPE::DMA_TICK);
 			}
 		}
 
@@ -4847,26 +4838,21 @@ OPT_SPEED
 			case BACKUP_TYPE::FLASH64K:
 			case BACKUP_TYPE::FLASH128K:
 			{
-				while (address >= GAMEPAK_SRAM_MIRROR_START_ADDRESS)
-				{
-					address = (address % GAMEPAK_SRAM_MIRROR_START_ADDRESS) + GAMEPAK_SRAM_START_ADDRESS;
-				}
-
-				auto currentMemoryBank = TO_UINT8(pGBA_instance->GBA_state.emulatorStatus.backup.flash.currentMemoryBank);
+				const BYTE flashByte = flashReadByte(address);
 
 				if (accessWidth == MEMORY_ACCESS_WIDTH::EIGHT_BIT)
 				{
-					RETURN static_cast<T>(pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[currentMemoryBank][address - GAMEPAK_SRAM_START_ADDRESS]);
+					RETURN static_cast<T>(flashByte);
 				}
 				else if (accessWidth == MEMORY_ACCESS_WIDTH::SIXTEEN_BIT)
 				{
 					// Refer : http://problemkaputt.de/gbatek-gba-unpredictable-things.htm
-					RETURN static_cast<T>((GBA_HALFWORD)pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[currentMemoryBank][address - GAMEPAK_SRAM_START_ADDRESS] * 0x0101);
+					RETURN static_cast<T>((GBA_HALFWORD)flashByte * 0x0101);
 				}
 				else if (accessWidth == MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT)
 				{
 					// Refer : http://problemkaputt.de/gbatek-gba-unpredictable-things.htm
-					RETURN static_cast<T>((GBA_WORD)pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[currentMemoryBank][address - GAMEPAK_SRAM_START_ADDRESS] * 0x01010101);
+					RETURN static_cast<T>((GBA_WORD)flashByte * 0x01010101);
 				}
 				BREAK;
 			}
@@ -4939,41 +4925,6 @@ OPT_SPEED
 
 		if (source == MEMORY_ACCESS_SOURCE::CPU || source == MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH)
 		{
-			TODO("Support for FORCED_BLANK needs to be added at line %d of file %s", __LINE__, __FILE__);
-#if (DISABLED)
-			if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.FORCED_BLANK == RESET)
-			{
-				if (pGBA_display->currentLCDMode == LCD_MODES::MODE_LCD_H_DRAW_V_DRAW)
-				{
-					if (IF_ADDRESS_WITHIN(address, PALETTE_RAM_START_ADDRESS, PALETTE_RAM_END_ADDRESS)
-						|| (IF_ADDRESS_WITHIN(address, PALETTE_RAM_MIRROR_START_ADDRESS, PALETTE_RAM_MIRROR_END_ADDRESS))
-						|| (IF_ADDRESS_WITHIN(address, VIDEO_RAM_START_ADDRESS, VIDEO_RAM_END_ADDRESS))
-						|| (IF_ADDRESS_WITHIN(address, VIDEO_RAM_MIRROR_START_ADDRESS, VIDEO_RAM_MIRROR_END_ADDRESS))
-						|| (IF_ADDRESS_WITHIN(address, OAM_START_ADDRESS, OAM_END_ADDRESS))
-						|| (IF_ADDRESS_WITHIN(address, OAM_MIRROR_START_ADDRESS, OAM_MIRROR_END_ADDRESS)))
-					{
-						tick();
-						RETURN;
-					}
-				}
-				else
-				{
-					if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.HBLANK_INTERVAL_FREE == RESET)
-					{
-						if (pGBA_display->currentLCDMode == LCD_MODES::MODE_LCD_H_BLANK_V_BLANK
-							|| pGBA_display->currentLCDMode == LCD_MODES::MODE_LCD_H_BLANK_V_DRAW)
-						{
-							if ((IF_ADDRESS_WITHIN(address, OAM_START_ADDRESS, OAM_END_ADDRESS))
-								|| (IF_ADDRESS_WITHIN(address, OAM_MIRROR_START_ADDRESS, OAM_MIRROR_END_ADDRESS)))
-							{
-								tick();
-								RETURN;
-							}
-						}
-					}
-				}
-			}
-#endif
 			uint32_t cpuTicks = getMemoryAccessCycles(address, accessWidth, source, accessType);
 #if (ENABLE_ARM7TDMI_SST == YES)
 			if (ROM_TYPE == ROM::TEST_SST) MASQ_UNLIKELY
@@ -5001,50 +4952,27 @@ OPT_SPEED
 				tick();
 				--cpuTicks;
 			}
+
+			// Refer : https://rust-console.github.io/gbatek-gbaonly/?utm_source=chatgpt.com#vram-oam-and-palette-ram-access
+			if (isLCDMemoryAccessStalled(address))
+			{
+				tick();
+			}
 		}
 
 		if (source == MEMORY_ACCESS_SOURCE::DMA)
 		{
-			TODO("Support for FORCED_BLANK needs to be added at line %d of file %s", __LINE__, __FILE__);
-#if (DISABLED)
-			if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.FORCED_BLANK == RESET)
-			{
-				if (pGBA_display->currentLCDMode == LCD_MODES::MODE_LCD_H_DRAW_V_DRAW)
-				{
-					if (IF_ADDRESS_WITHIN(address, PALETTE_RAM_START_ADDRESS, PALETTE_RAM_END_ADDRESS)
-						|| (IF_ADDRESS_WITHIN(address, PALETTE_RAM_MIRROR_START_ADDRESS, PALETTE_RAM_MIRROR_END_ADDRESS))
-						|| (IF_ADDRESS_WITHIN(address, VIDEO_RAM_START_ADDRESS, VIDEO_RAM_END_ADDRESS))
-						|| (IF_ADDRESS_WITHIN(address, VIDEO_RAM_MIRROR_START_ADDRESS, VIDEO_RAM_MIRROR_END_ADDRESS))
-						|| (IF_ADDRESS_WITHIN(address, OAM_START_ADDRESS, OAM_END_ADDRESS))
-						|| (IF_ADDRESS_WITHIN(address, OAM_MIRROR_START_ADDRESS, OAM_MIRROR_END_ADDRESS)))
-					{
-						tick();
-						RETURN;
-					}
-				}
-				else
-				{
-					if (pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.HBLANK_INTERVAL_FREE == RESET)
-					{
-						if (pGBA_display->currentLCDMode == LCD_MODES::MODE_LCD_H_BLANK_V_BLANK
-							|| pGBA_display->currentLCDMode == LCD_MODES::MODE_LCD_H_BLANK_V_DRAW)
-						{
-							if ((IF_ADDRESS_WITHIN(address, OAM_START_ADDRESS, OAM_END_ADDRESS))
-								|| (IF_ADDRESS_WITHIN(address, OAM_MIRROR_START_ADDRESS, OAM_MIRROR_END_ADDRESS)))
-							{
-								tick();
-								RETURN;
-							}
-						}
-					}
-				}
-			}
-#endif
 			uint32_t dmaTicks = getMemoryAccessCycles(address, accessWidth, source, accessType);
 			while (dmaTicks)
 			{
 				tick(TICK_TYPE::DMA_TICK);
 				--dmaTicks;
+			}
+
+			// Refer : https://rust-console.github.io/gbatek-gbaonly/?utm_source=chatgpt.com#vram-oam-and-palette-ram-access
+			if (isLCDMemoryAccessStalled(address))
+			{
+				tick(TICK_TYPE::DMA_TICK);
 			}
 		}
 
@@ -5381,54 +5309,7 @@ OPT_SPEED
 			case BACKUP_TYPE::FLASH64K:
 			case BACKUP_TYPE::FLASH128K:
 			{
-				while (address >= GAMEPAK_SRAM_MIRROR_START_ADDRESS)
-				{
-					address = (address % GAMEPAK_SRAM_MIRROR_START_ADDRESS) + GAMEPAK_SRAM_START_ADDRESS;
-				}
-
-				auto currentMemoryBank = TO_UINT8(pGBA_instance->GBA_state.emulatorStatus.backup.flash.currentMemoryBank);
-
-				if (pGBA_instance->GBA_state.emulatorStatus.backup.flash.chooseMemoryBank == YES)
-				{
-					if (address == FLASH_ACCESS_MEMORY0)
-					{
-						pGBA_instance->GBA_state.emulatorStatus.backup.flash.currentMemoryBank =
-							((data == ZERO) ? BACKUP_FLASH_MEMORY_BANK::BANK0 : BACKUP_FLASH_MEMORY_BANK::BANK1);
-						pGBA_instance->GBA_state.emulatorStatus.backup.flash.chooseMemoryBank = NO;
-					}
-					else
-					{
-						WARN("Memory Bank Not Chosen!");
-					}
-				}
-				else if
-					(
-						(address == FLASH_ACCESS_MEMORY2)
-						||
-						(address == FLASH_ACCESS_MEMORY3)
-						)
-				{
-					pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[currentMemoryBank][address - GAMEPAK_SRAM_START_ADDRESS] = TO_UINT8(data);
-				}
-				// TO handle for "Erase 4KB sector"
-				else if (pGBA_instance->GBA_state.emulatorStatus.backup.flash.previousFlashCommand == BACKUP_FLASH_CMDS::START_ERASE_CMD)
-				{
-					pGBA_instance->GBA_state.emulatorStatus.backup.flash.erase4kbStartAddr = address;
-					pGBA_instance->GBA_state.emulatorStatus.backup.flash.erase4kbPageNumber = ((address & 0xF000) >> TWELVE);
-
-					pGBA_instance->GBA_state.emulatorStatus.backup.flash.currentFlashCommand = (BACKUP_FLASH_CMDS)data;
-				}
-				else if (pGBA_instance->GBA_state.emulatorStatus.backup.flash.allowFlashWrite == YES)
-				{
-					pGBA_instance->GBA_state.emulatorStatus.backup.flash.allowFlashWrite = NO;
-
-					if (pGBA_instance->GBA_state.emulatorStatus.backup.flash.isErased[currentMemoryBank][address - GAMEPAK_SRAM_START_ADDRESS] == YES)
-					{
-						pGBA_instance->GBA_state.emulatorStatus.backup.flash.isErased[currentMemoryBank][address - GAMEPAK_SRAM_START_ADDRESS] = NO;
-
-						pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[currentMemoryBank][address - GAMEPAK_SRAM_START_ADDRESS] = TO_UINT8(data);
-					}
-				}
+				flashWriteByte(address, TO_UINT8(data));
 				BREAK;
 			}
 			case BACKUP_TYPE::EEPROM:
@@ -5878,7 +5759,7 @@ private:
 		processBackup();
 
 		// Tick the scheduler
-		scheduler.tick();
+		pGBA_scheduler->tick();
 
 		// Cache state pointer to reduce dereferencing overhead
 		auto* state = &pGBA_instance->GBA_state;
@@ -5959,7 +5840,7 @@ OPT_SPEED
 			RETURN state.cache.counter;
 		}
 
-		const int64_t now = (int64_t)scheduler.get_current_cycles();
+		const int64_t now = (int64_t)pGBA_scheduler->get_current_cycles();
 		// The reason for "+ ONE" is the firstTick is a tick in future, and when that happens, the ticks should be 1, not 0. So we add ONE to account for that.
 		const uint64_t ticks = (now >= state.cache.stats.firstTick) ? ((uint64_t)((now - state.cache.stats.firstTick) / getTimerPrescalar(timer)) + ONE) : 0;
 
@@ -5973,7 +5854,7 @@ OPT_SPEED
 		const int64_t prescalar = getTimerPrescalar(timer);
 
 		// Capture the master CPU cycle from the scheduler.
-		const int64_t now = (int64_t)scheduler.get_current_cycles();
+		const int64_t now = (int64_t)pGBA_scheduler->get_current_cycles();
 		const int64_t activationTime = now + delayedStart;
 
 		// First prescaler boundary at or after the activation time
@@ -5987,7 +5868,7 @@ OPT_SPEED
 		const int64_t overflowAt = cyclesTofirstTick + ((int64_t)(0x10000 - state.cache.counter - 1) * prescalar);
 
 		// Register the absolute cycle target with the master event scheduler queue.
-		scheduler.schedule(static_cast<EventId>(GBA_EVENT::EVENT_TIMER_OVERFLOW), (uint64_t)overflowAt, (int)timer);
+		pGBA_scheduler->schedule(static_cast<EventId>(GBA_EVENT::EVENT_TIMER_OVERFLOW), (uint64_t)overflowAt, (int)timer);
 	}
 
 	MASQ_INLINE void stopTimer(TIMER timer)
@@ -6000,7 +5881,7 @@ OPT_SPEED
 		}
 
 		state.cache.counter = readTimerCounter(timer);
-		scheduler.cancel(static_cast<EventId>(GBA_EVENT::EVENT_TIMER_OVERFLOW), (int)timer);
+		pGBA_scheduler->cancel(static_cast<EventId>(GBA_EVENT::EVENT_TIMER_OVERFLOW), (int)timer);
 		state.currentState = DISABLED;
 	}
 
@@ -6045,7 +5926,7 @@ OPT_SPEED
 			// may be different that the current timer's prescalar
 			// readyAt: Acts as a startup latency threshold. Prevents the cascade timer 
 			// from incrementing on previous timer's overflow if this happened before the delay has elapsed.
-			state.cache.stats.readyAt = (int64_t)scheduler.get_current_cycles() + delayedStart;
+			state.cache.stats.readyAt = (int64_t)pGBA_scheduler->get_current_cycles() + delayedStart;
 		}
 		else
 		{
@@ -6094,9 +5975,9 @@ OPT_SPEED
 					if (dmacntH.mDMAnCNT_HFields.DMA_EN == SET
 						&& dmacntH.mDMAnCNT_HFields.DMA_START_TIMING == DMA_TIMING::SPECIAL)
 					{
-						scheduler.schedule(
+						pGBA_scheduler->schedule(
 							static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION),
-							scheduler.get_current_cycles() + DMA_HW_STARTUP_DELAY,
+							pGBA_scheduler->get_current_cycles() + DMA_HW_STARTUP_DELAY,
 							static_cast<int>(DMA::DMA1));
 					}
 				}
@@ -6122,9 +6003,9 @@ OPT_SPEED
 					if (dmacntH.mDMAnCNT_HFields.DMA_EN == SET
 						&& dmacntH.mDMAnCNT_HFields.DMA_START_TIMING == DMA_TIMING::SPECIAL)
 					{
-						scheduler.schedule(
+						pGBA_scheduler->schedule(
 							static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION),
-							scheduler.get_current_cycles() + DMA_HW_STARTUP_DELAY,
+							pGBA_scheduler->get_current_cycles() + DMA_HW_STARTUP_DELAY,
 							static_cast<int>(DMA::DMA2));
 					}
 				}
@@ -6141,7 +6022,7 @@ OPT_SPEED
 				&& isTimerCountUp(nextTimer) == YES
 				// Below condition is very rare but possible
 				// i.e when previous timer overflowed but current cascade timer's delay has not elapsed
-				&& (int64_t)scheduler.get_current_cycles() >= nextState.cache.stats.readyAt)
+				&& (int64_t)pGBA_scheduler->get_current_cycles() >= nextState.cache.stats.readyAt)
 			{
 				const uint32_t value = (uint32_t)nextState.cache.counter + ONE;
 				if (value > 0xFFFF)
@@ -6439,9 +6320,9 @@ private:
 			// Activate if IMMEDIATE
 			if (cache.scheduleType == DMA_TIMING::IMMEDIATE)
 			{
-				scheduler.schedule(
+				pGBA_scheduler->schedule(
 					static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION),
-					scheduler.get_current_cycles() + DMA_STARTUP_DELAY,
+					pGBA_scheduler->get_current_cycles() + DMA_STARTUP_DELAY,
 					static_cast<int>(dmaID));
 			}
 		}
@@ -6451,7 +6332,7 @@ private:
 			cache.currentState = NO;
 			UNSETBIT(pGBA_instance->GBA_state.dma.runnableSet, dmaID);
 
-			scheduler.cancel(static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION), (int)dmaID);
+			pGBA_scheduler->cancel(static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION), (int)dmaID);
 
 			// Remove from all trigger maps (already done above, but keeping for clarity)
 			for (int timing = DMA_TIMING::IMMEDIATE; timing < DMA_TIMING::TOTAL_DMA_TIMING; timing++)
@@ -6492,9 +6373,9 @@ private:
 		{
 			if (GETBIT(dmaID, dmaMap))
 			{
-				scheduler.schedule(
+				pGBA_scheduler->schedule(
 					static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION),
-					scheduler.get_current_cycles() + DMA_HW_STARTUP_DELAY,
+					pGBA_scheduler->get_current_cycles() + DMA_HW_STARTUP_DELAY,
 					static_cast<int>(dmaID));
 			}
 		}
@@ -6708,15 +6589,15 @@ OPT_SPEED
 	{
 		const uint8_t ch = static_cast<uint8_t>(channel);
 		auto& chInstance = pGBA_instance->GBA_state.audio.audioChannelInstance[ch];
-		const INC64 now = static_cast<INC64>(scheduler.get_current_cycles());
+		const INC64 now = static_cast<INC64>(pGBA_scheduler->get_current_cycles());
 
 		if (stepEventWasRunning == YES)
 		{
-			const INC64 elapsed = now - pGBA_audio->scheduler.lastSyncCycleCount[ch];
+			const INC64 elapsed = now - pGBA_audio->apu_stats.lastSyncCycleCount[ch];
 			chInstance.frequencyTimer = (elapsed >= chInstance.frequencyTimer) ? static_cast<INC64>(ZERO) : (chInstance.frequencyTimer - elapsed);
 		}
 
-		pGBA_audio->scheduler.lastSyncCycleCount[ch] = now;
+		pGBA_audio->apu_stats.lastSyncCycleCount[ch] = now;
 	}
 
 	MASQ_INLINE void syncChannelFrequencyTimer(AUDIO_CHANNELS channel)
@@ -6728,10 +6609,10 @@ OPT_SPEED
 	MASQ_INLINE void scheduleChannelStep(AUDIO_CHANNELS channel)
 	{
 		const uint8_t ch = static_cast<uint8_t>(channel);
-		const INC64 now = static_cast<INC64>(scheduler.get_current_cycles());
+		const INC64 now = static_cast<INC64>(pGBA_scheduler->get_current_cycles());
 
-		pGBA_audio->scheduler.lastSyncCycleCount[ch] = now;
-		scheduler.reschedule(
+		pGBA_audio->apu_stats.lastSyncCycleCount[ch] = now;
+		pGBA_scheduler->reschedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_APU_CHANNEL_STEP),
 			now + pGBA_instance->GBA_state.audio.audioChannelInstance[ch].frequencyTimer,
 			ch);
@@ -7348,6 +7229,7 @@ OPT_SPEED
 		pGBA_display->objPriority[x][y] = DEFAULT_OBJ_PRIORITY;
 		pGBA_display->gfx_obj_window[x][y] = DISABLED;
 		pGBA_display->gfx_obj_mode[x][y] = OBJECT_MODE::NORMAL;
+		pGBA_display->gfx_obj_mosaic_flag[x][y] = NO;
 		for (ID bgID = BG0; bgID < BG3; bgID++)
 		{
 			pGBA_display->gfx_bg[bgID][x][y] = ZERO;
@@ -7432,12 +7314,13 @@ OPT_SPEED
 
 	}
 
-	MASQ_INLINE void HANDLE_WINDOW_FOR_BG(uint32_t x, uint32_t y, ID bgID)
+	// Returns whether the windows let this BG show at (x, y). Pixels outside the visible area are never displayed, so they count as allowed.
+	MASQ_INLINE FLAG IS_WINDOW_ALLOWING_BG(uint32_t x, uint32_t y, ID bgID)
 	{
 
 		if ((x >= ((uint16_t)LCD_DIMENSIONS::LCD_VISIBLE_PIXEL_PER_LINES)) || (y >= ((uint16_t)LCD_DIMENSIONS::LCD_TOTAL_V_LINES)))
 		{
-			RETURN;
+			RETURN YES;
 		}
 
 		FLAG isWindowAllowingBG = YES;
@@ -7484,7 +7367,7 @@ OPT_SPEED
 		default:
 		{
 			FATAL("Unknown BG Layer");
-			RETURN;
+			RETURN YES;
 		}
 		}
 
@@ -7497,7 +7380,15 @@ OPT_SPEED
 			, objin
 		);
 
-		if (isWindowAllowingBG == NO)
+		RETURN isWindowAllowingBG;
+
+	}
+
+	// Clears the stored BG pixel when the windows hide it
+	MASQ_INLINE void HANDLE_WINDOW_FOR_BG(uint32_t x, uint32_t y, ID bgID)
+	{
+
+		if (IS_WINDOW_ALLOWING_BG(x, y, bgID) == NO)
 		{
 			pGBA_display->gfx_bg[bgID][x][y] = ZERO;
 		}
@@ -7701,11 +7592,36 @@ OPT_SPEED
 				ID minBG = MIN_MAX_BG_LAYERS[pGBA_display->currentPPUMode][ZERO];
 				ID maxBG = MIN_MAX_BG_LAYERS[pGBA_display->currentPPUMode][ONE];
 
-				// Check if window layer is allowing the bg, if not, marks the pixel as transparent
-				for (ID bgID = minBG; bgID <= maxBG; bgID++)
+				// BG windows are applied below, AFTER mosaic has picked each BG pixel: mosaic belongs to the layer, windows only mask its output
+
+				// Horizontal OBJ mosaic. On hardware it is a post-process on the sprite buffer in screen space (not blocks anchored on each
+				// sprite): the pixel that gets displayed is the one held in a latch, and the latch takes the current sprite pixel when
+				//   1. x is a multiple of the mosaic width, or
+				//   2. the current pixel does not have the mosaic flag, or
+				//   3. the latched pixel does not have the mosaic flag, or
+				//   4. the current pixel has a numerically lower priority value than the latched one.
+				// Transparent pixels of mosaic sprites carry the flag too. (Behaviour worked out by fleroviux, NBA author: mGBA issue #2933.)
+				// This runs before the OBJ window mask so the mask applies to what is displayed.
 				{
-					HANDLE_WINDOW_FOR_BG(x, y, bgID);
+					auto& objMosaicLatch = pGBA_display->objMosaicLatch;
+					const BYTE currentObjPriority = pGBA_display->objPriority[x][y];
+					const FLAG currentObjMosaic = pGBA_display->gfx_obj_mosaic_flag[x][y];
+					const uint32_t objMosaicWidth = pGBA_peripherals->mMOSAICHalfWord.mMOSAICFields.OBJ_MOSAIC_H_SIZE + ONE;
+
+					if ((x % objMosaicWidth) == ZERO || currentObjMosaic == NO || objMosaicLatch.isMosaic == NO || currentObjPriority < objMosaicLatch.priority)
+					{
+						objMosaicLatch.colorNumber = pGBA_display->gfx_obj[x][y];
+						objMosaicLatch.priority = currentObjPriority;
+						objMosaicLatch.mode = pGBA_display->gfx_obj_mode[x][y];
+						objMosaicLatch.isMosaic = currentObjMosaic;
+					}
+
+					// The latched pixel is what gets displayed
+					pGBA_display->gfx_obj[x][y] = objMosaicLatch.colorNumber;
+					pGBA_display->objPriority[x][y] = objMosaicLatch.priority;
+					pGBA_display->gfx_obj_mode[x][y] = objMosaicLatch.mode;
 				}
+
 				// Check if window layer is allowing the obj, if not, marks the pixel as transparent
 				HANDLE_WINDOW_FOR_OBJ(x, y);
 
@@ -7743,6 +7659,12 @@ OPT_SPEED
 							uint32_t mosaicX = x - (x % (pGBA_peripherals->mMOSAICHalfWord.mMOSAICFields.BG_MOSAIC_H_SIZE + ONE));
 							uint32_t mosaicY = y - (y % (pGBA_peripherals->mMOSAICHalfWord.mMOSAICFields.BG_MOSAIC_V_SIZE + ONE));
 							bgPixel = pGBA_display->gfx_bg_mosaic[bgID][mosaicX][mosaicY];
+						}
+
+						// Windows mask the layer's OUTPUT, so they are applied after mosaic has picked the pixel
+						if (bgPixel != ZERO && IS_WINDOW_ALLOWING_BG(x, y, bgID) == NO)
+						{
+							bgPixel = ZERO;
 						}
 
 						if (bgPixel != ZERO)
@@ -8233,6 +8155,19 @@ OPT_SPEED
 		INC32 transformedSpriteX = ZERO, transformedSpriteY = ZERO;
 		INC16 spriteY = objCache.spriteYPixelCoordinate;
 		SDIM32 Y = objCache.vcount;
+
+		MASQ_UNUSED(oamID);
+
+		const FLAG isObjMosaic = (objCache.ObjAttribute.mOamAttr01Word.mOamAttr0HalfWord.mOamAttr0Fields.OBJ_MOSAIC == SET) ? YES : NO;
+		if (isObjMosaic == YES)
+		{
+			// Vertical OBJ mosaic: every line of a block shows the sprite row of the block's first SCREEN line (blocks are anchored on
+			// the screen, not on the sprite). If that line is above the sprite, the sprite's first row is used.
+			// This happens before flip / affine, so those act on the mosaiced row.
+			// (Horizontal mosaic is a screen-space post-process in MERGE_AND_DISPLAY_PHASE1)
+			const INC16 mosaicRowOffset = static_cast<INC16>(Y % (pGBA_peripherals->mMOSAICHalfWord.mMOSAICFields.OBJ_MOSAIC_V_SIZE + ONE));
+			spriteY = (spriteY > mosaicRowOffset) ? static_cast<INC16>(spriteY - mosaicRowOffset) : static_cast<INC16>(ZERO);
+		}
 		// update the spriteX coordinates (needed for next VRAM stages)
 		objCache.spriteXPixelCoordinate = spriteXEnd;
 		// check if this needs to be the last vram cycle for this object
@@ -8540,16 +8475,6 @@ OPT_SPEED
 					paletteIndex = pixelColorNumberFromTileData << ONE;
 				}
 
-				// Cache the palette index for this pixel in the mosaic array for this object
-				pGBA_display->gfx_obj_mosaic[oamID][spriteX][spriteY] = paletteIndex;
-
-				if (objCache.ObjAttribute.mOamAttr01Word.mOamAttr0HalfWord.mOamAttr0Fields.OBJ_MOSAIC == SET)
-				{
-					uint32_t mosaicX = spriteX - (spriteX % (pGBA_peripherals->mMOSAICHalfWord.mMOSAICFields.OBJ_MOSAIC_H_SIZE + ONE));
-					uint32_t mosaicY = spriteY - (spriteY % (pGBA_peripherals->mMOSAICHalfWord.mMOSAICFields.OBJ_MOSAIC_V_SIZE + ONE));
-					paletteIndex = pGBA_display->gfx_obj_mosaic[oamID][mosaicX][mosaicY];
-				}
-
 				if ((OBJECT_MODE)objCache.ObjAttribute.mOamAttr01Word.mOamAttr0HalfWord.mOamAttr0Fields.OBJ_MODE == OBJECT_MODE::OBJ_WINDOW
 					&&
 					paletteIndex != ZERO)
@@ -8567,6 +8492,8 @@ OPT_SPEED
 						pGBA_display->gfx_obj_mode[X][Y] = (OBJECT_MODE)objCache.ObjAttribute.mOamAttr01Word.mOamAttr0HalfWord.mOamAttr0Fields.OBJ_MODE;
 					}
 					pGBA_display->objPriority[X][Y] = objCache.ObjAttribute.mOamAttr23Word.mOamAttr2HalfWord.mOamAttr2Fields.PRIORITY;
+					// The mosaic flag follows the sprite buffer entry, also for transparent pixels (the merge stage needs it)
+					pGBA_display->gfx_obj_mosaic_flag[X][Y] = isObjMosaic;
 				}
 			}
 		}
@@ -11149,9 +11076,9 @@ OPT_SPEED
 					&&
 					pGBA_instance->GBA_state.dma.cache[DMA::DMA3].scheduleType == DMA_TIMING::SPECIAL)
 				{
-					scheduler.schedule(
+					pGBA_scheduler->schedule(
 						static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION),
-						scheduler.get_current_cycles() + DMA_HW_STARTUP_DELAY,
+						pGBA_scheduler->get_current_cycles() + DMA_HW_STARTUP_DELAY,
 						static_cast<int>(DMA::DMA3));
 				}
 			}
@@ -11170,9 +11097,9 @@ OPT_SPEED
 			pGBA_display->currentLCDMode = LCD_MODES::MODE_LCD_H_DRAW_V_BLANK;
 			PPUINFO("Entering MODE_LCD_H_DRAW_V_BLANK");
 
-			scheduler.schedule(
+			pGBA_scheduler->schedule(
 				static_cast<EventId>(GBA_EVENT::EVENT_PPU_HDRAW_VBLANK),
-				scheduler.get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE),
+				pGBA_scheduler->get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE),
 				ZERO);
 		}
 		// LINE 0 - 158
@@ -11242,9 +11169,9 @@ OPT_SPEED
 					&&
 					pGBA_instance->GBA_state.dma.cache[DMA::DMA3].scheduleType == DMA_TIMING::SPECIAL)
 				{
-					scheduler.schedule(
+					pGBA_scheduler->schedule(
 						static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION),
-						scheduler.get_current_cycles() + DMA_HW_STARTUP_DELAY,
+						pGBA_scheduler->get_current_cycles() + DMA_HW_STARTUP_DELAY,
 						static_cast<int>(DMA::DMA3));
 				}
 			}
@@ -11255,9 +11182,9 @@ OPT_SPEED
 			pGBA_display->currentLCDMode = LCD_MODES::MODE_LCD_H_DRAW_V_DRAW;
 			PPUINFO("Entering MODE_LCD_H_DRAW_V_DRAW");
 
-			scheduler.schedule(
+			pGBA_scheduler->schedule(
 				static_cast<EventId>(GBA_EVENT::EVENT_PPU_HDRAW_VDRAW),
-				scheduler.get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE),
+				pGBA_scheduler->get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE),
 				ZERO);
 		}
 	}
@@ -11282,9 +11209,9 @@ OPT_SPEED
 		pGBA_display->currentLCDMode = LCD_MODES::MODE_LCD_H_BLANK_V_BLANK;
 		PPUINFO("Entering MODE_LCD_H_BLANK_V_BLANK");
 
-		scheduler.schedule(
+		pGBA_scheduler->schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_PPU_HBLANK_VBLANK),
-			scheduler.get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK),
+			pGBA_scheduler->get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK),
 			ZERO);
 	}
 
@@ -11308,9 +11235,9 @@ OPT_SPEED
 		pGBA_display->currentLCDMode = LCD_MODES::MODE_LCD_H_BLANK_V_DRAW;
 		PPUINFO("Entering MODE_LCD_H_BLANK_V_DRAW");
 
-		scheduler.schedule(
+		pGBA_scheduler->schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_PPU_HBLANK_VDRAW),
-			scheduler.get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK),
+			pGBA_scheduler->get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_BLANK),
 			ZERO);
 	}
 
@@ -11375,9 +11302,9 @@ OPT_SPEED
 			pGBA_display->currentLCDMode = LCD_MODES::MODE_LCD_H_DRAW_V_DRAW;
 			PPUINFO("Entering MODE_LCD_H_DRAW_V_DRAW");
 
-			scheduler.schedule(
+			pGBA_scheduler->schedule(
 				static_cast<EventId>(GBA_EVENT::EVENT_PPU_HDRAW_VDRAW),
-				scheduler.get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE),
+				pGBA_scheduler->get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE),
 				ZERO);
 		}
 		// LINE 160 to 226
@@ -11407,9 +11334,9 @@ OPT_SPEED
 					&&
 					pGBA_instance->GBA_state.dma.cache[DMA::DMA3].scheduleType == DMA_TIMING::SPECIAL)
 				{
-					scheduler.schedule(
+					pGBA_scheduler->schedule(
 						static_cast<EventId>(GBA_EVENT::EVENT_DMA_ACTIVATION),
-						scheduler.get_current_cycles() + DMA_HW_STARTUP_DELAY,
+						pGBA_scheduler->get_current_cycles() + DMA_HW_STARTUP_DELAY,
 						static_cast<int>(DMA::DMA3));
 				}
 			}
@@ -11431,25 +11358,25 @@ OPT_SPEED
 			pGBA_display->currentLCDMode = LCD_MODES::MODE_LCD_H_DRAW_V_BLANK;
 			PPUINFO("Entering MODE_LCD_H_DRAW_V_BLANK");
 
-			scheduler.schedule(
+			pGBA_scheduler->schedule(
 				static_cast<EventId>(GBA_EVENT::EVENT_PPU_HDRAW_VBLANK),
-				scheduler.get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE),
+				pGBA_scheduler->get_current_cycles() + static_cast<uint64_t>(LCD_MODE_CYCLES::CYCLES_LCD_H_VISIBLE),
 				ZERO);
 		}
 	}
 
 	MASQ_INLINE void syncPPU()
 	{
-		INC64 currentCycles = scheduler.get_current_cycles();
+		INC64 currentCycles = pGBA_scheduler->get_current_cycles();
 		// If nothing has advanced, exit immediately.
-		if (pGBA_display->scheduler.lastSyncCycleCount == currentCycles)
+		if (pGBA_display->ppu_stats.lastSyncCycleCount == currentCycles)
 		{
 			RETURN;
 		}
-		ASSERT(pGBA_display->scheduler.lastSyncCycleCount < currentCycles);
-		INC64 catchupCycles = currentCycles - pGBA_display->scheduler.lastSyncCycleCount;
+		ASSERT(pGBA_display->ppu_stats.lastSyncCycleCount < currentCycles);
+		INC64 catchupCycles = currentCycles - pGBA_display->ppu_stats.lastSyncCycleCount;
 		processPPU(catchupCycles);
-		pGBA_display->scheduler.lastSyncCycleCount = currentCycles;
+		pGBA_display->ppu_stats.lastSyncCycleCount = currentCycles;
 	}
 
 	void processPPU(INC64 ppuCycles);
@@ -11510,11 +11437,11 @@ private:
 				}
 
 				// Cancel any existing pending transfer event before scheduling the new one
-				scheduler.cancel(static_cast<EventId>(GBA_EVENT::EVENT_SIO_TRANSFER_COMPLETE));
+				pGBA_scheduler->cancel(static_cast<EventId>(GBA_EVENT::EVENT_SIO_TRANSFER_COMPLETE));
 
-				scheduler.schedule(
+				pGBA_scheduler->schedule(
 					static_cast<EventId>(GBA_EVENT::EVENT_SIO_TRANSFER_COMPLETE),
-					scheduler.get_current_cycles() + cyclesToTxRxData,
+					pGBA_scheduler->get_current_cycles() + cyclesToTxRxData,
 					ZERO);
 			}
 		}
@@ -11522,158 +11449,169 @@ private:
 
 private:
 
-	// ============================================
-	// AGGRESSIVE OPTIMIZATION - processBackup
-	// 100% accuracy maintained
-	// ============================================
+	// ---- Flash backup chip (64K / 128K) ---------------------------------------------------------------------------
+// Commands are decoded when the write happens, as a real state machine: what a write means depends on the state the chip is in.
+// (Reference: https://dillonbeliveau.com/2020/06/05/GBA-FLASH.html and GBATEK "GBA Cart Backup Flash ROM")
+// The previous version stored command bytes in the data array and polled them every tick. That cannot work because 0x5555 and
+// 0x2AAA are ordinary data addresses too: every command cycle overwrote the save data at those two offsets with 0xFF, and a program
+// command whose data byte goes to 0x5555 or 0x2AAA was mistaken for a command write. The state machine below never stores command
+// bytes, and the data byte of a program command goes to the address it is written to, whatever that address is.
 
-	MASQ_INLINE void processBackup()
+	MASQ_INLINE void resetFlashChip()
 	{
+		auto& flash = pGBA_instance->GBA_state.emulatorStatus.backup.flash;
+
+		flash.currentMemoryBank = BACKUP_FLASH_MEMORY_BANK::BANK0;
+		flash.chooseMemoryBank = NO;
+		flash.allowFlashWrite = NO;
+		flash.previousFlashCommand = BACKUP_FLASH_CMDS::NO_OPERATION_00; // "erase armed" lives here
+		flash.currentFlashCommand = BACKUP_FLASH_CMDS::NO_OPERATION_00;  // "identification mode" lives here
+		flash.flashFsmState = BACKUP_FLASH_FSM::STATE0;
+	}
+
+	MASQ_INLINE BYTE flashReadByte(uint32_t address)
+	{
+		auto& flash = pGBA_instance->GBA_state.emulatorStatus.backup.flash;
+
+		while (address >= GAMEPAK_SRAM_MIRROR_START_ADDRESS)
+		{
+			address = (address % GAMEPAK_SRAM_MIRROR_START_ADDRESS) + GAMEPAK_SRAM_START_ADDRESS;
+		}
+
+		const uint32_t offset = address - GAMEPAK_SRAM_START_ADDRESS;
+		const ID bank = (flash.currentMemoryBank == BACKUP_FLASH_MEMORY_BANK::BANK1) ? ONE : ZERO;
+
+		// In chip identification mode the first two bytes are replaced by the manufacturer and device ID
+		if (flash.currentFlashCommand == BACKUP_FLASH_CMDS::ENTER_CHIP_INDENTIFICATION_MODE && offset < TWO)
+		{
+			if (pGBA_instance->GBA_state.emulatorStatus.backup.backupType == BACKUP_TYPE::FLASH64K)
+			{
+				RETURN(offset == ZERO) ? 0x32 : 0x1B; // Panasonic
+			}
+			RETURN(offset == ZERO) ? 0x62 : 0x13; // Sanyo
+		}
+
+		RETURN pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[bank][offset];
+	}
+
+	MASQ_INLINE void flashWriteByte(uint32_t address, BYTE data)
+	{
+		auto& flash = pGBA_instance->GBA_state.emulatorStatus.backup.flash;
 		const BACKUP_TYPE backupType = pGBA_instance->GBA_state.emulatorStatus.backup.backupType;
 
-		if (backupType != BACKUP_TYPE::FLASH64K && backupType != BACKUP_TYPE::FLASH128K) MASQ_UNLIKELY
-			RETURN;
-
-		auto& flash = pGBA_instance->GBA_state.emulatorStatus.backup.flash;
-		const ID currentMemoryBank = (flash.currentMemoryBank == BACKUP_FLASH_MEMORY_BANK::BANK1) ? ONE : ZERO;
-
-		// KEEP direct pointer (DO NOT REMOVE)
-		auto* flashMem = pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit[currentMemoryBank];
-
-		const BACKUP_FLASH_FSM state = flash.flashFsmState;
-
-		// Helper lambda for READ via API
-		auto READ_FLASH = [&](uint32_t addr) -> uint8_t
-			{
-				RETURN readRawMemoryInternal<uint8_t>(
-					addr,
-					MEMORY_ACCESS_WIDTH::EIGHT_BIT,
-					MEMORY_ACCESS_SOURCE::HOST,
-					MEMORY_ACCESS_TYPE::AUTOMATIC,
-					YES   // IMPORTANT: LOCK = YES (avoid recursion / DMA side effects)
-				);
-			};
-
-		if (state == BACKUP_FLASH_FSM::STATE0) MASQ_LIKELY
+		while (address >= GAMEPAK_SRAM_MIRROR_START_ADDRESS)
 		{
-			if (READ_FLASH(FLASH_ACCESS_MEMORY2) == TO_UINT8(BACKUP_FLASH_CMDS::CMD_1)) MASQ_UNLIKELY
+			address = (address % GAMEPAK_SRAM_MIRROR_START_ADDRESS) + GAMEPAK_SRAM_START_ADDRESS;
+		}
+
+		const uint32_t offset = address - GAMEPAK_SRAM_START_ADDRESS;
+		const ID bank = (flash.currentMemoryBank == BACKUP_FLASH_MEMORY_BANK::BANK1) ? ONE : ZERO;
+		auto* memory = pGBA_memory->mGBAMemoryMap.mGamePakBackup.mGamePakFlash.mExtFlash8bit;
+
+		// 1) The write that follows "set memory bank" (0xB0) must go to 0x0E000000 and selects the bank for ALL later accesses
+		if (flash.chooseMemoryBank == YES)
+		{
+			flash.chooseMemoryBank = NO;
+			if (offset == ZERO)
+			{
+				flash.currentMemoryBank = ((data & ONE) == ZERO) ? BACKUP_FLASH_MEMORY_BANK::BANK0 : BACKUP_FLASH_MEMORY_BANK::BANK1;
+			}
+			RETURN;
+		}
+
+		// 2) The write that follows "program single byte" (0xA0) is the data byte, at ANY address (0x5555 and 0x2AAA included).
+		// Programming can only clear bits, so the result is the old value AND the new one
+		if (flash.allowFlashWrite == YES)
+		{
+			flash.allowFlashWrite = NO;
+			memory[bank][offset] &= data;
+			RETURN;
+		}
+
+		// 3) Command cycles: 0xAA to 0x5555, 0x55 to 0x2AAA, then the command (to 0x5555, or for sector erase 0x30 to the sector address)
+		switch (flash.flashFsmState)
+		{
+		case BACKUP_FLASH_FSM::STATE0:
+		{
+			if (offset == 0x5555 && data == TO_UINT8(BACKUP_FLASH_CMDS::CMD_1))
 			{
 				flash.flashFsmState = BACKUP_FLASH_FSM::STATE1;
-				flashMem[FLASH_ACCESS_MEMORY2 - GAMEPAK_SRAM_START_ADDRESS] = RESET;
 			}
+			// A single 0xF0 write is the "terminate write/erase" command: nothing to do, operations complete instantly here
+			BREAK;
 		}
-		else if (state == BACKUP_FLASH_FSM::STATE1) MASQ_UNLIKELY
+		case BACKUP_FLASH_FSM::STATE1:
 		{
-			if (READ_FLASH(FLASH_ACCESS_MEMORY3) == TO_UINT8(BACKUP_FLASH_CMDS::CMD_2)) MASQ_UNLIKELY
+			if (offset == 0x2AAA && data == TO_UINT8(BACKUP_FLASH_CMDS::CMD_2))
 			{
 				flash.flashFsmState = BACKUP_FLASH_FSM::STATE2;
-				flashMem[FLASH_ACCESS_MEMORY3 - GAMEPAK_SRAM_START_ADDRESS] = RESET;
-			}
-		}
-		else if (state == BACKUP_FLASH_FSM::STATE2) MASQ_UNLIKELY
-		{
-			if (flash.previousFlashCommand == BACKUP_FLASH_CMDS::START_ERASE_CMD
-				&& flash.erase4kbPageNumber != INVALID) MASQ_UNLIKELY
-			{
-				flash.flashFsmState = BACKUP_FLASH_FSM::STATE0;
-				flash.erase4kbPageNumber = INVALID;
-
-				const GBA_WORD eraseStartAddr = flash.erase4kbStartAddr;
-				flash.erase4kbStartAddr = RESET;
-
-				if (eraseStartAddr < GAMEPAK_SRAM_START_ADDRESS + 0x10000) MASQ_LIKELY
-				{
-					memset(&flashMem[eraseStartAddr - GAMEPAK_SRAM_START_ADDRESS], 0xFF, 0x1000);
-					memset(&flash.isErased[currentMemoryBank][eraseStartAddr - GAMEPAK_SRAM_START_ADDRESS], YES, 0x1000);
-				}
 			}
 			else
 			{
-				const BACKUP_FLASH_CMDS currentCmd =
-					(BACKUP_FLASH_CMDS)READ_FLASH(FLASH_ACCESS_MEMORY2);
-
-				flashMem[FLASH_ACCESS_MEMORY2 - GAMEPAK_SRAM_START_ADDRESS] = RESET;
-				flash.currentFlashCommand = currentCmd;
-
-				if (currentCmd == BACKUP_FLASH_CMDS::NO_OPERATION) MASQ_LIKELY
-				{
-					// do nothing
-				}
-				else if (currentCmd == BACKUP_FLASH_CMDS::ENTER_CHIP_INDENTIFICATION_MODE) MASQ_UNLIKELY
-				{
-					flash.flashFsmState = BACKUP_FLASH_FSM::STATE0;
-
-					if (flash.previousFlashCommand != BACKUP_FLASH_CMDS::START_ERASE_CMD)
-					{
-						flash.ogByteAtFlashAccessMem0 = flashMem[FLASH_ACCESS_MEMORY0 - GAMEPAK_SRAM_START_ADDRESS];
-						flash.ogByteAtFlashAccessMem1 = flashMem[FLASH_ACCESS_MEMORY1 - GAMEPAK_SRAM_START_ADDRESS];
-
-						if (backupType == BACKUP_TYPE::FLASH64K)
-						{
-							flashMem[ZERO] = 0x32;
-							flashMem[ONE] = 0x1B;
-						}
-						else
-						{
-							flashMem[ZERO] = 0x62;
-							flashMem[ONE] = 0x13;
-						}
-					}
-				}
-				else if (currentCmd == BACKUP_FLASH_CMDS::EXIT_CHIP_INDENTIFICATION_MODE) MASQ_UNLIKELY
-				{
-					flash.flashFsmState = BACKUP_FLASH_FSM::STATE0;
-
-					if (flash.previousFlashCommand != BACKUP_FLASH_CMDS::START_ERASE_CMD)
-					{
-						flashMem[FLASH_ACCESS_MEMORY0 - GAMEPAK_SRAM_START_ADDRESS] = flash.ogByteAtFlashAccessMem0;
-						flashMem[FLASH_ACCESS_MEMORY1 - GAMEPAK_SRAM_START_ADDRESS] = flash.ogByteAtFlashAccessMem1;
-					}
-				}
-				else if (currentCmd == BACKUP_FLASH_CMDS::START_ERASE_CMD) MASQ_UNLIKELY
-				{
-					flash.flashFsmState = BACKUP_FLASH_FSM::STATE0;
-				}
-				else if (currentCmd == BACKUP_FLASH_CMDS::ERASE_ENTIRE_CHIP) MASQ_UNLIKELY
-				{
-					flash.flashFsmState = BACKUP_FLASH_FSM::STATE0;
-
-					if (flash.previousFlashCommand == BACKUP_FLASH_CMDS::START_ERASE_CMD)
-					{
-						if (backupType == BACKUP_TYPE::FLASH64K)
-						{
-							memset(flashMem, 0xFF, 0x10000);
-							memset(flash.isErased[currentMemoryBank], YES, 0x10000);
-						}
-						else if (flash.currentMemoryBank == BACKUP_FLASH_MEMORY_BANK::BANK0)
-						{
-							memset(flashMem, 0xFF, 0x10000);
-							memset(flash.isErased[currentMemoryBank], YES, 0x10000);
-						}
-						else
-						{
-							memset(&flashMem[0x10000], 0xFF, 0x10000);
-							memset(&flash.isErased[currentMemoryBank][0x10000], YES, 0x10000);
-						}
-					}
-				}
-				else if (currentCmd == BACKUP_FLASH_CMDS::START_1BYTE_WRITE_CMD) MASQ_UNLIKELY
-				{
-					flash.flashFsmState = BACKUP_FLASH_FSM::STATE0;
-					flash.allowFlashWrite = YES;
-				}
-				else if (currentCmd == BACKUP_FLASH_CMDS::SET_MEMORY_BANK) MASQ_UNLIKELY
-				{
-					flash.flashFsmState = BACKUP_FLASH_FSM::STATE0;
-					flash.chooseMemoryBank = YES;
-				}
-
-				if (currentCmd != BACKUP_FLASH_CMDS::NO_OPERATION)
-				{
-					flash.previousFlashCommand = currentCmd;
-				}
+				// Anything else cancels the sequence (a new 0xAA to 0x5555 restarts it)
+				flash.flashFsmState = (offset == 0x5555 && data == TO_UINT8(BACKUP_FLASH_CMDS::CMD_1)) ? BACKUP_FLASH_FSM::STATE1 : BACKUP_FLASH_FSM::STATE0;
 			}
+			BREAK;
 		}
+		default: // STATE2: this write is the command
+		{
+			flash.flashFsmState = BACKUP_FLASH_FSM::STATE0;
+
+			// Second command cycle after "prepare erase" (0x80): chip erase or 4KB sector erase
+			if (flash.previousFlashCommand == BACKUP_FLASH_CMDS::START_ERASE_CMD)
+			{
+				flash.previousFlashCommand = BACKUP_FLASH_CMDS::NO_OPERATION_00;
+
+				if (offset == 0x5555 && data == TO_UINT8(BACKUP_FLASH_CMDS::ERASE_ENTIRE_CHIP))
+				{
+					const ID bankCount = (backupType == BACKUP_TYPE::FLASH128K) ? TO_UINT8(BACKUP_FLASH_MEMORY_BANK::TOTAL) : ONE;
+					for (ID eraseBank = ZERO; eraseBank < bankCount; ++eraseBank)
+					{
+						memset(memory[eraseBank], 0xFF, 0x10000);
+					}
+				}
+				else if (data == TO_UINT8(BACKUP_FLASH_CMDS::ERASE_4KB_SECTOR))
+				{
+					// The low 12 bits of the address are ignored
+					memset(&memory[bank][offset & 0xF000], 0xFF, 0x1000);
+				}
+				BREAK;
+			}
+
+			if (offset != 0x5555)
+			{
+				BREAK;
+			}
+
+			switch (static_cast<BACKUP_FLASH_CMDS>(data))
+			{
+			case BACKUP_FLASH_CMDS::ENTER_CHIP_INDENTIFICATION_MODE:
+				flash.currentFlashCommand = BACKUP_FLASH_CMDS::ENTER_CHIP_INDENTIFICATION_MODE;
+				BREAK;
+			case BACKUP_FLASH_CMDS::EXIT_CHIP_INDENTIFICATION_MODE:
+				flash.currentFlashCommand = BACKUP_FLASH_CMDS::NO_OPERATION_00;
+				BREAK;
+			case BACKUP_FLASH_CMDS::START_ERASE_CMD:
+				flash.previousFlashCommand = BACKUP_FLASH_CMDS::START_ERASE_CMD;
+				BREAK;
+			case BACKUP_FLASH_CMDS::START_1BYTE_WRITE_CMD:
+				flash.allowFlashWrite = YES;
+				BREAK;
+			case BACKUP_FLASH_CMDS::SET_MEMORY_BANK:
+				// Only 128KB devices have two banks
+				flash.chooseMemoryBank = (backupType == BACKUP_TYPE::FLASH128K) ? YES : NO;
+				BREAK;
+			default:
+				BREAK;
+			}
+			BREAK;
+		}
+		}
+	}
+
+	MASQ_INLINE void processBackup()
+	{
+		DO_NOTHING;
 	}
 
 private:
@@ -11699,9 +11637,9 @@ private:
 		if (interruptState.irqAvailLatch != irqAvailLatch)
 		{
 			// Avail latch: 1 cycle after the IF/IE write is applied (IRQ_AVAILABILITY_DELAY)
-			gba->scheduler.schedule(
+			gba->pGBA_scheduler->schedule(
 				static_cast<EventId>(GBA_EVENT::EVENT_IRQ_AVAIL),
-				gba->scheduler.get_current_cycles() + IRQ_AVAILABILITY_DELAY,
+				gba->pGBA_scheduler->get_current_cycles() + IRQ_AVAILABILITY_DELAY,
 				irqAvailLatch);
 		}
 
@@ -11711,9 +11649,9 @@ private:
 		if (interruptState.irqLineLatch != irqLineLatch)
 		{
 			// CPU IRQ line: 1 cycle after the avail latch (IRQ_LINE_DELAY)
-			gba->scheduler.schedule(
+			gba->pGBA_scheduler->schedule(
 				static_cast<EventId>(GBA_EVENT::EVENT_IRQ_LINE),
-				gba->scheduler.get_current_cycles() + IRQ_LINE_DELAY,
+				gba->pGBA_scheduler->get_current_cycles() + IRQ_LINE_DELAY,
 				irqLineLatch);
 
 			// "irqLineLatch" which is the IRQ line in SOC is instantenous but IRQ line in CPU i.e. "cpuIrqLineLatch" is delayed (handled in irqLineHandler)  
@@ -11779,14 +11717,14 @@ private:
 		gba->timerOverflowWork(timer);
 
 		// The counter is the reload value as of this cycle, the next tick is one period away
-		const int64_t now = (int64_t)gba->scheduler.get_current_cycles();
+		const int64_t now = (int64_t)gba->pGBA_scheduler->get_current_cycles();
 		const int64_t prescalar = gba->getTimerPrescalar(timer);
 
 		// Point to the next future tick
 		state.cache.stats.firstTick = now + prescalar;
 
 		const int64_t overflowAt = state.cache.stats.firstTick + ((int64_t)(0x10000 - state.cache.counter - 1) * prescalar);
-		gba->scheduler.schedule(static_cast<EventId>(GBA_EVENT::EVENT_TIMER_OVERFLOW), (uint64_t)overflowAt, timerId);
+		gba->pGBA_scheduler->schedule(static_cast<EventId>(GBA_EVENT::EVENT_TIMER_OVERFLOW), (uint64_t)overflowAt, timerId);
 	}
 
 	static void sioTransferHandler(void* userData, MASQ_MAYBE_UNUSED int context)
@@ -11850,12 +11788,12 @@ private:
 
 		gba->tickChannel(static_cast<AUDIO_CHANNELS>(channel));
 
-		gba->pGBA_audio->scheduler.lastSyncCycleCount[channel] = gba->scheduler.get_current_cycles();
+		gba->pGBA_audio->apu_stats.lastSyncCycleCount[channel] = gba->pGBA_scheduler->get_current_cycles();
 
 		// Schedule channel step
-		gba->scheduler.schedule(
+		gba->pGBA_scheduler->schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_APU_CHANNEL_STEP),
-			gba->scheduler.get_current_cycles() + chInstance.frequencyTimer,
+			gba->pGBA_scheduler->get_current_cycles() + chInstance.frequencyTimer,
 			channel);
 	}
 
@@ -11866,9 +11804,9 @@ private:
 		gba->frameSequencer();
 
 		// Schedule the Framesequencer
-		gba->scheduler.schedule(
+		gba->pGBA_scheduler->schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_APU_FRAME_SEQUENCER),
-			gba->scheduler.get_current_cycles() + FRAME_SEQ_THRESHOLD,
+			gba->pGBA_scheduler->get_current_cycles() + FRAME_SEQ_THRESHOLD,
 			ZERO);
 	}
 
@@ -11879,9 +11817,9 @@ private:
 		gba->captureDownsampledAudioSamples();
 
 		// Schedule the Downsampler
-		gba->scheduler.schedule(
+		gba->pGBA_scheduler->schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_APU_SAMPLE),
-			gba->scheduler.get_current_cycles() + DOWNSAMPLE_THRESHOLD,
+			gba->pGBA_scheduler->get_current_cycles() + DOWNSAMPLE_THRESHOLD,
 			ZERO);
 	}
 

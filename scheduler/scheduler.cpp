@@ -104,6 +104,16 @@ void Scheduler_t::reschedule(EventId id, int64_t new_target_cycle, int context)
 	schedule(id, new_target_cycle, context);
 }
 
+void Scheduler_t::post_load_fixup(const Scheduler_t& referenceInstance)
+{
+	// 1. Restore the static function pointers from the valid template instance
+	eventDefCount = referenceInstance.eventDefCount;
+	std::memcpy(eventDefs, referenceInstance.eventDefs, sizeof(eventDefs));
+
+	// 2. Recompute the next event time using the newly loaded queue data from disk
+	recompute_next_event_time();
+}
+
 void Scheduler_t::process_due_events()
 {
 	SCHED_STAT(stats.processDueCalls++);
