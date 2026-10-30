@@ -15,6 +15,7 @@
 #pragma region WIP
 #define GBA_ENABLE_ROM_SEQ_BURST_QUIRK					YES
 #define GBA_ENABLE_VIDEO_MEMORY_STALLS					YES
+#define GBA_ENABLE_GAMEPAK_PREFETCH						NO
 #define GBA_ENABLE_AGS_PATCHED_TEST						NO
 #pragma endregion WIP
 
@@ -2581,7 +2582,7 @@ private:
 		uint16_t WAIT_STATE_1_SEQ : 1; // bit  7
 		uint16_t WAIT_STATE_2_NON_SEQ : 2; // bit  8 - 9
 		uint16_t WAIT_STATE_2_SEQ : 1; // bit  10
-		uint16_t PHI_TERMINAL_OUTPUT : 1; // bit  11 - 12
+		uint16_t PHI_TERMINAL_OUTPUT : 2; // bit  11 - 12
 		uint16_t NOT_USED_0 : 1; // bit  13
 		uint16_t GAMEPAK_PREFETCH_BUFF : 1; // bit  14
 		uint16_t GAMEPAK_TYPE_FLAG : 1; // bit  15
@@ -3693,6 +3694,23 @@ private:
 
 private:
 
+	typedef struct
+	{
+		FLAG     enabled;           // Prefetch active state (WAITCNT bit 14)
+		uint8_t  head;              // Circular queue read index (0-7)
+		uint8_t  tail;              // Circular queue write index (0-7)
+		uint8_t  count;             // Active halfword count in buffer (0-8)
+		union
+		{
+			uint16_t buffer16[8];   // FIFO storage for prefetched ROM halfwords
+			uint32_t buffer32[4];   // FIFO storage for prefetched ROM words
+		};
+		uint32_t address_buffer[8]; // Corresponding ROM addresses for hit validation
+		uint32_t target_address;    // Next sequential ROM address queued for prefetching
+	} GamePakPrefetch_t;
+
+private:
+
 	enum class GBA_EVENT : EventId
 	{
 		EVENT_PPU_HBLANK_VDRAW,
@@ -3715,6 +3733,12 @@ private:
 
 private:
 
+	typedef struct 
+	{
+		FLAG hit;
+		uint32_t data;
+	} PrefetchResult_t;
+
 	typedef struct
 	{
 		cpu_t cpuInstance;
@@ -3726,6 +3750,7 @@ private:
 		audio_t audio;
 		display_t display;
 		quirks_t quirks;
+		GamePakPrefetch_t prefetch;
 		emulatorStatus_t emulatorStatus;
 		Scheduler_t Scheduler;
 	} GBA_state_t;
@@ -4332,6 +4357,89 @@ OPT_SPEED
 #endif
 	}
 
+	// Check and handle prefetch during instruction fetches (Cache Hit/Miss)
+	PrefetchResult_t handlePrefetchInstructionFetch(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth)
+	{
+		auto& prefetch = pGBA_instance->GBA_state.prefetch;
+		if (!prefetch.enabled) RETURN{ false, 0 };
+
+		// Prefetch only operates when executing code out of GamePak ROM
+		if (!IF_ADDRESS_WITHIN(address, GAMEPAK_ROM_WS0_START_ADDRESS, GAMEPAK_ROM_WS2_END_ADDRESS)) RETURN{ false, 0 };
+
+		bool is_thumb = (getARMState() == STATE_TYPE::ST_THUMB);
+
+		if (is_thumb)
+		{
+			// THUMB Hit Check: Needs 1 halfword at the exact address
+			if (prefetch.count >= 1 && prefetch.address_buffer[prefetch.head] == address)
+			{
+				uint16_t fetched_data = prefetch.buffer16[prefetch.head];
+				prefetch.head = (prefetch.head + 1) & 7;
+				prefetch.count--;
+				RETURN{ true, fetched_data };
+			}
+		}
+		else
+		{
+			// ARM Hit Check: Needs 2 consecutive halfwords (address and address + 2)
+			if (prefetch.count >= 2)
+			{
+				uint8_t next_head = (prefetch.head + 1) & 7;
+
+				if (prefetch.address_buffer[prefetch.head] == address &&
+					prefetch.address_buffer[next_head] == (address + 2))
+				{
+					uint16_t lo = prefetch.buffer16[prefetch.head];
+					prefetch.head = next_head;
+
+					uint16_t hi = prefetch.buffer16[prefetch.head];
+					prefetch.head = (prefetch.head + 1) & 7;
+
+					prefetch.count -= 2;
+					uint32_t fetched_data = lo | (hi << 16);
+					RETURN{ true, fetched_data };
+				}
+			}
+		}
+
+		// Cache Miss / Discontinuity: Flush and reset target tracking
+		prefetch.head = 0;
+		prefetch.tail = 0;
+		prefetch.count = 0;
+		prefetch.target_address = address + (is_thumb ? 2 : 4);
+		RETURN{ false, 0 };
+	}
+
+	// Check and trigger prefetch step during CPU data accesses (Bus is free)
+	void handlePrefetchDataFill(uint32_t data_address)
+	{
+		auto& prefetch = pGBA_instance->GBA_state.prefetch;
+		if (!prefetch.enabled || prefetch.count >= 8) RETURN;
+
+		// Ensure CPU is currently running code out of GamePak ROM
+		uint32_t current_pc = cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)PC);
+		if (!IF_ADDRESS_WITHIN(current_pc, GAMEPAK_ROM_WS0_START_ADDRESS, GAMEPAK_ROM_WS0_END_ADDRESS)) RETURN;
+
+		// Ensure the data access target is NOT in GamePak ROM (so the ROM bus is free)
+		if (data_address >= GAMEPAK_ROM_WS0_START_ADDRESS) RETURN;
+
+		uint32_t target = prefetch.target_address & 0x01FFFFFF;
+
+		// Pull a 16-bit halfword from GamePak ROM wait state 0 memory map
+		uint16_t halfword = static_cast<uint16_t>(
+			pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakRom.mWaitState.mWaitState0.mWaitState0Memory16bit[(target & 0x01FFFFFF) / TWO]
+			);
+
+		// Push data AND its corresponding address into the circular buffers
+		prefetch.buffer16[prefetch.tail] = halfword;
+		prefetch.address_buffer[prefetch.tail] = prefetch.target_address;
+		prefetch.tail = (prefetch.tail + 1) & 7;
+		prefetch.count++;
+
+		// Advance target tracker by 2 bytes
+		prefetch.target_address += TWO;
+	}
+
 	// NOTE: For memory mirrors, refer http://problemkaputt.de/gbatek-gba-unpredictable-things.htm
 	template <typename T>
 	T readRawMemoryInternal(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType, FLAG LOCK = NO)
@@ -4351,6 +4459,31 @@ OPT_SPEED
 
 			// CPU accessed the bus: drop any remaining free (parallel) internal cycles, as NBA does on every Bus::Read / Bus::Write
 			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.freeBusCyclesCounter = RESET;
+		}
+
+		// Handle prefetch for instruction fetches and data fills
+		if (source == MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH)
+		{
+			auto result = handlePrefetchInstructionFetch(address, accessWidth);
+			if (result.hit)
+			{
+				// A prefetch hit costs 1 cycle (the base access cycle), 
+				// bypassing the normal ROM wait states.
+				tick();
+
+				// The access still happens; check if the LCD display controller stalls it
+				if (isLCDMemoryAccessStalled(address))
+				{
+					tick();
+				}
+
+				// Return immediately with the cached data
+				RETURN static_cast<T>(result.data);
+			}
+		}
+		else if (source == MEMORY_ACCESS_SOURCE::CPU)
+		{
+			handlePrefetchDataFill(address);
 		}
 
 		// https://discord.com/channels/465585922579103744/465586361731121162/1321107870573400137
@@ -4907,6 +5040,12 @@ OPT_SPEED
 
 			// CPU accessed the bus: drop any remaining free (parallel) internal cycles, as NBA does on every Bus::Read / Bus::Write
 			pGBA_instance->GBA_state.emulatorStatus.ticks.cycle_accurate.freeBusCyclesCounter = RESET;
+		}
+
+		// Handle Prefetch Data Fill for CPU access to ROM
+		if (source == MEMORY_ACCESS_SOURCE::CPU)
+		{
+			handlePrefetchDataFill(address);
 		}
 
 		// https://discord.com/channels/465585922579103744/465586361731121162/1321107870573400137

@@ -2436,6 +2436,21 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 
 		pGBA_peripherals->mWAITCNTHalfWord.mWAITCNTHalfWord = data;
 
+#if (GBA_ENABLE_GAMEPAK_PREFETCH == YES)
+		FLAG prefetchWasEnabled = pGBA_instance->GBA_state.prefetch.enabled;
+		FLAG prefetchNowEnabled = pGBA_peripherals->mWAITCNTHalfWord.mWAITCNTFields.GAMEPAK_PREFETCH_BUFF;
+
+		pGBA_instance->GBA_state.prefetch.enabled = prefetchNowEnabled;
+
+		if (prefetchWasEnabled && !prefetchNowEnabled)
+		{
+			pGBA_instance->GBA_state.prefetch.head = RESET;
+			pGBA_instance->GBA_state.prefetch.tail = RESET;
+			pGBA_instance->GBA_state.prefetch.count = RESET;
+			pGBA_instance->GBA_state.prefetch.target_address = RESET;
+		}
+#endif
+
 		auto NonSequentialWaitStates = [&](uint32_t x) {
 			switch (x)
 			{
@@ -2758,6 +2773,33 @@ MASQ_INLINE void GBA_t::cpuIdleCycles()
 	{
 		// No DMA cycles pending, so execute a CPU cycle
 		busCycles();
+
+		// Handle prefetching if enabled and buffer is not full
+		auto& prefetch = pGBA_instance->GBA_state.prefetch;
+		if (prefetch.enabled && prefetch.count < 8)
+		{
+			// Ensure CPU is currently executing code out of GamePak ROM
+			uint32_t current_pc = cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)PC);
+			if (IF_ADDRESS_WITHIN(current_pc, GAMEPAK_ROM_WS0_START_ADDRESS, GAMEPAK_ROM_WS0_END_ADDRESS))
+			{
+				uint32_t target = prefetch.target_address & 0x01FFFFFF;
+
+				// Pull a 16-bit halfword from GamePak ROM wait state 0 memory map
+				uint16_t halfword = static_cast<uint16_t>(
+					pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakRom.mWaitState.mWaitState0.mWaitState0Memory16bit[(target & 0x01FFFFFF) / TWO]
+					);
+
+				// Push data AND corresponding address into circular FIFO buffer
+				prefetch.buffer16[prefetch.tail] = halfword;
+				prefetch.address_buffer[prefetch.tail] = prefetch.target_address;
+
+				prefetch.tail = (prefetch.tail + ONE) & 7;
+				prefetch.count++;
+
+				// Advance target tracker by 2 bytes
+				prefetch.target_address += TWO;
+			}
+		}
 	}
 	else
 	{
