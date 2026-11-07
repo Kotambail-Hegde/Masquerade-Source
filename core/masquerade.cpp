@@ -4335,6 +4335,7 @@ public:
 											{
 												if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("Coming soon");
 												ImGui::MenuItem("GBA", NULL, NO, DISABLED);
+#if MASQ_ENABLE_GBC
 												if (current_instance->getEmulationID() == EMULATION_ID::GB_GBC_ID)
 												{
 													GBc_t* gbc = static_cast<GBc_t*>(current_instance);
@@ -4342,11 +4343,13 @@ public:
 														gbc->gbcDebugger.windowOpen = (gbc->gbcDebugger.windowOpen == NO) ? YES : NO;
 												}
 												else
+#endif
 												{
 													ImGui::MenuItem("GB-GBC", NULL, NO, DISABLED);
 													if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
 														ImGui::SetTooltip("Please load a GB/GBC ROM");
 												}
+#if MASQ_ENABLE_NES
 												if (current_instance->getEmulationID() == EMULATION_ID::NES_ID)
 												{
 													NES_t* nes = static_cast<NES_t*>(current_instance);
@@ -4354,6 +4357,7 @@ public:
 														nes->nesDebugger.windowOpen = (nes->nesDebugger.windowOpen == NO) ? YES : NO;
 												}
 												else
+#endif
 												{
 													ImGui::MenuItem("NES", NULL, NO, DISABLED);
 													if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) 
@@ -4372,6 +4376,7 @@ public:
 										if (ImGui::BeginMenu("Statistics"))
 										{
 #if MASQ_GBA_SCHEDULER_STATS_UI
+#if MASQ_ENABLE_GBA
 											if (current_instance->getEmulationID() == EMULATION_ID::GBA_ID)
 											{
 												GBA_t* gbaStats = static_cast<GBA_t*>(current_instance);
@@ -4379,6 +4384,7 @@ public:
 													gbaStats->schedulerStatsWindowOpen = (gbaStats->schedulerStatsWindowOpen == NO) ? YES : NO;
 											}
 											else
+#endif
 											{
 												ImGui::MenuItem("Scheduler", NULL, NO, DISABLED);
 												if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
@@ -4494,6 +4500,7 @@ public:
 												// Window state toggles automatically via pointer reference
 											}
 
+#if MASQ_ENABLE_GBC
 											if (current_instance->getEmulationID() == EMULATION_ID::GB_GBC_ID)
 											{
 												ImGui::Separator();
@@ -4519,6 +4526,7 @@ public:
 													gbc->camera_capture_timing_percent = percent;
 												}
 											}
+#endif // MASQ_ENABLE_GBC
 
 											if (camera != nullptr)
 											{
@@ -5142,21 +5150,27 @@ public:
 								}
 
 								// ---- PPU/CPU/APU/Event debugger ----------------
+#if MASQ_ENABLE_GBC
 								if (current_instance->getEmulationID() == EMULATION_ID::GB_GBC_ID)
 								{
 									static_cast<GBc_t*>(current_instance)->renderGBCDebuggerUI();
 								}
+#endif // MASQ_ENABLE_GBC
+#if MASQ_ENABLE_NES
 								if (current_instance->getEmulationID() == EMULATION_ID::NES_ID)
 								{
 									static_cast<NES_t*>(current_instance)->renderNESDebuggerUI();
 								}
+#endif // MASQ_ENABLE_NES
 
 								// ---- GBA scheduler stats window ---------------
 #if MASQ_GBA_SCHEDULER_STATS_UI
+#if MASQ_ENABLE_GBA
 								if (current_instance->getEmulationID() == EMULATION_ID::GBA_ID)
 								{
 									renderGBASchedulerStatsWindow(static_cast<GBA_t*>(current_instance));
 								}
+#endif // MASQ_ENABLE_GBA
 #endif // MASQ_GBA_SCHEDULER_STATS_UI
 
 								// ---- Cheat hub ------------------------------
@@ -5584,6 +5598,7 @@ public:
 										}
 									}
 
+#if MASQ_ENABLE_GBC
 									if (current_instance->getEmulationID() == EMULATION_ID::GB_GBC_ID)
 									{
 										GBc_t* gbc = static_cast<GBc_t*>(current_instance);
@@ -5602,10 +5617,12 @@ public:
 											}
 										}
 									}
+#endif // MASQ_ENABLE_GBC
 									RenderCameraHardwareUI(camera);
 #endif // !__RPI_PICO__ && !ENABLE_OTA_EXECUTABLE && !ENABLE_SERVER_EXECUTABLE
 								}
 
+#if MASQ_ENABLE_GBC
 								if (barcodeWindowOpen == YES)
 								{
 									ImGui::OpenPopup("Scan Barcode Popup");
@@ -5662,6 +5679,8 @@ public:
 
 									ImGui::EndPopup();
 								}
+#endif // MASQ_ENABLE_GBC
+								// ---- Network link UI ------------------------
 
 #ifndef __EMSCRIPTEN__
 								if (networkUI.showConnectPopup)

@@ -925,6 +925,149 @@ elseif (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
 endif()
 
 # =========================================================
+# ALL-MODULES / MODULAR TARGETS GENERATION
+# =========================================================
+option(MASQ_BUILD_ALL_MODULES "Build individual core executables alongside the monolith" OFF)
+
+if(MASQ_BUILD_ALL_MODULES)
+    message(STATUS "MASQ_BUILD_ALL_MODULES enabled — generating individual core targets")
+
+    foreach(_target_mod ${_MASQ_ALL})
+        set(_target_name "masquerade-${_target_mod}")
+
+        # Construct specific sources for this target only
+        set(_target_sources
+            ${PROJECT_HEADERS}
+            ${THIRD_PARTY_HEADERS}
+            ${PICO_HEADERS}
+            ${CORE_SOURCES}
+            ${SCHEDULER_SOURCES}
+            ${CHEATS_SOURCES}
+            ${MINIZ_SOURCES}
+            ${IMGUI_SOURCES}
+            ${GLAD_SOURCES}
+            ${PLATFORM_SOURCES}
+        )
+
+        # Append ONLY the source files relevant to this specific target module
+        if(_target_mod STREQUAL "GBA")
+            list(APPEND _target_sources ${GBA_SOURCES})
+        elseif(_target_mod STREQUAL "GBC")
+            list(APPEND _target_sources ${GBC_SOURCES})
+        elseif(_target_mod STREQUAL "NES")
+            list(APPEND _target_sources ${NES_SOURCES})
+            elseif(_target_mod STREQUAL "PACMAN")
+            list(APPEND _target_sources ${PACMAN_SOURCES})
+        elseif(_target_mod STREQUAL "SI")
+            list(APPEND _target_sources ${SI_SOURCES})
+        elseif(_target_mod STREQUAL "CHIP8")
+            list(APPEND _target_sources ${CHIP8_SOURCES})
+        elseif(_target_mod STREQUAL "GOL")
+            list(APPEND _target_sources ${GOL_SOURCES})
+        endif()
+
+        # 1. Create the standalone executable using ONLY its specific sources
+        add_executable(${_target_name} ${_target_sources})
+
+        # 2. Force compile definitions: 1 for its own module, 0 for everything else
+        foreach(_mod ${_MASQ_ALL})
+            if(_mod STREQUAL _target_mod)
+                target_compile_definitions(${_target_name} PRIVATE MASQ_ENABLE_${_mod}=1)
+            else()
+                target_compile_definitions(${_target_name} PRIVATE MASQ_ENABLE_${_mod}=0)
+            endif()
+        endforeach()
+
+        # 3. Mirror output directories
+        if (NOT RPI_PICO)
+            set_target_properties(${_target_name}
+                PROPERTIES
+                ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+                LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+                RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+            )
+        endif()
+
+        # 4. Include directories structure
+        target_include_directories(${_target_name} PUBLIC
+            ${CMAKE_SOURCE_DIR}
+            ${CMAKE_SOURCE_DIR}/scheduler
+            ${CMAKE_SOURCE_DIR}/cheats
+            ${CMAKE_SOURCE_DIR}/core
+            ${CMAKE_SOURCE_DIR}/ui
+            ${CMAKE_SOURCE_DIR}/helpers
+            ${CMAKE_SOURCE_DIR}/bios
+            ${CMAKE_SOURCE_DIR}/gameOfLife
+            ${CMAKE_SOURCE_DIR}/chip8
+            ${CMAKE_SOURCE_DIR}/spaceInvaders
+            ${CMAKE_SOURCE_DIR}/pacMan
+            ${CMAKE_SOURCE_DIR}/nes
+            ${CMAKE_SOURCE_DIR}/gb-gbc
+            ${CMAKE_SOURCE_DIR}/gba
+            ${CMAKE_SOURCE_DIR}/pico
+            ${CMAKE_SOURCE_DIR}/panel
+            ${PANEL_ABSTRACTION_INCLUDE_DIR}
+            ${PANEL_DRIVER_INCLUDE_DIR}
+        )
+
+        if (NOT RPI_PICO)
+            target_include_directories(${_target_name} SYSTEM PUBLIC
+                "${BOOST_INCLUDE_DIR}"
+                "${IMGUI_DIR}"
+                "${IMGUI_BACKENDS_DIR}"
+                "${IMGUI_MISC_CPP_DIR}"
+                "${IMGUI_EXAMPLES_LIBS_DIR}"
+                "${STB_INCLUDE_DIR}"
+                "${RAPID_JSON_INCLUDE_DIR}"
+                "${SDL3_INCLUDE_DIR}"
+                "${SDL3_NET_INCLUDE_DIR}"
+                "${MINIZ_DIR}"
+            )
+            if(EMSCRIPTEN)
+                target_include_directories(${_target_name} SYSTEM PUBLIC "${EFB_INCLUDE_DIR}")
+            endif()
+        endif()
+
+        # 5. Mirror platform-specific linking
+        if (RPI_PICO)
+            target_link_libraries(${_target_name} PRIVATE
+                pico_stdlib hardware_gpio hardware_timer hardware_pwm hardware_dma hardware_spi hardware_i2c hardware_irq hardware_clocks pico_multicore
+            )
+            if (PICO_CYW43_SUPPORTED)
+                target_link_libraries(${_target_name} PRIVATE pico_cyw43_arch_none)
+            endif()
+            pico_enable_stdio_uart(${_target_name} 1)
+            pico_enable_stdio_usb(${_target_name} 1)
+            pico_add_extra_outputs(${_target_name})
+        elseif (EMSCRIPTEN)
+            set_target_properties(${_target_name} PROPERTIES SUFFIX ".html")
+            if (EXISTS "${SDL3_WASM_LIB}")
+                target_link_libraries(${_target_name} PRIVATE "${SDL3_WASM_LIB}")
+            else()
+                target_link_libraries(${_target_name} PRIVATE "${SDL3_LIB_PATH}")
+            endif()
+            if (EXISTS "${SDL3_NET_WASM_LIB}")
+                target_link_libraries(${_target_name} PRIVATE "${SDL3_NET_WASM_LIB}")
+            else()
+                target_link_libraries(${_target_name} PRIVATE "${SDL3_NET_LIB_PATH}")
+            endif()
+            target_link_libraries(${_target_name} PRIVATE sockets)
+        elseif (CMAKE_SYSTEM_NAME STREQUAL "Windows" AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+            target_link_libraries(${_target_name} PRIVATE nfd::nfd SDL3::SDL3 SDL3_net::SDL3_net ws2_32 winmm user32 gdi32 opengl32 gdiplus Shlwapi dwmapi stdc++fs)
+        elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            if (RPI_5 OR CMAKE_SYSTEM_PROCESSOR MATCHES "arm" OR CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+                target_link_libraries(${_target_name} PRIVATE nfd::nfd SDL3::SDL3 SDL3_net::SDL3_net OpenGL::GLES3 EGL pthread dl m)
+            else()
+                target_link_libraries(${_target_name} PRIVATE nfd::nfd SDL3::SDL3 SDL3_net::SDL3_net GL pthread dl m)
+            endif()
+        else()
+            target_link_libraries(${_target_name} PRIVATE nfd::nfd SDL3::SDL3 SDL3_net::SDL3_net)
+        endif()
+
+    endforeach()
+endif()
+
+# =========================================================
 # PRE / POST BUILD SCRIPTS (desktop only)
 # =========================================================
 if (NOT EMSCRIPTEN AND NOT RPI_PICO)

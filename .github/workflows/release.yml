@@ -374,6 +374,7 @@ jobs:
         run: |
           cmake -G "Visual Studio 18 2026" -A x64 ^
                 -DCMAKE_BUILD_TYPE=Release ^
+                -DMASQ_BUILD_ALL_MODULES=ON ^
                 -DGIT_COMMIT_HASH=%GIT_COMMIT_HASH% ^
                 -DIMGUI_ROOT=%IMGUI_ROOT% ^
                 -DMINIZ_ROOT=%MINIZ_ROOT% ^
@@ -507,6 +508,7 @@ jobs:
         run: |
           cmake -G Ninja \
                 -DCMAKE_BUILD_TYPE=Release \
+                -DMASQ_BUILD_ALL_MODULES=ON \
                 -DGIT_COMMIT_HASH=$GIT_COMMIT_HASH \
                 -DCMAKE_PREFIX_PATH="$SDL3_ROOT;$SDL3_NET_ROOT" \
                 -DIMGUI_ROOT=$IMGUI_ROOT \
