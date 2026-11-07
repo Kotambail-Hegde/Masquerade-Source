@@ -138,6 +138,14 @@ jobs:
         run: echo "GIT_COMMIT_HASH=$env:GITHUB_SHA" >> $env:GITHUB_ENV
         shell: pwsh
 
+      - name: Setup CMake
+        uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: '4.4.5'
+
+      - name: Verify CMake
+        run: cmake --version
+
       # --- Cache all external dependencies
       # v16: b2 auto-detects MSVC version via _MSC_VER mapping, but VS 2026
       # (MSVC 19.51) isn't in Boost 1.89's mapping table so b2 falls back to
@@ -416,11 +424,19 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build build-essential cmake git \
+          sudo apt-get install -y ninja-build build-essential git \
                                   libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev \
                                   libxi-dev libgl1-mesa-dev libglu1-mesa-dev \
                                   libgtk-3-dev libxss-dev libasound2-dev libpulse-dev libpipewire-0.3-dev \
                                   libwayland-dev wayland-protocols libxkbcommon-dev
+
+      - name: Setup CMake
+        uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: '4.4.5'
+
+      - name: Verify CMake
+        run: cmake --version
 
       - name: Cache external dependencies
         id: cache-external
@@ -545,6 +561,14 @@ jobs:
 
       - name: Export git commit hash
         run: echo "GIT_COMMIT_HASH=${GITHUB_SHA}" >> $GITHUB_ENV
+
+      - name: Setup CMake
+        uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: '4.4.5'
+
+      - name: Verify CMake
+        run: cmake --version
 
       - name: Cache external dependencies
         id: cache-external
