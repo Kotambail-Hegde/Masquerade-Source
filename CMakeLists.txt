@@ -1,4 +1,6 @@
-cmake_minimum_required(VERSION 3.24.0)
+cmake_minimum_required(VERSION 4.4.5)
+
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 # =========================================================
 # RPI PICO — PRE-PROJECT SETUP
@@ -17,6 +19,8 @@ option(RPI_PICO "Build for Raspberry Pi Pico (bare-metal)" OFF)
 
 if (RPI_PICO)
     message(STATUS "RPI_PICO requested — bootstrapping Pico SDK before project()")
+
+    set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY CACHE STRING "" FORCE)
 
     if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows" AND NOT IS_GITHUB_ACTIONS)
         message(STATUS "Building on Windows")
@@ -707,13 +711,16 @@ elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
 
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     message(STATUS "MSVC")
+    add_compile_options(/permissive-)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
     target_compile_options(${PROJECT_NAME} PRIVATE
         $<$<CONFIG:Debug>:/W4 /RTC1>
         $<$<CONFIG:Release>:
-            /GL /O2 /Ot /Oi /Oy /Ob2 /GS- /GT /GF
-            /fp:fast /arch:AVX2 /Qpar /W3 /WX /sdl-
-            /Zc:__cplusplus /Zc:inline /favor:INTEL64
-            /DNDEBUG /fp:except- /MP
+            /GL /O2 /Ot /Oi /Oy /Ob2 /GS-
+            /GF /Gy /GT
+            /fp:fast /Qpar /W3 /WX /sdl-
+            /Zc:__cplusplus /Zc:inline
+            /DNDEBUG /MP
         >
     )
 endif()
@@ -913,9 +920,12 @@ elseif (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     target_link_libraries(${PROJECT_NAME} PRIVATE nfd::nfd SDL3::SDL3 SDL3_net::SDL3_net)
     target_link_options(${PROJECT_NAME} PRIVATE
         $<$<CONFIG:Release>:/INCREMENTAL:NO>
+        $<$<CONFIG:Release>:/NXCOMPAT>
         $<$<CONFIG:Release>:/LTCG>
         $<$<CONFIG:Release>:/OPT:REF>
         $<$<CONFIG:Release>:/OPT:ICF>
+        $<$<CONFIG:Release>:/MAP>
+        $<$<CONFIG:Release>:/MAPINFO:EXPORTS>
     )
     target_compile_definitions(${PROJECT_NAME} PRIVATE SDL_MAIN_HANDLED __STDC_FORMAT_MACROS)
     target_compile_definitions(${PROJECT_NAME} PRIVATE
