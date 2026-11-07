@@ -2581,7 +2581,7 @@ private:
 		uint16_t WAIT_STATE_1_SEQ : 1; // bit  7
 		uint16_t WAIT_STATE_2_NON_SEQ : 2; // bit  8 - 9
 		uint16_t WAIT_STATE_2_SEQ : 1; // bit  10
-		uint16_t PHI_TERMINAL_OUTPUT : 1; // bit  11 - 12
+		uint16_t PHI_TERMINAL_OUTPUT : 2; // bit  11 - 12
 		uint16_t NOT_USED_0 : 1; // bit  13
 		uint16_t GAMEPAK_PREFETCH_BUFF : 1; // bit  14
 		uint16_t GAMEPAK_TYPE_FLAG : 1; // bit  15
@@ -5767,7 +5767,6 @@ private:
 		// Refer https://discord.com/channels/465585922579103744/465586361731121162/959490468868161569
 		// 1 cycle CPSR delay
 		state->interrupt.cpsrIrqMaskLatch = pGBA_registers->cpsr.psrFields.psrIRQDisBit;
-
 	}
 
 	void timerTick();
