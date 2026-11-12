@@ -15,6 +15,7 @@
 #pragma region WIP
 #define GBA_ENABLE_ROM_SEQ_BURST_QUIRK					YES
 #define GBA_ENABLE_VIDEO_MEMORY_STALLS					YES
+#define GBA_ENABLE_GAMEPAK_PREFETCH						YES
 #define GBA_ENABLE_AGS_PATCHED_TEST						NO
 #pragma endregion WIP
 
@@ -3693,6 +3694,23 @@ private:
 
 private:
 
+	typedef struct
+	{
+		FLAG     enabled;			// The game turned the feature on (WAITCNT bit 14). If NO, nothing else is used.
+		FLAG     running;			// The helper is running right now. It starts after a normal ROM instruction fetch and stays on until something stops it.
+		FLAG     thumb;				// The instructions it is following are Thumb (2 bytes each). NO means ARM (4 bytes each).
+		FLAG     bufferWasDisabled;
+		uint8_t  opcodeWidth;		// Bytes per instruction in that stream (2 or 4). Next address = this address + opcodeWidth.
+		uint8_t  capacity;			// How many instructions fit in the line: 8 for Thumb, 4 for ARM (16 bytes either way).
+		uint8_t  count;				// How many instructions are already fetched and waiting in the line.
+		int32_t  cyclesPerOpcode;   // Cycles the helper needs to fetch ONE instruction (sequential ROM time: S for Thumb, 2S for ARM).
+		int32_t  cyclesLeft;		// Cycles left until the instruction being fetched right now arrives. 0 means idle: the line is full.
+		uint32_t fetchingAddress;	// Address of the instruction being fetched right now.
+		uint32_t headAddress;		// Address of the oldest waiting instruction: the only one the CPU can take for 1 cycle.
+	} GamePakPrefetch_t;
+
+private:
+
 	enum class GBA_EVENT : EventId
 	{
 		EVENT_PPU_HBLANK_VDRAW,
@@ -3726,6 +3744,7 @@ private:
 		audio_t audio;
 		display_t display;
 		quirks_t quirks;
+		GamePakPrefetch_t prefetch;
 		emulatorStatus_t emulatorStatus;
 		Scheduler_t Scheduler;
 	} GBA_state_t;
@@ -4332,6 +4351,216 @@ OPT_SPEED
 #endif
 	}
 
+	MASQ_INLINE FLAG isCartridgeRomAddress(uint32_t address)
+	{
+		RETURN IF_ADDRESS_WITHIN(address, GAMEPAK_ROM_WS0_START_ADDRESS, GAMEPAK_ROM_WS2_END_ADDRESS) ? YES : NO;
+	}
+
+	MASQ_INLINE FLAG isCartridgeBackupAddress(uint32_t address)
+	{
+		RETURN IF_ADDRESS_WITHIN(address, GAMEPAK_SRAM_START_ADDRESS, GAMEPAK_SRAM_MIRROR_END_ADDRESS) ? YES : NO;
+	}
+
+	MASQ_INLINE void prefetchFlush()
+	{
+		auto& p = pGBA_instance->GBA_state.prefetch;
+		p.running = NO;
+		p.count = RESET;
+		p.cyclesLeft = RESET;
+	}
+
+	MASQ_INLINE void prefetchSetEnabled(FLAG enable)
+	{
+		auto& p = pGBA_instance->GBA_state.prefetch;
+
+		if (p.enabled == YES && enable == NO)
+		{
+			p.bufferWasDisabled = YES;
+			prefetchFlush();
+		}
+		p.enabled = enable;
+	}
+
+	MASQ_INLINE void prefetchStep(int32_t cycles)
+	{
+		auto& p = pGBA_instance->GBA_state.prefetch;
+
+		if (p.running == NO)
+		{
+			RETURN;
+		}
+
+		if (p.cyclesLeft <= ZERO)
+		{
+			RETURN;
+		}
+
+		p.cyclesLeft -= cycles;
+
+		while (p.cyclesLeft <= ZERO)
+		{
+			p.count++;
+
+			if (p.enabled == YES && p.count < p.capacity)
+			{
+				p.fetchingAddress += p.opcodeWidth;
+				p.cyclesLeft += p.cyclesPerOpcode;
+			}
+			else
+			{
+				p.cyclesLeft = ZERO;
+				BREAK;
+			}
+		}
+	}
+
+	MASQ_INLINE void prefetchStop(TICK_TYPE tickType)
+	{
+		auto& p = pGBA_instance->GBA_state.prefetch;
+
+		if (p.running == YES)
+		{
+			const uint32_t r15 = static_cast<uint32_t>(cpuReadRegister(getCurrentlyValidRegisterBank(), (REGISTER_TYPE)PC));
+
+			if (isCartridgeRomAddress(r15) == YES)
+			{
+				const int32_t halfwayPlusOne = (p.cyclesPerOpcode >> ONE) + ONE;
+
+				if (p.cyclesLeft == ONE || (p.thumb == NO && p.cyclesLeft == halfwayPlusOne))
+				{
+					// Source: NBA
+					// A cartridge bus conflict (ROM data/write, SRAM/Flash access) stops the prefetcher.
+					// If this in the last cycle of a halfword fetch (cyclesLeft == 1, or ARM state cyclesLeft == cyclesPerOpcode/2 + 1),
+					// the CPU incurs a 1-tick penalty stall. (Only active when executing from ROM).
+					tick(tickType);
+				}
+			}
+
+			p.running = NO;
+		}
+	}
+
+	MASQ_INLINE void prefetchCodeFetch(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, uint32_t missCycles)
+	{
+		auto& p = pGBA_instance->GBA_state.prefetch;
+		const FLAG thumb = (accessWidth == MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT) ? NO : YES;
+		const uint32_t region = address >> 24;
+		const MEMORY_ACCESS_WIDTH width = (thumb == YES) ? MEMORY_ACCESS_WIDTH::SIXTEEN_BIT : MEMORY_ACCESS_WIDTH::THIRTYTWO_BIT;
+
+		if (p.running == YES)
+		{
+			if (p.count != ZERO && address == p.headAddress)
+			{
+				p.count--;
+				p.headAddress += p.opcodeWidth;
+				if (p.cyclesLeft <= ZERO && p.enabled == YES)
+				{
+					p.fetchingAddress += p.opcodeWidth;
+					p.cyclesLeft = p.cyclesPerOpcode;
+				}
+				tick();
+				RETURN;
+			}
+
+			// Source: NBA
+			// The opcode is the one being fetched right now: wait for the rest of that fetch
+			// TODO: Figure out how/when is the below case possible!
+			if (p.cyclesLeft > ZERO && address == p.fetchingAddress)
+			{
+				for (int32_t remaining = p.cyclesLeft; remaining > ZERO; --remaining)
+				{
+					tick();
+				}
+				if (p.cyclesLeft <= ZERO && p.enabled == YES)
+				{
+					p.fetchingAddress += p.opcodeWidth;
+					p.cyclesLeft = p.cyclesPerOpcode;
+				}
+				p.headAddress = p.fetchingAddress;
+				p.count = ZERO;
+				RETURN;
+			}
+		}
+
+		prefetchStop(TICK_TYPE::CPU_TICK);
+
+		if (p.bufferWasDisabled == YES)
+		{
+			// Source: NBA
+			// First opcode fetch after prefetch was switched off is forced to be non-sequential
+			const uint32_t sequentialCycles = WAIT_CYCLES[region][TO_UINT8(MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE)][TO_UINT8(width)];
+			const uint32_t nonSequentialCycles = WAIT_CYCLES[region][TO_UINT8(MEMORY_ACCESS_TYPE::NON_SEQUENTIAL_CYCLE)][TO_UINT8(width)];
+			if (missCycles == sequentialCycles)
+			{
+				missCycles = nonSequentialCycles;
+			}
+			p.bufferWasDisabled = NO;
+		}
+
+		for (uint32_t i = ZERO; i < missCycles; i++)
+		{
+			tick();
+		}
+
+		if (p.enabled == YES)
+		{
+			p.running = YES;
+			p.thumb = thumb;
+			p.count = ZERO;
+
+			if (thumb == YES)
+			{
+				p.opcodeWidth = TWO;
+				p.capacity = EIGHT;
+			}
+			else
+			{
+				p.opcodeWidth = FOUR;
+				p.capacity = FOUR;
+			}
+
+			p.cyclesPerOpcode = static_cast<int32_t>(WAIT_CYCLES[region][TO_UINT8(MEMORY_ACCESS_TYPE::SEQUENTIAL_CYCLE)][TO_UINT8(width)]);
+			p.cyclesLeft = p.cyclesPerOpcode;
+			p.fetchingAddress = address + p.opcodeWidth;
+			p.headAddress = p.fetchingAddress;
+		}
+	}
+
+	MASQ_INLINE uint32_t prefetchOnCpuAccess(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, uint32_t cpuTicks)
+	{
+		auto& p = pGBA_instance->GBA_state.prefetch;
+
+		if (p.enabled == NO && p.running == NO && p.bufferWasDisabled == NO)
+		{
+			RETURN cpuTicks;
+		}
+
+		if (isCartridgeRomAddress(address) == YES)
+		{
+			if (source == MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH)
+			{
+				prefetchCodeFetch(address, accessWidth, cpuTicks);
+				RETURN ZERO;
+			}
+
+			prefetchStop(TICK_TYPE::CPU_TICK);
+		}
+		else if (isCartridgeBackupAddress(address) == YES)
+		{
+			prefetchStop(TICK_TYPE::CPU_TICK);
+		}
+
+		RETURN cpuTicks;
+	}
+
+	MASQ_INLINE void prefetchOnDmaAccess(uint32_t address)
+	{
+		if (pGBA_instance->GBA_state.prefetch.running == YES && (isCartridgeRomAddress(address) == YES || isCartridgeBackupAddress(address) == YES))
+		{
+			prefetchStop(TICK_TYPE::DMA_TICK);
+		}
+	}
+
 	// NOTE: For memory mirrors, refer http://problemkaputt.de/gbatek-gba-unpredictable-things.htm
 	template <typename T>
 	T readRawMemoryInternal(uint32_t address, MEMORY_ACCESS_WIDTH accessWidth, MEMORY_ACCESS_SOURCE source, MEMORY_ACCESS_TYPE accessType, FLAG LOCK = NO)
@@ -4371,6 +4600,7 @@ OPT_SPEED
 		if (source == MEMORY_ACCESS_SOURCE::CPU || source == MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH)
 		{
 			uint32_t cpuTicks = getMemoryAccessCycles(address, accessWidth, source, accessType);
+			cpuTicks = prefetchOnCpuAccess(address, accessWidth, source, cpuTicks); // opcode fetches from ROM spend their own cycles and return 0
 #if (ENABLE_ARM7TDMI_SST == YES)
 			if (ROM_TYPE == ROM::TEST_SST)
 			{
@@ -4379,17 +4609,16 @@ OPT_SPEED
 				{
 					sst.internal[sst.index].cycle += ONE;
 				}
-			// First cycle of this SST entry
-			else if (sst.index != RESET)
-			{
-				sst.internal[sst.index].cycle =
-					sst.internal[sst.index - 1].cycle + ONE;
-			}
-			// Very first SST entry
-			else
-			{
-				sst.internal[sst.index].cycle = ONE;
-			}
+				// First cycle of this SST entry
+				else if (sst.index != RESET)
+				{
+					sst.internal[sst.index].cycle = sst.internal[sst.index - 1].cycle + ONE;
+				}
+				// Very first SST entry
+				else
+				{
+					sst.internal[sst.index].cycle = ONE;
+				}
 			}
 #endif
 			while (cpuTicks)
@@ -4926,6 +5155,7 @@ OPT_SPEED
 		if (source == MEMORY_ACCESS_SOURCE::CPU || source == MEMORY_ACCESS_SOURCE::CPU_INSTRUCTION_FETCH)
 		{
 			uint32_t cpuTicks = getMemoryAccessCycles(address, accessWidth, source, accessType);
+			cpuTicks = prefetchOnCpuAccess(address, accessWidth, source, cpuTicks); // opcode fetches from ROM spend their own cycles and return 0
 #if (ENABLE_ARM7TDMI_SST == YES)
 			if (ROM_TYPE == ROM::TEST_SST) MASQ_UNLIKELY
 			{
@@ -4963,6 +5193,7 @@ OPT_SPEED
 		if (source == MEMORY_ACCESS_SOURCE::DMA)
 		{
 			uint32_t dmaTicks = getMemoryAccessCycles(address, accessWidth, source, accessType);
+			prefetchOnDmaAccess(address); // DMA to or from the cartridge stops the prefetch unit
 			while (dmaTicks)
 			{
 				tick(TICK_TYPE::DMA_TICK);
@@ -5741,6 +5972,10 @@ private:
 		}
 
 		MASQ_UNUSED(state);
+
+#if (GBA_ENABLE_GAMEPAK_PREFETCH == YES)
+		prefetchStep(ONE);
+#endif
 
 #if (ENABLE_ARM7TDMI_SST == YES)
 		if (ROM_TYPE != ROM::TEST_SST) MASQ_UNLIKELY

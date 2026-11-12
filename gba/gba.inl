@@ -2436,6 +2436,10 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 
 		pGBA_peripherals->mWAITCNTHalfWord.mWAITCNTHalfWord = data;
 
+#if (GBA_ENABLE_GAMEPAK_PREFETCH == YES)
+		prefetchSetEnabled((pGBA_peripherals->mWAITCNTHalfWord.mWAITCNTFields.GAMEPAK_PREFETCH_BUFF == SET) ? YES : NO);
+#endif
+
 		auto NonSequentialWaitStates = [&](uint32_t x) {
 			switch (x)
 			{

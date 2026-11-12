@@ -186,10 +186,9 @@ Masquerade supports the following hardware accessories and peripherals used by s
 #### Test Results
 - Passes jsmolka/alyosha-tas's arm.gba, thumb.gba, memory.gba, flash and PPU tests
 - Passes FuzzARM.gba
-- Passes all tests within the AGB aging catridge test suite except:
-  - Prefetch Buffer
+- Passes all tests within the AGB aging catridge test suite
 - Passes all mgba-suite tests except for few test-cases within the following tests:
-  - GamePAK prefetch related timing tests
+  - Few GamePAK prefetch related timing tests
   - Few timer count-up tests
   - Few timer IRQ tests
   - Few SIO tests
@@ -199,7 +198,7 @@ Masquerade supports the following hardware accessories and peripherals used by s
 - Passes all belogic's audio tests
 
 #### Known Issues (other than the ones mentioned above)
-- Few Unintentional audio artifacts are heard in some cases
+- Few Unintentional audio artifacts is still present
 
 ---
 
