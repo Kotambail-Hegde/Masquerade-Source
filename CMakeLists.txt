@@ -120,17 +120,21 @@ endif()
 # RPI_PICO is already declared above (must be pre-project)
 option(EMSCRIPTEN "Build for WebAssembly (Emscripten)" OFF)
 option(RPI_5      "Build for Raspberry Pi 5 (GLES)"    OFF)
+option(ANDROID    "Build for Android (NDK)"            OFF)
 
 # Enforce exclusivity
 if(RPI_PICO)
     set(EMSCRIPTEN OFF CACHE BOOL "" FORCE)
     set(RPI_5      OFF CACHE BOOL "" FORCE)
+    set(ANDROID    OFF CACHE BOOL "" FORCE)
 elseif(EMSCRIPTEN)
     set(RPI_5      OFF CACHE BOOL "" FORCE)
     set(RPI_PICO   OFF CACHE BOOL "" FORCE)
-elseif(RPI_5)
-    set(EMSCRIPTEN OFF CACHE BOOL "" FORCE)
+    set(ANDROID    OFF CACHE BOOL "" FORCE)
+elseif(ANDROID)
+    set(RPI_5      OFF CACHE BOOL "" FORCE)
     set(RPI_PICO   OFF CACHE BOOL "" FORCE)
+    set(EMSCRIPTEN OFF CACHE BOOL "" FORCE)
 endif()
 
 # Compile-time platform defines
@@ -270,6 +274,35 @@ if (RPI_PICO)
     set(IMGUI_MISC_CPP_DIR          "")
     set(IMGUI_EXAMPLES_LIBS_DIR     "")
 
+elseif (ANDROID)
+    message(STATUS "Using local paths for Android build")
+    include(${CMAKE_SOURCE_DIR}/Paths_android.cmake)
+
+    add_compile_definitions(ANDROID=1)
+    add_compile_definitions(SDL_MAIN_NEEDED=1)
+
+    if(NOT EXISTS "${SDL3_SRC_DIR}/CMakeLists.txt")
+        message(FATAL_ERROR "SDL3 CMakeLists.txt not found at ${SDL3_SRC_DIR}")
+    endif()
+
+    # Disable SDL precompiled headers
+    set(SDL_PCH OFF CACHE BOOL "" FORCE)
+
+    add_subdirectory("${SDL3_SRC_DIR}" "${CMAKE_BINARY_DIR}/sdl3-android")
+
+    # Map your Paths_android.cmake variables to the include variables your target expects
+    set(BOOST_INCLUDE_DIR "${BOOST_ROOT}")
+    set(STB_INCLUDE_DIR "${STB_ROOT}")
+    set(RAPID_JSON_INCLUDE_DIR "${RAPID_JSON_ROOT}/include")
+    set(MINIZ_INCLUDE_DIR "${MINIZ_ROOT}")
+    set(IMGUI_DIR "${IMGUI_ROOT}")
+    set(IMGUI_BACKENDS_DIR "${IMGUI_ROOT}/backends")
+    set(IMGUI_MISC_CPP_DIR "${IMGUI_ROOT}/misc/cpp")
+
+    if(NOT DEFINED IMGUI_ROOT)
+        set(IMGUI_ROOT "${CMAKE_SOURCE_DIR}/ui/imgui")
+    endif()
+
 elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows" AND NOT IS_GITHUB_ACTIONS)
     message(STATUS "Building on Windows")
     include(${CMAKE_SOURCE_DIR}/Paths_win.cmake)
@@ -366,7 +399,7 @@ if(NOT RPI_PICO)
         set(EFB_INCLUDE_DIR    "${EFB_ROOT}")
     endif()
 
-    if(NOT EMSCRIPTEN)
+    if(NOT EMSCRIPTEN AND NOT ANDROID)
         find_package(nfd   REQUIRED)
         find_package(SDL3  REQUIRED)
         find_package(SDL3_net  REQUIRED)
@@ -597,7 +630,11 @@ if (RPI_PICO)
     list(APPEND SOURCES ${PANEL_SOURCES})
 endif()
 
-add_executable(${PROJECT_NAME} ${SOURCES})
+if (ANDROID)
+    add_library(${PROJECT_NAME} SHARED ${SOURCES}) # Android requires a shared library
+else()
+    add_executable(${PROJECT_NAME} ${SOURCES})
+endif()
 
 # =========================================================
 # EMULATOR MODULE DEFINES
@@ -833,6 +870,29 @@ if (RPI_PICO)
             "${CMAKE_BINARY_DIR}/${PROJECT_NAME}.hex"
             "$<TARGET_FILE_DIR:${PROJECT_NAME}>/${PROJECT_NAME}.hex"
         COMMENT "Move Pico outputs → target dir (Debug/Release)"
+    )
+
+elseif (ANDROID)
+    message(STATUS "Using Android NDK (GLESv3)")
+    
+    find_library(log-lib log)
+    find_library(gles-lib GLESv3)
+    find_library(android-lib android)
+    find_library(egl-lib EGL)
+
+    # Link SDL3 (provided via Android Studio/Gradle CMake lookup or source subdirectory)
+    target_link_libraries(${PROJECT_NAME} PRIVATE
+        SDL3::SDL3
+        ${gles-lib}
+        ${egl-lib}
+        ${log-lib}
+        ${android-lib}
+    )
+    
+    target_compile_definitions(${PROJECT_NAME} PRIVATE 
+        SDL_MAIN_HANDLED 
+        IMGUI_IMPL_OPENGL_ES3 
+        __STDC_FORMAT_MACROS=1
     )
 
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
@@ -1080,7 +1140,7 @@ endif()
 # =========================================================
 # PRE / POST BUILD SCRIPTS (desktop only)
 # =========================================================
-if (NOT EMSCRIPTEN AND NOT RPI_PICO)
+if (NOT EMSCRIPTEN AND NOT RPI_PICO AND NOT ANDROID)
     add_custom_command(
         TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy

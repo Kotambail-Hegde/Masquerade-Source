@@ -86,6 +86,10 @@ extern "C" {
 #endif
 #endif // !MASQ_SCHEDULER_TESTS
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#endif
+
 // ---- C++ Standard Library ----------------------------
 #pragma region INCLUDES
 #include <algorithm>
@@ -174,7 +178,7 @@ extern "C" {
 #pragma endregion IMGUI_INCLUDES
 
 #pragma region GLAD_INCLUDES
-#if !defined(__EMSCRIPTEN__) && !defined(IMGUI_IMPL_OPENGL_ES2) && !defined(IMGUI_IMPL_OPENGL_ES3)
+#if !defined(__EMSCRIPTEN__)&& !defined(__ANDROID__) && !defined(IMGUI_IMPL_OPENGL_ES2) && !defined(IMGUI_IMPL_OPENGL_ES3)
 #include <glad/glad.h>
 #endif
 #pragma endregion GLAD_INCLUDES
@@ -182,19 +186,19 @@ extern "C" {
 
 #pragma region SDL_INCLUDES
 #include <SDL3/SDL.h>
-#if defined(IMGUI_IMPL_OPENGL_ES2)
+#if defined(IMGUI_IMPL_OPENGL_ES2) || defined(IMGUI_IMPL_OPENGL_ES3) || defined(__ANDROID__)
 #include <SDL3/SDL_opengles2.h>
 #else
 #include <SDL3/SDL_opengl.h>
 #endif
 #include <SDL3/SDL_version.h>
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
 #include <SDL3_net/SDL_net.h>
 #endif
 #pragma endregion SDL_INCLUDES
 
 #pragma region NFD_INCLUDES
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
 #include <nfd.hpp>
 #endif
 #pragma endregion NFD_INCLUDES
@@ -229,6 +233,20 @@ extern "C" {
 #endif
 #ifndef MAX_PATH
 #define MAX_PATH                                    260
+#endif
+
+// --- Open GL ------------------------------------------
+
+#ifndef GL_UNSIGNED_INT_8_8_8_8
+#define GL_UNSIGNED_INT_8_8_8_8 0x8035
+#endif
+
+#ifndef GL_BGRA
+#define GL_BGRA 0x80E1
+#endif
+
+#ifndef GL_BGR
+#define GL_BGR 0x80E0
 #endif
 
 // --- Numeric constants --------------------------------
@@ -639,6 +657,8 @@ extern "C" {
 #define PAUSE                                       do { for(;;) tight_loop_contents(); } while(0)
 #elif defined(__EMSCRIPTEN__)
 #define PAUSE                                       do { emscripten_run_script("alert('Press OK to CONTINUE...');"); } while(0)
+#elif defined(__ANDROID__)
+#define PAUSE                                       do { SDL_Log("[PAUSE] Execution halted."); } while(0)
 #elif defined(_WIN32) || defined(_WIN64)
 #define PAUSE                                       system("pause")
 #elif defined(__GNUC__)
@@ -1771,6 +1791,11 @@ inline void logger(const char* fmt, ...)
         char buffer[1024];
         vsnprintf(buffer, sizeof(buffer), fmt, args_copy);
         va_end(args_copy);
+
+#ifdef __ANDROID__
+        __android_log_write(ANDROID_LOG_INFO, "Masquerade", buffer);
+#endif
+
         LogToImGui("%s", buffer);
     }
 #endif
@@ -2046,7 +2071,7 @@ MASQ_INLINE bool doesFileExist(const std::string& name)
 
 MASQ_INLINE std::filesystem::path getexepath()
 {
-#if defined(__EMSCRIPTEN__) || defined(MASQ_SCHEDULER_TESTS)
+#if defined(__EMSCRIPTEN__) || defined(MASQ_SCHEDULER_TESTS) || defined(__ANDROID__)
 	// No executable path in WASM; RETURN empty or fixed string
 	RETURN {};
 #elif defined(_WIN32) || defined(_WIN64)
@@ -3541,7 +3566,7 @@ private:
 #endif // !ENABLE_OTA_EXECUTABLE
 
 // --- Network serial types (desktop only) -------------
-#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__)
+#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
 enum class LinkMsg : uint32_t
 {
     CLIENT_HELLO,
