@@ -2540,7 +2540,7 @@ void GBc_t::RenderGBCCaptureStagesUI()
 
 FLAG GBc_t::isSerialLinkConnected()
 {
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__)&& !defined(__ANDROID__)
 	RETURN linkSession.getConnectionState() == LinkConnectionState::DISCONNECTED ? NO : YES;
 #endif
 	RETURN NO;
@@ -2548,7 +2548,7 @@ FLAG GBc_t::isSerialLinkConnected()
 
 FLAG GBc_t::tickSerialLink(BYTE outgoingByte, BYTE* outReceivedByte)
 {
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__)&& !defined(__ANDROID__)
 	if (isSerialLinkConnected() == NO)
 	{
 		RETURN YES;
@@ -2583,7 +2583,7 @@ FLAG GBc_t::tickSerialLink(BYTE outgoingByte, BYTE* outReceivedByte)
 
 FLAG GBc_t::tickSerialLinkAsSlave(BYTE outgoingByte, BYTE* outReceivedByte)
 {
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__)&& !defined(__ANDROID__)
 	if (isSerialLinkConnected() == NO)
 	{
 		RETURN YES;

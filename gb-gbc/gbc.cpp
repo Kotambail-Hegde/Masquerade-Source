@@ -1617,7 +1617,7 @@ void GBc_t::serialTick()
 			// reachable only from tickSerialLink() in the master branch
 			// below, gated behind TRANSFER_ENABLE==1 and internally
 			// guarded against double-sending while one's already pending.
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
 			abstractEmulation_t::getLinkSession().setLocalReplyByte(pGBc_peripherals->SB);
 			abstractEmulation_t::getLinkSession().update();
 #endif
@@ -1648,7 +1648,7 @@ void GBc_t::serialTick()
 			//   whole emulator thread for the RTT duration.
 			if (pGBc_instance->GBc_state.emulatorStatus.serialDevice == GB_SERIAL_DEVICE::GB_LINK_CABLE && isSerialLinkConnected() == YES)
 			{
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
 				if (abstractEmulation_t::getLinkSession().isAdapterLeader() == YES)
 				{
 					// TODO: this instance owns the DMG-07 emulation for this session --
@@ -1743,7 +1743,7 @@ void GBc_t::serialTick()
 		//   single clock edge.
 		if (pGBc_instance->GBc_state.emulatorStatus.serialDevice == GB_SERIAL_DEVICE::GB_LINK_CABLE && isSerialLinkConnected() == YES)
 		{
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
 			// Slave branch, same idea, symmetric check:
 			if (abstractEmulation_t::getLinkSession().isFourPlayerAdapterActive() == YES
 				&& abstractEmulation_t::getLinkSession().isAdapterLeader() == NO)

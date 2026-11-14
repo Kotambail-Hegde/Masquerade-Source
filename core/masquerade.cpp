@@ -42,6 +42,10 @@
 #include "gba.h"
 #endif
 
+#ifdef __ANDROID__
+#include <SDL3/SDL_main.h>
+#endif
+
 // =========================================================
 // DESKTOP-ONLY INCLUDES  (SDL / ImGui / STB / DWM)
 // None of these are available or needed on RPI Pico.
@@ -109,6 +113,10 @@ static FLAG isMasqHeadless = NO;
 int     currentEmuTheme = SE_THEME_LIGHT;
 int     previousEmuTheme = SE_THEME_LIGHT;
 uint8_t customSEpalettes[FIVE * FOUR];
+
+#ifdef __ANDROID__
+static std::string s_pending_si_audio_type;
+#endif
 
 #pragma region MASQUERADE_THEME
 // ---- Masquerade UI themes -----------------------------------------------------------------------------
@@ -1124,19 +1132,35 @@ FLAG LoadImageTextureFromMemory(const void* data, size_t data_size, GLuint* out_
 // Open and read a file, then forward to LoadImageTextureFromMemory()
 FLAG LoadTextureFromFile(const char* file_name, GLuint* out_texture, int* out_width, int* out_height)
 {
-	FILE* f = fopen(file_name, "rb");
-	if (f == NULL) RETURN false;
+	SDL_IOStream* f = SDL_IOFromFile(file_name, "rb");
+	if (f == nullptr) RETURN false;
 
-	fseek(f, 0, SEEK_END);
-	size_t file_size = (size_t)ftell(f);
-	if (file_size == -1) RETURN false;
+	Sint64 file_size = SDL_GetIOSize(f);
+	if (file_size <= 0 || file_size > INT_MAX)
+	{
+		SDL_CloseIO(f);
+		RETURN false;
+	}
 
-	fseek(f, 0, SEEK_SET);
-	void* file_data = IM_ALLOC(file_size);
-	fread(file_data, 1, file_size, f);
-	fclose(f);
+	void* file_data = IM_ALLOC(static_cast<size_t>(file_size));
+	if (file_data == nullptr)
+	{
+		SDL_CloseIO(f);
+		RETURN false;
+	}
 
-	FLAG ret = LoadImageTextureFromMemory(file_data, file_size, out_texture, out_width, out_height);
+	size_t bytes_read = SDL_ReadIO(f, file_data, static_cast<size_t>(file_size));
+	SDL_CloseIO(f);
+
+	if (bytes_read != static_cast<size_t>(file_size))
+	{
+		IM_FREE(file_data);
+		RETURN false;
+	}
+
+	FLAG ret = LoadImageTextureFromMemory(file_data, static_cast<size_t>(file_size),
+		out_texture, out_width, out_height);
+
 	IM_FREE(file_data);
 	RETURN ret;
 }
@@ -1758,7 +1782,7 @@ static void renderGBASchedulerStatsWindow(GBA_t* gba)
 #pragma endregion GBA_SCHEDULER_STATS_UI
 #endif // MASQ_GBA_SCHEDULER_STATS_UI
 
-#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__)
+#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__)&& !defined(__ANDROID__)
 #pragma region NETWORK_HELPERS
 FLAG abstractEmulationLinkSession_t::connect(const char* hostAddress, uint16_t port)
 {
@@ -2163,25 +2187,36 @@ class Emulation_t
 public:
 
 #ifdef __EMSCRIPTEN__
-	char const* bootromfilters = { ".bin,.BIN" };
-	char const* golfilters = { ".gol,.GOL" };
-	char const* chip8filters = { ".ch8,.CH8,.c8,.C8,.sc8,.SC8,.xo8,.XO8" };
-	char const* spaceInvadersFilter = { ".e,.f,.g,.h,.zip" };
-	char const* pacmanFilter = { ".1m,.3m,.4a,.5e,.5f,.6e,.6f,.6h,.6j,.7f,.zip" };
-	char const* nesFilter = { ".nes,.NES" };
-	char const* gbGbcFilter = { ".gb,.gbc,.GB,.GBC" };
-	char const* gbaFilter = { ".gba,.GBA" };
+	char const* bootromfilters = ".bin,.BIN";
+    char const* golfilters = ".gol,.GOL";
+    char const* chip8filters = ".ch8,.CH8,.c8,.C8,.sc8,.SC8,.xo8,.XO8";
+    char const* spaceInvadersFilter = ".e,.f,.g,.h,.zip";
+    char const* pacmanFilter = ".1m,.3m,.4a,.5e,.5f,.6e,.6f,.6h,.6j,.7f,.zip";
+    char const* nesFilter = ".nes,.NES";
+    char const* gbGbcFilter = ".gb,.gbc,.GB,.GBC";
+    char const* gbaFilter = ".gba,.GBA";
+
+#elif defined(__ANDROID__)
+	SDL_DialogFileFilter bootromfilters[1]        = { { "Boot ROM",                         "bin,BIN"                        } };
+	SDL_DialogFileFilter golfilters[1]            = { { "Game Of Life States",              "gol,GOL"                        } };
+	SDL_DialogFileFilter chip8filters[1]          = { { "Chip8/S-Chip/XO-Chip ROMs",        "ch8,CH8,c8,C8,sc8,SC8,xo8,XO8"  } };
+	SDL_DialogFileFilter spaceInvadersFilter[1]   = { { "SpaceInvaders ROMs",               "e,f,g,h,zip,ZIP"                } };
+	SDL_DialogFileFilter spaceInvadersAudioFilter[1] = { { "SpaceInvaders Audio",         "wav,WAV"                        } };
+	SDL_DialogFileFilter pacmanFilter[1]          = { { "Pacman/MsPacman ROMs",             "1m,3m,4a,5e,5f,6e,6f,6h,6j,7f,zip" } };
+	SDL_DialogFileFilter nesFilter[1]             = { { "NES ROMs",                         "nes,NES"                        } };
+	SDL_DialogFileFilter gbGbcFilter[1]           = { { "GB/GBC ROMs",                      "gb,gbc,GB,GBC"                  } };
+	SDL_DialogFileFilter gbaFilter[1]             = { { "GBA ROMs",                         "gba,GBA"                        } };
 
 #elif !defined(__RPI_PICO__) // native desktop (NFD)
-	nfdu8filteritem_t bootromfilters[1] = { { "Boot ROM",                               "bin,BIN"                         } };
-	nfdu8filteritem_t golfilters[1] = { { "Game Of Life States",                    "gol,GOL"                         } };
-	nfdu8filteritem_t chip8filters[1] = { { "Chip8/S-Chip/XO-Chip/Modern-Chip8 ROMs", "ch8,CH8,c8,C8,sc8,SC8,xo8,XO8"  } };
-	nfdu8filteritem_t spaceInvadersFilter[1] = { { "SpaceInvaders ROMs",                     "e,f,g,h"                         } };
-	nfdu8filteritem_t spaceInvadersAudioFilter[1] = { { "SpaceInvaders Audio",               "wav,WAV"                         } };
-	nfdu8filteritem_t pacmanFilter[1] = { { "Pacman/MsPacman ROMs",                   "1m,3m,4a,5e,5f,6e,6f,6h,6j,7f"  } };
-	nfdu8filteritem_t nesFilter[1] = { { "NES ROMs",                               "nes,NES"                         } };
-	nfdu8filteritem_t gbGbcFilter[1] = { { "GB/GBC ROMs",                            "gb,gbc,GB,GBC"                   } };
-	nfdu8filteritem_t gbaFilter[1] = { { "GBA ROMs",                               "gba,GBA"                         } };
+	nfdu8filteritem_t bootromfilters[1]       = { { "Boot ROM",                               "bin,BIN"                        } };
+    nfdu8filteritem_t golfilters[1]           = { { "Game Of Life States",                    "gol,GOL"                        } };
+    nfdu8filteritem_t chip8filters[1]         = { { "Chip8/S-Chip/XO-Chip/Modern-Chip8 ROMs", "ch8,CH8,c8,C8,sc8,SC8,xo8,XO8" } };
+    nfdu8filteritem_t spaceInvadersFilter[1]  = { { "SpaceInvaders ROMs",                     "e,f,g,h"                        } };
+    nfdu8filteritem_t spaceInvadersAudioFilter[1] = { { "SpaceInvaders Audio",              "wav,WAV"                        } };
+    nfdu8filteritem_t pacmanFilter[1]         = { { "Pacman/MsPacman ROMs",                   "1m,3m,4a,5e,5f,6e,6f,6h,6j,7f" } };
+    nfdu8filteritem_t nesFilter[1]            = { { "NES ROMs",                               "nes,NES"                        } };
+    nfdu8filteritem_t gbGbcFilter[1]          = { { "GB/GBC ROMs",                            "gb,gbc,GB,GBC"                  } };
+    nfdu8filteritem_t gbaFilter[1]            = { { "GBA ROMs",                               "gba,GBA"                        } };
 #endif // ROM filter declarations
 
 private:
@@ -2204,7 +2239,7 @@ private:
 
 	KeyBindings keyBindings;
 
-#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__)
+#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
 private:
 
 	NetworkUIState_t networkUI;
@@ -2773,93 +2808,143 @@ private:
 #ifndef __RPI_PICO__
 private:
 
+#ifdef __ANDROID__
+static void SDLCALL handle_android_rom_selected(void* userdata, const char* const* filelist, int filter)
+{
+    if (!filelist || !*filelist) {
+        return; // Canceled or error
+    }
+    
+    while (*filelist) {
+        const char* path = *filelist;
+        INFO("Android Open ROM: %s", path);
+        dynamicDragNDropAndMenuSelect.push_back(std::string(path));
+        ++filelist;
+    }
+}
+
+static void SDLCALL handle_android_bios_selected(void* userdata, const char* const* filelist, int filter)
+{
+    if (!filelist || !*filelist) {
+        return;
+    }
+    const char* path = *filelist;
+    INFO("Android Open BIOS: %s", path);
+    
+    ROM type = static_cast<ROM>(reinterpret_cast<intptr_t>(userdata));
+    if (type == ROM::GAME_BOY)              config.put("gb_gbc._dmg_bios_location", std::string(path));
+    else if (type == ROM::GAME_BOY_COLOR)   config.put("gb_gbc._cgb_bios_location", std::string(path));
+    else if (type == ROM::GAME_BOY_ADVANCE) config.put("gba._gba_bios_location", std::string(path));
+
+    boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
+}
+#endif
+
 	void romSelect(ROM type)
 	{
 #ifdef __EMSCRIPTEN__
 		switch (type)
-		{
-		case ROM::CHIP8:              INFO("Chip8");                    emscripten_browser_file::upload(chip8filters, handle_upload_file); BREAK;
-		case ROM::SPACE_INVADERS:     INFO("Space Invaders");           emscripten_browser_file::upload(spaceInvadersFilter, handle_upload_file); BREAK;
-		case ROM::PAC_MAN:
-		case ROM::MS_PAC_MAN:         INFO("PacMan / Ms PacMan");       emscripten_browser_file::upload(pacmanFilter, handle_upload_file); BREAK;
-		case ROM::NES:                INFO("Nintendo Entertainment System"); emscripten_browser_file::upload(nesFilter, handle_upload_file); BREAK;
-		case ROM::GAME_BOY:
-		case ROM::GAME_BOY_COLOR:     INFO("Game Boy / Game Boy Color"); emscripten_browser_file::upload(gbGbcFilter, handle_upload_file); BREAK;
-		case ROM::GAME_BOY_ADVANCE:   INFO("Game Boy Advance");         emscripten_browser_file::upload(gbaFilter, handle_upload_file); BREAK;
-		default: FATAL("Unsupported ROM type : %u", TO_UINT(type)); RETURN;
-		}
-#else // native desktop (NFD)
-		nfdu8char_t* outPath;
-		const nfdpathset_t* outPaths;
-		nfdu8filteritem_t     filters[1];
-		nfdopendialogu8args_t args = { 0 };
+        {
+        case ROM::CHIP8:            INFO("Chip8");                     emscripten_browser_file::upload(chip8filters, handle_upload_file); BREAK;
+        case ROM::SPACE_INVADERS:    INFO("Space Invaders");            emscripten_browser_file::upload(spaceInvadersFilter, handle_upload_file); BREAK;
+        case ROM::PAC_MAN:
+        case ROM::MS_PAC_MAN:        INFO("PacMan / Ms PacMan");        emscripten_browser_file::upload(pacmanFilter, handle_upload_file); BREAK;
+        case ROM::NES:               INFO("Nintendo Entertainment System"); emscripten_browser_file::upload(nesFilter, handle_upload_file); BREAK;
+        case ROM::GAME_BOY:
+        case ROM::GAME_BOY_COLOR:    INFO("Game Boy / Game Boy Color"); emscripten_browser_file::upload(gbGbcFilter, handle_upload_file); BREAK;
+        case ROM::GAME_BOY_ADVANCE:  INFO("Game Boy Advance");          emscripten_browser_file::upload(gbaFilter, handle_upload_file); BREAK;
+        default: FATAL("Unsupported ROM type : %u", TO_UINT(type)); RETURN;
+        }
+#elif defined(__ANDROID__)
+		const SDL_DialogFileFilter* selected_filter = nullptr;
+		bool allow_many = (type == ROM::SPACE_INVADERS || type == ROM::PAC_MAN || type == ROM::MS_PAC_MAN);
 
 		switch (type)
 		{
-		case ROM::GAME_OF_LIFE:   filters->name = golfilters->name;           filters->spec = golfilters->spec;           BREAK;
-		case ROM::CHIP8:          filters->name = chip8filters->name;         filters->spec = chip8filters->spec;         BREAK;
-		case ROM::SPACE_INVADERS: filters->name = spaceInvadersFilter->name;  filters->spec = spaceInvadersFilter->spec;  BREAK;
-		case ROM::PAC_MAN:
-		case ROM::MS_PAC_MAN:     filters->name = pacmanFilter->name;         filters->spec = pacmanFilter->spec;         BREAK;
-		case ROM::NES:            filters->name = nesFilter->name;            filters->spec = nesFilter->spec;            BREAK;
-		case ROM::GAME_BOY:
-		case ROM::GAME_BOY_COLOR: filters->name = gbGbcFilter->name;         filters->spec = gbGbcFilter->spec;          BREAK;
-		case ROM::GAME_BOY_ADVANCE: filters->name = gbaFilter->name;         filters->spec = gbaFilter->spec;            BREAK;
-		default: FATAL("Unsupported ROM type : %u", TO_UINT(type)); RETURN;
+			case ROM::CHIP8:          selected_filter = chip8filters; break;
+			case ROM::SPACE_INVADERS: selected_filter = spaceInvadersFilter; break;
+			case ROM::PAC_MAN:
+			case ROM::MS_PAC_MAN:     selected_filter = pacmanFilter; break;
+			case ROM::NES:            selected_filter = nesFilter; break;
+			case ROM::GAME_BOY:
+			case ROM::GAME_BOY_COLOR: selected_filter = gbGbcFilter; break;
+			case ROM::GAME_BOY_ADVANCE: selected_filter = gbaFilter; break;
+			default: FATAL("Unsupported ROM type : %u", TO_UINT(type)); return;
 		}
 
-		args.filterList = filters;
-		args.filterCount = ONE;
-		nfdresult_t result;
+		SDL_ShowOpenFileDialog(handle_android_rom_selected, nullptr, nullptr, selected_filter, 1, nullptr, allow_many);
+#else // native desktop (NFD)
+		nfdu8char_t* outPath;
+        const nfdpathset_t* outPaths;
+        nfdu8filteritem_t    filters[1];
+        nfdopendialogu8args_t args = { 0 };
 
-		if (type == ROM::SPACE_INVADERS || type == ROM::PAC_MAN || type == ROM::MS_PAC_MAN)
-		{
-			result = NFD_OpenDialogMultiple(&outPaths, filters, ONE, NULL);
-			if (result == NFD_OKAY)
-			{
-				nfdpathsetsize_t numPaths;
-				NFD_PathSet_GetCount(outPaths, &numPaths);
-				for (nfdpathsetsize_t i = 0; i < numPaths; ++i)
-				{
-					nfdchar_t* path;
-					NFD_PathSet_GetPath(outPaths, i, &path);
-					INFO("Opening %i: %s", (int)i, path);
-					dynamicDragNDropAndMenuSelect.push_back(std::string(path));
-					NFD_PathSet_FreePath(path);
-				}
-				NFD_PathSet_Free(outPaths);
-			}
-			else if (result == NFD_CANCEL)
-			{
-				;
-			}
-			else
-			{
-				FATAL("Error: %s", NFD_GetError());
-			}
-		}
-		else
-		{
-			result = NFD_OpenDialogU8_With(&outPath, &args);
-			if (result == NFD_OKAY)
-			{
-				INFO("Opening : %s", outPath);
-				auto it = std::find(recentlyOpenedList.begin(), recentlyOpenedList.end(), std::string(outPath));
-				if (it != recentlyOpenedList.end()) recentlyOpenedList.erase(it);
-				recentlyOpenedList.push_front(std::string(outPath));
-				if (recentlyOpenedList.size() > _MAX_RECENTLY_USED_LIST_SIZE) recentlyOpenedList.pop_back();
-				dynamicDragNDropAndMenuSelect.push_back(std::string(outPath));
-				NFD_FreePathU8(outPath);
-			}
-			else if (result == NFD_CANCEL)
-			{
-				;
-			}
-			else
-			{
-				FATAL("Error: %s", NFD_GetError());
-			}
-		}
+        switch (type)
+        {
+        case ROM::GAME_OF_LIFE:   filters->name = golfilters->name;          filters->spec = golfilters->spec;          BREAK;
+        case ROM::CHIP8:          filters->name = chip8filters->name;        filters->spec = chip8filters->spec;        BREAK;
+        case ROM::SPACE_INVADERS: filters->name = spaceInvadersFilter->name;  filters->spec = spaceInvadersFilter->spec;  BREAK;
+        case ROM::PAC_MAN:
+        case ROM::MS_PAC_MAN:     filters->name = pacmanFilter->name;        filters->spec = pacmanFilter->spec;        BREAK;
+        case ROM::NES:            filters->name = nesFilter->name;            filters->spec = nesFilter->spec;            BREAK;
+        case ROM::GAME_BOY:
+        case ROM::GAME_BOY_COLOR: filters->name = gbGbcFilter->name;        filters->spec = gbGbcFilter->spec;          BREAK;
+        case ROM::GAME_BOY_ADVANCE: filters->name = gbaFilter->name;        filters->spec = gbaFilter->spec;            BREAK;
+        default: FATAL("Unsupported ROM type : %u", TO_UINT(type)); RETURN;
+        }
+
+        args.filterList = filters;
+        args.filterCount = ONE;
+        nfdresult_t result;
+
+        if (type == ROM::SPACE_INVADERS || type == ROM::PAC_MAN || type == ROM::MS_PAC_MAN)
+        {
+            result = NFD_OpenDialogMultiple(&outPaths, filters, ONE, NULL);
+            if (result == NFD_OKAY)
+            {
+                nfdpathsetsize_t numPaths;
+                NFD_PathSet_GetCount(outPaths, &numPaths);
+                for (nfdpathsetsize_t i = 0; i < numPaths; ++i)
+                {
+                    nfdchar_t* path;
+                    NFD_PathSet_GetPath(outPaths, i, &path);
+                    INFO("Opening %i: %s", (int)i, path);
+                    dynamicDragNDropAndMenuSelect.push_back(std::string(path));
+                    NFD_PathSet_FreePath(path);
+                }
+                NFD_PathSet_Free(outPaths);
+            }
+            else if (result == NFD_CANCEL)
+            {
+                ;
+            }
+            else
+            {
+                FATAL("Error: %s", NFD_GetError());
+            }
+        }
+        else
+        {
+            result = NFD_OpenDialogU8_With(&outPath, &args);
+            if (result == NFD_OKAY)
+            {
+                INFO("Opening : %s", outPath);
+                auto it = std::find(recentlyOpenedList.begin(), recentlyOpenedList.end(), std::string(outPath));
+                if (it != recentlyOpenedList.end()) recentlyOpenedList.erase(it);
+                recentlyOpenedList.push_front(std::string(outPath));
+                if (recentlyOpenedList.size() > _MAX_RECENTLY_USED_LIST_SIZE) recentlyOpenedList.pop_back();
+                dynamicDragNDropAndMenuSelect.push_back(std::string(outPath));
+                NFD_FreePathU8(outPath);
+            }
+            else if (result == NFD_CANCEL)
+            {
+                ;
+            }
+            else
+            {
+                FATAL("Error: %s", NFD_GetError());
+            }
+        }
 #endif // __EMSCRIPTEN__
 	}
 
@@ -2867,143 +2952,198 @@ private:
 	{
 #ifdef __EMSCRIPTEN__
 		switch (type)
-		{
-		case ROM::GAME_BOY:         INFO("GB BIOS");  emscripten_browser_file::upload(bootromfilters, handle_upload_bios<ROM::GAME_BOY>); BREAK;
-		case ROM::GAME_BOY_COLOR:   INFO("GBC BIOS"); emscripten_browser_file::upload(bootromfilters, handle_upload_bios<ROM::GAME_BOY_COLOR>); BREAK;
-		case ROM::GAME_BOY_ADVANCE: INFO("GBA BIOS"); emscripten_browser_file::upload(bootromfilters, handle_upload_bios<ROM::GAME_BOY_ADVANCE>); BREAK;
-		default: FATAL("Unsupported BIOS type : %u", TO_UINT(type)); RETURN;
-		}
-#else // !__EMSCRIPTEN__
+        {
+        case ROM::GAME_BOY:        INFO("GB BIOS");  emscripten_browser_file::upload(bootromfilters, handle_upload_bios<ROM::GAME_BOY>); BREAK;
+        case ROM::GAME_BOY_COLOR:   INFO("GBC BIOS"); emscripten_browser_file::upload(bootromfilters, handle_upload_bios<ROM::GAME_BOY_COLOR>); BREAK;
+        case ROM::GAME_BOY_ADVANCE: INFO("GBA BIOS"); emscripten_browser_file::upload(bootromfilters, handle_upload_bios<ROM::GAME_BOY_ADVANCE>); BREAK;
+        default: FATAL("Unsupported BIOS type : %u", TO_UINT(type)); RETURN;
+        }
+#elif defined(__ANDROID__)
+		SDL_ShowOpenFileDialog(handle_android_bios_selected, reinterpret_cast<void*>(static_cast<intptr_t>(type)), nullptr, bootromfilters, 1, nullptr, false);
+#else // !__EMSCRIPTEN__ && !__ANDROID__
 		nfdu8char_t* outPath = nullptr;
-		const nfdpathset_t* outPaths = nullptr;
-		nfdu8filteritem_t     filters[1];
-		nfdopendialogu8args_t args = { 0 };
+        const nfdpathset_t* outPaths = nullptr;
+        nfdu8filteritem_t    filters[1];
+        nfdopendialogu8args_t args = { 0 };
 
-		filters->name = bootromfilters->name;
-		filters->spec = bootromfilters->spec;
-		args.filterList = filters;
-		args.filterCount = ONE;
+        filters->name = bootromfilters->name;
+        filters->spec = bootromfilters->spec;
+        args.filterList = filters;
+        args.filterCount = ONE;
 
-		nfdresult_t result = NFD_OpenDialogU8_With(&outPath, &args);
-		if (result == NFD_OKAY)
-		{
-			INFO("Load : %s", outPath);
+        nfdresult_t result = NFD_OpenDialogU8_With(&outPath, &args);
+        if (result == NFD_OKAY)
+        {
+            INFO("Load : %s", outPath);
 
-			if (type == ROM::GAME_BOY)              config.put("gb_gbc._dmg_bios_location", std::string(outPath));
-			else if (type == ROM::GAME_BOY_COLOR)   config.put("gb_gbc._cgb_bios_location", std::string(outPath));
-			else if (type == ROM::GAME_BOY_ADVANCE) config.put("gba._gba_bios_location", std::string(outPath));
+            if (type == ROM::GAME_BOY)             config.put("gb_gbc._dmg_bios_location", std::string(outPath));
+            else if (type == ROM::GAME_BOY_COLOR)   config.put("gb_gbc._cgb_bios_location", std::string(outPath));
+            else if (type == ROM::GAME_BOY_ADVANCE) config.put("gba._gba_bios_location", std::string(outPath));
 
-			boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
-			NFD_FreePathU8(outPath);
-		}
-		else if (result == NFD_CANCEL)
-		{
-			;
-		}
-		else
-		{
-			FATAL("Error: %s", NFD_GetError());
-		}
+            boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
+            NFD_FreePathU8(outPath);
+        }
+        else if (result == NFD_CANCEL)
+        {
+            ;
+        }
+        else
+        {
+            FATAL("Error: %s", NFD_GetError());
+        }
 #endif // __EMSCRIPTEN__
 	}
 
-	void loadSIAudioWAV(std::string type)
+#ifdef __ANDROID__
+	static void SDLCALL handle_android_si_audio_selected(void* userdata, const char* const* filelist, int filter)
 	{
-#ifndef __EMSCRIPTEN__
-		nfdu8char_t* outPath = nullptr;
-		const nfdpathset_t* outPaths = nullptr;
-		nfdu8filteritem_t     filters[1];
-		nfdopendialogu8args_t args = { 0 };
-
-		filters->name = spaceInvadersAudioFilter->name;
-		filters->spec = spaceInvadersAudioFilter->spec;
-		args.filterList = filters;
-		args.filterCount = ONE;
-
-		nfdresult_t result = NFD_OpenDialogU8_With(&outPath, &args);
-		if (result == NFD_OKAY)
-		{
-			INFO("Load : %s", outPath);
-			std::string option = "spaceinvaders._" + type;
-			config.put(option, std::string(outPath));
-			boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
-			NFD_FreePathU8(outPath);
+		if (!filelist || !*filelist) {
+			return;
 		}
-		else if (result == NFD_CANCEL)
+		const char* path = *filelist;
+		INFO("Android Open SI Audio: %s", path);
+		std::string option = "spaceinvaders._" + s_pending_si_audio_type;
+		config.put(option, std::string(path));
+		boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
+	}
+
+	static void SDLCALL handle_android_barcode_selected(void* userdata, const char* const* filelist, int filter)
+	{
+		if (!filelist || !*filelist) {
+			return;
+		}
+		const char* path = *filelist;
+		INFO("Android Open Barcode: %s", path);
+
+		BYTE* barcode_ptr = static_cast<BYTE*>(userdata);
+		std::ifstream file(path, std::ios::binary);
+		if (file.is_open())
 		{
-			;
+			BYTE fileBytes[13] = {};
+			file.read(reinterpret_cast<char*>(fileBytes), 13);
+			if (file.gcount() == 13)
+			{
+				memcpy(barcode_ptr, fileBytes, 13);
+			}
+			else
+			{
+				WARN("Barcode .bin file is not exactly 13 bytes: %s", path);
+			}
 		}
 		else
 		{
-			FATAL("Error: %s", NFD_GetError());
+			WARN("Could not open barcode .bin file: %s", path);
 		}
-#endif // !__EMSCRIPTEN__
+	}
+#endif
+
+	void loadSIAudioWAV(std::string type)
+	{
+#ifdef __EMSCRIPTEN__
+		// TODO: Handle browser upload for WAV
+#elif defined(__ANDROID__)
+		s_pending_si_audio_type = type;
+		SDL_ShowOpenFileDialog(handle_android_si_audio_selected, nullptr, nullptr, spaceInvadersAudioFilter, 1, nullptr, false);
+#else // native desktop (NFD)
+		nfdu8char_t* outPath = nullptr;
+       const nfdpathset_t* outPaths = nullptr;
+       nfdu8filteritem_t     filters[1];
+       nfdopendialogu8args_t args = { 0 };
+
+       filters->name = spaceInvadersAudioFilter->name;
+       filters->spec = spaceInvadersAudioFilter->spec;
+       args.filterList = filters;
+       args.filterCount = ONE;
+
+       nfdresult_t result = NFD_OpenDialogU8_With(&outPath, &args);
+       if (result == NFD_OKAY)
+       {
+          INFO("Load : %s", outPath);
+          std::string option = "spaceinvaders._" + type;
+          config.put(option, std::string(outPath));
+          boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
+          NFD_FreePathU8(outPath);
+       }
+       else if (result == NFD_CANCEL)
+       {
+          ;
+       }
+       else
+       {
+          FATAL("Error: %s", NFD_GetError());
+       }
+#endif // __EMSCRIPTEN__
 	}
 
 	FLAG barcodeUpload(BYTE* barcode)
 	{
 #ifdef __EMSCRIPTEN__
 		// TODO: Handle browser .bin upload
-#else // !__EMSCRIPTEN__
+       RETURN NO;
+#elif defined(__ANDROID__)
+		SDL_DialogFileFilter barcodeFilter[1] = { { "Binary", "bin,BIN" } };
+		SDL_ShowOpenFileDialog(handle_android_barcode_selected, barcode, nullptr, barcodeFilter, 1, nullptr, false);
+		RETURN YES;
+#else // native desktop (NFD)
 		nfdu8char_t* outPath = nullptr;
-		const nfdpathset_t* outPaths = nullptr;
-		nfdu8filteritem_t     filters[1];
-		nfdopendialogu8args_t args = { 0 };
+       const nfdpathset_t* outPaths = nullptr;
+       nfdu8filteritem_t     filters[1];
+       nfdopendialogu8args_t args = { 0 };
 
-		filters->name = "Binary";
-		filters->spec = "bin";
+       filters->name = "Binary";
+       filters->spec = "bin";
 
-		args.filterList = filters;
-		args.filterCount = ONE;
+       args.filterList = filters;
+       args.filterCount = ONE;
 
-		nfdresult_t result = NFD_OpenDialogU8_With(&outPath, &args);
-		if (result == NFD_OKAY)
-		{
-			INFO("Load Barcode : %s", outPath);
+       nfdresult_t result = NFD_OpenDialogU8_With(&outPath, &args);
+       if (result == NFD_OKAY)
+       {
+          INFO("Load Barcode : %s", outPath);
 
-			// Assumption (not confirmed against any hardware reference -- flagging
-			// per project convention): the .bin file is exactly the 13 raw ASCII
-			// digit bytes, no header/delimiter -- the same bytes the "Scan" button
-			// already builds by hand from typed input. barcodeScan()/the wire
-			// protocol expects ASCII digits (Shonumi's Barcode_Boy.txt, section 4:
-			// "the 'numbers' are represented as ASCII instead of hex"), so this
-			// reads the file as-is with no digit conversion.
-			std::ifstream file(outPath, std::ios::binary);
-			FLAG loadedOK = NO;
+          // Assumption (not confirmed against any hardware reference -- flagging
+          // per project convention): the .bin file is exactly the 13 raw ASCII
+          // digit bytes, no header/delimiter -- the same bytes the "Scan" button
+          // already builds by hand from typed input. barcodeScan()/the wire
+          // protocol expects ASCII digits (Shonumi's Barcode_Boy.txt, section 4:
+          // "the 'numbers' are represented as ASCII instead of hex"), so this
+          // reads the file as-is with no digit conversion.
+          std::ifstream file(outPath, std::ios::binary);
+          FLAG loadedOK = NO;
 
-			if (file.is_open())
-			{
-				BYTE fileBytes[13] = {};
-				file.read(reinterpret_cast<char*>(fileBytes), 13);
+          if (file.is_open())
+          {
+             BYTE fileBytes[13] = {};
+             file.read(reinterpret_cast<char*>(fileBytes), 13);
 
-				if (file.gcount() == 13)
-				{
-					memcpy(barcode, fileBytes, 13);
-					loadedOK = YES;
-				}
-				else
-				{
-					WARN("Barcode .bin file is not exactly 13 bytes: %s", outPath);
-				}
-			}
-			else
-			{
-				WARN("Could not open barcode .bin file: %s", outPath);
-			}
+             if (file.gcount() == 13)
+             {
+                memcpy(barcode, fileBytes, 13);
+                loadedOK = YES;
+             }
+             else
+             {
+                WARN("Barcode .bin file is not exactly 13 bytes: %s", outPath);
+             }
+          }
+          else
+          {
+             WARN("Could not open barcode .bin file: %s", outPath);
+          }
 
-			NFD_FreePathU8(outPath);
+          NFD_FreePathU8(outPath);
 
-			RETURN loadedOK;
-		}
-		else if (result == NFD_CANCEL)
-		{
-			RETURN NO;
-		}
-		else
-		{
-			FATAL("Error: %s", NFD_GetError());
-			RETURN NO;
-		}
+          RETURN loadedOK;
+       }
+       else if (result == NFD_CANCEL)
+       {
+          RETURN NO;
+       }
+       else
+       {
+          FATAL("Error: %s", NFD_GetError());
+          RETURN NO;
+       }
 #endif // __EMSCRIPTEN__
 	}
 
@@ -3445,7 +3585,7 @@ public:
 				RETURN INVALID;
 			}
 
-#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__)
+#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__)&& !defined(__ANDROID__)
 			// ---- SDL_net init -------------------------------------
 			if (!NET_Init())
 			{
@@ -3455,7 +3595,7 @@ public:
 			}
 
 			abstractEmulationLinkSession_t& linkSession = abstractEmulation_t::getLinkSession();
-#endif // !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__)
+#endif // !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__)&& !defined(__ANDROID__)
 
 			// ---- GLSL / context version selection -------------------
 #if defined(IMGUI_IMPL_OPENGL_ES2)
@@ -3505,11 +3645,18 @@ public:
 			SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
 			SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
 			Uint32 window_flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN;
+#ifdef __ANDROID__
+			SDL_Window* window = SDL_CreateWindow(
+				"Masquerade Emulator",
+				0, 0,
+				window_flags);
+#else
 			SDL_Window* window = SDL_CreateWindow(
 				"Masquerade Emulator",
 				(current_instance->getTotalScreenWidth() * current_instance->getTotalPixelWidth()) + WINDOW_PADDING,
 				(current_instance->getTotalScreenHeight() * current_instance->getTotalPixelHeight()) + WINDOW_PADDING + WINDOW_PADDING,
 				window_flags);
+#endif
 			if (window == nullptr)
 			{
 				FATAL("Error: SDL_CreateWindow(): %s", SDL_GetError()); RETURN -ONE;
@@ -3546,13 +3693,25 @@ public:
 			io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 			io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
 			io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+#ifndef __ANDROID__
 			io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+#endif
 			io.ConfigWindowsMoveFromTitleBarOnly = true;
 
 #if (ENABLED_IMGUI_DEFAULT_THEME == YES)
 			ImGui::StyleColorsDark();
 #else
 			setupThemes();
+#endif
+
+#ifdef __ANDROID__
+			float dpiScale = SDL_GetWindowDisplayScale(window);
+
+			if (dpiScale <= 0.0f)
+				dpiScale = 1.0f;
+
+			ImGui::GetStyle().ScaleAllSizes(dpiScale);
+			io.FontGlobalScale = dpiScale;
 #endif
 
 			ImGuiStyle& style = ImGui::GetStyle();
@@ -3565,9 +3724,11 @@ public:
 			ImGui_ImplSDL3_InitForOpenGL(window, gl_context);
 			ImGui_ImplOpenGL3_Init(glsl_version);
 
+#ifndef __ANDROID__
 			io.Fonts->AddFontFromFileTTF((std::filesystem::path(_FONT_LOCATION) / "segoeui.ttf").string().c_str(), 16.0f);
+#endif
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__)&& !defined(__ANDROID__)
 			if (NFD_Init() != NFD_OKAY)
 			{
 				FATAL("Error: NFD_Init(): %s", NFD_GetError()); RETURN -ONE;
@@ -3582,7 +3743,7 @@ public:
 			SetDWMTitlebarColor(window, ImGui::GetStyle().Colors[ImGuiCol_WindowBg]);
 #endif
 
-#if !defined(__EMSCRIPTEN__) && !defined(IMGUI_IMPL_OPENGL_ES2) && !defined(IMGUI_IMPL_OPENGL_ES3)
+#if !defined(__EMSCRIPTEN__)&& !defined(__ANDROID__) && !defined(IMGUI_IMPL_OPENGL_ES2) && !defined(IMGUI_IMPL_OPENGL_ES3)
 			gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress);
 #endif
 
@@ -3591,17 +3752,21 @@ public:
 
 			FlushEarlyLogsToImGui();
 
-#ifndef __EMSCRIPTEN__
+#if defined(__ANDROID__)
+			std::string imLoc = "ui/sprites/BG1.png";
+#elif defined(__EMSCRIPTEN__)
+			std::string imLoc = "assets/ui/sprites/BG1.png";
+#else
 			auto uiSpritesDir = config.get<std::string>("internal._ui_sprites_directory", "");
 			if (uiSpritesDir.empty())
 			{
 				FATAL("Could not locate the UI sprites directory"); RETURN - ONE;
 			}
-			std::string imLoc = uiSpritesDir + "\\BG1.png";
-#else
-			std::string imLoc = "assets/ui/sprites/BG1.png";
+
+			std::filesystem::path imPath = std::filesystem::path(uiSpritesDir) / "BG1.png";
+			std::string imLoc = imPath.string();
 #endif
-			int    clickWinWidth = 0, clickWinHeight = 0;
+			int clickWinWidth = 0, clickWinHeight = 0;
 			uint32_t clickWinTexture = 0;
 			FLAG clickWinStatus = LoadTextureFromFile(imLoc.c_str(), &clickWinTexture, &clickWinWidth, &clickWinHeight);
 			IM_ASSERT(clickWinStatus);
@@ -4436,7 +4601,7 @@ public:
 											showLoggerWin = (showLoggerWin == NO) ? YES : NO;
 										}
 										ImGui::Separator();
-#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__) && !defined(ENABLE_OTA_EXECUTABLE) && !defined(ENABLE_SERVER_EXECUTABLE)
+#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__)&& !defined(__ANDROID__) && !defined(ENABLE_OTA_EXECUTABLE) && !defined(ENABLE_SERVER_EXECUTABLE)
 										FLAG isNetworkOptionEnabled = YES;
 #else
 										FLAG isNetworkOptionEnabled = NO;
@@ -4448,7 +4613,7 @@ public:
 #endif // !__RPI_PICO__ && !ENABLE_OTA_EXECUTABLE && !ENABLE_SERVER_EXECUTABLE 
 										if (ImGui::BeginMenu("Network", isNetworkOptionEnabled))
 										{
-#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__) && !defined(ENABLE_OTA_EXECUTABLE) && !defined(ENABLE_SERVER_EXECUTABLE)
+#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__)&& !defined(__ANDROID__) && !defined(ENABLE_OTA_EXECUTABLE) && !defined(ENABLE_SERVER_EXECUTABLE)
 											const LinkConnectionState connectionState = linkSession.getConnectionState();
 											const FLAG connected = connectionState == LinkConnectionState::CONNECTED || connectionState == LinkConnectionState::LINK_READY;
 											const FLAG linkReady = connectionState == LinkConnectionState::LINK_READY;
@@ -4961,13 +5126,15 @@ public:
 										ImGui::NextColumn();
 
 										ImGui::Text("Platform"); ImGui::NextColumn();
-#if   defined(_WIN32)   
+#if defined(_WIN32)
 										ImGui::Text(": Windows");
-#elif defined(__linux__) 
+#elif defined(__ANDROID__)
+										ImGui::Text(": Android");
+#elif defined(__linux__)
 										ImGui::Text(": Linux");
-#elif defined(__APPLE__) 
+#elif defined(__APPLE__)
 										ImGui::Text(": macOS");
-#else                   
+#else
 										ImGui::Text(": Unknown");
 #endif
 										ImGui::Columns(1);
@@ -5516,7 +5683,7 @@ public:
 #endif // !__EMSCRIPTEN__
 									}
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
 									linkSession.update();
 
 									while (linkSession.hasReceivedTestPacket() == YES)
@@ -5682,7 +5849,7 @@ public:
 #endif // MASQ_ENABLE_GBC
 								// ---- Network link UI ------------------------
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
 								if (networkUI.showConnectPopup)
 								{
 									ImGui::OpenPopup("Connect to Link Server");
@@ -5967,8 +6134,7 @@ public:
 			glDeleteFramebuffers(1, &frame_buffer);
 			frame_buffer = 0; // Reset!
 
-			NFD_Quit();
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
 			NET_Quit();
 #endif
 			ImGui_ImplOpenGL3_Shutdown();
@@ -6132,7 +6298,7 @@ inline EMULATION_ID getPlatformFromPath(const std::string& path)
 #endif
 }
 
-#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__)
+#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
 #define DISABLE_HEADLESS_WITH_WARNING(msg) \
 	do { \
 		INFO(msg); \
@@ -6489,16 +6655,48 @@ void postPrimaryBootLoader()
 #endif
 
 	// --- Setup all the paths ---------------------------------
-#ifndef __EMSCRIPTEN__
+#ifdef __ANDROID__
+	char* prefPath = SDL_GetPrefPath("Kotambail-Hegde", "Masquerade");
+	if (!prefPath)
+		throw std::runtime_error(SDL_GetError());
+
+	std::string writableDir(prefPath);
+	SDL_free(prefPath);
+
+	_CONFIG_LOCATION = writableDir + "CONFIG.ini";
+	_IMGUI_LOCATION = writableDir + "IMGUI.ini";
+	_FONT_LOCATION = "";
+#elif defined(__EMSCRIPTEN__)
+	_CONFIG_LOCATION = "assets/CONFIG.ini";
+	_FONT_LOCATION = "assets/ui/fonts/";
+	_IMGUI_LOCATION = "assets/ui/config/IMGUI.ini";
+#else
 	_EXE_LOCATION = getexepath().parent_path().string();
 	_CONFIG_LOCATION = (std::filesystem::path(_EXE_LOCATION) / "assets" / "CONFIG.ini").string();
-#else
-	_CONFIG_LOCATION = "assets/CONFIG.ini";
+	_FONT_LOCATION = (std::filesystem::path(_EXE_LOCATION) / "assets" / "ui" / "fonts").string();
 #endif
 
 	INFO("Searching for %s", _CONFIG_LOCATION.c_str());
 
 	// --- Read CONFIG.ini -------------------------------------
+#ifdef __ANDROID__
+	SDL_IOStream* file = SDL_IOFromFile("CONFIG.ini", "rb");
+
+	if (!file)
+		throw std::runtime_error(SDL_GetError());
+
+	std::string contents;
+	char buffer[4096];
+	size_t bytesRead;
+
+	while ((bytesRead = SDL_ReadIO(file, buffer, sizeof(buffer))) > ZERO)
+		contents.append(buffer, bytesRead);
+
+	SDL_CloseIO(file);
+
+	std::istringstream stream(contents);
+	boost::property_tree::ini_parser::read_ini(stream, config);
+#else
 	try
 	{
 		boost::property_tree::ini_parser::read_ini(_CONFIG_LOCATION, config);
@@ -6508,31 +6706,24 @@ void postPrimaryBootLoader()
 		std::cout << ex.what() << std::endl;
 		FATAL("Unable to read the CONFIG.ini");
 	}
-
-#ifndef __EMSCRIPTEN__
-	_FONT_LOCATION = (std::filesystem::path(_EXE_LOCATION) / "assets" / "ui" / "fonts").string();
-#else
-	_FONT_LOCATION = "assets/ui/fonts/";
 #endif
 
 	// --- Normalize CONFIG.ini paths (Windows → POSIX safe) --
 	auto normalizePath = [](std::string& p) { std::replace(p.begin(), p.end(), '\\', '/'); };
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
 	std::string uiWorkingDir = config.get<std::string>("internal._ui_working_directory", "");
 	if (uiWorkingDir.empty()) FATAL("Could not locate the UI working directory");
 	normalizePath(uiWorkingDir);
 	_IMGUI_LOCATION = (std::filesystem::path(uiWorkingDir) / "IMGUI.ini").string();
-#else
-	_IMGUI_LOCATION = "assets/ui/config/IMGUI.ini";
 #endif
 
 	// --- Ensure IMGUI directory exists -----------------------
 	std::filesystem::create_directories(std::filesystem::path(_IMGUI_LOCATION).parent_path());
 
 	// --- Create default IMGUI.ini if absent ------------------
-	struct stat buffer;
-	if (stat(_IMGUI_LOCATION.c_str(), &buffer) != ZERO)
+	struct stat imguiStat;
+	if (stat(_IMGUI_LOCATION.c_str(), &imguiStat) != ZERO)
 	{
 		std::ofstream out(_IMGUI_LOCATION);
 		if (!out) throw std::runtime_error("Failed to open file: " + _IMGUI_LOCATION);
@@ -6545,7 +6736,11 @@ void postPrimaryBootLoader()
 	INFO("Searching for %s", _IMGUI_LOCATION.c_str());
 	createLUTForCRC();
 
-#ifndef __EMSCRIPTEN__
+#ifdef __ANDROID__
+	recentlyOpenedListPath = (std::filesystem::path(writableDir) / "internal").string();
+#elif defined(__EMSCRIPTEN__)
+	recentlyOpenedListPath = "assets/internal";
+#else
 	std::string workingDir = config.get<std::string>("internal._working_directory", "");
 	if (workingDir.empty())
 	{
@@ -6553,8 +6748,6 @@ void postPrimaryBootLoader()
 	}
 	normalizePath(workingDir);
 	recentlyOpenedListPath = workingDir;
-#else
-	recentlyOpenedListPath = "assets/internal";
 #endif
 
 	ifNoDirectoryThenCreate(recentlyOpenedListPath);
@@ -6562,8 +6755,14 @@ void postPrimaryBootLoader()
 #ifndef __EMSCRIPTEN__
 	recentlyOpenedListPath = (std::filesystem::path(recentlyOpenedListPath) / "recentlyOpenedListPath.dir").string();
 	recentlyOpenedList = readDequeFromFile(recentlyOpenedListPath);
+
+#ifdef __ANDROID__
+	_CHEAT_SAVE_LOCATION = (std::filesystem::path(writableDir) / "cheats.txt").string();
+#else
 	_CHEAT_SAVE_LOCATION = (std::filesystem::path(workingDir) / "cheats.txt").string();
 	normalizePath(_CHEAT_SAVE_LOCATION);
+#endif
+
 #else
 	recentlyOpenedListPath += "/recentlyOpenedListPath.dir";
 	_CHEAT_SAVE_LOCATION = "assets/internal/cheats.txt";
