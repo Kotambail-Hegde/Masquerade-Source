@@ -74,7 +74,7 @@ extern FLAG startFromBoot;
 
 #pragma endregion GLOBAL_INFRASTRUCTURE_DECLARATIONS
 
-#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__)
+#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
 #pragma region NETWORK
 class abstractEmulationLinkSession_t
 {
@@ -413,7 +413,7 @@ protected:
 	InputHintCallback inputHintCallback = nullptr;
 #endif // !__RPI_PICO__
 
-#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__)
+#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
 public:
 	static abstractEmulationLinkSession_t& getLinkSession()
 	{
