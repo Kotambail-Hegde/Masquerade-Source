@@ -541,6 +541,9 @@ std::mutex               androidPendingRomsMutex;
 const DIM8           _MAX_RECENTLY_USED_LIST_SIZE = EIGHT;
 std::string          recentlyOpenedListPath;
 std::deque<std::string> recentlyOpenedList;
+#ifdef __EMSCRIPTEN__
+FLAG webQuitPending = NO; // Quit waits for IndexedDB to finish saving before leaving
+#endif
 
 // Menu-click control flags
 FLAG quitOnMenuClick = NO;
@@ -999,33 +1002,37 @@ void runProfiler()
 FLAG SavePersistentFSComplete = NO;
 FLAG ClearPersistentFSComplete = NO;
 
-extern "C" void onSavePersistentFSComplete() {
+extern "C" void onSavePersistentFSComplete() 
+{
 	SavePersistentFSComplete = YES;
 }
-extern "C" void onClearPersistentFSComplete() {
+extern "C" void onClearPersistentFSComplete() 
+{
 	ClearPersistentFSComplete = YES;
 }
 
-extern "C" void onSilentSavePersistentFSComplete() {
+extern "C" void onSilentSavePersistentFSComplete() 
+{
 	INFO("BIOS saved to IndexedDB silently. No restart required.");
 }
 
-extern "C" {
-
-	EMSCRIPTEN_KEEPALIVE
-		void listEmFilesRecursive(const std::string& path = "/")
+extern "C"
+{
+	EMSCRIPTEN_KEEPALIVE void listEmFilesRecursive(const std::string& path = "/")
 	{
 		DIR* dir = opendir(path.c_str());
 		if (!dir)
 		{
-			INFO("Cannot open directory: %s", path.c_str()); RETURN;
+			INFO("Cannot open directory: %s", path.c_str());
+			RETURN;
 		}
 
 		dirent* entry;
 		while ((entry = readdir(dir)) != nullptr)
 		{
 			std::string name = entry->d_name;
-			if (name == "." || name == "..") continue;
+			if (name == "." || name == "..")
+				continue;
 
 			std::string fullPath = path + (path.back() == '/' ? "" : "/") + name;
 			INFO("%s", fullPath.c_str());
@@ -1034,11 +1041,11 @@ extern "C" {
 			if (stat(fullPath.c_str(), &st) == 0 && S_ISDIR(st.st_mode))
 				listEmFilesRecursive(fullPath);
 		}
+
 		closedir(dir);
 	}
 
-	EMSCRIPTEN_KEEPALIVE
-		void listEmFiles()
+	EMSCRIPTEN_KEEPALIVE void listEmFiles()
 	{
 		INFO("____________________________________");
 		listEmFilesRecursive("/");
@@ -1051,60 +1058,168 @@ extern "C" {
 		EM_JS(void, mountPersistentFS, (Callback callback), {
 			FS.mkdir('/persistent');
 			FS.mount(IDBFS, {}, '/persistent');
-			FS.syncfs(true, function(err) {
+
+			FS.syncfs(true, function(err)
+			{
 				if (err)
-		 {
-console.error("syncfs error", err);
-}
-else
-{
-console.log("syncfs complete"); dynCall('v', callback);
-}
-});
+				{
+					console.error("syncfs error", err);
+				}
+				else
+				{
+					console.log("syncfs complete");
+					dynCall('v', callback);
+				}
+			});
 			});
 
 	EMSCRIPTEN_KEEPALIVE
 		EM_JS(void, savePersistentFS, (Callback callback), {
-			FS.syncfs(false, function(err) {
+			FS.syncfs(false, function(err)
+			{
 				if (err)
-		 {
-console.error("Error saving persistent FS:", err);
-}
-else
-{
-console.log("Saved persistent FS to IndexedDB"); dynCall('v', callback);
-}
-});
+				{
+					console.error("Error saving persistent FS:", err);
+				}
+				else
+				{
+					console.log("Saved persistent FS to IndexedDB");
+					dynCall('v', callback);
+				}
+			});
 			});
 
 	EMSCRIPTEN_KEEPALIVE
 		EM_JS(void, clearPersistentFS, (Callback callback), {
-			FS.readdir('/persistent').forEach(function(file) {
+			FS.readdir('/persistent').forEach(function(file)
+			{
 				if (file !== '.' && file !== '..')
-		 {
-try
-{
-FS.unlink('/persistent/' + file);
-}
-catch (e)
-{
-console.warn("Couldn't delete", file, e);
-}
-}
-});
-FS.syncfs(false, function(err) {
-	if (err)
-{
-console.error("Error clearing persistent FS:", err);
-}
-else
-{
-console.log("Cleared persistent FS from IndexedDB"); dynCall('v', callback);
-}
-});
+				{
+					try
+					{
+						FS.unlink('/persistent/' + file);
+					}
+					catch (e)
+					{
+						console.warn("Couldn't delete", file, e);
+					}
+				}
 			});
 
+			FS.syncfs(false, function(err)
+			{
+				if (err)
+				{
+					console.error("Error clearing persistent FS:", err);
+				}
+				else
+				{
+					console.log("Cleared persistent FS from IndexedDB");
+					dynCall('v', callback);
+				}
+			});
+			});
 } // extern "C"
+
+extern "C" {
+
+	static std::vector<std::string> gDroppedFiles;
+
+	// JS calls this once per dropped file: writes it into /persistent (same naming rule as handle_upload_file)
+	EMSCRIPTEN_KEEPALIVE void masq_drop_file(const char* filename, const uint8_t* data, int size)
+	{
+		if (filename == nullptr || data == nullptr || size <= 0)
+		{
+			INFO("Dropped file is empty"); RETURN;
+		}
+
+		std::string sanitized = filename;
+		std::transform(sanitized.begin(), sanitized.end(), sanitized.begin(),
+			[](unsigned char c) { return (char)std::tolower(c); });
+		std::replace(sanitized.begin(), sanitized.end(), ' ', '_');
+
+		const std::string persistentPath = "/persistent/" + sanitized;
+		{
+			std::ofstream ofs(persistentPath, std::ios::binary);
+			if (!ofs)
+			{
+				INFO("Could not write dropped file: %s", persistentPath.c_str()); RETURN;
+			}
+			ofs.write(reinterpret_cast<const char*>(data), size);
+		}
+		INFO("Dropped file stored: %s (%d bytes)", persistentPath.c_str(), size);
+
+		const std::string ext = get_extension(persistentPath.c_str());
+		if (strcmp(ext.c_str(), "zip") == 0)
+		{
+			std::vector<std::string> extracted;
+			extract_all_to_persistent_dir(persistentPath.c_str(), extracted);
+			for (const auto& p : extracted) gDroppedFiles.push_back(p);
+		}
+		else
+		{
+			gDroppedFiles.push_back(sanitized);
+		}
+	}
+
+	// JS calls this after the last file of a drop: saves IndexedDB and queues everything for loading in one go
+	EMSCRIPTEN_KEEPALIVE void masq_drop_commit()
+	{
+		if (gDroppedFiles.empty()) RETURN;
+
+		savePersistentFS(onSavePersistentFSComplete);
+
+		for (const auto& path : gDroppedFiles)
+		{
+			auto it = std::find(recentlyOpenedList.begin(), recentlyOpenedList.end(), path);
+			if (it != recentlyOpenedList.end()) recentlyOpenedList.erase(it);
+			recentlyOpenedList.push_front(path);
+			if (recentlyOpenedList.size() > _MAX_RECENTLY_USED_LIST_SIZE) recentlyOpenedList.pop_back();
+			dynamicDragNDropAndMenuSelect.push_back(path);
+		}
+		gDroppedFiles.clear();
+	}
+
+} // extern "C"
+
+// Browser drops arrive as SDL_EVENT_DROP_FILE with a path in the volatile /tmp/filedrop/... memory folder, which does not
+// survive the page reload used to start a game. Copy the file into /persistent (same naming rule as handle_upload_file)
+// and return the name(s) to queue.
+inline std::vector<std::string> importDroppedFileToPersistent(const char* droppedPath)
+{
+	std::vector<std::string> result;
+
+	std::ifstream ifs(droppedPath, std::ios::binary);
+	if (!ifs)
+	{
+		INFO("Dropped file not readable: %s", droppedPath); RETURN result;
+	}
+
+	std::string name = std::filesystem::path(droppedPath).filename().string();
+	std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { RETURN(char)std::tolower(c); });
+	std::replace(name.begin(), name.end(), ' ', '_');
+
+	const std::string persistentPath = "/persistent/" + name;
+	{
+		std::ofstream ofs(persistentPath, std::ios::binary);
+		if (!ofs)
+		{
+			INFO("Could not write dropped file: %s", persistentPath.c_str()); RETURN result;
+		}
+		ofs << ifs.rdbuf();
+	}
+	ifs.close();
+	std::remove(droppedPath); // free the in-memory copy
+	INFO("Dropped file stored: %s", persistentPath.c_str());
+
+	const std::string ext = get_extension(persistentPath.c_str());
+	if (strcmp(ext.c_str(), "zip") == 0)
+		extract_all_to_persistent_dir(persistentPath.c_str(), result);
+	else
+		result.push_back(name);
+
+	RETURN result;
+}
 #endif // __EMSCRIPTEN__
 #pragma endregion EMSCRIPTEN
 
@@ -2897,12 +3012,12 @@ private:
 		if (filelist == nullptr)
 		{
 			WARN("Android Open ROM failed: %s", SDL_GetError());
-			return;
+			RETURN;
 		}
 		if (*filelist == nullptr)
 		{
 			INFO("Android Open ROM: cancelled");
-			return;
+			RETURN;
 		}
 
 		const ROM type = static_cast<ROM>(reinterpret_cast<intptr_t>(userdata));
@@ -2923,7 +3038,7 @@ private:
 static void SDLCALL handle_android_bios_selected(void* userdata, const char* const* filelist, int filter)
 {
     if (!filelist || !*filelist) {
-        return;
+        RETURN;
     }
     const char* path = *filelist;
     INFO("Android Open BIOS: %s", path);
@@ -2966,7 +3081,7 @@ static void SDLCALL handle_android_bios_selected(void* userdata, const char* con
 			case ROM::GAME_BOY:
 			case ROM::GAME_BOY_COLOR: selected_filter = gbGbcFilter; break;
 			case ROM::GAME_BOY_ADVANCE: selected_filter = gbaFilter; break;
-			default: FATAL("Unsupported ROM type : %u", TO_UINT(type)); return;
+			default: FATAL("Unsupported ROM type : %u", TO_UINT(type)); RETURN;
 		}
 
 		(void)selected_filter; // SDL's Android filter->MIME mapping is unreliable for custom extensions; pick anything, type comes from the menu entry
@@ -3095,8 +3210,9 @@ static void SDLCALL handle_android_bios_selected(void* userdata, const char* con
 #ifdef __ANDROID__
 	static void SDLCALL handle_android_si_audio_selected(void* userdata, const char* const* filelist, int filter)
 	{
-		if (!filelist || !*filelist) {
-			return;
+		if (!filelist || !*filelist) 
+		{
+			RETURN;
 		}
 		const char* path = *filelist;
 		INFO("Android Open SI Audio: %s", path);
@@ -3107,8 +3223,9 @@ static void SDLCALL handle_android_bios_selected(void* userdata, const char* con
 
 	static void SDLCALL handle_android_barcode_selected(void* userdata, const char* const* filelist, int filter)
 	{
-		if (!filelist || !*filelist) {
-			return;
+		if (!filelist || !*filelist) 
+		{
+			RETURN;
 		}
 		const char* path = *filelist;
 		INFO("Android Open Barcode: %s", path);
@@ -4013,7 +4130,27 @@ public:
 						done = true;
 					if (e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED && e.window.windowID == SDL_GetWindowID(window))
 						done = true;
+#ifdef __EMSCRIPTEN__
 					if (e.type == SDL_EVENT_DROP_FILE)
+					{
+						const std::vector<std::string> imported = importDroppedFileToPersistent(e.drop.data);
+						if (!imported.empty())
+						{
+							savePersistentFS(onSavePersistentFSComplete);
+							for (const std::string& path : imported)
+							{
+								auto it = std::find(recentlyOpenedList.begin(), recentlyOpenedList.end(), path);
+								if (it != recentlyOpenedList.end()) recentlyOpenedList.erase(it);
+								recentlyOpenedList.push_front(path);
+								if (recentlyOpenedList.size() > _MAX_RECENTLY_USED_LIST_SIZE) recentlyOpenedList.pop_back();
+								dynamicDragNDropAndMenuSelect.push_back(path);
+							}
+						}
+					}
+					if (false) // desktop/Android drop handling below is not used on web
+#else
+					if (e.type == SDL_EVENT_DROP_FILE)
+#endif
 					{
 						auto it = std::find(recentlyOpenedList.begin(), recentlyOpenedList.end(), std::string(e.drop.data));
 						if (it != recentlyOpenedList.end()) recentlyOpenedList.erase(it);
@@ -4068,6 +4205,19 @@ public:
 							static FLAG showSgbTimingViewer = NO;
 
 							tickAtStart = SDL_GetTicksNS();
+#ifdef __EMSCRIPTEN__
+							{
+								// SDL syncs the canvas drawing-buffer size to its CSS size only on a browser 'resize' event. On first load that
+								// event may never fire, so the UI stays stretched ("zoomed") until the tab moves to another monitor. Send it ourselves.
+								static int webResizeSyncFrame = 0;
+								if (webResizeSyncFrame < 120)
+								{
+									++webResizeSyncFrame;
+									if (webResizeSyncFrame == 3 || webResizeSyncFrame == 60)
+										emscripten_run_script("window.dispatchEvent(new Event('resize'));");
+								}
+							}
+#endif
 #ifdef __ANDROID__
 							{
 								std::lock_guard<std::mutex> lock(androidPendingRomsMutex);
@@ -4113,7 +4263,11 @@ public:
 							SDL_Event event;
 							while (SDL_PollEvent(&event)) handleSDLEvent(event);
 
+#ifdef __EMSCRIPTEN__
+							if (false) // the browser already pauses rendering for hidden tabs; SDL's MINIMIZED flag can stay stuck (Firefox)
+#else
 							if (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED)
+#endif
 							{
 								SDL_Delay(10); RETURN;
 							}
@@ -4368,10 +4522,13 @@ public:
 										if (ImGui::MenuItem("Quit"))
 										{
 #ifdef __EMSCRIPTEN__
-											clearPersistentFS(onClearPersistentFSComplete);
-											blocking_delay_ms(ONEHUNDRED);
-#endif
+											// Return to the home screen WITHOUT wiping stored ROMs/BIOS; wait for IndexedDB to finish saving first
+											SavePersistentFSComplete = NO;
+											savePersistentFS(onSavePersistentFSComplete);
+											webQuitPending = YES;
+#else
 											done = YES;
+#endif
 										}
 										ImGui::EndMenu();
 									}
@@ -6401,9 +6558,19 @@ public:
 #ifndef __EMSCRIPTEN__
 							// Precise FPS limiter
 							if (1000000000 / myFPS > SDL_GetTicksNS() - tickAtStart)
+							{
 								SDL_DelayPrecise((uint64_t)(1000000000.0f / myFPS) - (SDL_GetTicksNS() - tickAtStart));
+							}
 #endif
 
+#ifdef __EMSCRIPTEN__
+							if (webQuitPending == YES && SavePersistentFSComplete == YES)
+							{
+								webQuitPending = NO;
+								SavePersistentFSComplete = NO;
+								done = YES;
+							}
+#endif
 							// ---- Emscripten restart handling --------------
 							if (done == YES)
 							{
