@@ -1121,67 +1121,6 @@ extern "C"
 			});
 } // extern "C"
 
-extern "C" {
-
-	static std::vector<std::string> gDroppedFiles;
-
-	// JS calls this once per dropped file: writes it into /persistent (same naming rule as handle_upload_file)
-	EMSCRIPTEN_KEEPALIVE void masq_drop_file(const char* filename, const uint8_t* data, int size)
-	{
-		if (filename == nullptr || data == nullptr || size <= 0)
-		{
-			INFO("Dropped file is empty"); RETURN;
-		}
-
-		std::string sanitized = filename;
-		std::transform(sanitized.begin(), sanitized.end(), sanitized.begin(),
-			[](unsigned char c) { return (char)std::tolower(c); });
-		std::replace(sanitized.begin(), sanitized.end(), ' ', '_');
-
-		const std::string persistentPath = "/persistent/" + sanitized;
-		{
-			std::ofstream ofs(persistentPath, std::ios::binary);
-			if (!ofs)
-			{
-				INFO("Could not write dropped file: %s", persistentPath.c_str()); RETURN;
-			}
-			ofs.write(reinterpret_cast<const char*>(data), size);
-		}
-		INFO("Dropped file stored: %s (%d bytes)", persistentPath.c_str(), size);
-
-		const std::string ext = get_extension(persistentPath.c_str());
-		if (strcmp(ext.c_str(), "zip") == 0)
-		{
-			std::vector<std::string> extracted;
-			extract_all_to_persistent_dir(persistentPath.c_str(), extracted);
-			for (const auto& p : extracted) gDroppedFiles.push_back(p);
-		}
-		else
-		{
-			gDroppedFiles.push_back(sanitized);
-		}
-	}
-
-	// JS calls this after the last file of a drop: saves IndexedDB and queues everything for loading in one go
-	EMSCRIPTEN_KEEPALIVE void masq_drop_commit()
-	{
-		if (gDroppedFiles.empty()) RETURN;
-
-		savePersistentFS(onSavePersistentFSComplete);
-
-		for (const auto& path : gDroppedFiles)
-		{
-			auto it = std::find(recentlyOpenedList.begin(), recentlyOpenedList.end(), path);
-			if (it != recentlyOpenedList.end()) recentlyOpenedList.erase(it);
-			recentlyOpenedList.push_front(path);
-			if (recentlyOpenedList.size() > _MAX_RECENTLY_USED_LIST_SIZE) recentlyOpenedList.pop_back();
-			dynamicDragNDropAndMenuSelect.push_back(path);
-		}
-		gDroppedFiles.clear();
-	}
-
-} // extern "C"
-
 // Browser drops arrive as SDL_EVENT_DROP_FILE with a path in the volatile /tmp/filedrop/... memory folder, which does not
 // survive the page reload used to start a game. Copy the file into /persistent (same naming rule as handle_upload_file)
 // and return the name(s) to queue.
@@ -1214,9 +1153,13 @@ inline std::vector<std::string> importDroppedFileToPersistent(const char* droppe
 
 	const std::string ext = get_extension(persistentPath.c_str());
 	if (strcmp(ext.c_str(), "zip") == 0)
+	{
 		extract_all_to_persistent_dir(persistentPath.c_str(), result);
+	}
 	else
+	{
 		result.push_back(name);
+	}
 
 	RETURN result;
 }

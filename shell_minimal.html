@@ -119,42 +119,6 @@
                 if (!document.hidden) focusCanvas();
             });
         })();
-
-        // ---- Drag & drop ROMs -----------------------------------------------------
-        // Browsers hand us bytes, not paths: copy them into the wasm heap, let the C++ side write them to
-        // /persistent, then commit all files of the drop together (needed for multi-file arcade sets).
-        (function () {
-            function whenReady(fn) {
-                if (Module.calledRun) fn(); else Module.postRun.push(fn);
-            }
-
-            async function handleFiles(fileList) {
-                var files = Array.prototype.slice.call(fileList);
-                if (!files.length) return;
-                for (var i = 0; i < files.length; ++i) {
-                    var f = files[i];
-                    var bytes = new Uint8Array(await f.arrayBuffer());
-                    var ptr = Module._malloc(bytes.length);
-                    Module.HEAPU8.set(bytes, ptr);
-                    Module.ccall('masq_drop_file', null, ['string', 'number', 'number'], [f.name, ptr, bytes.length]);
-                    Module._free(ptr);
-                }
-                Module.ccall('masq_drop_commit', null, [], []);
-            }
-
-            window.addEventListener('dragover', function (e) {
-                e.preventDefault();
-                if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
-            });
-            window.addEventListener('drop', function (e) {
-                e.preventDefault();
-                var files = e.dataTransfer ? e.dataTransfer.files : null;
-                if (!files || !files.length) return;
-                whenReady(function () {
-                    handleFiles(files).catch(function (err) { console.error('Drop failed:', err); });
-                });
-            });
-        })();
     </script>
 
     {{{ SCRIPT }}}
