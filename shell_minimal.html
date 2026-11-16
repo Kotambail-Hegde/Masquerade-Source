@@ -1,92 +1,162 @@
 <!doctype html>
 <html lang="en-us">
-  <head>
+<head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no" />
     <title>Masquerade</title>
     <style>
-      body { margin: 0; background-color: black }
-      /* FIXME: with our GLFW example this block seems to break resizing and io.DisplaySize gets stuck */
-      .emscripten {
-        position: absolute;
-        top: 0px;
-        left: 0px;
-        margin: 0px;
-        border: 0;
-        width: 100%;
-        height: 100%;
-        overflow: hidden;
-        display: block;
-        image-rendering: optimizeSpeed;
-        image-rendering: -moz-crisp-edges;
-        image-rendering: -o-crisp-edges;
-        image-rendering: -webkit-optimize-contrast;
-        image-rendering: optimize-contrast;
-        image-rendering: crisp-edges;
-        image-rendering: pixelated;
-        -ms-interpolation-mode: nearest-neighbor;
-      }
+        body {
+            margin: 0;
+            background-color: black
+        }
+        /* FIXME: with our GLFW example this block seems to break resizing and io.DisplaySize gets stuck */
+        .emscripten {
+            position: absolute;
+            top: 0px;
+            left: 0px;
+            margin: 0px;
+            border: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            display: block;
+            outline: none;
+            image-rendering: optimizeSpeed;
+            image-rendering: -moz-crisp-edges;
+            image-rendering: -o-crisp-edges;
+            image-rendering: -webkit-optimize-contrast;
+            image-rendering: optimize-contrast;
+            image-rendering: crisp-edges;
+            image-rendering: pixelated;
+            -ms-interpolation-mode: nearest-neighbor;
+        }
     </style>
-  </head>
-  <body>
-    <canvas class="emscripten" id="canvas" oncontextmenu="event.preventDefault()"></canvas>
+</head>
+<body>
+    <canvas class="emscripten" id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
 
     <script type="text/javascript">
-      var Module = {
-        preRun: [],
-        postRun: [],
-        print: (function () {
-          return function (text) {
-            text = Array.prototype.slice.call(arguments).join(' ');
-            console.log(text);
-          };
-        })(),
-        printErr: function (text) {
-          text = Array.prototype.slice.call(arguments).join(' ');
-          console.error(text);
-        },
-        canvas: (function () {
-          var canvas = document.getElementById('canvas');
-          //canvas.addEventListener("webglcontextlost", function(e) { alert('FIXME: WebGL context lost, please reload the page'); e.preventDefault(); }, false);
-          return canvas;
-        })(),
-        setStatus: function (text) {
-          console.log("status: " + text);
-        },
-        monitorRunDependencies: function (left) {
-          // no run dependencies to log
-        }
-      };
+        var Module = {
+            preRun: [],
+            postRun: [],
+            print: (function () {
+                return function (text) {
+                    text = Array.prototype.slice.call(arguments).join(' ');
+                    console.log(text);
+                };
+            })(),
+            printErr: function (text) {
+                text = Array.prototype.slice.call(arguments).join(' ');
+                console.error(text);
+            },
+            canvas: (function () {
+                var canvas = document.getElementById('canvas');
+                //canvas.addEventListener("webglcontextlost", function(e) { alert('FIXME: WebGL context lost, please reload the page'); e.preventDefault(); }, false);
+                return canvas;
+            })(),
+            setStatus: function (text) {
+                console.log("status: " + text);
+            },
+            monitorRunDependencies: function (left) {
+                // no run dependencies to log
+            }
+        };
 
-      // Parse ?roms=COUNT&rom0=...&rom1=... etc.
-      (function () {
-        var params = new URLSearchParams(window.location.search);
-        var romCount = parseInt(params.get("roms") || "0", 10);
-        Module.arguments = [];
+        // Parse ?roms=COUNT&rom0=...&rom1=... etc.
+        (function () {
+            var params = new URLSearchParams(window.location.search);
+            var romCount = parseInt(params.get("roms") || "0", 10);
+            Module.arguments = [];
 
-		for (let i = 0; i < romCount; ++i) {
-		  let rom = params.get("rom" + i);
-		  if (rom) {
-			// Decode URL encoding (handles spaces, capitals, numbers, special chars)
-			rom = decodeURIComponent(rom);
+            for (let i = 0; i < romCount; ++i) {
+                let rom = params.get("rom" + i);
+                if (rom) {
+                    // Decode URL encoding (handles spaces, capitals, numbers, special chars)
+                    rom = decodeURIComponent(rom);
 
-			// GH-Pages fix: remove leading slash in URL parameter
-			rom = rom.replace(/^\//, "");
+                    // GH-Pages fix: remove leading slash in URL parameter
+                    rom = rom.replace(/^\//, "");
 
-			// Add slash back because Emscripten paths must start with /
-			rom = "/" + rom;
+                    // Add slash back because Emscripten paths must start with /
+                    rom = "/" + rom;
 
-			Module.arguments.push(rom);
-			console.log('ROM argument added: ' + rom);
-		  }
-		}
-      })();
+                    Module.arguments.push(rom);
+                    console.log('ROM argument added: ' + rom);
+                }
+            }
+        })();
 
-      window.onerror = function (event) {
-        console.log("onerror: " + event);
-      };
+        window.onerror = function (event) {
+            console.log("onerror: " + event);
+        };
+
+        // ---- Input fixes (Firefox) ------------------------------------------------
+        // SDL only accepts mouse input once it believes the canvas has mouse focus (from 'mouseenter').
+        // Firefox may never send it if the pointer is already over the canvas at load, so we focus the
+        // canvas and send one ourselves on the first pointer activity.
+        (function () {
+            var canvas = document.getElementById('canvas');
+            var enteredSent = false;
+
+            function focusCanvas() {
+                if (document.activeElement !== canvas) canvas.focus({ preventScroll: true });
+            }
+            function sendEnter(e) {
+                if (enteredSent) return;
+                enteredSent = true;
+                canvas.dispatchEvent(new MouseEvent('mouseenter', {
+                    bubbles: false, clientX: e.clientX || 0, clientY: e.clientY || 0
+                }));
+            }
+
+            window.addEventListener('load', focusCanvas);
+            ['pointerdown', 'mousedown', 'touchstart', 'keydown'].forEach(function (t) {
+                window.addEventListener(t, focusCanvas, true);
+            });
+            window.addEventListener('mousemove', sendEnter, { once: true, capture: true });
+            window.addEventListener('pointerdown', sendEnter, { once: true, capture: true });
+            document.addEventListener('visibilitychange', function () {
+                if (!document.hidden) focusCanvas();
+            });
+        })();
+
+        // ---- Drag & drop ROMs -----------------------------------------------------
+        // Browsers hand us bytes, not paths: copy them into the wasm heap, let the C++ side write them to
+        // /persistent, then commit all files of the drop together (needed for multi-file arcade sets).
+        (function () {
+            function whenReady(fn) {
+                if (Module.calledRun) fn(); else Module.postRun.push(fn);
+            }
+
+            async function handleFiles(fileList) {
+                var files = Array.prototype.slice.call(fileList);
+                if (!files.length) return;
+                for (var i = 0; i < files.length; ++i) {
+                    var f = files[i];
+                    var bytes = new Uint8Array(await f.arrayBuffer());
+                    var ptr = Module._malloc(bytes.length);
+                    Module.HEAPU8.set(bytes, ptr);
+                    Module.ccall('masq_drop_file', null, ['string', 'number', 'number'], [f.name, ptr, bytes.length]);
+                    Module._free(ptr);
+                }
+                Module.ccall('masq_drop_commit', null, [], []);
+            }
+
+            window.addEventListener('dragover', function (e) {
+                e.preventDefault();
+                if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+            });
+            window.addEventListener('drop', function (e) {
+                e.preventDefault();
+                var files = e.dataTransfer ? e.dataTransfer.files : null;
+                if (!files || !files.length) return;
+                whenReady(function () {
+                    handleFiles(files).catch(function (err) { console.error('Drop failed:', err); });
+                });
+            });
+        })();
     </script>
 
     {{{ SCRIPT }}}
-  </body>
+</body>
 </html>

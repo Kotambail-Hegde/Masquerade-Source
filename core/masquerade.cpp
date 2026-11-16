@@ -42,6 +42,10 @@
 #include "gba.h"
 #endif
 
+#ifdef __ANDROID__
+#include <SDL3/SDL_main.h>
+#endif
+
 // =========================================================
 // DESKTOP-ONLY INCLUDES  (SDL / ImGui / STB / DWM)
 // None of these are available or needed on RPI Pico.
@@ -109,6 +113,10 @@ static FLAG isMasqHeadless = NO;
 int     currentEmuTheme = SE_THEME_LIGHT;
 int     previousEmuTheme = SE_THEME_LIGHT;
 uint8_t customSEpalettes[FIVE * FOUR];
+
+#ifdef __ANDROID__
+static std::string s_pending_si_audio_type;
+#endif
 
 #pragma region MASQUERADE_THEME
 // ---- Masquerade UI themes -----------------------------------------------------------------------------
@@ -450,6 +458,8 @@ static void MasqApplyMetrics()
 	ImGui::Dummy(size);
 }
 
+static float gAndroidEdgeLogical = 0.0f; // logical units kept clear at the left/right edges on Android (curved screens)
+
 // Height of the hero band at the top of the home screen.
 [[maybe_unused]] static float MasqHomeHeroHeight()
 {
@@ -465,7 +475,7 @@ static void MasqApplyMetrics()
 	const ImVec4 text = ImGui::GetStyleColorVec4(ImGuiCol_Text);
 	const ImVec4 background = ImGui::GetStyleColorVec4(ImGuiCol_WindowBg);
 	const ImVec4 label(text.x + (background.x - text.x) * 0.38f, text.y + (background.y - text.y) * 0.38f, text.z + (background.z - text.z) * 0.38f, 1.0f);
-	const float pad = 18.0f;
+	const float pad = 18.0f + gAndroidEdgeLogical;
 	const float titleSize = ImGui::GetFontSize() * 1.9f;
 	const float lineHeight = ImGui::GetTextLineHeight();
 
@@ -520,11 +530,20 @@ FLAG initScreen = NO;
 
 // Drag-n-drop / menu-triggered ROM selection
 std::vector<std::string> dynamicDragNDropAndMenuSelect;
+#ifdef __ANDROID__
+#include <mutex>
+// The SDL file-dialog callback runs on the Java UI thread, so results are queued here and drained on the main loop thread
+std::vector<std::string> androidPendingRoms;
+std::mutex               androidPendingRomsMutex;
+#endif
 
 // Recently opened items
 const DIM8           _MAX_RECENTLY_USED_LIST_SIZE = EIGHT;
 std::string          recentlyOpenedListPath;
 std::deque<std::string> recentlyOpenedList;
+#ifdef __EMSCRIPTEN__
+FLAG webQuitPending = NO; // Quit waits for IndexedDB to finish saving before leaving
+#endif
 
 // Menu-click control flags
 FLAG quitOnMenuClick = NO;
@@ -983,33 +1002,37 @@ void runProfiler()
 FLAG SavePersistentFSComplete = NO;
 FLAG ClearPersistentFSComplete = NO;
 
-extern "C" void onSavePersistentFSComplete() {
+extern "C" void onSavePersistentFSComplete() 
+{
 	SavePersistentFSComplete = YES;
 }
-extern "C" void onClearPersistentFSComplete() {
+extern "C" void onClearPersistentFSComplete() 
+{
 	ClearPersistentFSComplete = YES;
 }
 
-extern "C" void onSilentSavePersistentFSComplete() {
+extern "C" void onSilentSavePersistentFSComplete() 
+{
 	INFO("BIOS saved to IndexedDB silently. No restart required.");
 }
 
-extern "C" {
-
-	EMSCRIPTEN_KEEPALIVE
-		void listEmFilesRecursive(const std::string& path = "/")
+extern "C"
+{
+	EMSCRIPTEN_KEEPALIVE void listEmFilesRecursive(const std::string& path = "/")
 	{
 		DIR* dir = opendir(path.c_str());
 		if (!dir)
 		{
-			INFO("Cannot open directory: %s", path.c_str()); RETURN;
+			INFO("Cannot open directory: %s", path.c_str());
+			RETURN;
 		}
 
 		dirent* entry;
 		while ((entry = readdir(dir)) != nullptr)
 		{
 			std::string name = entry->d_name;
-			if (name == "." || name == "..") continue;
+			if (name == "." || name == "..")
+				continue;
 
 			std::string fullPath = path + (path.back() == '/' ? "" : "/") + name;
 			INFO("%s", fullPath.c_str());
@@ -1018,11 +1041,11 @@ extern "C" {
 			if (stat(fullPath.c_str(), &st) == 0 && S_ISDIR(st.st_mode))
 				listEmFilesRecursive(fullPath);
 		}
+
 		closedir(dir);
 	}
 
-	EMSCRIPTEN_KEEPALIVE
-		void listEmFiles()
+	EMSCRIPTEN_KEEPALIVE void listEmFiles()
 	{
 		INFO("____________________________________");
 		listEmFilesRecursive("/");
@@ -1035,60 +1058,168 @@ extern "C" {
 		EM_JS(void, mountPersistentFS, (Callback callback), {
 			FS.mkdir('/persistent');
 			FS.mount(IDBFS, {}, '/persistent');
-			FS.syncfs(true, function(err) {
+
+			FS.syncfs(true, function(err)
+			{
 				if (err)
-		 {
-console.error("syncfs error", err);
-}
-else
-{
-console.log("syncfs complete"); dynCall('v', callback);
-}
-});
+				{
+					console.error("syncfs error", err);
+				}
+				else
+				{
+					console.log("syncfs complete");
+					dynCall('v', callback);
+				}
+			});
 			});
 
 	EMSCRIPTEN_KEEPALIVE
 		EM_JS(void, savePersistentFS, (Callback callback), {
-			FS.syncfs(false, function(err) {
+			FS.syncfs(false, function(err)
+			{
 				if (err)
-		 {
-console.error("Error saving persistent FS:", err);
-}
-else
-{
-console.log("Saved persistent FS to IndexedDB"); dynCall('v', callback);
-}
-});
+				{
+					console.error("Error saving persistent FS:", err);
+				}
+				else
+				{
+					console.log("Saved persistent FS to IndexedDB");
+					dynCall('v', callback);
+				}
+			});
 			});
 
 	EMSCRIPTEN_KEEPALIVE
 		EM_JS(void, clearPersistentFS, (Callback callback), {
-			FS.readdir('/persistent').forEach(function(file) {
+			FS.readdir('/persistent').forEach(function(file)
+			{
 				if (file !== '.' && file !== '..')
-		 {
-try
-{
-FS.unlink('/persistent/' + file);
-}
-catch (e)
-{
-console.warn("Couldn't delete", file, e);
-}
-}
-});
-FS.syncfs(false, function(err) {
-	if (err)
-{
-console.error("Error clearing persistent FS:", err);
-}
-else
-{
-console.log("Cleared persistent FS from IndexedDB"); dynCall('v', callback);
-}
-});
+				{
+					try
+					{
+						FS.unlink('/persistent/' + file);
+					}
+					catch (e)
+					{
+						console.warn("Couldn't delete", file, e);
+					}
+				}
 			});
 
+			FS.syncfs(false, function(err)
+			{
+				if (err)
+				{
+					console.error("Error clearing persistent FS:", err);
+				}
+				else
+				{
+					console.log("Cleared persistent FS from IndexedDB");
+					dynCall('v', callback);
+				}
+			});
+			});
 } // extern "C"
+
+extern "C" {
+
+	static std::vector<std::string> gDroppedFiles;
+
+	// JS calls this once per dropped file: writes it into /persistent (same naming rule as handle_upload_file)
+	EMSCRIPTEN_KEEPALIVE void masq_drop_file(const char* filename, const uint8_t* data, int size)
+	{
+		if (filename == nullptr || data == nullptr || size <= 0)
+		{
+			INFO("Dropped file is empty"); RETURN;
+		}
+
+		std::string sanitized = filename;
+		std::transform(sanitized.begin(), sanitized.end(), sanitized.begin(),
+			[](unsigned char c) { return (char)std::tolower(c); });
+		std::replace(sanitized.begin(), sanitized.end(), ' ', '_');
+
+		const std::string persistentPath = "/persistent/" + sanitized;
+		{
+			std::ofstream ofs(persistentPath, std::ios::binary);
+			if (!ofs)
+			{
+				INFO("Could not write dropped file: %s", persistentPath.c_str()); RETURN;
+			}
+			ofs.write(reinterpret_cast<const char*>(data), size);
+		}
+		INFO("Dropped file stored: %s (%d bytes)", persistentPath.c_str(), size);
+
+		const std::string ext = get_extension(persistentPath.c_str());
+		if (strcmp(ext.c_str(), "zip") == 0)
+		{
+			std::vector<std::string> extracted;
+			extract_all_to_persistent_dir(persistentPath.c_str(), extracted);
+			for (const auto& p : extracted) gDroppedFiles.push_back(p);
+		}
+		else
+		{
+			gDroppedFiles.push_back(sanitized);
+		}
+	}
+
+	// JS calls this after the last file of a drop: saves IndexedDB and queues everything for loading in one go
+	EMSCRIPTEN_KEEPALIVE void masq_drop_commit()
+	{
+		if (gDroppedFiles.empty()) RETURN;
+
+		savePersistentFS(onSavePersistentFSComplete);
+
+		for (const auto& path : gDroppedFiles)
+		{
+			auto it = std::find(recentlyOpenedList.begin(), recentlyOpenedList.end(), path);
+			if (it != recentlyOpenedList.end()) recentlyOpenedList.erase(it);
+			recentlyOpenedList.push_front(path);
+			if (recentlyOpenedList.size() > _MAX_RECENTLY_USED_LIST_SIZE) recentlyOpenedList.pop_back();
+			dynamicDragNDropAndMenuSelect.push_back(path);
+		}
+		gDroppedFiles.clear();
+	}
+
+} // extern "C"
+
+// Browser drops arrive as SDL_EVENT_DROP_FILE with a path in the volatile /tmp/filedrop/... memory folder, which does not
+// survive the page reload used to start a game. Copy the file into /persistent (same naming rule as handle_upload_file)
+// and return the name(s) to queue.
+inline std::vector<std::string> importDroppedFileToPersistent(const char* droppedPath)
+{
+	std::vector<std::string> result;
+
+	std::ifstream ifs(droppedPath, std::ios::binary);
+	if (!ifs)
+	{
+		INFO("Dropped file not readable: %s", droppedPath); RETURN result;
+	}
+
+	std::string name = std::filesystem::path(droppedPath).filename().string();
+	std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { RETURN(char)std::tolower(c); });
+	std::replace(name.begin(), name.end(), ' ', '_');
+
+	const std::string persistentPath = "/persistent/" + name;
+	{
+		std::ofstream ofs(persistentPath, std::ios::binary);
+		if (!ofs)
+		{
+			INFO("Could not write dropped file: %s", persistentPath.c_str()); RETURN result;
+		}
+		ofs << ifs.rdbuf();
+	}
+	ifs.close();
+	std::remove(droppedPath); // free the in-memory copy
+	INFO("Dropped file stored: %s", persistentPath.c_str());
+
+	const std::string ext = get_extension(persistentPath.c_str());
+	if (strcmp(ext.c_str(), "zip") == 0)
+		extract_all_to_persistent_dir(persistentPath.c_str(), result);
+	else
+		result.push_back(name);
+
+	RETURN result;
+}
 #endif // __EMSCRIPTEN__
 #pragma endregion EMSCRIPTEN
 
@@ -1124,19 +1255,35 @@ FLAG LoadImageTextureFromMemory(const void* data, size_t data_size, GLuint* out_
 // Open and read a file, then forward to LoadImageTextureFromMemory()
 FLAG LoadTextureFromFile(const char* file_name, GLuint* out_texture, int* out_width, int* out_height)
 {
-	FILE* f = fopen(file_name, "rb");
-	if (f == NULL) RETURN false;
+	SDL_IOStream* f = SDL_IOFromFile(file_name, "rb");
+	if (f == nullptr) RETURN false;
 
-	fseek(f, 0, SEEK_END);
-	size_t file_size = (size_t)ftell(f);
-	if (file_size == -1) RETURN false;
+	Sint64 file_size = SDL_GetIOSize(f);
+	if (file_size <= 0 || file_size > INT_MAX)
+	{
+		SDL_CloseIO(f);
+		RETURN false;
+	}
 
-	fseek(f, 0, SEEK_SET);
-	void* file_data = IM_ALLOC(file_size);
-	fread(file_data, 1, file_size, f);
-	fclose(f);
+	void* file_data = IM_ALLOC(static_cast<size_t>(file_size));
+	if (file_data == nullptr)
+	{
+		SDL_CloseIO(f);
+		RETURN false;
+	}
 
-	FLAG ret = LoadImageTextureFromMemory(file_data, file_size, out_texture, out_width, out_height);
+	size_t bytes_read = SDL_ReadIO(f, file_data, static_cast<size_t>(file_size));
+	SDL_CloseIO(f);
+
+	if (bytes_read != static_cast<size_t>(file_size))
+	{
+		IM_FREE(file_data);
+		RETURN false;
+	}
+
+	FLAG ret = LoadImageTextureFromMemory(file_data, static_cast<size_t>(file_size),
+		out_texture, out_width, out_height);
+
 	IM_FREE(file_data);
 	RETURN ret;
 }
@@ -1758,7 +1905,7 @@ static void renderGBASchedulerStatsWindow(GBA_t* gba)
 #pragma endregion GBA_SCHEDULER_STATS_UI
 #endif // MASQ_GBA_SCHEDULER_STATS_UI
 
-#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__)
+#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__)&& !defined(__ANDROID__)
 #pragma region NETWORK_HELPERS
 FLAG abstractEmulationLinkSession_t::connect(const char* hostAddress, uint16_t port)
 {
@@ -2163,25 +2310,36 @@ class Emulation_t
 public:
 
 #ifdef __EMSCRIPTEN__
-	char const* bootromfilters = { ".bin,.BIN" };
-	char const* golfilters = { ".gol,.GOL" };
-	char const* chip8filters = { ".ch8,.CH8,.c8,.C8,.sc8,.SC8,.xo8,.XO8" };
-	char const* spaceInvadersFilter = { ".e,.f,.g,.h,.zip" };
-	char const* pacmanFilter = { ".1m,.3m,.4a,.5e,.5f,.6e,.6f,.6h,.6j,.7f,.zip" };
-	char const* nesFilter = { ".nes,.NES" };
-	char const* gbGbcFilter = { ".gb,.gbc,.GB,.GBC" };
-	char const* gbaFilter = { ".gba,.GBA" };
+	char const* bootromfilters = ".bin,.BIN";
+    char const* golfilters = ".gol,.GOL";
+    char const* chip8filters = ".ch8,.CH8,.c8,.C8,.sc8,.SC8,.xo8,.XO8";
+    char const* spaceInvadersFilter = ".e,.f,.g,.h,.zip";
+    char const* pacmanFilter = ".1m,.3m,.4a,.5e,.5f,.6e,.6f,.6h,.6j,.7f,.zip";
+    char const* nesFilter = ".nes,.NES";
+    char const* gbGbcFilter = ".gb,.gbc,.GB,.GBC";
+    char const* gbaFilter = ".gba,.GBA";
+
+#elif defined(__ANDROID__)
+	SDL_DialogFileFilter bootromfilters[1]        = { { "Boot ROM",                         "bin,BIN"                        } };
+	SDL_DialogFileFilter golfilters[1]            = { { "Game Of Life States",              "gol,GOL"                        } };
+	SDL_DialogFileFilter chip8filters[1]          = { { "Chip8/S-Chip/XO-Chip ROMs",        "ch8,CH8,c8,C8,sc8,SC8,xo8,XO8"  } };
+	SDL_DialogFileFilter spaceInvadersFilter[1]   = { { "SpaceInvaders ROMs",               "e,f,g,h,zip,ZIP"                } };
+	SDL_DialogFileFilter spaceInvadersAudioFilter[1] = { { "SpaceInvaders Audio",         "wav,WAV"                        } };
+	SDL_DialogFileFilter pacmanFilter[1]          = { { "Pacman/MsPacman ROMs",             "1m,3m,4a,5e,5f,6e,6f,6h,6j,7f,zip" } };
+	SDL_DialogFileFilter nesFilter[1]             = { { "NES ROMs",                         "nes,NES"                        } };
+	SDL_DialogFileFilter gbGbcFilter[1]           = { { "GB/GBC ROMs",                      "gb,gbc,GB,GBC"                  } };
+	SDL_DialogFileFilter gbaFilter[1]             = { { "GBA ROMs",                         "gba,GBA"                        } };
 
 #elif !defined(__RPI_PICO__) // native desktop (NFD)
-	nfdu8filteritem_t bootromfilters[1] = { { "Boot ROM",                               "bin,BIN"                         } };
-	nfdu8filteritem_t golfilters[1] = { { "Game Of Life States",                    "gol,GOL"                         } };
-	nfdu8filteritem_t chip8filters[1] = { { "Chip8/S-Chip/XO-Chip/Modern-Chip8 ROMs", "ch8,CH8,c8,C8,sc8,SC8,xo8,XO8"  } };
-	nfdu8filteritem_t spaceInvadersFilter[1] = { { "SpaceInvaders ROMs",                     "e,f,g,h"                         } };
-	nfdu8filteritem_t spaceInvadersAudioFilter[1] = { { "SpaceInvaders Audio",               "wav,WAV"                         } };
-	nfdu8filteritem_t pacmanFilter[1] = { { "Pacman/MsPacman ROMs",                   "1m,3m,4a,5e,5f,6e,6f,6h,6j,7f"  } };
-	nfdu8filteritem_t nesFilter[1] = { { "NES ROMs",                               "nes,NES"                         } };
-	nfdu8filteritem_t gbGbcFilter[1] = { { "GB/GBC ROMs",                            "gb,gbc,GB,GBC"                   } };
-	nfdu8filteritem_t gbaFilter[1] = { { "GBA ROMs",                               "gba,GBA"                         } };
+	nfdu8filteritem_t bootromfilters[1]       = { { "Boot ROM",                               "bin,BIN"                        } };
+    nfdu8filteritem_t golfilters[1]           = { { "Game Of Life States",                    "gol,GOL"                        } };
+    nfdu8filteritem_t chip8filters[1]         = { { "Chip8/S-Chip/XO-Chip/Modern-Chip8 ROMs", "ch8,CH8,c8,C8,sc8,SC8,xo8,XO8" } };
+    nfdu8filteritem_t spaceInvadersFilter[1]  = { { "SpaceInvaders ROMs",                     "e,f,g,h"                        } };
+    nfdu8filteritem_t spaceInvadersAudioFilter[1] = { { "SpaceInvaders Audio",              "wav,WAV"                        } };
+    nfdu8filteritem_t pacmanFilter[1]         = { { "Pacman/MsPacman ROMs",                   "1m,3m,4a,5e,5f,6e,6f,6h,6j,7f" } };
+    nfdu8filteritem_t nesFilter[1]            = { { "NES ROMs",                               "nes,NES"                        } };
+    nfdu8filteritem_t gbGbcFilter[1]          = { { "GB/GBC ROMs",                            "gb,gbc,GB,GBC"                  } };
+    nfdu8filteritem_t gbaFilter[1]            = { { "GBA ROMs",                               "gba,GBA"                        } };
 #endif // ROM filter declarations
 
 private:
@@ -2204,7 +2362,7 @@ private:
 
 	KeyBindings keyBindings;
 
-#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__)
+#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
 private:
 
 	NetworkUIState_t networkUI;
@@ -2773,93 +2931,233 @@ private:
 #ifndef __RPI_PICO__
 private:
 
+#ifdef __ANDROID__
+	// The Android picker returns content:// URIs. SDL_LoadFile (SDL_IOFromFile) can read them; the emulator cores need a real file, so copy into app storage.
+	static std::string androidImportRom(const char* uri, ROM type)
+	{
+		size_t size = 0;
+		void* data = SDL_LoadFile(uri, &size);
+		if (data == nullptr)
+		{
+			WARN("Could not read %s : %s", uri, SDL_GetError());
+			return "";
+		}
+
+		// Best-effort display name from the URI (document providers do not always include one)
+		std::string name(uri);
+		const size_t slash = name.find_last_of('/');
+		if (slash != std::string::npos) name = name.substr(slash + 1);
+
+		std::string decoded;
+		for (size_t i = 0; i < name.size(); ++i)
+		{
+			if (name[i] == '%' && i + 2 < name.size())
+			{
+				decoded += (char)std::strtol(name.substr(i + 1, 2).c_str(), nullptr, 16);
+				i += 2;
+			}
+			else decoded += name[i];
+		}
+		const size_t cut = decoded.find_last_of("/:");
+		if (cut != std::string::npos) decoded = decoded.substr(cut + 1);
+
+		std::string clean;
+		for (char c : decoded)
+			clean += (std::isalnum((unsigned char)c) || c == '.' || c == '_' || c == '-') ? c : '_';
+		if (clean.empty()) clean = "rom";
+
+		// Extension from the ROM type (GB vs GBC from the CGB flag at 0x143) unless the name already has a known one
+		const uint8_t* bytes = static_cast<const uint8_t*>(data);
+		const char* ext = ".bin";
+		switch (type)
+		{
+		case ROM::NES:              ext = ".nes"; break;
+		case ROM::GAME_BOY_ADVANCE: ext = ".gba"; break;
+		case ROM::CHIP8:            ext = ".ch8"; break;
+		case ROM::GAME_BOY:
+		case ROM::GAME_BOY_COLOR:   ext = (size > 0x143 && (bytes[0x143] & 0x80)) ? ".gbc" : ".gb"; break;
+		default: break;
+		}
+
+		std::string lowerExt = std::filesystem::path(clean).extension().string();
+		std::transform(lowerExt.begin(), lowerExt.end(), lowerExt.begin(), [](unsigned char c) { return (char)std::tolower(c); });
+		static const char* known[] = { ".gb", ".gbc", ".nes", ".gba", ".ch8", ".c8", ".sc8", ".xo8", ".zip" };
+		bool hasKnownExt = false;
+		for (const char* k : known) if (lowerExt == k) hasKnownExt = true;
+		if (!hasKnownExt) clean += ext;
+
+		char* prefPath = SDL_GetPrefPath("Kotambail-Hegde", "Masquerade");
+		if (prefPath == nullptr)
+		{
+			SDL_free(data);
+			return "";
+		}
+		const std::string dir = std::string(prefPath) + "roms/";
+		SDL_free(prefPath);
+		SDL_CreateDirectory(dir.c_str());
+
+		const std::string out = dir + clean;
+		const bool saved = SDL_SaveFile(out.c_str(), data, size);
+		SDL_free(data);
+		if (!saved)
+		{
+			WARN("Could not write %s : %s", out.c_str(), SDL_GetError());
+			return "";
+		}
+		return out;
+	}
+
+	static void SDLCALL handle_android_rom_selected(void* userdata, const char* const* filelist, int filter)
+	{
+		if (filelist == nullptr)
+		{
+			WARN("Android Open ROM failed: %s", SDL_GetError());
+			RETURN;
+		}
+		if (*filelist == nullptr)
+		{
+			INFO("Android Open ROM: cancelled");
+			RETURN;
+		}
+
+		const ROM type = static_cast<ROM>(reinterpret_cast<intptr_t>(userdata));
+		while (*filelist)
+		{
+			INFO("Android Open ROM: %s", *filelist);
+			const std::string local = androidImportRom(*filelist, type);
+			if (!local.empty())
+			{
+				INFO("Android ROM imported to: %s", local.c_str());
+				std::lock_guard<std::mutex> lock(androidPendingRomsMutex);
+				androidPendingRoms.push_back(local);
+			}
+			++filelist;
+		}
+	}
+
+static void SDLCALL handle_android_bios_selected(void* userdata, const char* const* filelist, int filter)
+{
+    if (!filelist || !*filelist) {
+        RETURN;
+    }
+    const char* path = *filelist;
+    INFO("Android Open BIOS: %s", path);
+    
+    ROM type = static_cast<ROM>(reinterpret_cast<intptr_t>(userdata));
+    if (type == ROM::GAME_BOY)              config.put("gb_gbc._dmg_bios_location", std::string(path));
+    else if (type == ROM::GAME_BOY_COLOR)   config.put("gb_gbc._cgb_bios_location", std::string(path));
+    else if (type == ROM::GAME_BOY_ADVANCE) config.put("gba._gba_bios_location", std::string(path));
+
+    boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
+}
+#endif
+
 	void romSelect(ROM type)
 	{
 #ifdef __EMSCRIPTEN__
 		switch (type)
-		{
-		case ROM::CHIP8:              INFO("Chip8");                    emscripten_browser_file::upload(chip8filters, handle_upload_file); BREAK;
-		case ROM::SPACE_INVADERS:     INFO("Space Invaders");           emscripten_browser_file::upload(spaceInvadersFilter, handle_upload_file); BREAK;
-		case ROM::PAC_MAN:
-		case ROM::MS_PAC_MAN:         INFO("PacMan / Ms PacMan");       emscripten_browser_file::upload(pacmanFilter, handle_upload_file); BREAK;
-		case ROM::NES:                INFO("Nintendo Entertainment System"); emscripten_browser_file::upload(nesFilter, handle_upload_file); BREAK;
-		case ROM::GAME_BOY:
-		case ROM::GAME_BOY_COLOR:     INFO("Game Boy / Game Boy Color"); emscripten_browser_file::upload(gbGbcFilter, handle_upload_file); BREAK;
-		case ROM::GAME_BOY_ADVANCE:   INFO("Game Boy Advance");         emscripten_browser_file::upload(gbaFilter, handle_upload_file); BREAK;
-		default: FATAL("Unsupported ROM type : %u", TO_UINT(type)); RETURN;
-		}
-#else // native desktop (NFD)
-		nfdu8char_t* outPath;
-		const nfdpathset_t* outPaths;
-		nfdu8filteritem_t     filters[1];
-		nfdopendialogu8args_t args = { 0 };
+        {
+        case ROM::CHIP8:            INFO("Chip8");                     emscripten_browser_file::upload(chip8filters, handle_upload_file); BREAK;
+        case ROM::SPACE_INVADERS:    INFO("Space Invaders");            emscripten_browser_file::upload(spaceInvadersFilter, handle_upload_file); BREAK;
+        case ROM::PAC_MAN:
+        case ROM::MS_PAC_MAN:        INFO("PacMan / Ms PacMan");        emscripten_browser_file::upload(pacmanFilter, handle_upload_file); BREAK;
+        case ROM::NES:               INFO("Nintendo Entertainment System"); emscripten_browser_file::upload(nesFilter, handle_upload_file); BREAK;
+        case ROM::GAME_BOY:
+        case ROM::GAME_BOY_COLOR:    INFO("Game Boy / Game Boy Color"); emscripten_browser_file::upload(gbGbcFilter, handle_upload_file); BREAK;
+        case ROM::GAME_BOY_ADVANCE:  INFO("Game Boy Advance");          emscripten_browser_file::upload(gbaFilter, handle_upload_file); BREAK;
+        default: FATAL("Unsupported ROM type : %u", TO_UINT(type)); RETURN;
+        }
+#elif defined(__ANDROID__)
+		const SDL_DialogFileFilter* selected_filter = nullptr;
+		bool allow_many = (type == ROM::SPACE_INVADERS || type == ROM::PAC_MAN || type == ROM::MS_PAC_MAN);
 
 		switch (type)
 		{
-		case ROM::GAME_OF_LIFE:   filters->name = golfilters->name;           filters->spec = golfilters->spec;           BREAK;
-		case ROM::CHIP8:          filters->name = chip8filters->name;         filters->spec = chip8filters->spec;         BREAK;
-		case ROM::SPACE_INVADERS: filters->name = spaceInvadersFilter->name;  filters->spec = spaceInvadersFilter->spec;  BREAK;
-		case ROM::PAC_MAN:
-		case ROM::MS_PAC_MAN:     filters->name = pacmanFilter->name;         filters->spec = pacmanFilter->spec;         BREAK;
-		case ROM::NES:            filters->name = nesFilter->name;            filters->spec = nesFilter->spec;            BREAK;
-		case ROM::GAME_BOY:
-		case ROM::GAME_BOY_COLOR: filters->name = gbGbcFilter->name;         filters->spec = gbGbcFilter->spec;          BREAK;
-		case ROM::GAME_BOY_ADVANCE: filters->name = gbaFilter->name;         filters->spec = gbaFilter->spec;            BREAK;
-		default: FATAL("Unsupported ROM type : %u", TO_UINT(type)); RETURN;
+			case ROM::CHIP8:          selected_filter = chip8filters; break;
+			case ROM::SPACE_INVADERS: selected_filter = spaceInvadersFilter; break;
+			case ROM::PAC_MAN:
+			case ROM::MS_PAC_MAN:     selected_filter = pacmanFilter; break;
+			case ROM::NES:            selected_filter = nesFilter; break;
+			case ROM::GAME_BOY:
+			case ROM::GAME_BOY_COLOR: selected_filter = gbGbcFilter; break;
+			case ROM::GAME_BOY_ADVANCE: selected_filter = gbaFilter; break;
+			default: FATAL("Unsupported ROM type : %u", TO_UINT(type)); RETURN;
 		}
 
-		args.filterList = filters;
-		args.filterCount = ONE;
-		nfdresult_t result;
+		(void)selected_filter; // SDL's Android filter->MIME mapping is unreliable for custom extensions; pick anything, type comes from the menu entry
+		SDL_ShowOpenFileDialog(handle_android_rom_selected, reinterpret_cast<void*>(static_cast<intptr_t>(type)), nullptr, nullptr, 0, nullptr, allow_many);
+#else // native desktop (NFD)
+		nfdu8char_t* outPath;
+        const nfdpathset_t* outPaths;
+        nfdu8filteritem_t    filters[1];
+        nfdopendialogu8args_t args = { 0 };
 
-		if (type == ROM::SPACE_INVADERS || type == ROM::PAC_MAN || type == ROM::MS_PAC_MAN)
-		{
-			result = NFD_OpenDialogMultiple(&outPaths, filters, ONE, NULL);
-			if (result == NFD_OKAY)
-			{
-				nfdpathsetsize_t numPaths;
-				NFD_PathSet_GetCount(outPaths, &numPaths);
-				for (nfdpathsetsize_t i = 0; i < numPaths; ++i)
-				{
-					nfdchar_t* path;
-					NFD_PathSet_GetPath(outPaths, i, &path);
-					INFO("Opening %i: %s", (int)i, path);
-					dynamicDragNDropAndMenuSelect.push_back(std::string(path));
-					NFD_PathSet_FreePath(path);
-				}
-				NFD_PathSet_Free(outPaths);
-			}
-			else if (result == NFD_CANCEL)
-			{
-				;
-			}
-			else
-			{
-				FATAL("Error: %s", NFD_GetError());
-			}
-		}
-		else
-		{
-			result = NFD_OpenDialogU8_With(&outPath, &args);
-			if (result == NFD_OKAY)
-			{
-				INFO("Opening : %s", outPath);
-				auto it = std::find(recentlyOpenedList.begin(), recentlyOpenedList.end(), std::string(outPath));
-				if (it != recentlyOpenedList.end()) recentlyOpenedList.erase(it);
-				recentlyOpenedList.push_front(std::string(outPath));
-				if (recentlyOpenedList.size() > _MAX_RECENTLY_USED_LIST_SIZE) recentlyOpenedList.pop_back();
-				dynamicDragNDropAndMenuSelect.push_back(std::string(outPath));
-				NFD_FreePathU8(outPath);
-			}
-			else if (result == NFD_CANCEL)
-			{
-				;
-			}
-			else
-			{
-				FATAL("Error: %s", NFD_GetError());
-			}
-		}
+        switch (type)
+        {
+        case ROM::GAME_OF_LIFE:   filters->name = golfilters->name;          filters->spec = golfilters->spec;          BREAK;
+        case ROM::CHIP8:          filters->name = chip8filters->name;        filters->spec = chip8filters->spec;        BREAK;
+        case ROM::SPACE_INVADERS: filters->name = spaceInvadersFilter->name;  filters->spec = spaceInvadersFilter->spec;  BREAK;
+        case ROM::PAC_MAN:
+        case ROM::MS_PAC_MAN:     filters->name = pacmanFilter->name;        filters->spec = pacmanFilter->spec;        BREAK;
+        case ROM::NES:            filters->name = nesFilter->name;            filters->spec = nesFilter->spec;            BREAK;
+        case ROM::GAME_BOY:
+        case ROM::GAME_BOY_COLOR: filters->name = gbGbcFilter->name;        filters->spec = gbGbcFilter->spec;          BREAK;
+        case ROM::GAME_BOY_ADVANCE: filters->name = gbaFilter->name;        filters->spec = gbaFilter->spec;            BREAK;
+        default: FATAL("Unsupported ROM type : %u", TO_UINT(type)); RETURN;
+        }
+
+        args.filterList = filters;
+        args.filterCount = ONE;
+        nfdresult_t result;
+
+        if (type == ROM::SPACE_INVADERS || type == ROM::PAC_MAN || type == ROM::MS_PAC_MAN)
+        {
+            result = NFD_OpenDialogMultiple(&outPaths, filters, ONE, NULL);
+            if (result == NFD_OKAY)
+            {
+                nfdpathsetsize_t numPaths;
+                NFD_PathSet_GetCount(outPaths, &numPaths);
+                for (nfdpathsetsize_t i = 0; i < numPaths; ++i)
+                {
+                    nfdchar_t* path;
+                    NFD_PathSet_GetPath(outPaths, i, &path);
+                    INFO("Opening %i: %s", (int)i, path);
+                    dynamicDragNDropAndMenuSelect.push_back(std::string(path));
+                    NFD_PathSet_FreePath(path);
+                }
+                NFD_PathSet_Free(outPaths);
+            }
+            else if (result == NFD_CANCEL)
+            {
+                ;
+            }
+            else
+            {
+                FATAL("Error: %s", NFD_GetError());
+            }
+        }
+        else
+        {
+            result = NFD_OpenDialogU8_With(&outPath, &args);
+            if (result == NFD_OKAY)
+            {
+                INFO("Opening : %s", outPath);
+                auto it = std::find(recentlyOpenedList.begin(), recentlyOpenedList.end(), std::string(outPath));
+                if (it != recentlyOpenedList.end()) recentlyOpenedList.erase(it);
+                recentlyOpenedList.push_front(std::string(outPath));
+                if (recentlyOpenedList.size() > _MAX_RECENTLY_USED_LIST_SIZE) recentlyOpenedList.pop_back();
+                dynamicDragNDropAndMenuSelect.push_back(std::string(outPath));
+                NFD_FreePathU8(outPath);
+            }
+            else if (result == NFD_CANCEL)
+            {
+                ;
+            }
+            else
+            {
+                FATAL("Error: %s", NFD_GetError());
+            }
+        }
 #endif // __EMSCRIPTEN__
 	}
 
@@ -2867,143 +3165,200 @@ private:
 	{
 #ifdef __EMSCRIPTEN__
 		switch (type)
-		{
-		case ROM::GAME_BOY:         INFO("GB BIOS");  emscripten_browser_file::upload(bootromfilters, handle_upload_bios<ROM::GAME_BOY>); BREAK;
-		case ROM::GAME_BOY_COLOR:   INFO("GBC BIOS"); emscripten_browser_file::upload(bootromfilters, handle_upload_bios<ROM::GAME_BOY_COLOR>); BREAK;
-		case ROM::GAME_BOY_ADVANCE: INFO("GBA BIOS"); emscripten_browser_file::upload(bootromfilters, handle_upload_bios<ROM::GAME_BOY_ADVANCE>); BREAK;
-		default: FATAL("Unsupported BIOS type : %u", TO_UINT(type)); RETURN;
-		}
-#else // !__EMSCRIPTEN__
+        {
+        case ROM::GAME_BOY:        INFO("GB BIOS");  emscripten_browser_file::upload(bootromfilters, handle_upload_bios<ROM::GAME_BOY>); BREAK;
+        case ROM::GAME_BOY_COLOR:   INFO("GBC BIOS"); emscripten_browser_file::upload(bootromfilters, handle_upload_bios<ROM::GAME_BOY_COLOR>); BREAK;
+        case ROM::GAME_BOY_ADVANCE: INFO("GBA BIOS"); emscripten_browser_file::upload(bootromfilters, handle_upload_bios<ROM::GAME_BOY_ADVANCE>); BREAK;
+        default: FATAL("Unsupported BIOS type : %u", TO_UINT(type)); RETURN;
+        }
+#elif defined(__ANDROID__)
+		SDL_ShowOpenFileDialog(handle_android_bios_selected, reinterpret_cast<void*>(static_cast<intptr_t>(type)), nullptr, bootromfilters, 1, nullptr, false);
+#else // !__EMSCRIPTEN__ && !__ANDROID__
 		nfdu8char_t* outPath = nullptr;
-		const nfdpathset_t* outPaths = nullptr;
-		nfdu8filteritem_t     filters[1];
-		nfdopendialogu8args_t args = { 0 };
+        const nfdpathset_t* outPaths = nullptr;
+        nfdu8filteritem_t    filters[1];
+        nfdopendialogu8args_t args = { 0 };
 
-		filters->name = bootromfilters->name;
-		filters->spec = bootromfilters->spec;
-		args.filterList = filters;
-		args.filterCount = ONE;
+        filters->name = bootromfilters->name;
+        filters->spec = bootromfilters->spec;
+        args.filterList = filters;
+        args.filterCount = ONE;
 
-		nfdresult_t result = NFD_OpenDialogU8_With(&outPath, &args);
-		if (result == NFD_OKAY)
-		{
-			INFO("Load : %s", outPath);
+        nfdresult_t result = NFD_OpenDialogU8_With(&outPath, &args);
+        if (result == NFD_OKAY)
+        {
+            INFO("Load : %s", outPath);
 
-			if (type == ROM::GAME_BOY)              config.put("gb_gbc._dmg_bios_location", std::string(outPath));
-			else if (type == ROM::GAME_BOY_COLOR)   config.put("gb_gbc._cgb_bios_location", std::string(outPath));
-			else if (type == ROM::GAME_BOY_ADVANCE) config.put("gba._gba_bios_location", std::string(outPath));
+            if (type == ROM::GAME_BOY)             config.put("gb_gbc._dmg_bios_location", std::string(outPath));
+            else if (type == ROM::GAME_BOY_COLOR)   config.put("gb_gbc._cgb_bios_location", std::string(outPath));
+            else if (type == ROM::GAME_BOY_ADVANCE) config.put("gba._gba_bios_location", std::string(outPath));
 
-			boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
-			NFD_FreePathU8(outPath);
-		}
-		else if (result == NFD_CANCEL)
-		{
-			;
-		}
-		else
-		{
-			FATAL("Error: %s", NFD_GetError());
-		}
+            boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
+            NFD_FreePathU8(outPath);
+        }
+        else if (result == NFD_CANCEL)
+        {
+            ;
+        }
+        else
+        {
+            FATAL("Error: %s", NFD_GetError());
+        }
 #endif // __EMSCRIPTEN__
 	}
 
-	void loadSIAudioWAV(std::string type)
+#ifdef __ANDROID__
+	static void SDLCALL handle_android_si_audio_selected(void* userdata, const char* const* filelist, int filter)
 	{
-#ifndef __EMSCRIPTEN__
-		nfdu8char_t* outPath = nullptr;
-		const nfdpathset_t* outPaths = nullptr;
-		nfdu8filteritem_t     filters[1];
-		nfdopendialogu8args_t args = { 0 };
-
-		filters->name = spaceInvadersAudioFilter->name;
-		filters->spec = spaceInvadersAudioFilter->spec;
-		args.filterList = filters;
-		args.filterCount = ONE;
-
-		nfdresult_t result = NFD_OpenDialogU8_With(&outPath, &args);
-		if (result == NFD_OKAY)
+		if (!filelist || !*filelist) 
 		{
-			INFO("Load : %s", outPath);
-			std::string option = "spaceinvaders._" + type;
-			config.put(option, std::string(outPath));
-			boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
-			NFD_FreePathU8(outPath);
+			RETURN;
 		}
-		else if (result == NFD_CANCEL)
+		const char* path = *filelist;
+		INFO("Android Open SI Audio: %s", path);
+		std::string option = "spaceinvaders._" + s_pending_si_audio_type;
+		config.put(option, std::string(path));
+		boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
+	}
+
+	static void SDLCALL handle_android_barcode_selected(void* userdata, const char* const* filelist, int filter)
+	{
+		if (!filelist || !*filelist) 
 		{
-			;
+			RETURN;
+		}
+		const char* path = *filelist;
+		INFO("Android Open Barcode: %s", path);
+
+		BYTE* barcode_ptr = static_cast<BYTE*>(userdata);
+		std::ifstream file(path, std::ios::binary);
+		if (file.is_open())
+		{
+			BYTE fileBytes[13] = {};
+			file.read(reinterpret_cast<char*>(fileBytes), 13);
+			if (file.gcount() == 13)
+			{
+				memcpy(barcode_ptr, fileBytes, 13);
+			}
+			else
+			{
+				WARN("Barcode .bin file is not exactly 13 bytes: %s", path);
+			}
 		}
 		else
 		{
-			FATAL("Error: %s", NFD_GetError());
+			WARN("Could not open barcode .bin file: %s", path);
 		}
-#endif // !__EMSCRIPTEN__
+	}
+#endif
+
+	void loadSIAudioWAV(std::string type)
+	{
+#ifdef __EMSCRIPTEN__
+		// TODO: Handle browser upload for WAV
+#elif defined(__ANDROID__)
+		s_pending_si_audio_type = type;
+		SDL_ShowOpenFileDialog(handle_android_si_audio_selected, nullptr, nullptr, spaceInvadersAudioFilter, 1, nullptr, false);
+#else // native desktop (NFD)
+		nfdu8char_t* outPath = nullptr;
+       const nfdpathset_t* outPaths = nullptr;
+       nfdu8filteritem_t     filters[1];
+       nfdopendialogu8args_t args = { 0 };
+
+       filters->name = spaceInvadersAudioFilter->name;
+       filters->spec = spaceInvadersAudioFilter->spec;
+       args.filterList = filters;
+       args.filterCount = ONE;
+
+       nfdresult_t result = NFD_OpenDialogU8_With(&outPath, &args);
+       if (result == NFD_OKAY)
+       {
+          INFO("Load : %s", outPath);
+          std::string option = "spaceinvaders._" + type;
+          config.put(option, std::string(outPath));
+          boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
+          NFD_FreePathU8(outPath);
+       }
+       else if (result == NFD_CANCEL)
+       {
+          ;
+       }
+       else
+       {
+          FATAL("Error: %s", NFD_GetError());
+       }
+#endif // __EMSCRIPTEN__
 	}
 
 	FLAG barcodeUpload(BYTE* barcode)
 	{
 #ifdef __EMSCRIPTEN__
 		// TODO: Handle browser .bin upload
-#else // !__EMSCRIPTEN__
+       RETURN NO;
+#elif defined(__ANDROID__)
+		SDL_DialogFileFilter barcodeFilter[1] = { { "Binary", "bin,BIN" } };
+		SDL_ShowOpenFileDialog(handle_android_barcode_selected, barcode, nullptr, barcodeFilter, 1, nullptr, false);
+		RETURN YES;
+#else // native desktop (NFD)
 		nfdu8char_t* outPath = nullptr;
-		const nfdpathset_t* outPaths = nullptr;
-		nfdu8filteritem_t     filters[1];
-		nfdopendialogu8args_t args = { 0 };
+       const nfdpathset_t* outPaths = nullptr;
+       nfdu8filteritem_t     filters[1];
+       nfdopendialogu8args_t args = { 0 };
 
-		filters->name = "Binary";
-		filters->spec = "bin";
+       filters->name = "Binary";
+       filters->spec = "bin";
 
-		args.filterList = filters;
-		args.filterCount = ONE;
+       args.filterList = filters;
+       args.filterCount = ONE;
 
-		nfdresult_t result = NFD_OpenDialogU8_With(&outPath, &args);
-		if (result == NFD_OKAY)
-		{
-			INFO("Load Barcode : %s", outPath);
+       nfdresult_t result = NFD_OpenDialogU8_With(&outPath, &args);
+       if (result == NFD_OKAY)
+       {
+          INFO("Load Barcode : %s", outPath);
 
-			// Assumption (not confirmed against any hardware reference -- flagging
-			// per project convention): the .bin file is exactly the 13 raw ASCII
-			// digit bytes, no header/delimiter -- the same bytes the "Scan" button
-			// already builds by hand from typed input. barcodeScan()/the wire
-			// protocol expects ASCII digits (Shonumi's Barcode_Boy.txt, section 4:
-			// "the 'numbers' are represented as ASCII instead of hex"), so this
-			// reads the file as-is with no digit conversion.
-			std::ifstream file(outPath, std::ios::binary);
-			FLAG loadedOK = NO;
+          // Assumption (not confirmed against any hardware reference -- flagging
+          // per project convention): the .bin file is exactly the 13 raw ASCII
+          // digit bytes, no header/delimiter -- the same bytes the "Scan" button
+          // already builds by hand from typed input. barcodeScan()/the wire
+          // protocol expects ASCII digits (Shonumi's Barcode_Boy.txt, section 4:
+          // "the 'numbers' are represented as ASCII instead of hex"), so this
+          // reads the file as-is with no digit conversion.
+          std::ifstream file(outPath, std::ios::binary);
+          FLAG loadedOK = NO;
 
-			if (file.is_open())
-			{
-				BYTE fileBytes[13] = {};
-				file.read(reinterpret_cast<char*>(fileBytes), 13);
+          if (file.is_open())
+          {
+             BYTE fileBytes[13] = {};
+             file.read(reinterpret_cast<char*>(fileBytes), 13);
 
-				if (file.gcount() == 13)
-				{
-					memcpy(barcode, fileBytes, 13);
-					loadedOK = YES;
-				}
-				else
-				{
-					WARN("Barcode .bin file is not exactly 13 bytes: %s", outPath);
-				}
-			}
-			else
-			{
-				WARN("Could not open barcode .bin file: %s", outPath);
-			}
+             if (file.gcount() == 13)
+             {
+                memcpy(barcode, fileBytes, 13);
+                loadedOK = YES;
+             }
+             else
+             {
+                WARN("Barcode .bin file is not exactly 13 bytes: %s", outPath);
+             }
+          }
+          else
+          {
+             WARN("Could not open barcode .bin file: %s", outPath);
+          }
 
-			NFD_FreePathU8(outPath);
+          NFD_FreePathU8(outPath);
 
-			RETURN loadedOK;
-		}
-		else if (result == NFD_CANCEL)
-		{
-			RETURN NO;
-		}
-		else
-		{
-			FATAL("Error: %s", NFD_GetError());
-			RETURN NO;
-		}
+          RETURN loadedOK;
+       }
+       else if (result == NFD_CANCEL)
+       {
+          RETURN NO;
+       }
+       else
+       {
+          FATAL("Error: %s", NFD_GetError());
+          RETURN NO;
+       }
 #endif // __EMSCRIPTEN__
 	}
 
@@ -3445,7 +3800,7 @@ public:
 				RETURN INVALID;
 			}
 
-#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__)
+#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__)&& !defined(__ANDROID__)
 			// ---- SDL_net init -------------------------------------
 			if (!NET_Init())
 			{
@@ -3455,7 +3810,7 @@ public:
 			}
 
 			abstractEmulationLinkSession_t& linkSession = abstractEmulation_t::getLinkSession();
-#endif // !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__)
+#endif // !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__)&& !defined(__ANDROID__)
 
 			// ---- GLSL / context version selection -------------------
 #if defined(IMGUI_IMPL_OPENGL_ES2)
@@ -3505,11 +3860,21 @@ public:
 			SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
 			SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
 			Uint32 window_flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN;
+#ifdef __ANDROID__
+			window_flags |= SDL_WINDOW_FULLSCREEN;
+#endif
+#ifdef __ANDROID__
+			SDL_Window* window = SDL_CreateWindow(
+				"Masquerade Emulator",
+				0, 0,
+				window_flags);
+#else
 			SDL_Window* window = SDL_CreateWindow(
 				"Masquerade Emulator",
 				(current_instance->getTotalScreenWidth() * current_instance->getTotalPixelWidth()) + WINDOW_PADDING,
 				(current_instance->getTotalScreenHeight() * current_instance->getTotalPixelHeight()) + WINDOW_PADDING + WINDOW_PADDING,
 				window_flags);
+#endif
 			if (window == nullptr)
 			{
 				FATAL("Error: SDL_CreateWindow(): %s", SDL_GetError()); RETURN -ONE;
@@ -3546,13 +3911,29 @@ public:
 			io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 			io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
 			io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+#ifndef __ANDROID__
 			io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+#endif
 			io.ConfigWindowsMoveFromTitleBarOnly = true;
 
 #if (ENABLED_IMGUI_DEFAULT_THEME == YES)
 			ImGui::StyleColorsDark();
 #else
 			setupThemes();
+#endif
+
+#ifdef __ANDROID__
+			// UI is laid out in desktop-sized logical units: logical = pixels / androidUiScale.
+			// Density on this phone is 3.5, so 0.45 gives ~1.6 (about 2000x910 logical in landscape). Tune via mods._ANDROID_UI_SCALE.
+			float androidUiScale = SDL_GetWindowDisplayScale(window);
+			if (androidUiScale <= 0.0f)
+				androidUiScale = 1.0f;
+			androidUiScale *= config.get<float>("mods._ANDROID_UI_SCALE", 0.6f);
+			if (androidUiScale < 1.0f)
+				androidUiScale = 1.0f;
+
+			// Font is baked at 16 * scale (see AddFontFromMemoryTTF below) and drawn at 1/scale in logical units: crisp, not blurry
+			io.FontGlobalScale = 1.0f / (androidUiScale * 1.4f); // font is baked 1.4x larger; menus drawn at 1.4x (see menu bar block)
 #endif
 
 			ImGuiStyle& style = ImGui::GetStyle();
@@ -3565,9 +3946,29 @@ public:
 			ImGui_ImplSDL3_InitForOpenGL(window, gl_context);
 			ImGui_ImplOpenGL3_Init(glsl_version);
 
+#ifdef __ANDROID__
+			{
+				size_t androidFontSize = 0;
+				void* androidFontData = SDL_LoadFile("ui/fonts/segoeui.ttf", &androidFontSize); // APK asset, intentionally kept for the app lifetime
+				if (androidFontData != nullptr)
+				{
+					ImFontConfig androidFontCfg;
+					androidFontCfg.FontDataOwnedByAtlas = false;
+					io.Fonts->AddFontFromMemoryTTF(androidFontData, (int)androidFontSize, 16.0f * androidUiScale * 1.4f, &androidFontCfg);
+				}
+				else
+				{
+					FATAL("Could not load ui/fonts/segoeui.ttf: %s", SDL_GetError());
+					ImFontConfig androidFontCfg;
+					androidFontCfg.SizePixels = 13.0f * androidUiScale * 1.4f;
+					io.Fonts->AddFontDefault(&androidFontCfg);
+				}
+			}
+#else
 			io.Fonts->AddFontFromFileTTF((std::filesystem::path(_FONT_LOCATION) / "segoeui.ttf").string().c_str(), 16.0f);
+#endif
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__)&& !defined(__ANDROID__)
 			if (NFD_Init() != NFD_OKAY)
 			{
 				FATAL("Error: NFD_Init(): %s", NFD_GetError()); RETURN -ONE;
@@ -3582,7 +3983,7 @@ public:
 			SetDWMTitlebarColor(window, ImGui::GetStyle().Colors[ImGuiCol_WindowBg]);
 #endif
 
-#if !defined(__EMSCRIPTEN__) && !defined(IMGUI_IMPL_OPENGL_ES2) && !defined(IMGUI_IMPL_OPENGL_ES3)
+#if !defined(__EMSCRIPTEN__)&& !defined(__ANDROID__) && !defined(IMGUI_IMPL_OPENGL_ES2) && !defined(IMGUI_IMPL_OPENGL_ES3)
 			gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress);
 #endif
 
@@ -3591,17 +3992,21 @@ public:
 
 			FlushEarlyLogsToImGui();
 
-#ifndef __EMSCRIPTEN__
+#if defined(__ANDROID__)
+			std::string imLoc = "ui/sprites/BG1.png";
+#elif defined(__EMSCRIPTEN__)
+			std::string imLoc = "assets/ui/sprites/BG1.png";
+#else
 			auto uiSpritesDir = config.get<std::string>("internal._ui_sprites_directory", "");
 			if (uiSpritesDir.empty())
 			{
 				FATAL("Could not locate the UI sprites directory"); RETURN - ONE;
 			}
-			std::string imLoc = uiSpritesDir + "\\BG1.png";
-#else
-			std::string imLoc = "assets/ui/sprites/BG1.png";
+
+			std::filesystem::path imPath = std::filesystem::path(uiSpritesDir) / "BG1.png";
+			std::string imLoc = imPath.string();
 #endif
-			int    clickWinWidth = 0, clickWinHeight = 0;
+			int clickWinWidth = 0, clickWinHeight = 0;
 			uint32_t clickWinTexture = 0;
 			FLAG clickWinStatus = LoadTextureFromFile(imLoc.c_str(), &clickWinTexture, &clickWinWidth, &clickWinHeight);
 			IM_ASSERT(clickWinStatus);
@@ -3682,14 +4087,70 @@ public:
 			io.IniFilename = _IMGUI_LOCATION.c_str();
 
 			// Shared SDL event handler
+#ifdef __ANDROID__
+			int  androidSafeX = 0, androidSafeY = 0;
+			bool androidMenuVisible = true;
+			std::unordered_map<SDL_FingerID, ImVec2> androidFingers; // active touches in ImGui logical coordinates
+#endif
 			auto handleSDLEvent = [&](SDL_Event& e)
 				{
+#ifdef __ANDROID__
+					if (e.type == SDL_EVENT_MOUSE_MOTION)
+					{
+						e.motion.x = (e.motion.x - (float)androidSafeX) / androidUiScale;
+						e.motion.y = (e.motion.y - (float)androidSafeY) / androidUiScale;
+					}
+					else if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN || e.type == SDL_EVENT_MOUSE_BUTTON_UP)
+					{
+						e.button.x = (e.button.x - (float)androidSafeX) / androidUiScale;
+						e.button.y = (e.button.y - (float)androidSafeY) / androidUiScale;
+					}
+					else if (e.type == SDL_EVENT_MOUSE_WHEEL)
+					{
+						e.wheel.mouse_x = (e.wheel.mouse_x - (float)androidSafeX) / androidUiScale;
+						e.wheel.mouse_y = (e.wheel.mouse_y - (float)androidSafeY) / androidUiScale;
+					}
+#endif
+#ifdef __ANDROID__
+					if (e.type == SDL_EVENT_FINGER_DOWN || e.type == SDL_EVENT_FINGER_MOTION)
+					{
+						int fw = 0, fh = 0;
+						SDL_GetWindowSize(window, &fw, &fh);
+						androidFingers[e.tfinger.fingerID] = ImVec2(
+							(e.tfinger.x * (float)fw - (float)androidSafeX) / androidUiScale,
+							(e.tfinger.y * (float)fh - (float)androidSafeY) / androidUiScale);
+					}
+					else if (e.type == SDL_EVENT_FINGER_UP || e.type == SDL_EVENT_FINGER_CANCELED)
+					{
+						androidFingers.erase(e.tfinger.fingerID);
+					}
+#endif
 					ImGui_ImplSDL3_ProcessEvent(&e);
 					if (e.type == SDL_EVENT_QUIT)
 						done = true;
 					if (e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED && e.window.windowID == SDL_GetWindowID(window))
 						done = true;
+#ifdef __EMSCRIPTEN__
 					if (e.type == SDL_EVENT_DROP_FILE)
+					{
+						const std::vector<std::string> imported = importDroppedFileToPersistent(e.drop.data);
+						if (!imported.empty())
+						{
+							savePersistentFS(onSavePersistentFSComplete);
+							for (const std::string& path : imported)
+							{
+								auto it = std::find(recentlyOpenedList.begin(), recentlyOpenedList.end(), path);
+								if (it != recentlyOpenedList.end()) recentlyOpenedList.erase(it);
+								recentlyOpenedList.push_front(path);
+								if (recentlyOpenedList.size() > _MAX_RECENTLY_USED_LIST_SIZE) recentlyOpenedList.pop_back();
+								dynamicDragNDropAndMenuSelect.push_back(path);
+							}
+						}
+					}
+					if (false) // desktop/Android drop handling below is not used on web
+#else
+					if (e.type == SDL_EVENT_DROP_FILE)
+#endif
 					{
 						auto it = std::find(recentlyOpenedList.begin(), recentlyOpenedList.end(), std::string(e.drop.data));
 						if (it != recentlyOpenedList.end()) recentlyOpenedList.erase(it);
@@ -3733,7 +4194,7 @@ public:
 							static FLAG showCheatWin = NO;
 							static FLAG maintainAspectRatio = config.get<FLAG>("mods._MAINTAIN_ASPECT_RATIO", true);
 							static FLAG accurateInputSampling = config.get<FLAG>("mods._ENABLE_ACCURATE_INPUT_SAMPLING", false);
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__)&& !defined(__ANDROID__)
 							static FLAG showBiosPrompt = !to_bool(config.get<std::string>("internal._first_boot_bios_prompt_done", "false"));
 #else
 							static const FLAG showBiosPrompt = NO;
@@ -3744,6 +4205,36 @@ public:
 							static FLAG showSgbTimingViewer = NO;
 
 							tickAtStart = SDL_GetTicksNS();
+#ifdef __EMSCRIPTEN__
+							{
+								// SDL syncs the canvas drawing-buffer size to its CSS size only on a browser 'resize' event. On first load that
+								// event may never fire, so the UI stays stretched ("zoomed") until the tab moves to another monitor. Send it ourselves.
+								static int webResizeSyncFrame = 0;
+								if (webResizeSyncFrame < 120)
+								{
+									++webResizeSyncFrame;
+									if (webResizeSyncFrame == 3 || webResizeSyncFrame == 60)
+										emscripten_run_script("window.dispatchEvent(new Event('resize'));");
+								}
+							}
+#endif
+#ifdef __ANDROID__
+							{
+								std::lock_guard<std::mutex> lock(androidPendingRomsMutex);
+								for (const std::string& pending : androidPendingRoms)
+								{
+									if (androidPendingRoms.size() == ONE)
+									{
+										auto it = std::find(recentlyOpenedList.begin(), recentlyOpenedList.end(), pending);
+										if (it != recentlyOpenedList.end()) recentlyOpenedList.erase(it);
+										recentlyOpenedList.push_front(pending);
+										if (recentlyOpenedList.size() > _MAX_RECENTLY_USED_LIST_SIZE) recentlyOpenedList.pop_back();
+									}
+									dynamicDragNDropAndMenuSelect.push_back(pending);
+								}
+								androidPendingRoms.clear();
+							}
+#endif
 
 							if (pendingWindowScale != RESET)
 							{
@@ -3772,7 +4263,11 @@ public:
 							SDL_Event event;
 							while (SDL_PollEvent(&event)) handleSDLEvent(event);
 
+#ifdef __EMSCRIPTEN__
+							if (false) // the browser already pauses rendering for hidden tabs; SDL's MINIMIZED flag can stay stuck (Firefox)
+#else
 							if (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED)
+#endif
 							{
 								SDL_Delay(10); RETURN;
 							}
@@ -3780,14 +4275,64 @@ public:
 							// ---- Dear ImGui frame ---------------------------
 							ImGui_ImplOpenGL3_NewFrame();
 							ImGui_ImplSDL3_NewFrame();
+#ifdef __ANDROID__
+							{
+								// Lay ImGui out inside the safe area only (re-queried every frame, so rotation just works)
+								int winW = 0, winH = 0;
+								SDL_GetWindowSize(window, &winW, &winH);
+								// Curved-edge phones: keep the UI a fixed margin (logical units) away from the left/right edges.
+								// Tune with mods._ANDROID_EDGE_MARGIN; mods._ANDROID_USE_SAFE_AREA=true uses SDL's cutout safe area instead.
+								static const float androidEdgeMargin = config.get<float>("mods._ANDROID_EDGE_MARGIN", 32.0f);
+								static const bool  androidUseSafeArea = config.get<bool>("mods._ANDROID_USE_SAFE_AREA", true);
+								const int edgePx = (int)(androidEdgeMargin * androidUiScale);
+								SDL_Rect safe = { 0, 0, winW, winH }; // full-bleed: backgrounds run edge to edge, only content is inset (DisplaySafeAreaPadding below)
+								(void)edgePx;
+								SDL_Rect queried = {};
+								if (androidUseSafeArea && SDL_GetWindowSafeArea(window, &queried) && queried.w > 0 && queried.h > 0)
+									safe = queried;
+								androidSafeX = safe.x;
+								androidSafeY = safe.y;
+								io.DisplaySize = ImVec2((float)safe.w / androidUiScale, (float)safe.h / androidUiScale);
+								io.DisplayFramebufferScale = ImVec2(androidUiScale, androidUiScale);
+								{
+									ImGuiStyle& touchStyle = ImGui::GetStyle();
+									touchStyle.FramePadding = ImVec2(18.0f, 16.0f);
+									touchStyle.ItemSpacing = ImVec2(18.0f, 22.0f);
+									touchStyle.ItemInnerSpacing = ImVec2(10.0f, 8.0f);
+									touchStyle.TouchExtraPadding = ImVec2(8.0f, 8.0f);
+									touchStyle.ScrollbarSize = 24.0f;
+									touchStyle.GrabMinSize = 24.0f;
+									touchStyle.DisplaySafeAreaPadding = ImVec2(androidEdgeMargin, 0.0f); // moves the menu bar's items clear of the curved edge, bar background stays full-width
+									gAndroidEdgeLogical = androidEdgeMargin;
+								}
+							}
+#endif
 							ImGui::NewFrame();
+#ifdef __ANDROID__
+							{
+								// Extend the menu bar colour into the edge margins so it still looks edge-to-edge
+								int winW = 0, winH = 0;
+								SDL_GetWindowSize(window, &winW, &winH);
+								const float leftM = (float)androidSafeX / androidUiScale;
+								const float rightM = (float)(winW - androidSafeX) / androidUiScale - io.DisplaySize.x;
+								const float barH = ImGui::GetFrameHeight();
+								ImDrawList* edgeDraw = ImGui::GetBackgroundDrawList();
+								const float topM = (float)androidSafeY / androidUiScale;
+								edgeDraw->PushClipRect(ImVec2(-leftM, -topM), ImVec2(io.DisplaySize.x + rightM, io.DisplaySize.y), false);
+								edgeDraw->AddRectFilled(ImVec2(-leftM, -topM), ImVec2(io.DisplaySize.x + rightM, 0.0f), ImGui::GetColorU32(ImGuiCol_MenuBarBg));
+								const ImU32 barCol = ImGui::GetColorU32(ImGuiCol_MenuBarBg);
+								edgeDraw->AddRectFilled(ImVec2(-leftM, 0.0f), ImVec2(0.0f, barH), barCol);
+								edgeDraw->AddRectFilled(ImVec2(io.DisplaySize.x, 0.0f), ImVec2(io.DisplaySize.x + rightM, barH), barCol);
+								edgeDraw->PopClipRect();
+							}
+#endif
 
 							ImGuiDockNodeFlags dockSpaceFlags = ImGuiDockNodeFlags_AutoHideTabBar;
 							if (!showUpdWin && !showAboutWin)
 								dockSpaceFlags |= ImGuiDockNodeFlags_NoTabBar;
 							ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(), dockSpaceFlags);
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
 							// Only show the prompt if it's the first boot AND the init splash screen is dismissed
 							if (showBiosPrompt == YES && initScreen == NO)
 							{
@@ -3866,11 +4411,20 @@ public:
 
 								ImGui::EndPopup();
 							}
-#endif // !__EMSCRIPTEN__
+#endif // !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
 
 							if (initScreen == NO)
 							{
+#ifdef __ANDROID__
+								// Touch-sized menu: 1.4x text and roomier rows, applied only while the menu bar and its popups are submitted
+								io.FontGlobalScale = 1.0f / androidUiScale;
+								ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(28.0f, 26.0f));
+								ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(28.0f, 34.0f));
+								ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(16.0f, 16.0f));
+								if ((androidMenuVisible || current_instance->getEmulationID() == EMULATION_ID::DEFAULT_ID) && ImGui::BeginMainMenuBar())
+#else
 								if (ImGui::BeginMainMenuBar())
+#endif
 								{
 									// ---- File menu ----------------------------------
 									if (ImGui::BeginMenu("File"))
@@ -3968,10 +4522,13 @@ public:
 										if (ImGui::MenuItem("Quit"))
 										{
 #ifdef __EMSCRIPTEN__
-											clearPersistentFS(onClearPersistentFSComplete);
-											blocking_delay_ms(ONEHUNDRED);
-#endif
+											// Return to the home screen WITHOUT wiping stored ROMs/BIOS; wait for IndexedDB to finish saving first
+											SavePersistentFSComplete = NO;
+											savePersistentFS(onSavePersistentFSComplete);
+											webQuitPending = YES;
+#else
 											done = YES;
+#endif
 										}
 										ImGui::EndMenu();
 									}
@@ -4436,7 +4993,7 @@ public:
 											showLoggerWin = (showLoggerWin == NO) ? YES : NO;
 										}
 										ImGui::Separator();
-#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__) && !defined(ENABLE_OTA_EXECUTABLE) && !defined(ENABLE_SERVER_EXECUTABLE)
+#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__)&& !defined(__ANDROID__) && !defined(ENABLE_OTA_EXECUTABLE) && !defined(ENABLE_SERVER_EXECUTABLE)
 										FLAG isNetworkOptionEnabled = YES;
 #else
 										FLAG isNetworkOptionEnabled = NO;
@@ -4448,7 +5005,7 @@ public:
 #endif // !__RPI_PICO__ && !ENABLE_OTA_EXECUTABLE && !ENABLE_SERVER_EXECUTABLE 
 										if (ImGui::BeginMenu("Network", isNetworkOptionEnabled))
 										{
-#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__) && !defined(ENABLE_OTA_EXECUTABLE) && !defined(ENABLE_SERVER_EXECUTABLE)
+#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__)&& !defined(__ANDROID__) && !defined(ENABLE_OTA_EXECUTABLE) && !defined(ENABLE_SERVER_EXECUTABLE)
 											const LinkConnectionState connectionState = linkSession.getConnectionState();
 											const FLAG connected = connectionState == LinkConnectionState::CONNECTED || connectionState == LinkConnectionState::LINK_READY;
 											const FLAG linkReady = connectionState == LinkConnectionState::LINK_READY;
@@ -4612,7 +5169,146 @@ public:
 
 									ImGui::EndMainMenuBar();
 								} // BeginMainMenuBar
+#ifdef __ANDROID__
+								ImGui::PopStyleVar(3);
+								io.FontGlobalScale = 1.0f / (androidUiScale * 1.4f);
+#endif
 
+#ifdef __ANDROID__
+								{
+									const EMULATION_ID androidEmuId = current_instance->getEmulationID();
+									static EMULATION_ID androidPrevEmuId = EMULATION_ID::DEFAULT_ID;
+									static float        androidMenuIdle = 0.0f;
+									if (androidEmuId != androidPrevEmuId)
+									{
+										androidMenuVisible = (androidEmuId == EMULATION_ID::DEFAULT_ID);
+										androidPrevEmuId = androidEmuId;
+										androidMenuIdle = 0.0f;
+									}
+									if (androidEmuId != EMULATION_ID::DEFAULT_ID)
+									{
+										const bool popupOpen = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
+										if (androidMenuVisible)
+										{
+											androidMenuIdle = (popupOpen || ImGui::IsMouseDown(0)) ? 0.0f : androidMenuIdle + io.DeltaTime;
+											if (androidMenuIdle > 4.0f) androidMenuVisible = false;
+										}
+										const float btn = 64.0f;
+										const float topY = androidMenuVisible ? 71.0f : 8.0f; // bar is ~62 logical units tall now
+										ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - btn - 12.0f, topY));
+										ImGui::SetNextWindowSize(ImVec2(btn, btn));
+										ImGui::SetNextWindowBgAlpha(0.0f);
+										ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+										ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.45f));
+										if (ImGui::Begin("##AndroidMenuToggle", nullptr,
+											ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+											ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav))
+										{
+											if (ImGui::Button(androidMenuVisible ? "Hide" : "Menu", ImVec2(btn, btn)))
+											{
+												androidMenuVisible = !androidMenuVisible;
+												androidMenuIdle = 0.0f;
+											}
+										}
+										ImGui::End();
+										ImGui::PopStyleColor();
+										ImGui::PopStyleVar();
+									}
+								}
+#endif
+#ifdef __ANDROID__
+								{
+									static const EmuKey androidPadKeys[8] = { EmuKey::UP, EmuKey::DOWN, EmuKey::LEFT, EmuKey::RIGHT, EmuKey::A, EmuKey::B, EmuKey::START, EmuKey::SELECT };
+									static bool         androidPadPrev[8] = {};
+									static const bool   androidTouchControls = config.get<bool>("mods._ANDROID_TOUCH_CONTROLS", true);
+
+									bool padNow[8] = {};
+									const bool padActive = androidTouchControls
+										&& current_instance->getEmulationID() != EMULATION_ID::DEFAULT_ID
+										&& !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
+
+									const float  W = io.DisplaySize.x, H = io.DisplaySize.y;
+									const ImVec2 dpadC(150.0f, H - 190.0f);
+									const float  dpadR = 110.0f;
+									const float  arm = dpadR * 0.36f;
+									const ImVec2 btnB(W - 270.0f, H - 120.0f);
+									const ImVec2 btnA(W - 130.0f, H - 210.0f);
+									const float  btnR = 62.0f;
+									const ImVec2 selMin(W * 0.5f - 126.0f, H - 96.0f), selMax(W * 0.5f - 16.0f, H - 44.0f);
+									const ImVec2 staMin(W * 0.5f + 16.0f, H - 96.0f), staMax(W * 0.5f + 126.0f, H - 44.0f);
+
+									if (padActive)
+									{
+										for (const auto& f : androidFingers)
+										{
+											const ImVec2 p = f.second;
+											const float dx = p.x - dpadC.x, dy = p.y - dpadC.y;
+											if (dx * dx + dy * dy < (dpadR * 1.7f) * (dpadR * 1.7f))
+											{
+												if (dy < -0.35f * dpadR) padNow[0] = true;
+												if (dy > 0.35f * dpadR) padNow[1] = true;
+												if (dx < -0.35f * dpadR) padNow[2] = true;
+												if (dx > 0.35f * dpadR) padNow[3] = true;
+											}
+											auto inCircle = [&](const ImVec2& c)
+												{
+													const float ax = p.x - c.x, ay = p.y - c.y;
+													return ax * ax + ay * ay < (btnR * 1.3f) * (btnR * 1.3f);
+												};
+											if (inCircle(btnA)) padNow[4] = true;
+											if (inCircle(btnB)) padNow[5] = true;
+											if (p.x >= staMin.x && p.x <= staMax.x && p.y >= staMin.y - 12.0f && p.y <= staMax.y + 12.0f) padNow[6] = true;
+											if (p.x >= selMin.x && p.x <= selMax.x && p.y >= selMin.y - 12.0f && p.y <= selMax.y + 12.0f) padNow[7] = true;
+										}
+									}
+
+									for (int i = 0; i < 8; ++i)
+									{
+										if (padNow[i] != androidPadPrev[i])
+										{
+											current_instance->onKeyEvent(androidPadKeys[i], padNow[i] ? EmuKeyAction::PRESSED : EmuKeyAction::RELEASED);
+											androidPadPrev[i] = padNow[i];
+										}
+									}
+
+									if (padActive)
+									{
+										ImDrawList* dl = ImGui::GetForegroundDrawList();
+										const ImU32 cIdle = IM_COL32(255, 255, 255, 70);
+										const ImU32 cDown = IM_COL32(255, 255, 255, 150);
+										const ImU32 cLine = IM_COL32(255, 255, 255, 120);
+										const ImU32 cText = IM_COL32(255, 255, 255, 220);
+
+										// D-pad: plus shape, pressed arm highlighted
+										dl->AddRectFilled(ImVec2(dpadC.x - dpadR, dpadC.y - arm), ImVec2(dpadC.x + dpadR, dpadC.y + arm), cIdle, 14.0f);
+										dl->AddRectFilled(ImVec2(dpadC.x - arm, dpadC.y - dpadR), ImVec2(dpadC.x + arm, dpadC.y + dpadR), cIdle, 14.0f);
+										if (padNow[0]) dl->AddRectFilled(ImVec2(dpadC.x - arm, dpadC.y - dpadR), ImVec2(dpadC.x + arm, dpadC.y - arm), cDown, 14.0f);
+										if (padNow[1]) dl->AddRectFilled(ImVec2(dpadC.x - arm, dpadC.y + arm), ImVec2(dpadC.x + arm, dpadC.y + dpadR), cDown, 14.0f);
+										if (padNow[2]) dl->AddRectFilled(ImVec2(dpadC.x - dpadR, dpadC.y - arm), ImVec2(dpadC.x - arm, dpadC.y + arm), cDown, 14.0f);
+										if (padNow[3]) dl->AddRectFilled(ImVec2(dpadC.x + arm, dpadC.y - arm), ImVec2(dpadC.x + dpadR, dpadC.y + arm), cDown, 14.0f);
+
+										auto label = [&](const ImVec2& c, const char* s, float size)
+											{
+												const ImVec2 ts = ImGui::GetFont()->CalcTextSizeA(size, FLT_MAX, 0.0f, s);
+												dl->AddText(ImGui::GetFont(), size, ImVec2(c.x - ts.x * 0.5f, c.y - ts.y * 0.5f), cText, s);
+											};
+
+										dl->AddCircleFilled(btnA, btnR, padNow[4] ? cDown : cIdle, 48);
+										dl->AddCircle(btnA, btnR, cLine, 48, 3.0f);
+										label(btnA, "A", 30.0f);
+										dl->AddCircleFilled(btnB, btnR, padNow[5] ? cDown : cIdle, 48);
+										dl->AddCircle(btnB, btnR, cLine, 48, 3.0f);
+										label(btnB, "B", 30.0f);
+
+										dl->AddRectFilled(selMin, selMax, padNow[7] ? cDown : cIdle, 24.0f);
+										dl->AddRect(selMin, selMax, cLine, 24.0f, 0, 3.0f);
+										label(ImVec2((selMin.x + selMax.x) * 0.5f, (selMin.y + selMax.y) * 0.5f), "SELECT", 20.0f);
+										dl->AddRectFilled(staMin, staMax, padNow[6] ? cDown : cIdle, 24.0f);
+										dl->AddRect(staMin, staMax, cLine, 24.0f, 0, 3.0f);
+										label(ImVec2((staMin.x + staMax.x) * 0.5f, (staMin.y + staMax.y) * 0.5f), "START", 20.0f);
+									}
+								}
+#endif
 								// ---- Emulation window ----------------------------
 								ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarSize, 0.5f * ImGui::GetStyle().ScrollbarSize);
 								ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
@@ -4630,6 +5326,23 @@ public:
 								// Exact screen-space rect of the rendered emu framebuffer (used for zapper mouse mapping)
 								ImVec2 renderedImagePos = ImVec2(0.0f, 0.0f);
 								ImVec2 renderedImageSize = ImVec2(0.0f, 0.0f);
+#ifdef __ANDROID__
+								{
+									static bool androidDiagLogged = false;
+									if (!androidDiagLogged)
+									{
+										androidDiagLogged = true;
+										int wW = 0, wH = 0, pW = 0, pH = 0;
+										SDL_GetWindowSize(window, &wW, &wH);
+										SDL_GetWindowSizeInPixels(window, &pW, &pH);
+										SDL_Rect sa = {};
+										SDL_GetWindowSafeArea(window, &sa);
+										ImVec2 av = ImGui::GetContentRegionAvail();
+										INFO("AndroidDiag win=%dx%d px=%dx%d density=%.2f dispScale=%.2f safe=%d,%d %dx%d", wW, wH, pW, pH, SDL_GetWindowPixelDensity(window), SDL_GetWindowDisplayScale(window), sa.x, sa.y, sa.w, sa.h);
+										INFO("AndroidDiag DisplaySize=%.0fx%.0f FbScale=%.2f emuWinSize=%.0fx%.0f avail=%.0fx%.0f docked=%d font=%.1f", io.DisplaySize.x, io.DisplaySize.y, io.DisplayFramebufferScale.x, ImGui::GetWindowSize().x, ImGui::GetWindowSize().y, av.x, av.y, (int)ImGui::IsWindowDocked(), ImGui::GetFontSize());
+									}
+								}
+#endif
 
 								if (maintainAspectRatio == NO || current_instance->getEmulationID() == EMULATION_ID::DEFAULT_ID)
 								{
@@ -4961,13 +5674,15 @@ public:
 										ImGui::NextColumn();
 
 										ImGui::Text("Platform"); ImGui::NextColumn();
-#if   defined(_WIN32)   
+#if defined(_WIN32)
 										ImGui::Text(": Windows");
-#elif defined(__linux__) 
+#elif defined(__ANDROID__)
+										ImGui::Text(": Android");
+#elif defined(__linux__)
 										ImGui::Text(": Linux");
-#elif defined(__APPLE__) 
+#elif defined(__APPLE__)
 										ImGui::Text(": macOS");
-#else                   
+#else
 										ImGui::Text(": Unknown");
 #endif
 										ImGui::Columns(1);
@@ -5516,7 +6231,7 @@ public:
 #endif // !__EMSCRIPTEN__
 									}
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
 									linkSession.update();
 
 									while (linkSession.hasReceivedTestPacket() == YES)
@@ -5682,7 +6397,7 @@ public:
 #endif // MASQ_ENABLE_GBC
 								// ---- Network link UI ------------------------
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
 								if (networkUI.showConnectPopup)
 								{
 									ImGui::OpenPopup("Connect to Link Server");
@@ -5801,7 +6516,21 @@ public:
 
 							// ---- Render ----------------------------------
 							ImGui::Render();
+#ifdef __ANDROID__
+							{
+								int winW = 0, winH = 0, pxW = 0, pxH = 0;
+								SDL_GetWindowSize(window, &winW, &winH);
+								SDL_GetWindowSizeInPixels(window, &pxW, &pxH);
+								ImDrawData* androidDrawData = ImGui::GetDrawData();
+								androidDrawData->DisplayPos = ImVec2((float)-androidSafeX / androidUiScale, (float)-androidSafeY / androidUiScale);
+								androidDrawData->DisplaySize = ImVec2((float)winW / androidUiScale, (float)winH / androidUiScale);
+								glViewport(0, 0, pxW, pxH);
+								clear_color = ImGui::GetStyleColorVec4(ImGuiCol_WindowBg); // edge-to-edge background: insets become invisible
+								clear_color.w = 1.0f;
+							}
+#else
 							glViewport(0, 0, (int)io.DisplaySize.x, (int)io.DisplaySize.y);
+#endif
 							glClearColor(clear_color.x* clear_color.w, clear_color.y* clear_color.w,
 								clear_color.z* clear_color.w, clear_color.w);
 							glClear(GL_COLOR_BUFFER_BIT);
@@ -5829,9 +6558,19 @@ public:
 #ifndef __EMSCRIPTEN__
 							// Precise FPS limiter
 							if (1000000000 / myFPS > SDL_GetTicksNS() - tickAtStart)
+							{
 								SDL_DelayPrecise((uint64_t)(1000000000.0f / myFPS) - (SDL_GetTicksNS() - tickAtStart));
+							}
 #endif
 
+#ifdef __EMSCRIPTEN__
+							if (webQuitPending == YES && SavePersistentFSComplete == YES)
+							{
+								webQuitPending = NO;
+								SavePersistentFSComplete = NO;
+								done = YES;
+							}
+#endif
 							// ---- Emscripten restart handling --------------
 							if (done == YES)
 							{
@@ -5967,8 +6706,7 @@ public:
 			glDeleteFramebuffers(1, &frame_buffer);
 			frame_buffer = 0; // Reset!
 
-			NFD_Quit();
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
 			NET_Quit();
 #endif
 			ImGui_ImplOpenGL3_Shutdown();
@@ -6132,7 +6870,7 @@ inline EMULATION_ID getPlatformFromPath(const std::string& path)
 #endif
 }
 
-#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__)
+#if !defined(__RPI_PICO__) && !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
 #define DISABLE_HEADLESS_WITH_WARNING(msg) \
 	do { \
 		INFO(msg); \
@@ -6489,16 +7227,48 @@ void postPrimaryBootLoader()
 #endif
 
 	// --- Setup all the paths ---------------------------------
-#ifndef __EMSCRIPTEN__
+#ifdef __ANDROID__
+	char* prefPath = SDL_GetPrefPath("Kotambail-Hegde", "Masquerade");
+	if (!prefPath)
+		throw std::runtime_error(SDL_GetError());
+
+	std::string writableDir(prefPath);
+	SDL_free(prefPath);
+
+	_CONFIG_LOCATION = writableDir + "CONFIG.ini";
+	_IMGUI_LOCATION = writableDir + "IMGUI.ini";
+	_FONT_LOCATION = "";
+#elif defined(__EMSCRIPTEN__)
+	_CONFIG_LOCATION = "assets/CONFIG.ini";
+	_FONT_LOCATION = "assets/ui/fonts/";
+	_IMGUI_LOCATION = "assets/ui/config/IMGUI.ini";
+#else
 	_EXE_LOCATION = getexepath().parent_path().string();
 	_CONFIG_LOCATION = (std::filesystem::path(_EXE_LOCATION) / "assets" / "CONFIG.ini").string();
-#else
-	_CONFIG_LOCATION = "assets/CONFIG.ini";
+	_FONT_LOCATION = (std::filesystem::path(_EXE_LOCATION) / "assets" / "ui" / "fonts").string();
 #endif
 
 	INFO("Searching for %s", _CONFIG_LOCATION.c_str());
 
 	// --- Read CONFIG.ini -------------------------------------
+#ifdef __ANDROID__
+	SDL_IOStream* file = SDL_IOFromFile("CONFIG.ini", "rb");
+
+	if (!file)
+		throw std::runtime_error(SDL_GetError());
+
+	std::string contents;
+	char buffer[4096];
+	size_t bytesRead;
+
+	while ((bytesRead = SDL_ReadIO(file, buffer, sizeof(buffer))) > ZERO)
+		contents.append(buffer, bytesRead);
+
+	SDL_CloseIO(file);
+
+	std::istringstream stream(contents);
+	boost::property_tree::ini_parser::read_ini(stream, config);
+#else
 	try
 	{
 		boost::property_tree::ini_parser::read_ini(_CONFIG_LOCATION, config);
@@ -6508,31 +7278,24 @@ void postPrimaryBootLoader()
 		std::cout << ex.what() << std::endl;
 		FATAL("Unable to read the CONFIG.ini");
 	}
-
-#ifndef __EMSCRIPTEN__
-	_FONT_LOCATION = (std::filesystem::path(_EXE_LOCATION) / "assets" / "ui" / "fonts").string();
-#else
-	_FONT_LOCATION = "assets/ui/fonts/";
 #endif
 
 	// --- Normalize CONFIG.ini paths (Windows → POSIX safe) --
 	auto normalizePath = [](std::string& p) { std::replace(p.begin(), p.end(), '\\', '/'); };
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
 	std::string uiWorkingDir = config.get<std::string>("internal._ui_working_directory", "");
 	if (uiWorkingDir.empty()) FATAL("Could not locate the UI working directory");
 	normalizePath(uiWorkingDir);
 	_IMGUI_LOCATION = (std::filesystem::path(uiWorkingDir) / "IMGUI.ini").string();
-#else
-	_IMGUI_LOCATION = "assets/ui/config/IMGUI.ini";
 #endif
 
 	// --- Ensure IMGUI directory exists -----------------------
 	std::filesystem::create_directories(std::filesystem::path(_IMGUI_LOCATION).parent_path());
 
 	// --- Create default IMGUI.ini if absent ------------------
-	struct stat buffer;
-	if (stat(_IMGUI_LOCATION.c_str(), &buffer) != ZERO)
+	struct stat imguiStat;
+	if (stat(_IMGUI_LOCATION.c_str(), &imguiStat) != ZERO)
 	{
 		std::ofstream out(_IMGUI_LOCATION);
 		if (!out) throw std::runtime_error("Failed to open file: " + _IMGUI_LOCATION);
@@ -6545,7 +7308,11 @@ void postPrimaryBootLoader()
 	INFO("Searching for %s", _IMGUI_LOCATION.c_str());
 	createLUTForCRC();
 
-#ifndef __EMSCRIPTEN__
+#ifdef __ANDROID__
+	recentlyOpenedListPath = (std::filesystem::path(writableDir) / "internal").string();
+#elif defined(__EMSCRIPTEN__)
+	recentlyOpenedListPath = "assets/internal";
+#else
 	std::string workingDir = config.get<std::string>("internal._working_directory", "");
 	if (workingDir.empty())
 	{
@@ -6553,8 +7320,6 @@ void postPrimaryBootLoader()
 	}
 	normalizePath(workingDir);
 	recentlyOpenedListPath = workingDir;
-#else
-	recentlyOpenedListPath = "assets/internal";
 #endif
 
 	ifNoDirectoryThenCreate(recentlyOpenedListPath);
@@ -6562,8 +7327,14 @@ void postPrimaryBootLoader()
 #ifndef __EMSCRIPTEN__
 	recentlyOpenedListPath = (std::filesystem::path(recentlyOpenedListPath) / "recentlyOpenedListPath.dir").string();
 	recentlyOpenedList = readDequeFromFile(recentlyOpenedListPath);
+
+#ifdef __ANDROID__
+	_CHEAT_SAVE_LOCATION = (std::filesystem::path(writableDir) / "cheats.txt").string();
+#else
 	_CHEAT_SAVE_LOCATION = (std::filesystem::path(workingDir) / "cheats.txt").string();
 	normalizePath(_CHEAT_SAVE_LOCATION);
+#endif
+
 #else
 	recentlyOpenedListPath += "/recentlyOpenedListPath.dir";
 	_CHEAT_SAVE_LOCATION = "assets/internal/cheats.txt";
