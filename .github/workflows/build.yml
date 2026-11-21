@@ -44,7 +44,7 @@ permissions:
 jobs:
   build_windows:
     name: Build Windows (MSVC)
-    runs-on: windows-2022
+    runs-on: windows-latest
     # Skip version bump commits (auto-merged by release.yml) and revert commits
     # so the release flow doesn't trigger redundant builds on master
     if: |
