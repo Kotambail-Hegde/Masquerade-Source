@@ -24,7 +24,9 @@ chip8_t::chip8_t(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, Masq
 
 #ifndef __RPI_PICO__
 	// Save state possible only on non-pico builds
-#ifndef __EMSCRIPTEN__
+#if defined(__ANDROID__)
+	_SAVE_LOCATION = masquerade_io::androidSaveDir();
+#elif !defined(__EMSCRIPTEN__)
 	_SAVE_LOCATION = pt.get<std::string>("chip8._save_location", "");
 	if (_SAVE_LOCATION.empty())
 	{
@@ -36,7 +38,7 @@ chip8_t::chip8_t(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, Masq
 #endif
 
 	// check if directory mentioned by "_SAVE_LOCATION" exists, if not we need to explicitly create it
-	ifNoDirectoryThenCreate(_SAVE_LOCATION);
+	masquerade_io::ensureDir(_SAVE_LOCATION);
 
 #endif	// !__RPI_PICO__
 
@@ -164,16 +166,16 @@ bool chip8_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 #ifndef __RPI_PICO__
 	// open the rom file
 
-	FILE* fp = NULL;
-	errno_t err = fopen_portable(&fp, rom[ZERO].c_str(), "rb");
+	SDL_IOStream* fp = SDL_IOFromFile(rom[ZERO].c_str(), "rb");
+	errno_t err = (fp != NULL) ? 0 : -1;
 
 	if (!err && (fp != NULL))
 	{
-		fseek(fp, 0, SEEK_END);
-		pAbsolute_chip8_instance->absolute_chip8_state.aboutRom.romSize = ftell(fp);
-		rewind(fp);
-		fread(pChip8_memory->memory + 0x0200, pAbsolute_chip8_instance->absolute_chip8_state.aboutRom.romSize, 1, fp);
-		fclose(fp);
+		SDL_SeekIO(fp, 0, SDL_IO_SEEK_END);
+		pAbsolute_chip8_instance->absolute_chip8_state.aboutRom.romSize = TO_UINT32(SDL_TellIO(fp));
+		SDL_SeekIO(fp, 0, SDL_IO_SEEK_SET);
+		SDL_ReadIO(fp, pChip8_memory->memory + 0x0200, pAbsolute_chip8_instance->absolute_chip8_state.aboutRom.romSize);
+		SDL_CloseIO(fp);
 		pAbsolute_chip8_instance->absolute_chip8_state.aboutRom.isRomLoaded = true;
 
 		// If database search is enabled, then try to get info if available in database... 
@@ -704,7 +706,7 @@ bool chip8_t::initializeEmulator()
 
 	pChip8_audio->pitch = 4000.0f;
 	pChip8_audio->phase = 0.0;
-	
+
 	// initialize the graphics
 
 #ifndef __RPI_PICO__
@@ -886,7 +888,9 @@ bool chip8_t::initializeEmulator()
 	GL_CALL(glBindVertexArray(0));
 
 	std::string shaderPath;
-#ifndef __EMSCRIPTEN__
+#if defined(__ANDROID__)
+	shaderPath = "internal"; // APK asset folder (Gradle maps assets/ to the APK root)
+#elif !defined(__EMSCRIPTEN__)
 	shaderPath = pt.get<std::string>("internal._working_directory", "");
 	if (shaderPath.empty())
 	{
@@ -1204,15 +1208,15 @@ void chip8_t::scrollDisplay(INC32 H, INC32 V)
 
 void chip8_t::displayCompleteScreen()
 {
-    if (pChip8_quirks->_quirk_xo_chip == YES)
-    {
+	if (pChip8_quirks->_quirk_xo_chip == YES)
+	{
 		/*
 		 * NOTE:
 		 * Always render both planes.
 		 * `pChip8_display->planes` is used only to decide whether to add pixel data or not.
 		 * For rendering, all planes MUST be rendered.
 		 */
-		// --- Configuration ---
+		 // --- Configuration ---
 		constexpr uint8_t NUM_PLANES = 2; // Change to 3 or 4 for future XO-Chip expansions
 		constexpr uint8_t NUM_COLORS = 1 << NUM_PLANES; // 2^N colors
 		// Example LUT: index = plane bits combination
@@ -1223,63 +1227,63 @@ void chip8_t::displayCompleteScreen()
 			color2.n, // 0b10
 			color3.n, // 0b11
 			// Add more if NUM_PLANES > 2
-        };
+		};
 #ifndef __RPI_PICO__
-        for (uint32_t y = 0; y < getScreenHeight(); y++)
-        {
-            for (uint32_t x = 0; x < getScreenWidth(); x++)
-            {
-                uint8_t idx = 0;
-                for (uint8_t plane = 0; plane < NUM_PLANES; plane++)
-                {
-                    if (plane >= CHIP8_GFX_PLANES)
-                        plane = CHIP8_GFX_PLANES - 1;
-                    if (pChip8_display->gfx.gfx2D[plane][y][x] == SET)
-                        idx |= (1 << plane);
-                }
-                pChip8_display->imGuiBuffer.imGuiBuffer2D[y][x].n = planeColorLUT[idx];
-            }
-        }
+		for (uint32_t y = 0; y < getScreenHeight(); y++)
+		{
+			for (uint32_t x = 0; x < getScreenWidth(); x++)
+			{
+				uint8_t idx = 0;
+				for (uint8_t plane = 0; plane < NUM_PLANES; plane++)
+				{
+					if (plane >= CHIP8_GFX_PLANES)
+						plane = CHIP8_GFX_PLANES - 1;
+					if (pChip8_display->gfx.gfx2D[plane][y][x] == SET)
+						idx |= (1 << plane);
+				}
+				pChip8_display->imGuiBuffer.imGuiBuffer2D[y][x].n = planeColorLUT[idx];
+			}
+		}
 #else // __RPI_PICO__
-        PANEL_TRANSFORM_FOR_CHIP8(
-            pctx,
-            reinterpret_cast<const uint8_t*>(&pChip8_display->gfx.gfx1D[0][0]),
-            ((NUM_PLANES > CHIP8_GFX_PLANES) ? CHIP8_GFX_PLANES : NUM_PLANES),
-            planeColorLUT,
-            getScreenWidth(),
-            getScreenHeight()
-        );
+		PANEL_TRANSFORM_FOR_CHIP8(
+			pctx,
+			reinterpret_cast<const uint8_t*>(&pChip8_display->gfx.gfx1D[0][0]),
+			((NUM_PLANES > CHIP8_GFX_PLANES) ? CHIP8_GFX_PLANES : NUM_PLANES),
+			planeColorLUT,
+			getScreenWidth(),
+			getScreenHeight()
+		);
 #endif
-    }
-    else
-    {
-        const uint32_t planeColorLUT[2] = { color1.n, color0.n };
+	}
+	else
+	{
+		const uint32_t planeColorLUT[2] = { color1.n, color0.n };
 #ifndef __RPI_PICO__
-        for (uint32_t y = 0; y < getScreenHeight(); y++)
-        {
-            for (uint32_t x = 0; x < getScreenWidth(); x++)
-            {
-                pChip8_display->imGuiBuffer.imGuiBuffer2D[y][x].n
-                    = ((pChip8_display->gfx.gfx2D[0][y][x] == SET) ? color0.n : color1.n);
-            }
-        }
+		for (uint32_t y = 0; y < getScreenHeight(); y++)
+		{
+			for (uint32_t x = 0; x < getScreenWidth(); x++)
+			{
+				pChip8_display->imGuiBuffer.imGuiBuffer2D[y][x].n
+					= ((pChip8_display->gfx.gfx2D[0][y][x] == SET) ? color0.n : color1.n);
+			}
+		}
 #else // __RPI_PICO__
-        PANEL_TRANSFORM_FOR_CHIP8(
-            pctx,
-            reinterpret_cast<const uint8_t*>(&pChip8_display->gfx.gfx1D[0][0]),
-            ONE,
-            planeColorLUT,
-            getScreenWidth(),
-            getScreenHeight()
-        );
+		PANEL_TRANSFORM_FOR_CHIP8(
+			pctx,
+			reinterpret_cast<const uint8_t*>(&pChip8_display->gfx.gfx1D[0][0]),
+			ONE,
+			planeColorLUT,
+			getScreenWidth(),
+			getScreenHeight()
+		);
 #endif
-    }
+	}
 
 #ifdef __RPI_PICO__
 	// For Raspberry Pi Pico, we will use the default framebuffer and render directly to it.
 	// No need for OpenGL setup or texture management.
-    PANEL_PRESENT_FRAME(pctx);
-    PANEL_BACKEND_PRESENT(pctx.fb);
+	PANEL_PRESENT_FRAME(pctx);
+	PANEL_BACKEND_PRESENT(pctx.fb);
 #else // !__RPI_PICO__
 #if (GL_FIXED_FUNCTION_PIPELINE == YES) && !defined(IMGUI_IMPL_OPENGL_ES2) && !defined(IMGUI_IMPL_OPENGL_ES3)
 	glBindFramebuffer(GL_FRAMEBUFFER, frame_buffer);
@@ -1562,7 +1566,7 @@ bool chip8_t::processOpcode()
 			}
 		};
 
-	auto handleConditionalJump = [&]() 
+	auto handleConditionalJump = [&]()
 		{
 			// Refer to https://blog.khutchins.com/posts/chip-8-emulation-xo-chip/
 			if (pChip8_quirks->_quirk_xo_chip == YES)
@@ -1714,7 +1718,7 @@ bool chip8_t::processOpcode()
 		}
 		if ((pChip8_instance->chip8_state.cpuInstance.opcode & 0x00FF) == 0xFE)
 		{
-			if ((pChip8_quirks->_quirk_schip_modern == YES || pChip8_quirks->_quirk_xo_chip == YES)) 
+			if ((pChip8_quirks->_quirk_schip_modern == YES || pChip8_quirks->_quirk_xo_chip == YES))
 			{
 				clearDisplayBuffer();
 				pChip8_display->res = C8RES::LORES;
@@ -2043,7 +2047,7 @@ bool chip8_t::processOpcode()
 	{
 		/*
 		* THEORY:
-		* 
+		*
 		* if _QUIRK_DISPLAY_WAIT is enabled, at max we should allow only 60 sprites per second
 		* since we have a 60 Hz interrupt, we can use this to achieve the above goal
 		* 60 spites =>  1 second is same as 1 sprite in 1/60 second which is 1 sprite per 60 Hz interrupt
@@ -2242,7 +2246,7 @@ bool chip8_t::processOpcode()
 					value = (value << 2 | value) & 0x3333;
 					value = (value << 1 | value) & 0x5555;
 
-					RETURN (value << 1) | value;
+					RETURN(value << 1) | value;
 					};
 
 				// S-Chip (Legacy) LORES is designed to work at 64 x 128 NOT 32 x 64
@@ -2313,7 +2317,7 @@ bool chip8_t::processOpcode()
 					auto index = ((pChip8_registers->I + yy) & 0xFFFF);
 					pixel_i = (uint32_t)pChip8_memory->memory[index];
 					// Bloat the byte
-					pixel_i = bitBloat(pixel_i);						
+					pixel_i = bitBloat(pixel_i);
 					// Shift the byte
 					pixel_i <<= xOff;
 
@@ -2419,7 +2423,7 @@ bool chip8_t::processOpcode()
 					{
 						zy = (yy + yi) & (actual_height - 1);																		// wrap around the height
 					}
-		
+
 					// Read the 2 byte pixel data for 16x16 sprite 
 					if (schip_16x16 == true)
 					{
@@ -2486,7 +2490,7 @@ bool chip8_t::processOpcode()
 			{
 				// S-Chip (Modern) LORES is designed to work at 32 x 64
 				// All quirks w.r.t Dxyn is supposed to assume the display boundary as 32 x 64
-					
+
 				// Ideally S-Chip (Modern) LORES should not have doubling, 
 				// but then this would result in variable SDL window size and variable size imGuiBuffer1D/imGuiBuffer2D buffer
 				// So, we still scale final display and set in the imGuiBuffer1D/imGuiBuffer2D buffer

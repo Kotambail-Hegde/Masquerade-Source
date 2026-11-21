@@ -1,5 +1,8 @@
 ﻿#pragma once
 
+// ZERO, YES, NO, RETURN, MASQ_INLINE and FLAG are defined in macros.h (shared with masquerade_io.h)
+#include "macros.h"
+
 // =========================================================
 // PRE-DEFINES
 // =========================================================
@@ -197,6 +200,8 @@ extern "C" {
 #endif
 #pragma endregion SDL_INCLUDES
 
+#include "masquerade_io.h" // SDL based file I/O (works for Android assets and content copies)
+
 #pragma region NFD_INCLUDES
 #if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
 #include <nfd.hpp>
@@ -250,7 +255,6 @@ extern "C" {
 #endif
 
 // --- Numeric constants --------------------------------
-#define ZERO                                        0
 #define ONE                                         1
 #define TWO                                         2
 #define THREE                                       3
@@ -543,8 +547,6 @@ extern "C" {
 #define DEACTIVATED                                 DISABLED
 #define DOUBT                                       DISABLED
 #define INTERRUPT_DISABLED                          ZERO
-#define YES                                         true
-#define NO                                          false
 #define DONT_CLOSE                                  true
 #define CLOSE                                       false
 #define NOT_USED                                    false
@@ -607,11 +609,11 @@ extern "C" {
 #define CEIL(fValue)                                ((uint64_t)((float)fValue + (float)0.9f))
 #define IS_ODD(val)                                 ((val & ONE) == ONE)
 #define IS_EVEN(val)                                ((val & ONE) == ZERO)
-#define UWORD_FROM_UBYTES(HI, LO)                  (uint16_t)((HI << EIGHT) | LO)
+#define UWORD_FROM_UBYTES(HI, LO)                   (uint16_t)((HI << EIGHT) | LO)
 
 // --- Emulation timing ---------------------------------
 #define FPS_SLOTS                                   SIXTY
-#define DEFAULT_FPS                                 ONEHUNDRED*ONETHOUSAND
+#define DEFAULT_FPS                                 SIXTY
 #define MUTE_AUDIO                                  static_cast<float>(ZERO)
 #define INVALID_INTERRUPT_HANLDER_ADDRESS           ZERO
 #define SINGLE_ROM_FILE                             ONE
@@ -668,7 +670,6 @@ extern "C" {
 #endif
 
 // --- Misc flow / utility macros ----------------------
-#define RETURN                                      return
 #define FOREVER                                     true
 #define DO_NOTHING                                  /* Do Nothing */
 #define STUB()                                      /* Do Nothing */
@@ -843,20 +844,6 @@ extern "C" {
 
 #define MASQ_UNUSED(x)                              (void)(x);
 
-// --- Inline / hint attributes ------------------------
-#if defined(_MSC_VER)
-#define MASQ_INLINE                                 __forceinline
-#elif defined(__GNUC__) || defined(__clang__)
-#define MASQ_INLINE __attribute__((always_inline))  inline
-#else
-#define MASQ_INLINE                                 inline
-#endif
-
-#ifdef DEBUG_NO_INLINE
-#undef  MASQ_INLINE
-#define MASQ_INLINE
-#endif
-
 // [[unlikely]] / [[likely]] — not supported by all Pico toolchains
 #if defined(__EMSCRIPTEN__) || defined(__RPI_PICO__)
 #define MASQ_UNLIKELY
@@ -962,7 +949,6 @@ typedef float    GBA_AUDIO_SAMPLE_TYPE;
 typedef int16_t  GBA_AUDIO_SAMPLE_TYPE;
 #endif
 
-typedef bool     FLAG;
 typedef byte     BIT;
 typedef uint8_t  BYTE;
 typedef int8_t   SBYTE;
@@ -1843,9 +1829,8 @@ MASQ_INLINE void blocking_delay_ms(int ms)
 // --- Directory creation (desktop only) ---------------
 MASQ_INLINE void ifNoDirectoryThenCreate(std::string directory)
 {
-#ifndef __RPI_PICO__
-    if (!std::filesystem::is_directory(directory) || !std::filesystem::exists(directory))
-        std::filesystem::create_directories(directory);
+#if !defined(__RPI_PICO__) && !defined(ENABLE_OTA_EXECUTABLE) && !defined(ENABLE_SERVER_EXECUTABLE) && !defined(MASQ_SCHEDULER_TESTS)
+    masquerade_io::ensureDir(directory); // never throws (std::filesystem::create_directories throws on read-only or invalid paths, e.g. on Android)
 #else
     (void)directory; // no filesystem on Pico; ROM and config are compiled-in
 #endif
@@ -2075,9 +2060,12 @@ MASQ_INLINE std::filesystem::path getexepath()
 	// No executable path in WASM; RETURN empty or fixed string
 	RETURN {};
 #elif defined(_WIN32) || defined(_WIN64)
-    wchar_t path[MAX_PATH] = { 0 };
-    GetModuleFileNameW(NULL, path, MAX_PATH);
-    RETURN path;
+    wchar_t path[MAX_PATH] = {};
+    DWORD length = GetModuleFileNameW(NULL, path, MAX_PATH);
+    if (length > 0 && length < MAX_PATH)
+        RETURN std::filesystem::path(path);
+    else
+        RETURN{};
 #else
     char result[PATH_MAX];
     ssize_t count = readlink("/proc/self/exe", result, PATH_MAX);
@@ -3240,8 +3228,10 @@ MASQ_INLINE void stripBlock(std::string& source,
 MASQ_INLINE shaderProgramSource_t parseShader(const std::string& filepath)
 {
     std::string vertex, fragment;
-    std::ifstream stream(filepath);
-    if (!stream.is_open())
+    std::string shaderText;
+    const bool shaderLoaded = masquerade_io::readTextFile(filepath, shaderText); // SDL: also reads from the APK on Android
+    std::istringstream stream(shaderText);
+    if (!shaderLoaded)
     {
         LOG("Failed to open shader file: %s — using defaults", filepath.c_str());
         if (filepath.find("blend") != std::string::npos)
@@ -3260,6 +3250,7 @@ MASQ_INLINE shaderProgramSource_t parseShader(const std::string& filepath)
         SHADER_TYPE type = SHADER_TYPE::NONE;
         while (getline(stream, line))
         {
+            if (!line.empty() && line.back() == '\r') line.pop_back(); // files read as bytes keep CRLF
             if (line.find("#shader") != std::string::npos)
                 type = (line.find("vertex") != std::string::npos) ? SHADER_TYPE::VERTEX : SHADER_TYPE::FRAGMENT;
             else
@@ -3276,7 +3267,7 @@ MASQ_INLINE shaderProgramSource_t parseShader(const std::string& filepath)
         }
         };
 
-#ifndef __EMSCRIPTEN__
+#if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
     stripBlock(vertex, "#if defined(WEBGL)", "#else");
     stripBlock(fragment, "#if defined(WEBGL)", "#else");
 #else

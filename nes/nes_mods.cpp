@@ -29,7 +29,7 @@ bool NES_t::saveState(uint8_t id)
 
 	saveStateNameForThisROM = saveStateNameForThisROM + std::to_string(id);
 
-	std::ofstream save;
+	masquerade_io::ofstream save;
 
 #if ZERO
 	time_t rawtime;
@@ -46,7 +46,7 @@ bool NES_t::saveState(uint8_t id)
 
 	INFO("Saved as: %s\n", saveStateNameForThisROM.c_str());
 
-	saveStateNameForThisROM = _SAVE_LOCATION + "\\" + saveStateNameForThisROM;
+	saveStateNameForThisROM = _SAVE_LOCATION + "/" + saveStateNameForThisROM;
 
 	static_assert(std::is_trivially_copyable<NES_instance_t>::value, "not trivially copyable");
 	static_assert(std::is_standard_layout<NES_instance_t>::value, "not standard layout");
@@ -71,9 +71,9 @@ bool NES_t::loadState(uint8_t id)
 
 	saveStateNameForThisROM = saveStateNameForThisROM + std::to_string(id);
 
-	std::ifstream save;
+	masquerade_io::ifstream save;
 
-	saveStateNameForThisROM = _SAVE_LOCATION + "\\" + saveStateNameForThisROM;
+	saveStateNameForThisROM = _SAVE_LOCATION + "/" + saveStateNameForThisROM;
 
 	static_assert(std::is_trivially_copyable<NES_instance_t>::value, "not trivially copyable");
 	static_assert(std::is_standard_layout<NES_instance_t>::value, "not standard layout");
@@ -91,11 +91,7 @@ bool NES_t::absoluteSaveState(uint8_t id)
 {
 	bool status = false;
 
-	std::filesystem::path saveDirectory(_SAVE_LOCATION);
-	if (!(std::filesystem::exists(saveDirectory)))
-	{
-		std::filesystem::create_directory(saveDirectory);
-	}
+	masquerade_io::ensureDir(_SAVE_LOCATION);
 
 	std::string saveStateNameForThisROM = getSaveStateName(
 		pINES->iNES_Fields.iNES_header.header
@@ -104,7 +100,7 @@ bool NES_t::absoluteSaveState(uint8_t id)
 
 	saveStateNameForThisROM = "_absolute_" + saveStateNameForThisROM + std::to_string(id);
 
-	std::ofstream save;
+	masquerade_io::ofstream save;
 
 #if ZERO
 	time_t rawtime;
@@ -121,7 +117,7 @@ bool NES_t::absoluteSaveState(uint8_t id)
 
 	printf("Saved as: %s\n", saveStateNameForThisROM.c_str());
 
-	saveStateNameForThisROM = _SAVE_LOCATION + "\\" + saveStateNameForThisROM;
+	saveStateNameForThisROM = _SAVE_LOCATION + "/" + saveStateNameForThisROM;
 
 	static_assert(std::is_trivially_copyable<absolute_NES_instance_t>::value, "not trivially copyable");
 	static_assert(std::is_standard_layout<absolute_NES_instance_t>::value, "not standard layout");
@@ -146,9 +142,9 @@ bool NES_t::absoluteLoadState(uint8_t id)
 
 	saveStateNameForThisROM = "_absolute_" + saveStateNameForThisROM + std::to_string(id);
 
-	std::ifstream save;
+	masquerade_io::ifstream save;
 
-	saveStateNameForThisROM = _SAVE_LOCATION + "\\" + saveStateNameForThisROM;
+	saveStateNameForThisROM = _SAVE_LOCATION + "/" + saveStateNameForThisROM;
 
 	static_assert(std::is_trivially_copyable<absolute_NES_instance_t>::value, "not trivially copyable");
 	static_assert(std::is_standard_layout<absolute_NES_instance_t>::value, "not standard layout");
@@ -210,16 +206,12 @@ FLAG NES_t::loadNESDB(const std::string& jsonPath)
 		RETURN SUCCESS;
 	}
 
-	std::ifstream ifs(jsonPath);
-	if (!ifs.is_open())
+	std::string json;
+	if (!masquerade_io::readTextFile(jsonPath, json))
 	{
 		LOG("NES20DB: cannot open '%s'.", jsonPath.c_str());
 		RETURN FAILURE;
 	}
-
-	std::string json((std::istreambuf_iterator<char>(ifs)),
-		std::istreambuf_iterator<char>());
-	ifs.close();
 
 	rapidjson::Document doc;
 	doc.Parse(json.c_str());

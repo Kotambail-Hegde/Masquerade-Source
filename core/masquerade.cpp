@@ -527,6 +527,7 @@ FLAG initScreen = YES;
 #else
 FLAG initScreen = NO;
 #endif
+FLAG splashDismissRequested = NO; // set from the page on the first real user gesture (web)
 
 // Drag-n-drop / menu-triggered ROM selection
 std::vector<std::string> dynamicDragNDropAndMenuSelect;
@@ -1120,6 +1121,12 @@ extern "C"
 			});
 			});
 } // extern "C"
+
+// Called from the page (shell_minimal.html) on the first real user gesture, so the splash never depends on SDL/ImGui input focus
+extern "C" EMSCRIPTEN_KEEPALIVE void masq_dismiss_splash()
+{
+	splashDismissRequested = YES;
+}
 
 // Browser drops arrive as SDL_EVENT_DROP_FILE with a path in the volatile /tmp/filedrop/... memory folder, which does not
 // survive the page reload used to start a game. Copy the file into /persistent (same naming rule as handle_upload_file)
@@ -2267,7 +2274,7 @@ public:
 	SDL_DialogFileFilter golfilters[1]            = { { "Game Of Life States",              "gol,GOL"                        } };
 	SDL_DialogFileFilter chip8filters[1]          = { { "Chip8/S-Chip/XO-Chip ROMs",        "ch8,CH8,c8,C8,sc8,SC8,xo8,XO8"  } };
 	SDL_DialogFileFilter spaceInvadersFilter[1]   = { { "SpaceInvaders ROMs",               "e,f,g,h,zip,ZIP"                } };
-	SDL_DialogFileFilter spaceInvadersAudioFilter[1] = { { "SpaceInvaders Audio",         "wav,WAV"                        } };
+	SDL_DialogFileFilter spaceInvadersAudioFilter[1] = { { "SpaceInvaders Audio",           "wav,WAV"                        } };
 	SDL_DialogFileFilter pacmanFilter[1]          = { { "Pacman/MsPacman ROMs",             "1m,3m,4a,5e,5f,6e,6f,6h,6j,7f,zip" } };
 	SDL_DialogFileFilter nesFilter[1]             = { { "NES ROMs",                         "nes,NES"                        } };
 	SDL_DialogFileFilter gbGbcFilter[1]           = { { "GB/GBC ROMs",                      "gb,gbc,GB,GBC"                  } };
@@ -2278,7 +2285,7 @@ public:
     nfdu8filteritem_t golfilters[1]           = { { "Game Of Life States",                    "gol,GOL"                        } };
     nfdu8filteritem_t chip8filters[1]         = { { "Chip8/S-Chip/XO-Chip/Modern-Chip8 ROMs", "ch8,CH8,c8,C8,sc8,SC8,xo8,XO8" } };
     nfdu8filteritem_t spaceInvadersFilter[1]  = { { "SpaceInvaders ROMs",                     "e,f,g,h"                        } };
-    nfdu8filteritem_t spaceInvadersAudioFilter[1] = { { "SpaceInvaders Audio",              "wav,WAV"                        } };
+    nfdu8filteritem_t spaceInvadersAudioFilter[1] = { { "SpaceInvaders Audio",                "wav,WAV"                        } };
     nfdu8filteritem_t pacmanFilter[1]         = { { "Pacman/MsPacman ROMs",                   "1m,3m,4a,5e,5f,6e,6f,6h,6j,7f" } };
     nfdu8filteritem_t nesFilter[1]            = { { "NES ROMs",                               "nes,NES"                        } };
     nfdu8filteritem_t gbGbcFilter[1]          = { { "GB/GBC ROMs",                            "gb,gbc,GB,GBC"                  } };
@@ -3159,8 +3166,25 @@ static void SDLCALL handle_android_bios_selected(void* userdata, const char* con
 		}
 		const char* path = *filelist;
 		INFO("Android Open SI Audio: %s", path);
+
+		// content:// URIs only work for this session: keep a private copy so the choice survives a restart
+		std::vector<uint8_t> wavBytes;
+		if (!masquerade_io::loadFile(path, wavBytes))
+		{
+			WARN("Could not read SI audio file: %s", path);
+			RETURN;
+		}
+		const std::string audioDir = masquerade_io::androidAppDir("si_audio");
+		masquerade_io::ensureDir(audioDir);
+		const std::string localPath = masquerade_io::join(audioDir, s_pending_si_audio_type + ".wav");
+		if (!masquerade_io::saveFile(localPath, wavBytes.data(), wavBytes.size()))
+		{
+			WARN("Could not store SI audio file: %s", localPath.c_str());
+			RETURN;
+		}
+
 		std::string option = "spaceinvaders._" + s_pending_si_audio_type;
-		config.put(option, std::string(path));
+		config.put(option, localPath);
 		boost::property_tree::ini_parser::write_ini(_CONFIG_LOCATION, config);
 	}
 
@@ -3174,7 +3198,7 @@ static void SDLCALL handle_android_bios_selected(void* userdata, const char* con
 		INFO("Android Open Barcode: %s", path);
 
 		BYTE* barcode_ptr = static_cast<BYTE*>(userdata);
-		std::ifstream file(path, std::ios::binary);
+		masquerade_io::ifstream file(path, std::ios::binary);
 		if (file.is_open())
 		{
 			BYTE fileBytes[13] = {};
@@ -4032,7 +4056,6 @@ public:
 			// Shared SDL event handler
 #ifdef __ANDROID__
 			int  androidSafeX = 0, androidSafeY = 0;
-			bool androidMenuVisible = true;
 			std::unordered_map<SDL_FingerID, ImVec2> androidFingers; // active touches in ImGui logical coordinates
 #endif
 			auto handleSDLEvent = [&](SDL_Event& e)
@@ -4364,10 +4387,8 @@ public:
 								ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(28.0f, 26.0f));
 								ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(28.0f, 34.0f));
 								ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(16.0f, 16.0f));
-								if ((androidMenuVisible || current_instance->getEmulationID() == EMULATION_ID::DEFAULT_ID) && ImGui::BeginMainMenuBar())
-#else
-								if (ImGui::BeginMainMenuBar())
 #endif
+								if (ImGui::BeginMainMenuBar())
 								{
 									// ---- File menu ----------------------------------
 									if (ImGui::BeginMenu("File"))
@@ -5115,49 +5136,6 @@ public:
 #ifdef __ANDROID__
 								ImGui::PopStyleVar(3);
 								io.FontGlobalScale = 1.0f / (androidUiScale * 1.4f);
-#endif
-
-#ifdef __ANDROID__
-								{
-									const EMULATION_ID androidEmuId = current_instance->getEmulationID();
-									static EMULATION_ID androidPrevEmuId = EMULATION_ID::DEFAULT_ID;
-									static float        androidMenuIdle = 0.0f;
-									if (androidEmuId != androidPrevEmuId)
-									{
-										androidMenuVisible = (androidEmuId == EMULATION_ID::DEFAULT_ID);
-										androidPrevEmuId = androidEmuId;
-										androidMenuIdle = 0.0f;
-									}
-									if (androidEmuId != EMULATION_ID::DEFAULT_ID)
-									{
-										const bool popupOpen = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
-										if (androidMenuVisible)
-										{
-											androidMenuIdle = (popupOpen || ImGui::IsMouseDown(0)) ? 0.0f : androidMenuIdle + io.DeltaTime;
-											if (androidMenuIdle > 4.0f) androidMenuVisible = false;
-										}
-										const float btn = 64.0f;
-										const float topY = androidMenuVisible ? 71.0f : 8.0f; // bar is ~62 logical units tall now
-										ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - btn - 12.0f, topY));
-										ImGui::SetNextWindowSize(ImVec2(btn, btn));
-										ImGui::SetNextWindowBgAlpha(0.0f);
-										ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-										ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.45f));
-										if (ImGui::Begin("##AndroidMenuToggle", nullptr,
-											ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
-											ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav))
-										{
-											if (ImGui::Button(androidMenuVisible ? "Hide" : "Menu", ImVec2(btn, btn)))
-											{
-												androidMenuVisible = !androidMenuVisible;
-												androidMenuIdle = 0.0f;
-											}
-										}
-										ImGui::End();
-										ImGui::PopStyleColor();
-										ImGui::PopStyleVar();
-									}
-								}
 #endif
 #ifdef __ANDROID__
 								{
@@ -6429,7 +6407,7 @@ public:
 							}
 							else // initScreen == YES
 							{
-								if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) || ImGui::IsMouseClicked(ImGuiMouseButton_Middle) || ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+								if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) || ImGui::IsMouseClicked(ImGuiMouseButton_Middle) || ImGui::IsMouseClicked(ImGuiMouseButton_Right) || splashDismissRequested == YES)
 								{
 									initScreen = NO;
 								}
@@ -7189,6 +7167,29 @@ void postPrimaryBootLoader()
 	_EXE_LOCATION = getexepath().parent_path().string();
 	_CONFIG_LOCATION = (std::filesystem::path(_EXE_LOCATION) / "assets" / "CONFIG.ini").string();
 	_FONT_LOCATION = (std::filesystem::path(_EXE_LOCATION) / "assets" / "ui" / "fonts").string();
+
+	// CONFIG.ini stores paths relative to the executable ("assets\saves", ...). Make that folder the working directory so they
+	// resolve however the app was started (a ROM dropped on the exe, a shortcut, a terminal in another folder ...).
+	// Command-line ROM paths are relative to the launch folder, so make them absolute first.
+	{
+		static std::vector<std::string> absoluteArgs;
+		static std::vector<char*> absoluteArgv;
+		std::error_code ec;
+		for (int ii = ZERO; ii < gArgc; ii++)
+		{
+			std::string arg = gArgv[ii];
+			if (ii > ZERO && std::filesystem::exists(arg, ec))
+				arg = std::filesystem::absolute(arg, ec).string();
+			absoluteArgs.push_back(arg);
+		}
+		for (auto& arg : absoluteArgs)
+			absoluteArgv.push_back(arg.data());
+		absoluteArgv.push_back(nullptr);
+		gArgv = absoluteArgv.data();
+
+		std::filesystem::current_path(_EXE_LOCATION, ec);
+		if (ec) WARN("Could not switch the working directory to %s: %s", _EXE_LOCATION.c_str(), ec.message().c_str());
+	}
 #endif
 
 	INFO("Searching for %s", _CONFIG_LOCATION.c_str());
@@ -7211,6 +7212,27 @@ void postPrimaryBootLoader()
 
 	std::istringstream stream(contents);
 	boost::property_tree::ini_parser::read_ini(stream, config);
+
+	// Overlay the settings saved earlier (CONFIG.ini in the app's writable folder) on top of the packaged defaults
+	{
+		std::string savedText;
+		if (masquerade_io::readTextFile(_CONFIG_LOCATION, savedText))
+		{
+			try
+			{
+				MasqConfig_t saved;
+				std::istringstream savedStream(savedText);
+				boost::property_tree::ini_parser::read_ini(savedStream, saved);
+				for (const auto& section : saved)
+					for (const auto& item : section.second)
+						config.put(section.first + "." + item.first, item.second.data());
+			}
+			catch (const std::exception& ex)
+			{
+				WARN("Ignoring the saved CONFIG.ini: %s", ex.what());
+			}
+		}
+	}
 #else
 	try
 	{
@@ -7287,6 +7309,14 @@ void postPrimaryBootLoader()
 	BYTE bootType = BOOT;
 
 BOOT_AGAIN:
+
+#if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
+	{
+		// Native file dialogs can change the working directory; relative paths from CONFIG.ini expect the executable's folder
+		std::error_code ec;
+		std::filesystem::current_path(_EXE_LOCATION, ec);
+	}
+#endif
 
 	if ((dynamicDragNDropAndMenuSelect.size() != ZERO) || (saveContextOnReboot == NO))
 		romsToRun.fill("");

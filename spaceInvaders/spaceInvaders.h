@@ -11,6 +11,7 @@
 #pragma region INCLUDES
 //
 #include "helpers.h"
+#include "masquerade_io.h"
 //
 #include "abstractEmulation.h"
 #pragma endregion INCLUDES

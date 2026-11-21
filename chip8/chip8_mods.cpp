@@ -83,7 +83,7 @@ FLAG chip8_t::saveState(uint8_t id)
 
 	saveStateNameForThisROM = saveStateNameForThisROM + std::to_string(id);
 
-	std::ofstream save;
+	masquerade_io::ofstream save;
 
 #if ZERO
 	time_t rawtime;
@@ -100,7 +100,7 @@ FLAG chip8_t::saveState(uint8_t id)
 
 	LOG("Saved as: %s", saveStateNameForThisROM.c_str());
 
-	saveStateNameForThisROM = _SAVE_LOCATION + "\\" + saveStateNameForThisROM;
+	saveStateNameForThisROM = _SAVE_LOCATION + "/" + saveStateNameForThisROM;
 
 	static_assert(std::is_trivially_copyable<chip8_instance_t>::value, "not trivially copyable");
 	static_assert(std::is_standard_layout<chip8_instance_t>::value, "not standard layout");
@@ -129,9 +129,9 @@ FLAG chip8_t::loadState(uint8_t id)
 
 	saveStateNameForThisROM = saveStateNameForThisROM + std::to_string(id);
 
-	std::ifstream save;
+	masquerade_io::ifstream save;
 
-	saveStateNameForThisROM = _SAVE_LOCATION + "\\" + saveStateNameForThisROM;
+	saveStateNameForThisROM = _SAVE_LOCATION + "/" + saveStateNameForThisROM;
 
 	static_assert(std::is_trivially_copyable<chip8_instance_t>::value, "not trivially copyable");
 	static_assert(std::is_standard_layout<chip8_instance_t>::value, "not standard layout");
@@ -209,7 +209,7 @@ int32_t chip8_t::getIdFromSHA1()
 	const std::string jsonPath = _EXE_LOCATION + sha1_path;
 
 	// Check if file exists
-	if (!std::filesystem::exists(jsonPath))
+	if (!masquerade_io::exists(jsonPath))
 	{
 		LOG("SHA1 database file not found: %s", jsonPath.c_str());
 		RETURN INVALID;
@@ -220,7 +220,16 @@ int32_t chip8_t::getIdFromSHA1()
 	{
 		try
 		{
-			boost::property_tree::read_json(jsonPath, sha1db);
+			{
+				std::string jsonText;
+				if (!masquerade_io::readTextFile(jsonPath, jsonText))
+				{
+					DEBUG("Failed to read SHA1 database: %s", jsonPath.c_str());
+					RETURN INVALID;
+				}
+				std::istringstream jsonStream(jsonText);
+				boost::property_tree::read_json(jsonStream, sha1db);
+			}
 			DEBUG("SHA1 database loaded successfully.");
 		}
 		catch (const boost::property_tree::json_parser_error& ex)
@@ -261,7 +270,7 @@ FLAG chip8_t::getProgramFromId(int32_t id, MasqConfig_t* prg)
 	const std::string jsonPath = _EXE_LOCATION + prg_path;
 
 	// Check if file exists
-	if (!std::filesystem::exists(jsonPath))
+	if (!masquerade_io::exists(jsonPath))
 	{
 		LOG("Programs database file not found: %s", jsonPath.c_str());
 		RETURN FAILURE;
@@ -270,7 +279,16 @@ FLAG chip8_t::getProgramFromId(int32_t id, MasqConfig_t* prg)
 	try
 	{
 		MasqConfig_t programsTree;
-		boost::property_tree::read_json(jsonPath, programsTree);
+		{
+			std::string jsonText;
+			if (!masquerade_io::readTextFile(jsonPath, jsonText))
+			{
+				LOG("Failed to read programs.json: %s", jsonPath.c_str());
+				RETURN FAILURE;
+			}
+			std::istringstream jsonStream(jsonText);
+			boost::property_tree::read_json(jsonStream, programsTree);
+		}
 
 		uint32_t idx = 0;
 		for (auto& item : programsTree)
