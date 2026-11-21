@@ -159,7 +159,9 @@ NES_t::NES_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 		// Determine ROM_TYPE
 		ROM_TYPE = (getExt(rom[ZERO]) == "nes") ? ROM::NES : (rom.size() > ONE && getExt(rom[ONE]) == "bin") ? ROM::TEST_ROM_BIN : ROM::NO_ROM;
 
-#ifndef __EMSCRIPTEN__
+#if defined(__ANDROID__)
+		_SAVE_LOCATION = masquerade_io::androidSaveDir();
+#elif !defined(__EMSCRIPTEN__)
 		_SAVE_LOCATION = pt.get<std::string>("nes._save_location", "");
 		if (_SAVE_LOCATION.empty())
 		{
@@ -170,7 +172,7 @@ NES_t::NES_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 #endif
 
 		// check if directory mentioned by "_SAVE_LOCATION" exists, if not we need to explicitly create it
-		ifNoDirectoryThenCreate(_SAVE_LOCATION);
+		masquerade_io::ensureDir(_SAVE_LOCATION);
 
 		this->rom[ZERO] = rom[(ROM_TYPE == ROM::NES) ? ZERO : ONE];
 
@@ -13811,7 +13813,9 @@ bool NES_t::initializeEmulator()
 		GL_CALL(glBindVertexArray(0));
 
 		std::string shaderPath;
-#ifndef __EMSCRIPTEN__
+#if defined(__ANDROID__)
+		shaderPath = "internal"; // APK asset folder (Gradle maps assets/ to the APK root)
+#elif !defined(__EMSCRIPTEN__)
 		shaderPath = pt.get<std::string>("internal._working_directory", "");
 		if (shaderPath.empty())
 		{
@@ -13859,11 +13863,7 @@ void NES_t::destroyEmulator()
 
 	if (pINES->iNES_Fields.iNES_header.fields.flag6.fields.hasPersistantMemory == YES)
 	{
-		std::filesystem::path saveDirectory(_SAVE_LOCATION);
-		if (!(std::filesystem::exists(saveDirectory)))
-		{
-			std::filesystem::create_directory(saveDirectory);
-		}
+		masquerade_io::ensureDir(_SAVE_LOCATION);
 
 		TODO("Need a better way to generate unique ID as current method wastes some time");
 		std::string saveFileNameForThisROM = getSaveFileName(
@@ -13871,11 +13871,11 @@ void NES_t::destroyEmulator()
 			, 0xFFFF
 		);
 
-		saveFileNameForThisROM = _SAVE_LOCATION + "\\" + saveFileNameForThisROM;
+		saveFileNameForThisROM = _SAVE_LOCATION + "/" + saveFileNameForThisROM;
 
 		std::cout << "\nSaving to " << saveFileNameForThisROM << std::endl;
 
-		std::ofstream outSRAM(saveFileNameForThisROM.c_str(), std::ios_base::binary);
+		masquerade_io::ofstream outSRAM(saveFileNameForThisROM.c_str(), std::ios_base::binary);
 
 		if (outSRAM.fail() == NO)
 		{
@@ -13934,24 +13934,25 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 {
 	// open the rom file
 
-	FILE* fp = NULL;
+	SDL_IOStream* fp = NULL;
 	uint32_t totalRomSize = 0;
 	uint32_t totalAuxilaryRomSize = 0;
 
 	if (ROM_TYPE == ROM::NES)
 	{
-		errno_t err = fopen_portable(&fp, rom[ZERO].c_str(), "rb");
+		fp = SDL_IOFromFile(rom[ZERO].c_str(), "rb");
+		errno_t err = (fp != NULL) ? 0 : -1;
 
 		if (!err && (fp != NULL))
 		{
 			// get the size of the complete rom
-			fseek(fp, 0, SEEK_END);
-			pAbsolute_NES_instance->absolute_NES_state.aboutRom.codeRomSize = ftell(fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_END);
+			pAbsolute_NES_instance->absolute_NES_state.aboutRom.codeRomSize = TO_UINT32(SDL_TellIO(fp));
 
 			// read the complete rom
-			rewind(fp);
-			fread(pINES->completeROM + 0x0000, pAbsolute_NES_instance->absolute_NES_state.aboutRom.codeRomSize, 1, fp);
-			fclose(fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_SET);
+			SDL_ReadIO(fp, pINES->completeROM + 0x0000, pAbsolute_NES_instance->absolute_NES_state.aboutRom.codeRomSize);
+			SDL_CloseIO(fp);
 
 			crc32_init();
 
@@ -16458,11 +16459,11 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 					, 0xFFFF
 				);
 
-				saveFileNameForThisROM = _SAVE_LOCATION + "\\" + saveFileNameForThisROM;
+				saveFileNameForThisROM = _SAVE_LOCATION + "/" + saveFileNameForThisROM;
 
 				std::cout << "\nAttempting to load " << saveFileNameForThisROM << std::endl;
 
-				std::ifstream inSRAM(saveFileNameForThisROM.c_str(), std::ios::in | std::ios_base::binary);
+				masquerade_io::ifstream inSRAM(saveFileNameForThisROM.c_str(), std::ios::in | std::ios_base::binary);
 
 				if (inSRAM.fail() == NO)
 				{
@@ -16478,30 +16479,31 @@ bool NES_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 		}
 		else
 		{
-			LOG("Failed to open file: %s", strerror(err));
+			LOG("Failed to open file: %s", SDL_GetError());
 		}
 	}
 	else if (ROM_TYPE == ROM::TEST_ROM_BIN)
 	{
-		errno_t err = fopen_portable(&fp, rom[ZERO].c_str(), "rb");
+		fp = SDL_IOFromFile(rom[ZERO].c_str(), "rb");
+		errno_t err = (fp != NULL) ? 0 : -1;
 
 		if (!err && (fp != NULL))
 		{
 			// get the size of the complete rom
-			fseek(fp, 0, SEEK_END);
-			pAbsolute_NES_instance->absolute_NES_state.aboutRom.codeRomSize = ftell(fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_END);
+			pAbsolute_NES_instance->absolute_NES_state.aboutRom.codeRomSize = TO_UINT32(SDL_TellIO(fp));
 
 			// read the complete rom
-			rewind(fp);
-			fread(pNES_cpuMemory->NESRawMemory + 0x0000, pAbsolute_NES_instance->absolute_NES_state.aboutRom.codeRomSize, 1, fp);
-			fclose(fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_SET);
+			SDL_ReadIO(fp, pNES_cpuMemory->NESRawMemory + 0x0000, pAbsolute_NES_instance->absolute_NES_state.aboutRom.codeRomSize);
+			SDL_CloseIO(fp);
 
 			pNES_cpuRegisters->sp = 0x00FF;
 			pNES_cpuRegisters->pc = 0x0400;
 		}
 		else
 		{
-			LOG("Failed to open file: %s", strerror(err));
+			LOG("Failed to open file: %s", SDL_GetError());
 		}
 	}
 	else

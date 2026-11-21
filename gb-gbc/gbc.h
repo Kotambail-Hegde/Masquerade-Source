@@ -6,6 +6,7 @@
 #pragma region INCLUDES
 //
 #include "helpers.h"
+#include "masquerade_io.h"
 //
 #include "abstractEmulation.h"
 #pragma endregion INCLUDES
@@ -505,7 +506,7 @@ private:
 
 PACK_BEGIN
 
-	typedef struct
+		typedef struct
 	{
 		uint8_t opcode;
 		uint8_t previousOpcode;
@@ -814,14 +815,14 @@ private:
 
 private:
 
-	enum class MBCType  : uint16_t
+	enum class MBCType : uint16_t
 	{
-		NONE, 
-		MBC1, 
-		MBC1M, 
-		MBC2, 
-		MBC3, 
-		MBC5, 
+		NONE,
+		MBC1,
+		MBC1M,
+		MBC2,
+		MBC3,
+		MBC5,
 		MBC6,
 		MBC7,
 		MMM01,
@@ -834,7 +835,7 @@ private:
 		INVALID_MBC
 	};
 
-	const std::unordered_map<uint16_t, MBCType> kMBCTypeMap = 
+	const std::unordered_map<uint16_t, MBCType> kMBCTypeMap =
 	{
 		{0x00, MBCType::NONE},
 		{0x01, MBCType::MBC1}, {0x02, MBCType::MBC1}, {0x03, MBCType::MBC1},
@@ -1689,17 +1690,17 @@ private:
 
 		FLAG isEmpty()
 		{
-			RETURN (numberOfEntities <= ZERO);
+			RETURN(numberOfEntities <= ZERO);
 		}
 
 		FLAG isFull()
 		{
-			RETURN (numberOfEntities >= PIXEL_FIFO_SIZE_FOR_GB_GBC);
+			RETURN(numberOfEntities >= PIXEL_FIFO_SIZE_FOR_GB_GBC);
 		}
 
 		FLAG needsFilling()
 		{
-			RETURN (numberOfEntities <= (PIXEL_FIFO_SIZE_FOR_GB_GBC - EIGHT));
+			RETURN(numberOfEntities <= (PIXEL_FIFO_SIZE_FOR_GB_GBC - EIGHT));
 		}
 
 		FLAG pop(struct pixelFIFOEntity_t* pEntity)
@@ -1779,7 +1780,7 @@ private:
 				RETURN NULL;
 			}
 
-			RETURN &(pEntities[index]);
+			RETURN& (pEntities[index]);
 		}
 
 		FLAG insertValidElementAt(BYTE index, struct pixelFIFOEntity_t pEntity)
@@ -2513,8 +2514,8 @@ private:
 
 		for (int a = 0; a < (45 * 90); ++a)
 		{
-				BYTE attr = readSGBTransferByte(TO_UINT16(a));
-				sgbSystemAttributePool.raw[a] = attr;
+			BYTE attr = readSGBTransferByte(TO_UINT16(a));
+			sgbSystemAttributePool.raw[a] = attr;
 		}
 
 		DEBUG("[SGB] ATTR_TRN Completed");
@@ -2973,13 +2974,13 @@ private:
 
 	enum class HUC3_MODES
 	{
-		RAM_RO	= 0x0,
-		RAM_RW	= 0xA,
-		RTC_W	= 0xB,
-		RTC_R	= 0xC,
-		RTC_RW	= 0xD,
-		IR		= 0xE,
-		UNKNOWN	= 0xF
+		RAM_RO = 0x0,
+		RAM_RW = 0xA,
+		RTC_W = 0xB,
+		RTC_R = 0xC,
+		RTC_RW = 0xD,
+		IR = 0xE,
+		UNKNOWN = 0xF
 	};
 
 	enum class MMM01_MODES
@@ -3670,7 +3671,7 @@ private:
 
 	static const uint16_t TYPE_BG_WIN = (ZERO << FIFTEEN);
 	static const uint16_t TYPE_OBJ = (ONE << FIFTEEN);
-	uint16_t mapPalette[8192 /* TODO: Calculate this based on VRAM instead of using magic numbers */] = {ZERO}; // MSB == 1 (OBJ) ; MSB == 0 (BG)
+	uint16_t mapPalette[8192 /* TODO: Calculate this based on VRAM instead of using magic numbers */] = { ZERO }; // MSB == 1 (OBJ) ; MSB == 0 (BG)
 	std::set<BYTE> visibleOamIndexPerLY;
 	std::set<BYTE> visibleOamIndexPerFrame;
 	//std::map<uint16_t, std::string> mapAsm;
@@ -3678,7 +3679,7 @@ private:
 #pragma endregion EMULATION_DECLARATIONS
 
 #pragma region BESS
-PACK_BEGIN
+	PACK_BEGIN
 private:
 
 #ifndef __RPI_PICO__
@@ -3815,7 +3816,7 @@ private:
 	};
 #endif // !__RPI_PICO__
 
-PACK_END
+	PACK_END
 #pragma endregion BESS
 
 #pragma region INFRASTRUCTURE_METHOD_DECLARATION
@@ -3825,8 +3826,8 @@ public:
 	void setupTheCoreOfEmulation(void* masqueradeInstance = nullptr, void* audio = nullptr, void* input = nullptr, void* network = nullptr, void* camera = nullptr) override;
 	void sendBiosToEmulator(bios_t* bios = nullptr) override {};
 
-	FLAG resetAudio(void* audio = nullptr) override { 
-		RETURN SUCCESS; 
+	FLAG resetAudio(void* audio = nullptr) override {
+		RETURN SUCCESS;
 	};
 	FLAG resetInput(void* input = nullptr) override {
 		RETURN SUCCESS;
@@ -4217,7 +4218,7 @@ public:
 
 #pragma region SM83_METHOD_DECLARATION
 private:
-	
+
 	void cpuSetRegister(REGISTER_TYPE rt, uint16_t u16parameter);
 	uint16_t cpuReadRegister(REGISTER_TYPE rt);
 	void cpuWritePointer(POINTER_TYPE mrt, uint16_t u16parameter);
@@ -4415,7 +4416,7 @@ private:
 	void syncOtherGBModuleTicks(int32_t specAddress = INVALID, int32_t specData = INVALID);
 	MASQ_INLINE FLAG isDoubleSpeedTickHi() const
 	{
-		RETURN (pGBc_instance->GBc_state.emulatorStatus.ticks.isDoubleSpeedHi == YES);
+		RETURN(pGBc_instance->GBc_state.emulatorStatus.ticks.isDoubleSpeedHi == YES);
 	}
 	MASQ_INLINE void setNextTickForDoubleSpeed()
 	{
@@ -4453,7 +4454,7 @@ private:
 	void cameraTick();
 	static MASQ_INLINE uint16_t readOAMWord(const BYTE* OAM, int byteOffset)
 	{
-		RETURN (uint16_t)OAM[byteOffset] | ((uint16_t)OAM[byteOffset + 1] << 8);
+		RETURN(uint16_t)OAM[byteOffset] | ((uint16_t)OAM[byteOffset + 1] << 8);
 	}
 	static MASQ_INLINE void writeOAMWord(BYTE* OAM, int byteOffset, uint16_t value)
 	{
@@ -4475,7 +4476,7 @@ private:
 		auto* OAM = pGBc_memory->GBcMemoryMap.mOAM.OAMMemory;
 
 		/*
-		* 
+		*
 		*   OAM (160 bytes)
 		*
 		*	Row 0   FE00-FE07
@@ -4529,7 +4530,7 @@ private:
 		*	+-------------------------------+
 		*	| Sprite 38 | Sprite 39 |
 		*	+-------------------------------+
-		* 
+		*
 		*/
 
 		const uint8_t currentRow = pGBc_display->oamSearchCount / 2;
@@ -4684,7 +4685,7 @@ private:
 		pGBc_display->latchedWX = pGBc_peripherals->WX;
 		pGBc_display->latchedXWindow = (int16_t)((int16_t)pGBc_peripherals->WX - SEVEN);
 		pGBc_display->latchedWindowDiscardTarget = (pGBc_peripherals->WX < SEVEN) ? (BYTE)(SEVEN - pGBc_peripherals->WX) : ZERO;
-		
+
 		// Increment window line counter.
 		pGBc_display->windowLineCounter++;
 
@@ -4747,7 +4748,7 @@ private:
 		if (((uint16_t)(address - BGP_ADDRESS) <= (uint16_t)(OBP1_ADDRESS - BGP_ADDRESS)) && order == SPECULATION_ORDER::FIRST)
 		{
 			typedef typename std::remove_pointer<decltype(pGBc_peripherals)>::type PeripheralStructType;
-			static const size_t PALETTE_LUT[] = 
+			static const size_t PALETTE_LUT[] =
 			{
 				offsetof(PeripheralStructType, BGP),  // Index 0 maps to 0xFF47
 				offsetof(PeripheralStructType, OBP0), // Index 1 maps to 0xFF48

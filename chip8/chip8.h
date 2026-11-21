@@ -11,6 +11,7 @@
 #pragma region INCLUDES
 //
 #include "helpers.h"
+#include "masquerade_io.h"
 //
 #include "abstractEmulation.h"
 #ifdef __RPI_PICO__
@@ -118,7 +119,7 @@ private:
 #pragma region EMULATION_DECLARATIONS
 
 private:
-	
+
 	enum class VARIANT
 	{
 		CHIP8,
@@ -380,7 +381,7 @@ private:
 
 private:
 
-	Pixel SUPERNOVA = Pixel(255, 204, 0); 
+	Pixel SUPERNOVA = Pixel(255, 204, 0);
 	Pixel CHELSEAGEM = Pixel(153, 102, 0);
 	Pixel BLAZEORANGE = Pixel(255, 102, 0);
 	Pixel CEDARWOODFINISH = Pixel(102, 34, 0);
@@ -391,7 +392,7 @@ private:
 	Pixel color3 = CEDARWOODFINISH;
 
 private:
-	
+
 #ifndef __RPI_PICO__
 	std::deque<chip8_state_t> gamePlay;
 #endif // !__RPI_PICO__
@@ -408,7 +409,9 @@ public:
 
 	chip8_t(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom, MasqConfig_t& config, FLAG headless = NO);
 	void setupTheCoreOfEmulation(void* masqueradeInstance = nullptr, void* audio = nullptr, void* input = nullptr, void* network = nullptr, void* camera = nullptr) override;
-	void sendBiosToEmulator(bios_t* bios = nullptr) override { MASQ_UNUSED(bios); };
+	void sendBiosToEmulator(bios_t* bios = nullptr) override {
+		MASQ_UNUSED(bios);
+	};
 
 	FLAG resetAudio(void* audio = nullptr) override {
 		MASQ_UNUSED(audio);
@@ -502,7 +505,9 @@ public:
 
 public:
 
-	bool processDisplay(uint32_t arg0 = NOT_USED) { MASQ_UNUSED(arg0); RETURN NOT_USED; };
+	bool processDisplay(uint32_t arg0 = NOT_USED) {
+		MASQ_UNUSED(arg0); RETURN NOT_USED;
+	};
 	void scrollDisplay(INC32 H, INC32 V);
 	void displayCompleteScreen();
 	void clearCompleteScreen();
@@ -555,10 +560,18 @@ public:
 	int64_t getEmulatedCPUCycle();
 	void setEmulatedCPUCycle(int64_t cycles);
 
-	int32_t getEmulatedCPUCyclePerEmulationLoop() { RETURN ZERO; };
-	void setEmulatedCPUCyclePerEmulationLoop(int32_t cycles) { MASQ_UNUSED(cycles); };
-	void incrementEmulatedCPUCycle(uint32_t nCycles, bool flag1 = false) {MASQ_UNUSED(nCycles); MASQ_UNUSED(flag1); };
-	void decrementEmulatedCPUCycle(uint32_t nCycles, bool flag1 = false) {MASQ_UNUSED(nCycles); MASQ_UNUSED(flag1); };
+	int32_t getEmulatedCPUCyclePerEmulationLoop() {
+		RETURN ZERO;
+	};
+	void setEmulatedCPUCyclePerEmulationLoop(int32_t cycles) {
+		MASQ_UNUSED(cycles);
+	};
+	void incrementEmulatedCPUCycle(uint32_t nCycles, bool flag1 = false) {
+		MASQ_UNUSED(nCycles); MASQ_UNUSED(flag1);
+	};
+	void decrementEmulatedCPUCycle(uint32_t nCycles, bool flag1 = false) {
+		MASQ_UNUSED(nCycles); MASQ_UNUSED(flag1);
+	};
 
 private:
 

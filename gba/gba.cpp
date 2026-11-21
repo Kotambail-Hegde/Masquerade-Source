@@ -216,7 +216,9 @@ GBA_t::GBA_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 
 	LOG("Setup the event handlers in the scheduler for GBA emulator");
 
-#ifndef __EMSCRIPTEN__
+#if defined(__ANDROID__)
+	_SAVE_LOCATION = masquerade_io::androidSaveDir();
+#elif !defined(__EMSCRIPTEN__)
 	_SAVE_LOCATION = pt.get<std::string>("gba._save_location", "");
 	if (_SAVE_LOCATION.empty())
 	{
@@ -226,9 +228,11 @@ GBA_t::GBA_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 	_SAVE_LOCATION = "assets/saves";
 #endif
 	// check if directory mentioned by "_SAVE_LOCATION" exists, if not we need to explicitly create it
-	ifNoDirectoryThenCreate(_SAVE_LOCATION);
+	masquerade_io::ensureDir(_SAVE_LOCATION);
 
-#ifndef __EMSCRIPTEN__
+#if defined(__ANDROID__)
+	_BIOS_LOCATION = masquerade_io::androidBiosFile("gba_bios.bin");
+#elif !defined(__EMSCRIPTEN__)
 	_BIOS_LOCATION = config.get<std::string>("gba._gba_bios_location");
 #else
 	_BIOS_LOCATION = "/persistent/gba_bios.bin";
@@ -267,18 +271,20 @@ GBA_t::GBA_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 
 		if (gba_bios.biosFound == YES)
 		{
-			FILE* fp = NULL;
 			std::cout << maybeBiosFile << std::endl;
-			errno_t err = fopen_portable(&fp, maybeBiosFile.c_str(), "rb");
+			SDL_IOStream* fp = SDL_IOFromFile(maybeBiosFile.c_str(), "rb");
+			errno_t err = (fp != NULL) ? 0 : -1;
 			if (!err && (fp != NULL))
 			{
-				fseek(fp, 0, SEEK_END);
-				sizeOfBios = ftell(fp);
+				SDL_SeekIO(fp, 0, SDL_IO_SEEK_END);
+				sizeOfBios = TO_UINT32(SDL_TellIO(fp));
 
 				if (sizeOfBios == gba_bios.expectedBiosSize)
 				{
-					rewind(fp);
-					fread(gba_bios.biosImage + 0x0000, sizeOfBios, 1, fp);
+					SDL_SeekIO(fp, 0, SDL_IO_SEEK_SET);
+					SDL_ReadIO(fp, gba_bios.biosImage + 0x0000, sizeOfBios);
+					SDL_CloseIO(fp);
+					fp = NULL;
 
 #if ZERO
 					uint32_t scanner = 0;
@@ -307,6 +313,8 @@ GBA_t::GBA_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 				}
 				else
 				{
+					SDL_CloseIO(fp);
+					fp = NULL;
 					gba_bios.biosFound = NO;
 				}
 			}
@@ -1627,7 +1635,9 @@ FLAG GBA_t::initializeEmulator()
 		GL_CALL(glBindVertexArray(0));
 
 		std::string shaderPath;
-#ifndef __EMSCRIPTEN__
+#if defined(__ANDROID__)
+		shaderPath = "internal"; // APK asset folder (Gradle maps assets/ to the APK root)
+#elif !defined(__EMSCRIPTEN__)
 		shaderPath = pt.get<std::string>("internal._working_directory", "");
 		if (shaderPath.empty())
 		{
@@ -1664,11 +1674,7 @@ void GBA_t::destroyEmulator()
 
 	// save SRAM + RTC (if applicable)
 
-	std::filesystem::path saveDirectory(_SAVE_LOCATION);
-	if (!(std::filesystem::exists(saveDirectory)))
-	{
-		std::filesystem::create_directory(saveDirectory);
-	}
+	masquerade_io::ensureDir(_SAVE_LOCATION);
 
 	// 1) saving "SRAM"
 
@@ -1677,11 +1683,11 @@ void GBA_t::destroyEmulator()
 		, sizeof(pGBA_memory->mGBAMemoryMap.mGamePakRom.mWaitState.mWaitState0.mWaitState0Fields.cartridge_header_SB.cartridge_header_SB_buffer)
 	);
 
-	saveFileNameForThisROM = _SAVE_LOCATION + "\\" + saveFileNameForThisROM;
+	saveFileNameForThisROM = _SAVE_LOCATION + "/" + saveFileNameForThisROM;
 
 	std::cout << "\nSaving to " << saveFileNameForThisROM << std::endl;
 
-	std::ofstream outSRAM(saveFileNameForThisROM.c_str(), std::ios_base::binary);
+	masquerade_io::ofstream outSRAM(saveFileNameForThisROM.c_str(), std::ios_base::binary);
 
 	uint32_t sizeOfSRAMSlot = 0x10000;
 	uint8_t numberOfBackupBanks = ONE;
@@ -1737,11 +1743,11 @@ void GBA_t::destroyEmulator()
 		, sizeof(pGBA_memory->mGBAMemoryMap.mGamePakRom.mWaitState.mWaitState0.mWaitState0Fields.cartridge_header_SB.cartridge_header_SB_buffer)
 	);
 
-	rtcSaveForThisROM = _SAVE_LOCATION + "\\" + rtcSaveForThisROM;
+	rtcSaveForThisROM = _SAVE_LOCATION + "/" + rtcSaveForThisROM;
 
 	std::cout << "\nSaving to " << rtcSaveForThisROM << std::endl;
 
-	std::ofstream outRTC(rtcSaveForThisROM.c_str(), std::ios_base::binary);
+	masquerade_io::ofstream outRTC(rtcSaveForThisROM.c_str(), std::ios_base::binary);
 
 	if (outRTC.fail() == false)
 	{
@@ -1803,13 +1809,14 @@ FLAG GBA_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 {
 	// open the rom file
 
-	FILE* fp = NULL;
+	SDL_IOStream* fp = NULL;
 	uint32_t totalRomSize = 0;
 	uint32_t totalAuxilaryRomSize = 0;
 
 	if ((ROM_TYPE == ROM::GAME_BOY_ADVANCE) || (ROM_TYPE == ROM::REPLAY) || (ROM_TYPE == ROM::COMPARE))
 	{
-		errno_t err = fopen_portable(&fp, rom[ZERO].c_str(), "rb");
+		fp = SDL_IOFromFile(rom[ZERO].c_str(), "rb");
+		errno_t err = (fp != NULL) ? 0 : -1;
 
 		if (!err && (fp != NULL))
 		{
@@ -1860,12 +1867,12 @@ FLAG GBA_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 			// now, time to load the rom
 
 			// get the size of the complete rom
-			fseek(fp, 0, SEEK_END);
-			pAbsolute_GBA_instance->absolute_GBA_state.aboutRom.codeRomSize = ftell(fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_END);
+			pAbsolute_GBA_instance->absolute_GBA_state.aboutRom.codeRomSize = TO_UINT32(SDL_TellIO(fp));
 
 			// read the complete rom
-			rewind(fp);
-			fread(pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakRom.mFlashRom8bit + 0x0000, pAbsolute_GBA_instance->absolute_GBA_state.aboutRom.codeRomSize, 1, fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_SET);
+			SDL_ReadIO(fp, pGBA_instance->GBA_state.gbaMemory.mGBAMemoryMap.mGamePakRom.mFlashRom8bit + 0x0000, pAbsolute_GBA_instance->absolute_GBA_state.aboutRom.codeRomSize);
 
 			// display some of the Cartridge information
 			LOG_NEW_LINE;
@@ -1954,11 +1961,11 @@ FLAG GBA_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 				, sizeof(pGBA_memory->mGBAMemoryMap.mGamePakRom.mWaitState.mWaitState0.mWaitState0Fields.cartridge_header_SB.cartridge_header_SB_buffer)
 			);
 
-			saveFileNameForThisROM = _SAVE_LOCATION + "\\" + saveFileNameForThisROM;
+			saveFileNameForThisROM = _SAVE_LOCATION + "/" + saveFileNameForThisROM;
 
 			std::cout << "\nAttempting to load " << saveFileNameForThisROM << std::endl;
 
-			std::ifstream inSRAM(saveFileNameForThisROM.c_str(), std::ios::in | std::ios_base::binary);
+			masquerade_io::ifstream inSRAM(saveFileNameForThisROM.c_str(), std::ios::in | std::ios_base::binary);
 
 			uint32_t sizeOfSRAMSlot = 0x10000;
 			uint8_t numberOfBackupBanks = ONE;
@@ -2013,11 +2020,11 @@ FLAG GBA_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 				, sizeof(pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_buffer)
 			);
 
-			rtcSaveForThisROM = _SAVE_LOCATION + "\\" + rtcSaveForThisROM;
+			rtcSaveForThisROM = _SAVE_LOCATION + "/" + rtcSaveForThisROM;
 
 			std::cout << "\nAttempting to load " << rtcSaveForThisROM << std::endl;
 
-			std::ifstream inRTC(rtcSaveForThisROM.c_str(), std::ios::in | std::ios_base::binary);
+			masquerade_io::ifstream inRTC(rtcSaveForThisROM.c_str(), std::ios::in | std::ios_base::binary);
 
 			if (inRTC.fail() == false)
 			{
@@ -2034,29 +2041,29 @@ FLAG GBA_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 
 			LOG_NEW_LINE;
 
-			rewind(fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_SET);
 
 			// close the rom for now
-			fclose(fp);
+			SDL_CloseIO(fp);
 
 			if ((ROM_TYPE == ROM::REPLAY) || (ROM_TYPE == ROM::COMPARE))
 			{
-				fp = nullptr;
-				errno_t err = fopen_portable(&fp, rom[ONE].c_str(), "rb");
+				fp = SDL_IOFromFile(rom[ONE].c_str(), "rb");
+				errno_t err = (fp != NULL) ? 0 : -1;
 
 				if (!err && (fp != NULL))
 				{
 					// get the size of the complete rom
-					fseek(fp, 0, SEEK_END);
-					auto size = ftell(fp);
-					rewind(fp);
+					SDL_SeekIO(fp, 0, SDL_IO_SEEK_END);
+					auto size = SDL_TellIO(fp);
+					SDL_SeekIO(fp, 0, SDL_IO_SEEK_SET);
 
 					// Sanity check: file size must be multiple of struct size
 					size_t frameSize = sizeof(repSkyFormat_t);
 					if (size % frameSize != 0)
 					{
 						FATAL("Invalid file size (%ld): not a multiple of frame size (%zu)", size, frameSize);
-						fclose(fp);
+						SDL_CloseIO(fp);
 					}
 
 					size_t numFrames = size / frameSize;
@@ -2065,8 +2072,8 @@ FLAG GBA_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 					repSkyLog.resize(numFrames);
 
 					// Read all frames at once
-					size_t readCount = fread(repSkyLog.data(), frameSize, numFrames, fp);
-					fclose(fp);
+					size_t readCount = (size_t)SDL_ReadIO(fp, repSkyLog.data(), frameSize * numFrames) / frameSize;
+					SDL_CloseIO(fp);
 
 					if (readCount != numFrames)
 					{
