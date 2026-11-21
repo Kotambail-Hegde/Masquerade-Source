@@ -11,7 +11,7 @@ bool GBA_t::saveState(uint8_t id)
 
 	saveStateNameForThisROM = saveStateNameForThisROM + std::to_string(id);
 
-	std::ofstream save;
+	masquerade_io::ofstream save;
 
 #if ZERO
 	time_t rawtime;
@@ -28,7 +28,7 @@ bool GBA_t::saveState(uint8_t id)
 
 	printf("Saved as: %s\n", saveStateNameForThisROM.c_str());
 
-	saveStateNameForThisROM = _SAVE_LOCATION + "\\" + saveStateNameForThisROM;
+	saveStateNameForThisROM = _SAVE_LOCATION + "/" + saveStateNameForThisROM;
 
 	static_assert(std::is_trivially_copyable<GBA_instance_t>::value, "not trivially copyable");
 	static_assert(std::is_standard_layout<GBA_instance_t>::value, "not standard layout");
@@ -53,9 +53,9 @@ bool GBA_t::loadState(uint8_t id)
 
 	saveStateNameForThisROM = saveStateNameForThisROM + std::to_string(id);
 
-	std::ifstream save;
+	masquerade_io::ifstream save;
 
-	saveStateNameForThisROM = _SAVE_LOCATION + "\\" + saveStateNameForThisROM;
+	saveStateNameForThisROM = _SAVE_LOCATION + "/" + saveStateNameForThisROM;
 
 	static_assert(std::is_trivially_copyable<GBA_instance_t>::value, "not trivially copyable");
 	static_assert(std::is_standard_layout<GBA_instance_t>::value, "not standard layout");
@@ -84,11 +84,7 @@ bool GBA_t::absoluteSaveState(uint8_t id)
 {
 	bool status = false;
 
-	std::filesystem::path saveDirectory(_SAVE_LOCATION);
-	if (!(std::filesystem::exists(saveDirectory)))
-	{
-		std::filesystem::create_directory(saveDirectory);
-	}
+	masquerade_io::ensureDir(_SAVE_LOCATION);
 
 	std::string saveStateNameForThisROM = getSaveFileName(
 		pGBA_memory->mGBAMemoryMap.mGamePakRom.mWaitState.mWaitState0.mWaitState0Fields.cartridge_header_SB.cartridge_header_SB_buffer
@@ -97,7 +93,7 @@ bool GBA_t::absoluteSaveState(uint8_t id)
 
 	saveStateNameForThisROM = "_absolute_" + saveStateNameForThisROM + std::to_string(id);
 
-	std::ofstream save;
+	masquerade_io::ofstream save;
 
 #if ZERO
 	time_t rawtime;
@@ -114,7 +110,7 @@ bool GBA_t::absoluteSaveState(uint8_t id)
 
 	printf("Saved as: %s\n", saveStateNameForThisROM.c_str());
 
-	saveStateNameForThisROM = _SAVE_LOCATION + "\\" + saveStateNameForThisROM;
+	saveStateNameForThisROM = _SAVE_LOCATION + "/" + saveStateNameForThisROM;
 
 	static_assert(std::is_trivially_copyable<absolute_GBA_instance_t>::value, "not trivially copyable");
 	static_assert(std::is_standard_layout<absolute_GBA_instance_t>::value, "not standard layout");
@@ -138,9 +134,9 @@ bool GBA_t::absoluteLoadState(uint8_t id)
 	);
 
 	saveStateNameForThisROM = "_absolute_" + saveStateNameForThisROM + std::to_string(id);
-	saveStateNameForThisROM = _SAVE_LOCATION + "\\" + saveStateNameForThisROM;
+	saveStateNameForThisROM = _SAVE_LOCATION + "/" + saveStateNameForThisROM;
 
-	std::ifstream save;
+	masquerade_io::ifstream save;
 	save.open(saveStateNameForThisROM, std::ios::binary);
 	if (!save.is_open())
 	{

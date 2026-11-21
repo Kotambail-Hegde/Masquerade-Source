@@ -30,7 +30,7 @@ FLAG spaceInvaders_t::saveState(uint8_t id)
 
 	saveStateNameForThisROM = saveStateNameForThisROM + std::to_string(id);
 
-	std::ofstream save;
+	masquerade_io::ofstream save;
 
 #if ZERO
 	time_t rawtime;
@@ -47,7 +47,7 @@ FLAG spaceInvaders_t::saveState(uint8_t id)
 
 	LOG("Saved as: %s\n", saveStateNameForThisROM.c_str());
 
-	saveStateNameForThisROM = _SAVE_LOCATION + "\\" + saveStateNameForThisROM;
+	saveStateNameForThisROM = _SAVE_LOCATION + "/" + saveStateNameForThisROM;
 
 	static_assert(std::is_trivially_copyable<si_instance_t>::value, "not trivially copyable");
 	static_assert(std::is_standard_layout<si_instance_t>::value, "not standard layout");
@@ -69,9 +69,9 @@ FLAG spaceInvaders_t::loadState(uint8_t id)
 
 	saveStateNameForThisROM = saveStateNameForThisROM + std::to_string(id);
 
-	std::ifstream save;
+	masquerade_io::ifstream save;
 
-	saveStateNameForThisROM = _SAVE_LOCATION + "\\" + saveStateNameForThisROM;
+	saveStateNameForThisROM = _SAVE_LOCATION + "/" + saveStateNameForThisROM;
 
 	static_assert(std::is_trivially_copyable<si_instance_t>::value, "not trivially copyable");
 	static_assert(std::is_standard_layout<si_instance_t>::value, "not standard layout");

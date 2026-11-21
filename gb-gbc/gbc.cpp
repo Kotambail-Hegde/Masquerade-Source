@@ -238,14 +238,16 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 			ROM_TYPE = ROM::NO_ROM;
 		}
 
-#ifndef __EMSCRIPTEN__
+#if defined(__ANDROID__)
+		_SAVE_LOCATION = masquerade_io::androidSaveDir();
+#elif !defined(__EMSCRIPTEN__)
 		_SAVE_LOCATION = pt.get<std::string>("gb_gbc._save_location");
 #else
 		_SAVE_LOCATION = "assets/saves";
 #endif
 
 		// check if directory mentioned by "_SAVE_LOCATION" exists, if not we need to explicitly create it
-		ifNoDirectoryThenCreate(_SAVE_LOCATION);
+		masquerade_io::ensureDir(_SAVE_LOCATION);
 
 		_FORCE_GB_FOR_GBC = to_bool(pt.get<std::string>("gb_gbc._force_gb_for_gbc", _FORCE_GB_FOR_GBC ? "true" : "false"));
 		_FORCE_GB_GFX_FOR_GBC = to_bool(pt.get<std::string>("gb_gbc._force_gb_gfx_for_gbc", _FORCE_GB_GFX_FOR_GBC ? "true" : "false"));
@@ -278,7 +280,9 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 			ROM_TYPE = ROM::GAME_BOY;
 			INFO("Running in DMG mode");
 
-#ifndef __EMSCRIPTEN__
+#if defined(__ANDROID__)
+			_BIOS_LOCATION = masquerade_io::androidBiosFile("dmg_boot.bin");
+#elif !defined(__EMSCRIPTEN__)
 			_BIOS_LOCATION = config.get<std::string>("gb_gbc._dmg_bios_location");
 #else
 			_BIOS_LOCATION = "/persistent/dmg_boot.bin";
@@ -294,7 +298,9 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 			ROM_TYPE = ROM::GAME_BOY_COLOR;
 			INFO("Running in CGB mode");
 
-#ifndef __EMSCRIPTEN__
+#if defined(__ANDROID__)
+			_BIOS_LOCATION = masquerade_io::androidBiosFile("cgb_boot.bin");
+#elif !defined(__EMSCRIPTEN__)
 			_BIOS_LOCATION = config.get<std::string>("gb_gbc._cgb_bios_location");
 #else
 			_BIOS_LOCATION = "/persistent/cgb_boot.bin";
@@ -312,7 +318,9 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 
 		if (_FORCE_SGB == YES)
 		{
-#ifndef __EMSCRIPTEN__
+#if defined(__ANDROID__)
+			_BIOS_LOCATION = masquerade_io::androidBiosFile("sgb2_boot.bin");
+#elif !defined(__EMSCRIPTEN__)
 			_BIOS_LOCATION = config.get<std::string>("gb_gbc._sgb_bios_location");
 #else
 			_BIOS_LOCATION = "/persistent/sgb2_boot.bin";
@@ -360,18 +368,20 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 
 			if (dmg_cgb_bios.biosFound == YES)
 			{
-				FILE* fp = NULL;
 				std::cout << maybeBiosFile << std::endl;
-				errno_t err = fopen_portable(&fp, maybeBiosFile.c_str(), "rb");
+				SDL_IOStream* fp = SDL_IOFromFile(maybeBiosFile.c_str(), "rb");
+				errno_t err = (fp != NULL) ? 0 : -1;
 				if (!err && (fp != NULL))
 				{
-					fseek(fp, 0, SEEK_END);
-					sizeOfBios = ftell(fp);
+					SDL_SeekIO(fp, 0, SDL_IO_SEEK_END);
+					sizeOfBios = TO_UINT32(SDL_TellIO(fp));
 
 					if (sizeOfBios == dmg_cgb_bios.expectedBiosSize)
 					{
-						rewind(fp);
-						fread(dmg_cgb_bios.biosImage + 0x0000, sizeOfBios, 1, fp);
+						SDL_SeekIO(fp, 0, SDL_IO_SEEK_SET);
+						SDL_ReadIO(fp, dmg_cgb_bios.biosImage + 0x0000, sizeOfBios);
+						SDL_CloseIO(fp);
+						fp = NULL;
 
 #if DEACTIVATED
 						uint32_t scanner = 0;
@@ -406,7 +416,9 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 							_IF_SGB_THEN_SGB2 = dmg_cgb_bios.biosImage[0xFD] == 0x01 ? NO : YES;
 							const FLAG isSGB2 = (_IF_SGB_THEN_SGB2 == YES);
 							INFO("Override: Running in %s mode", isSGB2 ? "SGB2" : "SGB1");
-#ifndef __EMSCRIPTEN__
+#if defined(__ANDROID__)
+							_SGB_DEFAULT_BORDER_LOCATION = isSGB2 ? "sgb2/borders/border_sgb2_pcb.sgb" : "sgb2/borders/border_sgb1.sgb";
+#elif !defined(__EMSCRIPTEN__)
 							_SGB_DEFAULT_BORDER_LOCATION = pt.get<std::string>((isSGB2 ? "gb_gbc._sgb2_border_location" : "gb_gbc._sgb1_border_location"), "assets/sgb2/borders/border_" + std::string(isSGB2 ? "sgb2_pcb.sgb" : "sgb1.sgb"));
 #else
 							_SGB_DEFAULT_BORDER_LOCATION = isSGB2 ? "assets/sgb2/borders/border_sgb2_pcb.sgb" : "assets/sgb2/borders/border_sgb1.sgb";
@@ -415,6 +427,8 @@ GBc_t::GBc_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> r
 					}
 					else
 					{
+						SDL_CloseIO(fp);
+						fp = NULL;
 						dmg_cgb_bios.biosFound = NO;
 						dmg_cgb_bios.unMapBios = YES;
 					}
@@ -7355,18 +7369,12 @@ void GBc_t::initDefaultSGBBorder()
 	auto& sgbBuffer = pGBc_display->imGuiSgbBuffer.imGuiSgbBuffer1D;
 
 	// Open the .sgb border file using the path string
-	std::ifstream file(_SGB_DEFAULT_BORDER_LOCATION, std::ios::binary);
-	if (!file.is_open())
+	std::vector<uint8_t> fileData;
+	if (!masquerade_io::loadFile(_SGB_DEFAULT_BORDER_LOCATION, fileData))
 	{
 		// Handle error: file could not be opened
 		RETURN;
 	}
-
-	// Read file contents into a byte vector
-	std::vector<uint8_t> fileData(
-		(std::istreambuf_iterator<char>(file)),
-		std::istreambuf_iterator<char>()
-	);
 
 	// Verify expected size: 8192 (tiles) + 1792 (map) + 128 (palettes) = 10112 bytes (0x2780)
 	if (fileData.size() < 0x2780)
@@ -7571,7 +7579,9 @@ void GBc_t::initializeGraphics()
 		GL_CALL(glBindVertexArray(0));
 
 		std::string shaderPath;
-#ifndef __EMSCRIPTEN__
+#if defined(__ANDROID__)
+		shaderPath = "internal"; // APK asset folder (Gradle maps assets/ to the APK root)
+#elif !defined(__EMSCRIPTEN__)
 		shaderPath = pt.get<std::string>("internal._working_directory", "");
 		if (shaderPath.empty())
 		{
@@ -8284,11 +8294,7 @@ void GBc_t::destroyEmulator()
 {
 	// save SRAM + RTC (if applicable)
 
-	std::filesystem::path saveDirectory(_SAVE_LOCATION);
-	if (!(std::filesystem::exists(saveDirectory)))
-	{
-		std::filesystem::create_directory(saveDirectory);
-	}
+	masquerade_io::ensureDir(_SAVE_LOCATION);
 
 	// Saving SRAM + RTC
 
@@ -8299,11 +8305,11 @@ void GBc_t::destroyEmulator()
 			, sizeof(pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_buffer)
 		);
 
-		saveFileNameForThisROM = _SAVE_LOCATION + "\\" + saveFileNameForThisROM;
+		saveFileNameForThisROM = _SAVE_LOCATION + "/" + saveFileNameForThisROM;
 
 		std::cout << "\nSaving to " << saveFileNameForThisROM << std::endl;
 
-		std::ofstream outSRAM(saveFileNameForThisROM.c_str(), std::ios_base::binary);
+		masquerade_io::ofstream outSRAM(saveFileNameForThisROM.c_str(), std::ios_base::binary);
 
 		if (outSRAM.fail() == NO)
 		{
@@ -8530,27 +8536,28 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 {
 	// open the rom file
 
-	FILE* fp = NULL;
+	SDL_IOStream* fp = NULL;
 	uint32_t totalRomSize = 0;
 	uint32_t totalAuxilaryRomSize = 0;
 
 	if (((ROM_TYPE == ROM::GAME_BOY) || (ROM_TYPE == ROM::GAME_BOY_COLOR)))
 	{
-		errno_t err = fopen_portable(&fp, rom[ZERO].c_str(), "rb");
+		fp = SDL_IOFromFile(rom[ZERO].c_str(), "rb");
+		errno_t err = (fp != NULL) ? 0 : -1;
 
 		if (!err && (fp != NULL))
 		{
 			// get the size of the complete rom
-			fseek(fp, 0, SEEK_END);
-			pAbsolute_GBc_instance->absolute_GBc_state.aboutRom.codeRomSize = ftell(fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_END);
+			pAbsolute_GBc_instance->absolute_GBc_state.aboutRom.codeRomSize = TO_UINT32(SDL_TellIO(fp));
 
 			// read the complete rom
-			rewind(fp);
-			fread(pGBc_instance->GBc_state.entireRom.entireRomMemory + 0x0000, pAbsolute_GBc_instance->absolute_GBc_state.aboutRom.codeRomSize, 1, fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_SET);
+			SDL_ReadIO(fp, pGBc_instance->GBc_state.entireRom.entireRomMemory + 0x0000, pAbsolute_GBc_instance->absolute_GBc_state.aboutRom.codeRomSize);
 
 			// load memory bank 0 (BIOS is ignored but Cartridge Header is stored)
-			rewind(fp);
-			fread(pGBc_memory->GBcRawMemory + 0x0000, sizeof(romBank00_t), 1, fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_SET);
+			SDL_ReadIO(fp, pGBc_memory->GBcRawMemory + 0x0000, sizeof(romBank00_t));
 
 			// total banks
 			COUNTER32 totalBanks = pAbsolute_GBc_instance->absolute_GBc_state.aboutRom.codeRomSize / 0x4000;
@@ -8661,10 +8668,10 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 			LOG(" Checksum : %2.2X (%s)", checksum, (checksum == header.headerChecksum) ? "PASSED" : "FAILED");
 			LOG_NEW_LINE;
 
-			rewind(fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_SET);
 
 			// close the rom for now
-			fclose(fp);
+			SDL_CloseIO(fp);
 
 			// indicate the type MBC type to rest of the system
 			initMBC();
@@ -9060,11 +9067,11 @@ FLAG GBc_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom)
 					, sizeof(pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_buffer)
 				);
 
-				saveFileNameForThisROM = _SAVE_LOCATION + "\\" + saveFileNameForThisROM;
+				saveFileNameForThisROM = _SAVE_LOCATION + "/" + saveFileNameForThisROM;
 
 				INFO("Attempting to load %s", saveFileNameForThisROM.c_str());
 
-				std::ifstream inSRAM(saveFileNameForThisROM.c_str(), std::ios::in | std::ios_base::binary);
+				masquerade_io::ifstream inSRAM(saveFileNameForThisROM.c_str(), std::ios::in | std::ios_base::binary);
 
 				if (isCartRAMAvailable() == YES)
 				{

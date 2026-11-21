@@ -42,7 +42,7 @@ bool GBc_t::saveState(uint8_t id)
 
 		saveStateNameForThisROM = saveStateNameForThisROM + std::to_string(id);
 
-		std::ofstream save;
+		masquerade_io::ofstream save;
 
 #if ZERO
 		time_t rawtime;
@@ -59,7 +59,7 @@ bool GBc_t::saveState(uint8_t id)
 
 		LOG("Saved as: %s", saveStateNameForThisROM.c_str());
 
-		saveStateNameForThisROM = _SAVE_LOCATION + "\\" + saveStateNameForThisROM;
+		saveStateNameForThisROM = _SAVE_LOCATION + "/" + saveStateNameForThisROM;
 
 		static_assert(std::is_trivially_copyable<GBc_instance_t>::value, "not trivially copyable");
 		static_assert(std::is_standard_layout<GBc_instance_t>::value, "not standard layout");
@@ -98,9 +98,9 @@ bool GBc_t::loadState(uint8_t id)
 
 		saveStateNameForThisROM = saveStateNameForThisROM + std::to_string(id);
 
-		std::ifstream save;
+		masquerade_io::ifstream save;
 
-		saveStateNameForThisROM = _SAVE_LOCATION + "\\" + saveStateNameForThisROM;
+		saveStateNameForThisROM = _SAVE_LOCATION + "/" + saveStateNameForThisROM;
 
 		static_assert(std::is_trivially_copyable<GBc_instance_t>::value, "not trivially copyable");
 		static_assert(std::is_standard_layout<GBc_instance_t>::value, "not standard layout");
@@ -121,11 +121,7 @@ bool GBc_t::absoluteSaveState(uint8_t id)
 {
 	bool status = false;
 
-	std::filesystem::path saveDirectory(_SAVE_LOCATION);
-	if (!(std::filesystem::exists(saveDirectory)))
-	{
-		std::filesystem::create_directory(saveDirectory);
-	}
+	masquerade_io::ensureDir(_SAVE_LOCATION);
 
 	std::string saveStateNameForThisROM = getSaveStateName(
 		pGBc_memory->GBcMemoryMap.mCodeRom.codeRomFields.romBank_00.romBank00_Fields.cartridge_header.cartridge_header_buffer
@@ -134,7 +130,7 @@ bool GBc_t::absoluteSaveState(uint8_t id)
 
 	saveStateNameForThisROM = "_absolute_" + saveStateNameForThisROM + std::to_string(id);
 
-	std::ofstream save;
+	masquerade_io::ofstream save;
 
 #if ZERO
 	time_t rawtime;
@@ -151,7 +147,7 @@ bool GBc_t::absoluteSaveState(uint8_t id)
 
 	LOG("Saved as: %s", saveStateNameForThisROM.c_str());
 
-	saveStateNameForThisROM = _SAVE_LOCATION + "\\" + saveStateNameForThisROM;
+	saveStateNameForThisROM = _SAVE_LOCATION + "/" + saveStateNameForThisROM;
 
 	static_assert(std::is_trivially_copyable<absolute_GBc_instance_t>::value, "not trivially copyable");
 	static_assert(std::is_standard_layout<absolute_GBc_instance_t>::value, "not standard layout");
@@ -176,9 +172,9 @@ bool GBc_t::absoluteLoadState(uint8_t id)
 
 	saveStateNameForThisROM = "_absolute_" + saveStateNameForThisROM + std::to_string(id);
 
-	std::ifstream save;
+	masquerade_io::ifstream save;
 
-	saveStateNameForThisROM = _SAVE_LOCATION + "\\" + saveStateNameForThisROM;
+	saveStateNameForThisROM = _SAVE_LOCATION + "/" + saveStateNameForThisROM;
 
 	static_assert(std::is_trivially_copyable<absolute_GBc_instance_t>::value, "not trivially copyable");
 	static_assert(std::is_standard_layout<absolute_GBc_instance_t>::value, "not standard layout");
@@ -241,10 +237,10 @@ bool GBc_t::bessSaveState(uint8_t id)
 
 	LOG("Saved as: %s", saveStateNameForThisROM.c_str());
 
-	saveStateNameForThisROM = _SAVE_LOCATION + "\\" + saveStateNameForThisROM;
+	saveStateNameForThisROM = _SAVE_LOCATION + "/" + saveStateNameForThisROM;
 
 	// Open file in binary mode
-	std::ofstream save(saveStateNameForThisROM.c_str(), std::ios::binary);
+	masquerade_io::ofstream save(saveStateNameForThisROM.c_str(), std::ios::binary);
 	if (!save)
 	{
 		FATAL("Not able to create save state");
@@ -281,7 +277,7 @@ bool GBc_t::bessSaveState(uint8_t id)
 
 #if _DEBUG
 	// For debug... keep this disabled in normal operation
-	save.rdbuf()->pubsetbuf(nullptr, 0);  // unbuffered mode
+	// (unbuffered mode does not apply to masquerade_io::ofstream)
 #endif
 
 	// 0.1) RAM
@@ -748,10 +744,10 @@ bool GBc_t::bessLoadState(uint8_t id)
 	);
 
 	saveStateNameForThisROM = saveStateNameForThisROM + std::to_string(id);
-	saveStateNameForThisROM = _SAVE_LOCATION + "\\" + saveStateNameForThisROM;
+	saveStateNameForThisROM = _SAVE_LOCATION + "/" + saveStateNameForThisROM;
 
 	// Open file in binary mode
-	std::ifstream save(saveStateNameForThisROM.c_str(), std::ios::binary);
+	masquerade_io::ifstream save(saveStateNameForThisROM.c_str(), std::ios::binary);
 	if (!save)
 	{
 		WARN("Not able to open save state");
@@ -789,7 +785,7 @@ bool GBc_t::bessLoadState(uint8_t id)
 	INC32 obj_pram_off = RESET;
 	INC32 first_blk_off = RESET;
 
-	auto read_NAME_block = [&](std::ifstream& save, const BESS_BLOCK_HEADER_t& BESS_BLOCK_HEADER)
+	auto read_NAME_block = [&](masquerade_io::ifstream& save, const BESS_BLOCK_HEADER_t& BESS_BLOCK_HEADER)
 		{
 			EVENT("This is the NAME block!");
 			BESS_OCCURENCE[TO_UINT(BESS_BLOCKS::BESS_NAME)] = YES;
@@ -804,7 +800,7 @@ bool GBc_t::bessLoadState(uint8_t id)
 			DEBUG("Emulator : %s", emuNameAndVer.c_str());
 		};
 
-	auto read_INFO_block = [&](std::ifstream& save, const BESS_BLOCK_HEADER_t& BESS_BLOCK_HEADER)
+	auto read_INFO_block = [&](masquerade_io::ifstream& save, const BESS_BLOCK_HEADER_t& BESS_BLOCK_HEADER)
 		{
 			EVENT("This is the INFO block!");
 			BESS_OCCURENCE[TO_UINT(BESS_BLOCKS::BESS_INFO)] = YES;
@@ -817,7 +813,7 @@ bool GBc_t::bessLoadState(uint8_t id)
 			DEBUG("ROM Checksum: 0x%X", BESS_BLOCK_INFO.chksum);
 		};
 
-	auto read_CORE_block = [&](std::ifstream& save, const BESS_BLOCK_HEADER_t& BESS_BLOCK_HEADER)
+	auto read_CORE_block = [&](masquerade_io::ifstream& save, const BESS_BLOCK_HEADER_t& BESS_BLOCK_HEADER)
 		{
 			EVENT("This is the CORE block!");
 			BESS_OCCURENCE[TO_UINT(BESS_BLOCKS::BESS_CORE)] = YES;
@@ -834,7 +830,7 @@ bool GBc_t::bessLoadState(uint8_t id)
 			std::string model(BESS_BLOCK_CORE.mdl_indent, sizeof(BESS_BLOCK_CORE.mdl_indent));
 			DEBUG("GB Model: %s", model.c_str());
 
-			if (((ROM_TYPE == ROM::GAME_BOY_COLOR) && (BESS_BLOCK_CORE.mdl_indent[0] != 'C')) 
+			if (((ROM_TYPE == ROM::GAME_BOY_COLOR) && (BESS_BLOCK_CORE.mdl_indent[0] != 'C'))
 				|| ((ROM_TYPE == ROM::GAME_BOY) && (BESS_BLOCK_CORE.mdl_indent[0] != 'G')))
 			{
 				FATAL("BESS gb model mismatch");
@@ -939,7 +935,7 @@ bool GBc_t::bessLoadState(uint8_t id)
 			RETURN SUCCESS;
 		};
 
-	auto read_XOAM_block = [&](std::ifstream& save, const BESS_BLOCK_HEADER_t& BESS_BLOCK_HEADER)
+	auto read_XOAM_block = [&](masquerade_io::ifstream& save, const BESS_BLOCK_HEADER_t& BESS_BLOCK_HEADER)
 		{
 			EVENT("This is the XOAM block!");
 			BESS_OCCURENCE[TO_UINT(BESS_BLOCKS::BESS_XOAM)] = YES;
@@ -965,7 +961,7 @@ bool GBc_t::bessLoadState(uint8_t id)
 			RETURN SUCCESS;
 		};
 
-	auto read_MBC_block = [&](std::ifstream& save, const BESS_BLOCK_HEADER_t& BESS_BLOCK_HEADER)
+	auto read_MBC_block = [&](masquerade_io::ifstream& save, const BESS_BLOCK_HEADER_t& BESS_BLOCK_HEADER)
 		{
 			EVENT("This is the MBC block!");
 			BESS_OCCURENCE[TO_UINT(BESS_BLOCKS::BESS_MBC)] = YES;
@@ -1007,7 +1003,7 @@ bool GBc_t::bessLoadState(uint8_t id)
 			RETURN SUCCESS;
 		};
 
-	auto read_RTC_block = [&](std::ifstream& save, const BESS_BLOCK_HEADER_t& BESS_BLOCK_HEADER)
+	auto read_RTC_block = [&](masquerade_io::ifstream& save, const BESS_BLOCK_HEADER_t& BESS_BLOCK_HEADER)
 		{
 			EVENT("This is the RTC block!");
 			BESS_OCCURENCE[TO_UINT(BESS_BLOCKS::BESS_RTC)] = YES;
@@ -1039,7 +1035,7 @@ bool GBc_t::bessLoadState(uint8_t id)
 			}
 		};
 
-	auto read_END_block = [&](std::ifstream& save, const BESS_BLOCK_HEADER_t& BESS_BLOCK_HEADER)
+	auto read_END_block = [&](masquerade_io::ifstream& save, const BESS_BLOCK_HEADER_t& BESS_BLOCK_HEADER)
 		{
 			EVENT("This is the END block!");
 			BESS_OCCURENCE[TO_UINT(BESS_BLOCKS::BESS_END)] = YES;
@@ -3570,7 +3566,7 @@ void GBc_t::renderGBCDebuggerRegistersPanel()
 			ImGui::TableNextColumn(); ImGui::TextColored(color, "%s", value);
 		};
 
-if (ImGui::CollapsingHeader("LCDC ($FF40)", ImGuiTreeNodeFlags_DefaultOpen))
+	if (ImGui::CollapsingHeader("LCDC ($FF40)", ImGuiTreeNodeFlags_DefaultOpen))
 	{
 		ImGui::Text("Raw: 0x%02X", (uint8_t)lcdcRaw);
 		if (beginRegTable("LCDCTable"))
