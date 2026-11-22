@@ -1134,6 +1134,16 @@ extern "C" EMSCRIPTEN_KEEPALIVE void masq_dismiss_splash()
 	splashDismissRequested = YES;
 }
 
+// Called from the page on real user input. ImGui discards ALL mouse/keyboard input every frame while it believes the app
+// lost focus (a SDL focus-lost event), and browsers can leave it in that state until a focus event arrives.
+extern "C" EMSCRIPTEN_KEEPALIVE void masq_page_focused()
+{
+	if (ImGui::GetCurrentContext() != nullptr)
+	{
+		ImGui::GetIO().AddFocusEvent(true);
+	}
+}
+
 // Browser drops arrive as SDL_EVENT_DROP_FILE with a path in the volatile /tmp/filedrop/... memory folder, which does not
 // survive the page reload used to start a game. Copy the file into /persistent (same naming rule as handle_upload_file)
 // and RETURN the name(s) to queue.
