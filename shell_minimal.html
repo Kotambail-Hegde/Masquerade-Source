@@ -110,9 +110,20 @@
                     bubbles: false, clientX: e.clientX || 0, clientY: e.clientY || 0
                 }));
             }
+            var focusDispatched = false;
+            function tellAppItIsFocused() {
+                if (!Module.calledRun) return;
+                if (!focusDispatched) {
+                    // let SDL see a real 'focus' event too (its keyboard focus); canvas.focus() alone never reaches SDL's window-level listener
+                    focusDispatched = true;
+                    window.dispatchEvent(new FocusEvent('focus'));
+                }
+                Module.ccall('masq_page_focused', null, [], []);
+            }
             function onGesture(e) {
                 focusCanvas();
                 sendEnter(e);
+                tellAppItIsFocused();
                 if (dismissed || !Module.calledRun) return; // runtime not ready yet: wait for the next gesture
                 dismissed = true;
                 Module.ccall('masq_dismiss_splash', null, [], []);
@@ -124,7 +135,7 @@
             });
             window.addEventListener('mousemove', sendEnter, { once: true, capture: true });
             window.addEventListener('load', focusCanvas);
-            document.addEventListener('visibilitychange', function () { if (!document.hidden) focusCanvas(); });
+            document.addEventListener('visibilitychange', function () { if (!document.hidden) { focusCanvas(); tellAppItIsFocused(); } });
         })();
     </script>
 

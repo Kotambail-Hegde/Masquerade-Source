@@ -928,7 +928,7 @@ elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
             "-sSTACK_SIZE=256MB" "-sSTACK_OVERFLOW_CHECK=0" "-sUSE_GLFW=0"
             "-sINITIAL_MEMORY=512MB"
             "-sEXPORTED_RUNTIME_METHODS=[ccall]"
-            "-sEXPORTED_FUNCTIONS=[_main,_malloc,_free,_masq_dismiss_splash]"
+            "-sEXPORTED_FUNCTIONS=[_main,_malloc,_free,_masq_dismiss_splash,_masq_page_focused]"
             "--shell-file=${CMAKE_SOURCE_DIR}/shell_minimal.html"
             "--preload-file=${CMAKE_SOURCE_DIR}/assets@/assets"
             "-O3" "-flto" "-msimd128" "-fno-math-errno" "-fno-rtti"
