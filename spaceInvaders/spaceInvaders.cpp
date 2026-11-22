@@ -66,7 +66,9 @@ spaceInvaders_t::spaceInvaders_t(int nFiles, std::array<std::string, MAX_NUMBER_
 		ROM_TYPE = ROM::SPACE_INVADERS;
 	}
 
-#ifndef __EMSCRIPTEN__
+#if defined(__ANDROID__)
+	_SAVE_LOCATION = masquerade_io::androidSaveDir();
+#elif !defined(__EMSCRIPTEN__)
 	_SAVE_LOCATION = pt.get<std::string>("spaceinvaders._save_location", "");
 	if (_SAVE_LOCATION.empty())
 	{
@@ -79,7 +81,7 @@ spaceInvaders_t::spaceInvaders_t(int nFiles, std::array<std::string, MAX_NUMBER_
 	_TEST_NUMBER = pt.get<std::int32_t>("spaceinvaders._test_to_run", 0);
 
 	// check if directory mentioned by "_SAVE_LOCATION" exists, if not we need to explicitly create it
-	ifNoDirectoryThenCreate(_SAVE_LOCATION);
+	masquerade_io::ensureDir(_SAVE_LOCATION);
 
 	for (INC8 ii = RESET; ii < (MAX_NUMBER_ROMS_FOR_SI - indexToCheck); ii++)
 	{
@@ -1176,6 +1178,9 @@ FLAG spaceInvaders_t::initializeEmulator()
 		auto loadWAV = [&](const std::string& key, SDL_AudioSpec& spec, Uint8*& buf, Uint32& len)
 			{
 				auto path = pt.get<std::string>(key, "");
+#ifdef __ANDROID__
+				path = masquerade_io::androidAssetPath(path);
+#endif
 				if (!path.empty())
 					SDL_LoadWAV(path.c_str(), &spec, &buf, &len);
 			};
@@ -1293,7 +1298,9 @@ FLAG spaceInvaders_t::initializeEmulator()
 		GL_CALL(glBindVertexArray(0));
 
 		std::string shaderPath;
-#ifndef __EMSCRIPTEN__
+#if defined(__ANDROID__)
+		shaderPath = "internal"; // APK asset folder (Gradle maps assets/ to the APK root)
+#elif !defined(__EMSCRIPTEN__)
 		shaderPath = pt.get<std::string>("internal._working_directory", "");
 		if (shaderPath.empty())
 		{
@@ -1377,29 +1384,30 @@ FLAG spaceInvaders_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFO
 {
 	// open the rom file
 
-	FILE* fp = NULL;
+	SDL_IOStream* fp = NULL;
 	uint32_t totalRomSize = 0;
 
 	if (ROM_TYPE == ROM::TEST_ROM_COM)
 	{
 		// Test ROM
 
-		errno_t err = fopen_portable(&fp, rom[ZERO].c_str(), "rb");
+		fp = SDL_IOFromFile(rom[ZERO].c_str(), "rb");
+		errno_t err = (fp != NULL) ? 0 : -1;
 
 		if (!err && (fp != NULL))
 		{
 			// get the size of the complete rom
-			fseek(fp, 0, SEEK_END);
-			pAbsolute_si_instance->absolute_si_state.aboutRom.romSize = ftell(fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_END);
+			pAbsolute_si_instance->absolute_si_state.aboutRom.romSize = TO_UINT32(SDL_TellIO(fp));
 			totalRomSize += pAbsolute_si_instance->absolute_si_state.aboutRom.romSize;
 
 			// read the complete rom
-			rewind(fp);
-			fread(&pSi_instance->si_state.memory.rawMemory[0x0100], pAbsolute_si_instance->absolute_si_state.aboutRom.romSize, 1, fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_SET);
+			SDL_ReadIO(fp, &pSi_instance->si_state.memory.rawMemory[0x0100], pAbsolute_si_instance->absolute_si_state.aboutRom.romSize);
 			LOG("test rom loaded");
 
 			// close the rom for now
-			fclose(fp);
+			SDL_CloseIO(fp);
 		}
 		else
 		{
@@ -1412,22 +1420,23 @@ FLAG spaceInvaders_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFO
 
 		// file e
 
-		errno_t err = fopen_portable(&fp, rom[ZERO].c_str(), "rb");
+		fp = SDL_IOFromFile(rom[ZERO].c_str(), "rb");
+		errno_t err = (fp != NULL) ? 0 : -1;
 
 		if (!err && (fp != NULL))
 		{
 			// get the size of the complete rom
-			fseek(fp, 0, SEEK_END);
-			pAbsolute_si_instance->absolute_si_state.aboutRom.romSize = ftell(fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_END);
+			pAbsolute_si_instance->absolute_si_state.aboutRom.romSize = TO_UINT32(SDL_TellIO(fp));
 			totalRomSize += pAbsolute_si_instance->absolute_si_state.aboutRom.romSize;
 
 			// read the complete rom
-			rewind(fp);
-			fread(pSi_instance->si_state.memory.memoryMap.mRom.romFields.rom_e, pAbsolute_si_instance->absolute_si_state.aboutRom.romSize, 1, fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_SET);
+			SDL_ReadIO(fp, pSi_instance->si_state.memory.memoryMap.mRom.romFields.rom_e, pAbsolute_si_instance->absolute_si_state.aboutRom.romSize);
 			LOG("file e loaded");
 
 			// close the rom for now
-			fclose(fp);
+			SDL_CloseIO(fp);
 		}
 		else
 		{
@@ -1437,22 +1446,23 @@ FLAG spaceInvaders_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFO
 
 		// file f
 
-		err = fopen_portable(&fp, rom[ONE].c_str(), "rb");
+		fp = SDL_IOFromFile(rom[ONE].c_str(), "rb");
+		err = (fp != NULL) ? 0 : -1;
 
 		if (!err && (fp != NULL))
 		{
 			// get the size of the complete rom
-			fseek(fp, 0, SEEK_END);
-			pAbsolute_si_instance->absolute_si_state.aboutRom.romSize = ftell(fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_END);
+			pAbsolute_si_instance->absolute_si_state.aboutRom.romSize = TO_UINT32(SDL_TellIO(fp));
 			totalRomSize += pAbsolute_si_instance->absolute_si_state.aboutRom.romSize;
 
 			// read the complete rom
-			rewind(fp);
-			fread(pSi_instance->si_state.memory.memoryMap.mRom.romFields.rom_f, pAbsolute_si_instance->absolute_si_state.aboutRom.romSize, 1, fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_SET);
+			SDL_ReadIO(fp, pSi_instance->si_state.memory.memoryMap.mRom.romFields.rom_f, pAbsolute_si_instance->absolute_si_state.aboutRom.romSize);
 			LOG("file f loaded");
 
 			// close the rom for now
-			fclose(fp);
+			SDL_CloseIO(fp);
 		}
 		else
 		{
@@ -1462,22 +1472,23 @@ FLAG spaceInvaders_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFO
 
 		// file g
 
-		err = fopen_portable(&fp, rom[TWO].c_str(), "rb");
+		fp = SDL_IOFromFile(rom[TWO].c_str(), "rb");
+		err = (fp != NULL) ? 0 : -1;
 
 		if (!err && (fp != NULL))
 		{
 			// get the size of the complete rom
-			fseek(fp, 0, SEEK_END);
-			pAbsolute_si_instance->absolute_si_state.aboutRom.romSize = ftell(fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_END);
+			pAbsolute_si_instance->absolute_si_state.aboutRom.romSize = TO_UINT32(SDL_TellIO(fp));
 			totalRomSize += pAbsolute_si_instance->absolute_si_state.aboutRom.romSize;
 
 			// read the complete rom
-			rewind(fp);
-			fread(pSi_instance->si_state.memory.memoryMap.mRom.romFields.rom_g, pAbsolute_si_instance->absolute_si_state.aboutRom.romSize, 1, fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_SET);
+			SDL_ReadIO(fp, pSi_instance->si_state.memory.memoryMap.mRom.romFields.rom_g, pAbsolute_si_instance->absolute_si_state.aboutRom.romSize);
 			LOG("file g loaded");
 
 			// close the rom for now
-			fclose(fp);
+			SDL_CloseIO(fp);
 		}
 		else
 		{
@@ -1487,22 +1498,23 @@ FLAG spaceInvaders_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFO
 
 		// file h
 
-		err = fopen_portable(&fp, rom[THREE].c_str(), "rb");
+		fp = SDL_IOFromFile(rom[THREE].c_str(), "rb");
+		err = (fp != NULL) ? 0 : -1;
 
 		if (!err && (fp != NULL))
 		{
 			// get the size of the complete rom
-			fseek(fp, 0, SEEK_END);
-			pAbsolute_si_instance->absolute_si_state.aboutRom.romSize = ftell(fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_END);
+			pAbsolute_si_instance->absolute_si_state.aboutRom.romSize = TO_UINT32(SDL_TellIO(fp));
 			totalRomSize += pAbsolute_si_instance->absolute_si_state.aboutRom.romSize;
 
 			// read the complete rom
-			rewind(fp);
-			fread(pSi_instance->si_state.memory.memoryMap.mRom.romFields.rom_h, pAbsolute_si_instance->absolute_si_state.aboutRom.romSize, 1, fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_SET);
+			SDL_ReadIO(fp, pSi_instance->si_state.memory.memoryMap.mRom.romFields.rom_h, pAbsolute_si_instance->absolute_si_state.aboutRom.romSize);
 			LOG("file h loaded");
 
 			// close the rom for now
-			fclose(fp);
+			SDL_CloseIO(fp);
 
 			pAbsolute_si_instance->absolute_si_state.aboutRom.isRomLoaded = true;
 		}

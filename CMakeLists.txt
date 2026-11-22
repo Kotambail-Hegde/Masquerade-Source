@@ -420,6 +420,7 @@ set(PROJECT_HEADERS
     bios/bios.h
     core/abstractEmulation.h
     core/defaults.h
+    core/masquerade_io.h
     chip8/chip8.h
     spaceInvaders/spaceInvaders.h
     pacMan/pacMan.h
@@ -429,6 +430,7 @@ set(PROJECT_HEADERS
     gba/gba.inl
     gba/gba_opcodes.inl
     helpers/helpers.h
+    helpers/macros.h
     cheats/cheats.h
     scheduler/scheduler.h
     ui/imgui_custom_config.h
@@ -926,7 +928,7 @@ elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
             "-sSTACK_SIZE=256MB" "-sSTACK_OVERFLOW_CHECK=0" "-sUSE_GLFW=0"
             "-sINITIAL_MEMORY=512MB"
             "-sEXPORTED_RUNTIME_METHODS=[ccall]"
-            "-sEXPORTED_FUNCTIONS=[_main,_malloc,_free]"
+            "-sEXPORTED_FUNCTIONS=[_main,_malloc,_free,_masq_dismiss_splash]"
             "--shell-file=${CMAKE_SOURCE_DIR}/shell_minimal.html"
             "--preload-file=${CMAKE_SOURCE_DIR}/assets@/assets"
             "-O3" "-flto" "-msimd128" "-fno-math-errno" "-fno-rtti"

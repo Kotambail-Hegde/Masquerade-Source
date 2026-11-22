@@ -140,7 +140,9 @@ pacMan_t::pacMan_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATF
 		ROM_TYPE = ROM::MS_PAC_MAN;
 	}
 
-#ifndef __EMSCRIPTEN__
+#if defined(__ANDROID__)
+	_SAVE_LOCATION = masquerade_io::androidSaveDir();
+#elif !defined(__EMSCRIPTEN__)
 	_SAVE_LOCATION = pt.get<std::string>("pacman._save_location", "");
 	if (_SAVE_LOCATION.empty())
 	{
@@ -154,7 +156,7 @@ pacMan_t::pacMan_t(int nFiles, std::array<std::string, MAX_NUMBER_ROMS_PER_PLATF
 	_TEST_NUMBER = pt.get<std::int32_t>("pacman._test_to_run", 0);
 
 	// check if directory mentioned by "_SAVE_LOCATION" exists, if not we need to explicitly create it
-	ifNoDirectoryThenCreate(_SAVE_LOCATION);
+	masquerade_io::ensureDir(_SAVE_LOCATION);
 
 	for (INC8 ii = RESET; ii < (MAX_NUMBER_ROMS_PER_PLATFORM - indexToCheck); ii++)
 	{
@@ -4064,7 +4066,7 @@ FLAG pacMan_t::setupEmulatorForMsPacMan(std::array<std::string, MAX_NUMBER_ROMS_
 		pPacMan_memory->pacManMemoryMap.mAuxCodeRom.auxillaryCodeRomFields.SPARE1[ii] = 0xFF;
 	}
 
-	FILE* fp = NULL;
+	SDL_IOStream* fp = NULL;
 	uint32_t totalRomSize = 0;
 
 	// Load, Decrypt and Store u7, u6 and u5 in cloned memory for now
@@ -4090,22 +4092,23 @@ FLAG pacMan_t::setupEmulatorForMsPacMan(std::array<std::string, MAX_NUMBER_ROMS_
 
 	// file u5
 
-	errno_t err = fopen_portable(&fp, rom[TEN].c_str(), "rb");
+	fp = SDL_IOFromFile(rom[TEN].c_str(), "rb");
+	errno_t err = (fp != NULL) ? 0 : -1;
 
 	if (!err && (fp != NULL))
 	{
 		// get the size of the complete rom
-		fseek(fp, 0, SEEK_END);
-		pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.auxillaryCodeRomSize = ftell(fp);
+		SDL_SeekIO(fp, 0, SDL_IO_SEEK_END);
+		pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.auxillaryCodeRomSize = TO_UINT32(SDL_TellIO(fp));
 		*totalAuxilaryRomSize += pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.auxillaryCodeRomSize;
 
 		// read the complete rom
-		rewind(fp);
-		fread(placeholderToLoad->placeholderMemFields.u5, pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.auxillaryCodeRomSize, 1, fp);
+		SDL_SeekIO(fp, 0, SDL_IO_SEEK_SET);
+		SDL_ReadIO(fp, placeholderToLoad->placeholderMemFields.u5, pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.auxillaryCodeRomSize);
 		LOG("file u5 loaded");
 
 		// close the rom for now
-		fclose(fp);
+		SDL_CloseIO(fp);
 
 		pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.areRomsLoaded = false;
 	}
@@ -4118,22 +4121,23 @@ FLAG pacMan_t::setupEmulatorForMsPacMan(std::array<std::string, MAX_NUMBER_ROMS_
 
 	// file u6
 
-	err = fopen_portable(&fp, rom[ELEVEN].c_str(), "rb");
+	fp = SDL_IOFromFile(rom[ELEVEN].c_str(), "rb");
+	err = (fp != NULL) ? 0 : -1;
 
 	if (!err && (fp != NULL))
 	{
 		// get the size of the complete rom
-		fseek(fp, 0, SEEK_END);
-		pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.auxillaryCodeRomSize = ftell(fp);
+		SDL_SeekIO(fp, 0, SDL_IO_SEEK_END);
+		pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.auxillaryCodeRomSize = TO_UINT32(SDL_TellIO(fp));
 		*totalAuxilaryRomSize += pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.auxillaryCodeRomSize;
 
 		// read the complete rom
-		rewind(fp);
-		fread(placeholderToLoad->placeholderMemFields.u6, pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.auxillaryCodeRomSize, 1, fp);
+		SDL_SeekIO(fp, 0, SDL_IO_SEEK_SET);
+		SDL_ReadIO(fp, placeholderToLoad->placeholderMemFields.u6, pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.auxillaryCodeRomSize);
 		LOG("file u6 loaded");
 
 		// close the rom for now
-		fclose(fp);
+		SDL_CloseIO(fp);
 
 		pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.areRomsLoaded = false;
 
@@ -4147,22 +4151,23 @@ FLAG pacMan_t::setupEmulatorForMsPacMan(std::array<std::string, MAX_NUMBER_ROMS_
 
 	// file u7
 
-	err = fopen_portable(&fp, rom[TWELVE].c_str(), "rb");
+	fp = SDL_IOFromFile(rom[TWELVE].c_str(), "rb");
+	err = (fp != NULL) ? 0 : -1;
 
 	if (!err && (fp != NULL))
 	{
 		// get the size of the complete rom
-		fseek(fp, 0, SEEK_END);
-		pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.auxillaryCodeRomSize = ftell(fp);
+		SDL_SeekIO(fp, 0, SDL_IO_SEEK_END);
+		pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.auxillaryCodeRomSize = TO_UINT32(SDL_TellIO(fp));
 		*totalAuxilaryRomSize += pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.auxillaryCodeRomSize;
 
 		// read the complete rom
-		rewind(fp);
-		fread(placeholderToLoad->placeholderMemFields.u7, pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.auxillaryCodeRomSize, 1, fp);
+		SDL_SeekIO(fp, 0, SDL_IO_SEEK_SET);
+		SDL_ReadIO(fp, placeholderToLoad->placeholderMemFields.u7, pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.auxillaryCodeRomSize);
 		LOG("file u7 loaded");
 
 		// close the rom for now
-		fclose(fp);
+		SDL_CloseIO(fp);
 
 		pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.areRomsLoaded = true;
 
@@ -4449,7 +4454,9 @@ FLAG pacMan_t::initializeEmulator()
 		GL_CALL(glBindVertexArray(0));
 
 		std::string shaderPath;
-#ifndef __EMSCRIPTEN__
+#if defined(__ANDROID__)
+		shaderPath = "internal"; // APK asset folder (Gradle maps assets/ to the APK root)
+#elif !defined(__EMSCRIPTEN__)
 		shaderPath = pt.get<std::string>("internal._working_directory", "");
 		if (shaderPath.empty())
 		{
@@ -4527,7 +4534,7 @@ FLAG pacMan_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom
 {
 	// open the rom file
 
-	FILE* fp = NULL;
+	SDL_IOStream* fp = NULL;
 	uint32_t totalRomSize = 0;
 	uint32_t totalAuxilaryRomSize = 0;
 
@@ -4535,22 +4542,23 @@ FLAG pacMan_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom
 	{
 		// Test ROM
 
-		errno_t err = fopen_portable(&fp, rom[ZERO].c_str(), "rb");
+		fp = SDL_IOFromFile(rom[ZERO].c_str(), "rb");
+		errno_t err = (fp != NULL) ? 0 : -1;
 
 		if (!err && (fp != NULL))
 		{
 			// get the size of the complete rom
-			fseek(fp, 0, SEEK_END);
-			pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.codeRomSize = ftell(fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_END);
+			pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.codeRomSize = TO_UINT32(SDL_TellIO(fp));
 			totalRomSize += pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.codeRomSize;
 
 			// read the complete rom
-			rewind(fp);
-			fread(&pPacMan_instance->pacMan_state.pacManMemory.pacManRawMemory[0x0100], pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.codeRomSize, 1, fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_SET);
+			SDL_ReadIO(fp, &pPacMan_instance->pacMan_state.pacManMemory.pacManRawMemory[0x0100], pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.codeRomSize);
 			LOG("test rom loaded");
 
 			// close the rom for now
-			fclose(fp);
+			SDL_CloseIO(fp);
 		}
 		else
 		{
@@ -4562,22 +4570,23 @@ FLAG pacMan_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom
 	{
 		// file 6e
 
-		errno_t err = fopen_portable(&fp, rom[ZERO].c_str(), "rb");
+		fp = SDL_IOFromFile(rom[ZERO].c_str(), "rb");
+		errno_t err = (fp != NULL) ? 0 : -1;
 
 		if (!err && (fp != NULL))
 		{
 			// get the size of the complete rom
-			fseek(fp, 0, SEEK_END);
-			pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.codeRomSize = ftell(fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_END);
+			pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.codeRomSize = TO_UINT32(SDL_TellIO(fp));
 			totalRomSize += pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.codeRomSize;
 
 			// read the complete rom
-			rewind(fp);
-			fread(pPacMan_instance->pacMan_state.pacManMemory.pacManMemoryMap.mCodeRom.codeRomFields.code_rom_6e, pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.codeRomSize, 1, fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_SET);
+			SDL_ReadIO(fp, pPacMan_instance->pacMan_state.pacManMemory.pacManMemoryMap.mCodeRom.codeRomFields.code_rom_6e, pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.codeRomSize);
 			LOG("file 6e loaded");
 
 			// close the rom for now
-			fclose(fp);
+			SDL_CloseIO(fp);
 		}
 		else
 		{
@@ -4587,22 +4596,23 @@ FLAG pacMan_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom
 
 		// file 6f
 
-		err = fopen_portable(&fp, rom[ONE].c_str(), "rb");
+		fp = SDL_IOFromFile(rom[ONE].c_str(), "rb");
+		err = (fp != NULL) ? 0 : -1;
 
 		if (!err && (fp != NULL))
 		{
 			// get the size of the complete rom
-			fseek(fp, 0, SEEK_END);
-			pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.codeRomSize = ftell(fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_END);
+			pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.codeRomSize = TO_UINT32(SDL_TellIO(fp));
 			totalRomSize += pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.codeRomSize;
 
 			// read the complete rom
-			rewind(fp);
-			fread(pPacMan_instance->pacMan_state.pacManMemory.pacManMemoryMap.mCodeRom.codeRomFields.code_rom_6f, pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.codeRomSize, 1, fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_SET);
+			SDL_ReadIO(fp, pPacMan_instance->pacMan_state.pacManMemory.pacManMemoryMap.mCodeRom.codeRomFields.code_rom_6f, pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.codeRomSize);
 			LOG("file 6f loaded");
 
 			// close the rom for now
-			fclose(fp);
+			SDL_CloseIO(fp);
 		}
 		else
 		{
@@ -4612,22 +4622,23 @@ FLAG pacMan_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom
 
 		// file 6h
 
-		err = fopen_portable(&fp, rom[TWO].c_str(), "rb");
+		fp = SDL_IOFromFile(rom[TWO].c_str(), "rb");
+		err = (fp != NULL) ? 0 : -1;
 
 		if (!err && (fp != NULL))
 		{
 			// get the size of the complete rom
-			fseek(fp, 0, SEEK_END);
-			pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.codeRomSize = ftell(fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_END);
+			pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.codeRomSize = TO_UINT32(SDL_TellIO(fp));
 			totalRomSize += pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.codeRomSize;
 
 			// read the complete rom
-			rewind(fp);
-			fread(pPacMan_instance->pacMan_state.pacManMemory.pacManMemoryMap.mCodeRom.codeRomFields.code_rom_6h, pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.codeRomSize, 1, fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_SET);
+			SDL_ReadIO(fp, pPacMan_instance->pacMan_state.pacManMemory.pacManMemoryMap.mCodeRom.codeRomFields.code_rom_6h, pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.codeRomSize);
 			LOG("file 6h loaded");
 
 			// close the rom for now
-			fclose(fp);
+			SDL_CloseIO(fp);
 		}
 		else
 		{
@@ -4637,22 +4648,23 @@ FLAG pacMan_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom
 
 		// file 6j
 
-		err = fopen_portable(&fp, rom[THREE].c_str(), "rb");
+		fp = SDL_IOFromFile(rom[THREE].c_str(), "rb");
+		err = (fp != NULL) ? 0 : -1;
 
 		if (!err && (fp != NULL))
 		{
 			// get the size of the complete rom
-			fseek(fp, 0, SEEK_END);
-			pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.codeRomSize = ftell(fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_END);
+			pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.codeRomSize = TO_UINT32(SDL_TellIO(fp));
 			totalRomSize += pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.codeRomSize;
 
 			// read the complete rom
-			rewind(fp);
-			fread(pPacMan_instance->pacMan_state.pacManMemory.pacManMemoryMap.mCodeRom.codeRomFields.code_rom_6j, pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.codeRomSize, 1, fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_SET);
+			SDL_ReadIO(fp, pPacMan_instance->pacMan_state.pacManMemory.pacManMemoryMap.mCodeRom.codeRomFields.code_rom_6j, pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.codeRomSize);
 			LOG("file 6j loaded");
 
 			// close the rom for now
-			fclose(fp);
+			SDL_CloseIO(fp);
 		}
 		else
 		{
@@ -4663,21 +4675,22 @@ FLAG pacMan_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom
 
 		// file 7f
 
-		err = fopen_portable(&fp, rom[FOUR].c_str(), "rb");
+		fp = SDL_IOFromFile(rom[FOUR].c_str(), "rb");
+		err = (fp != NULL) ? 0 : -1;
 
 		if (!err && (fp != NULL))
 		{
 			// get the size of the complete rom
-			fseek(fp, 0, SEEK_END);
-			pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.colorRomSize = ftell(fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_END);
+			pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.colorRomSize = TO_UINT32(SDL_TellIO(fp));
 
 			// read the complete rom
-			rewind(fp);
-			fread(pPacMan_instance->pacMan_state.color_rom.colorROMMemory, pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.colorRomSize, 1, fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_SET);
+			SDL_ReadIO(fp, pPacMan_instance->pacMan_state.color_rom.colorROMMemory, pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.colorRomSize);
 			LOG("file 7f loaded");
 
 			// close the rom for now
-			fclose(fp);
+			SDL_CloseIO(fp);
 		}
 		else
 		{
@@ -4688,21 +4701,22 @@ FLAG pacMan_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom
 
 		// file 4a
 
-		err = fopen_portable(&fp, rom[FIVE].c_str(), "rb");
+		fp = SDL_IOFromFile(rom[FIVE].c_str(), "rb");
+		err = (fp != NULL) ? 0 : -1;
 
 		if (!err && (fp != NULL))
 		{
 			// get the size of the complete rom
-			fseek(fp, 0, SEEK_END);
-			pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.paletteRomSize = ftell(fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_END);
+			pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.paletteRomSize = TO_UINT32(SDL_TellIO(fp));
 
 			// read the complete rom
-			rewind(fp);
-			fread(pPacMan_instance->pacMan_state.palette_rom.paletteROMMemory, pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.paletteRomSize, 1, fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_SET);
+			SDL_ReadIO(fp, pPacMan_instance->pacMan_state.palette_rom.paletteROMMemory, pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.paletteRomSize);
 			LOG("file 4a loaded");
 
 			// close the rom for now
-			fclose(fp);
+			SDL_CloseIO(fp);
 		}
 		else
 		{
@@ -4713,21 +4727,22 @@ FLAG pacMan_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom
 
 		// file 5e
 
-		err = fopen_portable(&fp, rom[SIX].c_str(), "rb");
+		fp = SDL_IOFromFile(rom[SIX].c_str(), "rb");
+		err = (fp != NULL) ? 0 : -1;
 
 		if (!err && (fp != NULL))
 		{
 			// get the size of the complete rom
-			fseek(fp, 0, SEEK_END);
-			pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.tileRomSize = ftell(fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_END);
+			pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.tileRomSize = TO_UINT32(SDL_TellIO(fp));
 
 			// read the complete rom
-			rewind(fp);
-			fread(pPacMan_instance->pacMan_state.tile_rom.tileROMMemory, pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.tileRomSize, 1, fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_SET);
+			SDL_ReadIO(fp, pPacMan_instance->pacMan_state.tile_rom.tileROMMemory, pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.tileRomSize);
 			LOG("file 5e loaded");
 
 			// close the rom for now
-			fclose(fp);
+			SDL_CloseIO(fp);
 		}
 		else
 		{
@@ -4738,21 +4753,22 @@ FLAG pacMan_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom
 
 		// file 5f
 
-		err = fopen_portable(&fp, rom[SEVEN].c_str(), "rb");
+		fp = SDL_IOFromFile(rom[SEVEN].c_str(), "rb");
+		err = (fp != NULL) ? 0 : -1;
 
 		if (!err && (fp != NULL))
 		{
 			// get the size of the complete rom
-			fseek(fp, 0, SEEK_END);
-			pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.spriteRomSize = ftell(fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_END);
+			pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.spriteRomSize = TO_UINT32(SDL_TellIO(fp));
 
 			// read the complete rom
-			rewind(fp);
-			fread(pPacMan_instance->pacMan_state.sprite_rom.spriteROMMemory, pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.spriteRomSize, 1, fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_SET);
+			SDL_ReadIO(fp, pPacMan_instance->pacMan_state.sprite_rom.spriteROMMemory, pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.spriteRomSize);
 			LOG("file 5f loaded");
 
 			// close the rom for now
-			fclose(fp);
+			SDL_CloseIO(fp);
 		}
 		else
 		{
@@ -4763,21 +4779,22 @@ FLAG pacMan_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom
 
 		// file 1m
 
-		err = fopen_portable(&fp, rom[EIGHT].c_str(), "rb");
+		fp = SDL_IOFromFile(rom[EIGHT].c_str(), "rb");
+		err = (fp != NULL) ? 0 : -1;
 
 		if (!err && (fp != NULL))
 		{
 			// get the size of the complete rom
-			fseek(fp, 0, SEEK_END);
-			pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.soundRom1Size = ftell(fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_END);
+			pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.soundRom1Size = TO_UINT32(SDL_TellIO(fp));
 
 			// read the complete rom
-			rewind(fp);
-			fread(pPacMan_instance->pacMan_state.sound_rom.soundROM.sound_rom1, pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.soundRom1Size, 1, fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_SET);
+			SDL_ReadIO(fp, pPacMan_instance->pacMan_state.sound_rom.soundROM.sound_rom1, pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.soundRom1Size);
 			LOG("file 1m loaded");
 
 			// close the rom for now
-			fclose(fp);
+			SDL_CloseIO(fp);
 		}
 		else
 		{
@@ -4788,21 +4805,22 @@ FLAG pacMan_t::loadRom(std::array<std::string, MAX_NUMBER_ROMS_PER_PLATFORM> rom
 
 		// file 3m
 
-		err = fopen_portable(&fp, rom[NINE].c_str(), "rb");
+		fp = SDL_IOFromFile(rom[NINE].c_str(), "rb");
+		err = (fp != NULL) ? 0 : -1;
 
 		if (!err && (fp != NULL))
 		{
 			// get the size of the complete rom
-			fseek(fp, 0, SEEK_END);
-			pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.soundRom2Size = ftell(fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_END);
+			pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.soundRom2Size = TO_UINT32(SDL_TellIO(fp));
 
 			// read the complete rom
-			rewind(fp);
-			fread(pPacMan_instance->pacMan_state.sound_rom.soundROM.sound_rom2, pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.soundRom2Size, 1, fp);
+			SDL_SeekIO(fp, 0, SDL_IO_SEEK_SET);
+			SDL_ReadIO(fp, pPacMan_instance->pacMan_state.sound_rom.soundROM.sound_rom2, pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.soundRom2Size);
 			LOG("file 3m loaded");
 
 			// close the rom for now
-			fclose(fp);
+			SDL_CloseIO(fp);
 
 			pAbsolute_pacMan_instance->absolute_pacMan_state.aboutRom.areRomsLoaded = false; // true;
 

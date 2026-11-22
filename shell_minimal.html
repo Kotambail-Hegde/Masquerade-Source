@@ -89,35 +89,42 @@
         window.onerror = function (event) {
             console.log("onerror: " + event);
         };
+    </script>
 
-        // ---- Input fixes (Firefox) ------------------------------------------------
-        // SDL only accepts mouse input once it believes the canvas has mouse focus (from 'mouseenter').
-        // Firefox may never send it if the pointer is already over the canvas at load, so we focus the
-        // canvas and send one ourselves on the first pointer activity.
+    <script type="text/javascript">
+        // Dismiss the splash from a real DOM gesture (independent of SDL's focus state), and make sure the canvas has focus.
+        // Firefox may never send 'mouseenter' when the pointer is already over the canvas at load (e.g. after a reload for a new game),
+        // so SDL never gets mouse focus; we send one ourselves on the first gesture.
         (function () {
             var canvas = document.getElementById('canvas');
-            var enteredSent = false;
+            var dismissed = false;
+            var enterSent = false;
 
             function focusCanvas() {
-                if (document.activeElement !== canvas) canvas.focus({ preventScroll: true });
+                if (canvas && document.activeElement !== canvas) canvas.focus({ preventScroll: true });
             }
             function sendEnter(e) {
-                if (enteredSent) return;
-                enteredSent = true;
+                if (enterSent || !canvas) return;
+                enterSent = true;
                 canvas.dispatchEvent(new MouseEvent('mouseenter', {
                     bubbles: false, clientX: e.clientX || 0, clientY: e.clientY || 0
                 }));
             }
+            function onGesture(e) {
+                focusCanvas();
+                sendEnter(e);
+                if (dismissed || !Module.calledRun) return; // runtime not ready yet: wait for the next gesture
+                dismissed = true;
+                Module.ccall('masq_dismiss_splash', null, [], []);
+            }
 
-            window.addEventListener('load', focusCanvas);
+            canvas.setAttribute('tabindex', '0');
             ['pointerdown', 'mousedown', 'touchstart', 'keydown'].forEach(function (t) {
-                window.addEventListener(t, focusCanvas, true);
+                window.addEventListener(t, onGesture, true);
             });
             window.addEventListener('mousemove', sendEnter, { once: true, capture: true });
-            window.addEventListener('pointerdown', sendEnter, { once: true, capture: true });
-            document.addEventListener('visibilitychange', function () {
-                if (!document.hidden) focusCanvas();
-            });
+            window.addEventListener('load', focusCanvas);
+            document.addEventListener('visibilitychange', function () { if (!document.hidden) focusCanvas(); });
         })();
     </script>
 

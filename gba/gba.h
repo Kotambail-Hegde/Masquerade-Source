@@ -6,6 +6,7 @@
 #pragma region INCLUDES
 //
 #include "helpers.h"
+#include "masquerade_io.h"
 #include "scheduler.h"
 //
 #include "abstractEmulation.h"
@@ -10655,7 +10656,7 @@ OPT_SPEED
 	// MODE PROCESSING AND CONTROL
 	// ============================================
 
-	MASQ_INLINE void PROCESS_PPU_MODES(INC64 ppuCycles, FLAG renderBG, FLAG renderWindow, FLAG renderObj, FLAG renderMerge)
+	MASQ_SUGGEST_INLINE void PROCESS_PPU_MODES(INC64 ppuCycles, FLAG renderBG, FLAG renderWindow, FLAG renderObj, FLAG renderMerge)
 	{
 
 		pGBA_display->currentPPUMode = pGBA_peripherals->mDISPCNTHalfWord.mDISPCNTFields.BG_MODE;

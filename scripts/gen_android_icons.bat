@@ -1,0 +1,1 @@
+python make_android_icons.py ../assets/ui/icons/masquerade.png ../android/app/src/main/res
