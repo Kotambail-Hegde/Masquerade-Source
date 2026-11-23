@@ -1378,7 +1378,7 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 					}
 
 					// Source : https://www.slack.net/~ant/libs/audio.html#Gb_Snd_Emu
-					uint16_t resetFrequencyTimer = (2048 - getChannelPeriod(AUDIO_CHANNELS::CHANNEL_1)) * FOUR;
+					uint16_t resetFrequencyTimer = (2048 - getChannelPeriod(AUDIO_CHANNELS::CHANNEL_1)) * SIXTEEN;
 					syncChannelFrequencyTimer(AUDIO_CHANNELS::CHANNEL_1);
 					pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].frequencyTimer
 						= (pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_1)].frequencyTimer & THREE)
@@ -1531,7 +1531,7 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 					pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_2)].isVolumeEnvelopeStillDoingAutomaticUpdates = YES;
 
 					// Source : https://www.slack.net/~ant/libs/audio.html#Gb_Snd_Emu
-					uint16_t resetFrequencyTimer = (2048 - getChannelPeriod(AUDIO_CHANNELS::CHANNEL_2)) * FOUR;
+					uint16_t resetFrequencyTimer = (2048 - getChannelPeriod(AUDIO_CHANNELS::CHANNEL_2)) * SIXTEEN;
 					syncChannelFrequencyTimer(AUDIO_CHANNELS::CHANNEL_2);
 					pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_2)].frequencyTimer
 						= (pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_2)].frequencyTimer & THREE)
@@ -1701,7 +1701,7 @@ MASQ_INLINE void GBA_t::writeIO(uint32_t address, GBA_HALFWORD data, MEMORY_ACCE
 					}
 
 					// Period needs to be reloaded as per https://gbdev.io/pandocs/Audio_Registers.html#ff1e--nr34-channel-3-period-high--control
-					uint16_t resetFrequencyTimer = (2048 - getChannelPeriod(AUDIO_CHANNELS::CHANNEL_3)) * TWO;
+					uint16_t resetFrequencyTimer = (2048 - getChannelPeriod(AUDIO_CHANNELS::CHANNEL_3)) * EIGHT;
 					pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_3)].frequencyTimer = resetFrequencyTimer;
 					// As per https://forums.nesdev.org/viewtopic.php?p=188035#p188035, another 6 cycle delay is needed
 					pGBA_instance->GBA_state.audio.audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::CHANNEL_3)].frequencyTimer += SIX;
