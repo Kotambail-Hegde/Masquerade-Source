@@ -7462,8 +7462,13 @@ OPT_SPEED
 				setEmulationVolume(gain);
 			}
 
-			if (SDL_PutAudioStreamData(audioStream, pGBA_instance->GBA_state.audio.audioBuffer,
-										sizeof(pGBA_instance->GBA_state.audio.audioBuffer)) == FAILURE) MASQ_UNLIKELY
+			// Drop stale audio if we run far ahead of real time (~0.25 s cap)
+			if (SDL_GetAudioStreamQueued(audioStream) > static_cast<int>((static_cast<int>(EMULATED_AUDIO_SAMPLING_RATE_FOR_GBA) << pGBA_instance->GBA_state.audio.previousSamplingResolution) * 4 / 4))
+			{
+				SDL_ClearAudioStream(audioStream);
+			}
+
+			if (SDL_PutAudioStreamData(audioStream, pGBA_instance->GBA_state.audio.audioBuffer, sizeof(pGBA_instance->GBA_state.audio.audioBuffer)) == FAILURE) MASQ_UNLIKELY
 			{
 				SDL_Log("Could not put data on Audio stream, %s", SDL_GetError());
 				FATAL("SDL_PutAudioStreamData Error");
