@@ -3422,6 +3422,7 @@ private:
 		int16_t sampleReadByChannel3;
 		int16_t sampleReadByChannel4;
 		uint32_t accumulatedTone;
+		uint8_t previousSamplingResolution;
 		MAP8 soundTimerOverFlow;
 		audioChannelInstance_t audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::TOTAL_CHANNELS)];
 		GBA_AUDIO_SAMPLE_TYPE audioBuffer[AUDIO_BUFFER_SIZE_FOR_GBA];
@@ -7318,7 +7319,51 @@ OPT_SPEED
 		continousDACCheck();
 	}
 
+	// Refer: GBATEK SOUNDBIAS bits 14-15
+	// 0: 512 cycles (32768 Hz), 1: 256 (65536 Hz), 2: 128 (131072 Hz), 3: 64 (262144 Hz)
+	MASQ_INLINE INC64 getAudioSampleIntervalCycles()
+	{
+		const uint8_t resolution = pGBA_peripherals->mSOUNDBIASHalfWord.mSOUNDBIASFields.AMP_RES_OR_SAMPLING_CYC;
+		return static_cast<INC64>(512 >> resolution);
+	}
+
+	// When the resolution changes: push the partial buffer (still at the old rate), then switch the stream's input rate.
+	// SDL3 converts data already queued with the old format, so nothing is lost or pitched wrong.
+	MASQ_INLINE void syncAudioSamplingRate()
+	{
+		auto& audioState = pGBA_instance->GBA_state.audio;
+		const uint8_t resolution = pGBA_peripherals->mSOUNDBIASHalfWord.mSOUNDBIASFields.AMP_RES_OR_SAMPLING_CYC;
+
+		if (resolution == audioState.previousSamplingResolution) MASQ_LIKELY
+		{
+			RETURN;
+		}
+
+		if (audioState.accumulatedTone > 0)
+		{
+			SDL_PutAudioStreamData(audioStream, audioState.audioBuffer,
+				static_cast<int>(audioState.accumulatedTone * sizeof(GBA_AUDIO_SAMPLE_TYPE)));
+			audioState.accumulatedTone = RESET;
+		}
+
+		const int sampleRate = static_cast<int>(EMULATED_AUDIO_SAMPLING_RATE_FOR_GBA) << resolution;
+		const SDL_AudioSpec newSpec{ SDL_AUDIO_S16, TO_UINT8(AUDIO_STREAMS::TOTAL_AUDIO_STREAMS), sampleRate };
+
+		if (SDL_SetAudioStreamFormat(audioStream, &newSpec, NULL) == FAILURE) MASQ_UNLIKELY
+		{
+			SDL_Log("Could not change Audio stream rate, %s", SDL_GetError());
+		}
+
+		audioState.previousSamplingResolution = resolution;
+	}
+
 	MASQ_INLINE void captureDownsampledAudioSamples()
+	{
+		syncAudioSamplingRate();
+		captureMixedAudioSample();
+	}
+
+	MASQ_INLINE void captureMixedAudioSample()
 	{
 		// DAC check - if DAC disabled, channel disabled immediately
 		continousDACCheck();
@@ -12039,9 +12084,11 @@ private:
 		gba->captureDownsampledAudioSamples();
 
 		// Schedule the Downsampler
+		const INC64 sampleInterval = gba->getAudioSampleIntervalCycles();
+		const INC64 now = gba->pGBA_scheduler->get_current_cycles();
 		gba->pGBA_scheduler->schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_APU_SAMPLE),
-			gba->pGBA_scheduler->get_current_cycles() + DOWNSAMPLE_THRESHOLD,
+			now + (sampleInterval - (now & (sampleInterval - 1))),
 			ZERO);
 	}
 
