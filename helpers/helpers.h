@@ -943,11 +943,7 @@ typedef float SPACEINVADERS_AUDIO_SAMPLE_TYPE;
 typedef float PACMAN_AUDIO_SAMPLE_TYPE;
 typedef float NES_AUDIO_SAMPLE_TYPE;
 typedef float GBC_AUDIO_SAMPLE_TYPE;
-#if (GBA_AUDIO_SAMPLE_FORMAT == MASQ_FLOAT32)
-typedef float    GBA_AUDIO_SAMPLE_TYPE;
-#else
 typedef int16_t  GBA_AUDIO_SAMPLE_TYPE;
-#endif
 
 typedef byte     BIT;
 typedef uint8_t  BYTE;

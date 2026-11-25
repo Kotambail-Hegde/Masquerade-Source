@@ -3422,6 +3422,7 @@ private:
 		int16_t sampleReadByChannel3;
 		int16_t sampleReadByChannel4;
 		uint32_t accumulatedTone;
+		uint8_t previousSamplingResolution;
 		MAP8 soundTimerOverFlow;
 		audioChannelInstance_t audioChannelInstance[TO_UINT8(AUDIO_CHANNELS::TOTAL_CHANNELS)];
 		GBA_AUDIO_SAMPLE_TYPE audioBuffer[AUDIO_BUFFER_SIZE_FOR_GBA];
@@ -6200,7 +6201,9 @@ OPT_SPEED
 			{
 				if (fifoA.size > ZERO) MASQ_LIKELY
 				{
-					fifoA.latch = ((GBA_AUDIO_SAMPLE_TYPE)fifoA.fifo[fifoA.position] << ONE);
+					// Keep the raw signed 8-bit sample. The 50%/100% scaling is applied once in the
+					// mixer (latch * {2,4}). Do not pre-shift here.
+					fifoA.latch = (GBA_AUDIO_SAMPLE_TYPE)fifoA.fifo[fifoA.position];
 					fifoA.position = (fifoA.position + ONE) & THIRTYONE;
 					fifoA.size--;
 				}
@@ -6228,7 +6231,8 @@ OPT_SPEED
 			{
 				if (fifoB.size > ZERO) MASQ_LIKELY
 				{
-					fifoB.latch = ((GBA_AUDIO_SAMPLE_TYPE)fifoB.fifo[fifoB.position] << ONE);
+					// Raw signed 8-bit sample, scaled once in the mixer (see channel A).
+					fifoB.latch = (GBA_AUDIO_SAMPLE_TYPE)fifoB.fifo[fifoB.position];
 					fifoB.position = (fifoB.position + ONE) & THIRTYONE;
 					fifoB.size--;
 				}
@@ -7246,7 +7250,7 @@ OPT_SPEED
 		const uint8_t ch = static_cast<uint8_t>(channel);
 
 		// Direct array access - no switch
-		static GBA_AUDIO_SAMPLE_TYPE const amplitudes[4] = {
+		const GBA_AUDIO_SAMPLE_TYPE amplitudes[4] = {
 			pGBA_instance->GBA_state.audio.sampleReadByChannel1,
 			pGBA_instance->GBA_state.audio.sampleReadByChannel2,
 			pGBA_instance->GBA_state.audio.sampleReadByChannel3,
@@ -7315,28 +7319,81 @@ OPT_SPEED
 		continousDACCheck();
 	}
 
+	// Refer: GBATEK SOUNDBIAS bits 14-15
+	// 0: 512 cycles (32768 Hz), 1: 256 (65536 Hz), 2: 128 (131072 Hz), 3: 64 (262144 Hz)
+	MASQ_INLINE INC64 getAudioSampleIntervalCycles()
+	{
+		const uint8_t resolution = pGBA_peripherals->mSOUNDBIASHalfWord.mSOUNDBIASFields.AMP_RES_OR_SAMPLING_CYC;
+		return static_cast<INC64>(512 >> resolution);
+	}
+
+	// When the resolution changes: push the partial buffer (still at the old rate), then switch the stream's input rate.
+	// SDL3 converts data already queued with the old format, so nothing is lost or pitched wrong.
+	MASQ_INLINE void syncAudioSamplingRate()
+	{
+		auto& audioState = pGBA_instance->GBA_state.audio;
+		const uint8_t resolution = pGBA_peripherals->mSOUNDBIASHalfWord.mSOUNDBIASFields.AMP_RES_OR_SAMPLING_CYC;
+
+		if (resolution == audioState.previousSamplingResolution) MASQ_LIKELY
+		{
+			RETURN;
+		}
+
+		if (audioState.accumulatedTone > 0)
+		{
+			SDL_PutAudioStreamData(audioStream, audioState.audioBuffer,
+				static_cast<int>(audioState.accumulatedTone * sizeof(GBA_AUDIO_SAMPLE_TYPE)));
+			audioState.accumulatedTone = RESET;
+		}
+
+		const int sampleRate = static_cast<int>(EMULATED_AUDIO_SAMPLING_RATE_FOR_GBA) << resolution;
+		const SDL_AudioSpec newSpec{ SDL_AUDIO_S16, TO_UINT8(AUDIO_STREAMS::TOTAL_AUDIO_STREAMS), sampleRate };
+
+		if (SDL_SetAudioStreamFormat(audioStream, &newSpec, NULL) == FAILURE) MASQ_UNLIKELY
+		{
+			SDL_Log("Could not change Audio stream rate, %s", SDL_GetError());
+		}
+
+		audioState.previousSamplingResolution = resolution;
+	}
+
 	MASQ_INLINE void captureDownsampledAudioSamples()
+	{
+		syncAudioSamplingRate();
+		captureMixedAudioSample();
+	}
+
+	MASQ_INLINE void captureMixedAudioSample()
 	{
 		// DAC check - if DAC disabled, channel disabled immediately
 		continousDACCheck();
 
-		static constexpr int PSG_VOL[4] = { ONE, TWO, FOUR, ZERO };
-		static constexpr int DMA_VOL[2] = { TWO, FOUR };
+		// Mixer arithmetic is done in the GBA's 10-bit DAC units (full scale = +-512):
+		//  - PSG:  sum(enabled channels) * PSG_VOL[SOUNDCNT_H.vol] * (master + 1) >> 5
+		//          PSG_VOL = 25% / 50% / 100% / prohibited (mute) => multipliers 1, 2, 4, 0.
+		//          4 channels * +-120 = +-480 at max, and (master+1) = 8 with vol 4 gives
+		//          32 / 32 = 1.0, so the PSG sum can never exceed the DAC range by itself.
+		//          This must be a multiply then a fixed >> 5. A shift of (5 - vol) cannot give
+		//          1:2:4 steps, cannot mute vol 3 and overdrives the mix.
+		//  - DMA:  signed 8-bit FIFO latch * DMA_VOL[SOUNDCNT_H.vol] (50% = 2, 100% = 4),
+		//          max +-508. The latch itself must stay the raw int8 (no extra << 1).
+		static constexpr int PSG_VOL[4] = { 1, 2, 4, 0 };
+		static constexpr int DMA_VOL[2] = { 2, 4 };
 
 		// Cache commonly accessed registers
 		const auto& soundcntL = pGBA_peripherals->mSOUNDCNT_LHalfWord.mSOUNDCNT_LFields;
 		const auto& soundcntH = pGBA_peripherals->mSOUNDCNT_HHalfWord.mSOUNDCNT_HFields;
-		const GBA_AUDIO_SAMPLE_TYPE biasLevel = pGBA_peripherals->mSOUNDBIASHalfWord.mSOUNDBIASFields.BIAS_LVL;
-		const int psgVolShift = FIVE - PSG_VOL[soundcntH.SOUND_VOL];
+		const int biasLevel = pGBA_peripherals->mSOUNDBIASHalfWord.mSOUNDBIASFields.BIAS_LVL;
+		const int psgVolume = PSG_VOL[soundcntH.SOUND_VOL];
 
 		// Get all channel samples once
-		const GBA_AUDIO_SAMPLE_TYPE channel1Sample = getDACOutput(AUDIO_CHANNELS::CHANNEL_1);
-		const GBA_AUDIO_SAMPLE_TYPE channel2Sample = getDACOutput(AUDIO_CHANNELS::CHANNEL_2);
-		const GBA_AUDIO_SAMPLE_TYPE channel3Sample = getDACOutput(AUDIO_CHANNELS::CHANNEL_3);
-		const GBA_AUDIO_SAMPLE_TYPE channel4Sample = getDACOutput(AUDIO_CHANNELS::CHANNEL_4);
+		const int channel1Sample = getDACOutput(AUDIO_CHANNELS::CHANNEL_1);
+		const int channel2Sample = getDACOutput(AUDIO_CHANNELS::CHANNEL_2);
+		const int channel3Sample = getDACOutput(AUDIO_CHANNELS::CHANNEL_3);
+		const int channel4Sample = getDACOutput(AUDIO_CHANNELS::CHANNEL_4);
 
 		// Process LEFT sample
-		GBA_AUDIO_SAMPLE_TYPE leftSample = static_cast<GBA_AUDIO_SAMPLE_TYPE>(MUTE_AUDIO);
+		int leftSample = 0;
 
 		if (DISABLE_FIRST_PULSE_CHANNEL == NO && soundcntL.SOUND_ENABLE_1L == ONE) MASQ_LIKELY
 			leftSample += channel1Sample;
@@ -7347,22 +7404,24 @@ OPT_SPEED
 		if (DISABLE_NOISE_CHANNEL == NO && soundcntL.SOUND_ENABLE_4L == ONE) MASQ_LIKELY
 			leftSample += channel4Sample;
 
-		leftSample *= soundcntL.SOUND_MASTER_VOL_L;
-		leftSample >>= psgVolShift;
+		// Master volume 0..7 is a gain of 1..8 on hardware (never fully muted), hence the +1.
+		// Same for the right side below.
+		leftSample = (leftSample * psgVolume * (soundcntL.SOUND_MASTER_VOL_L + 1)) >> 5;
 
 		if (DISABLE_DMAA_CHANNEL == NO && soundcntH.DMA_SOUND_A_EN_L == SET) MASQ_LIKELY
-			leftSample += (pGBA_audio->FIFO[DIRECT_SOUND_A].latch << DMA_VOL[soundcntH.DMA_SOUND_A_VOL]);
+			leftSample += pGBA_audio->FIFO[DIRECT_SOUND_A].latch * DMA_VOL[soundcntH.DMA_SOUND_A_VOL];
 
 		if (DISABLE_DMAB_CHANNEL == NO && soundcntH.DMA_SOUND_B_EN_L == SET) MASQ_LIKELY
-			leftSample += (pGBA_audio->FIFO[DIRECT_SOUND_B].latch << DMA_VOL[soundcntH.DMA_SOUND_B_VOL]);
+			leftSample += pGBA_audio->FIFO[DIRECT_SOUND_B].latch * DMA_VOL[soundcntH.DMA_SOUND_B_VOL];
 
-		leftSample += biasLevel;
-		leftSample = std::clamp(leftSample, GBA_AUDIO_SAMPLE_TYPE(0), GBA_AUDIO_SAMPLE_TYPE(0x3FF));
-		leftSample -= biasLevel;
+		// The DAC adds the bias, clips to 0..0x3FF, then the 0x200 centre is removed.
+		// Subtract the fixed 0x200 (not biasLevel): the clip window and DC offset must move
+		// with the bias. They only coincide at the 0x200 default.
+		leftSample = std::clamp(leftSample + biasLevel, 0, 0x3FF) - 0x200;
 		leftSample *= THIRTYTWO;
 
 		// Process RIGHT sample
-		GBA_AUDIO_SAMPLE_TYPE rightSample = static_cast<GBA_AUDIO_SAMPLE_TYPE>(MUTE_AUDIO);
+		int rightSample = 0;
 
 		if (DISABLE_FIRST_PULSE_CHANNEL == NO && soundcntL.SOUND_ENABLE_1R == ONE) MASQ_LIKELY
 			rightSample += channel1Sample;
@@ -7373,22 +7432,21 @@ OPT_SPEED
 		if (DISABLE_NOISE_CHANNEL == NO && soundcntL.SOUND_ENABLE_4R == ONE) MASQ_LIKELY
 			rightSample += channel4Sample;
 
-		rightSample *= soundcntL.SOUND_MASTER_VOL_R;
-		rightSample >>= psgVolShift;
+		rightSample = (rightSample * psgVolume * (soundcntL.SOUND_MASTER_VOL_R + 1)) >> 5;
 
 		if (DISABLE_DMAA_CHANNEL == NO && soundcntH.DMA_SOUND_A_EN_R == SET) MASQ_LIKELY
-			rightSample += (pGBA_audio->FIFO[DIRECT_SOUND_A].latch << DMA_VOL[soundcntH.DMA_SOUND_A_VOL]);
+			rightSample += pGBA_audio->FIFO[DIRECT_SOUND_A].latch * DMA_VOL[soundcntH.DMA_SOUND_A_VOL];
 
 		if (DISABLE_DMAB_CHANNEL == NO && soundcntH.DMA_SOUND_B_EN_R == SET) MASQ_LIKELY
-			rightSample += (pGBA_audio->FIFO[DIRECT_SOUND_B].latch << DMA_VOL[soundcntH.DMA_SOUND_B_VOL]);
+			rightSample += pGBA_audio->FIFO[DIRECT_SOUND_B].latch * DMA_VOL[soundcntH.DMA_SOUND_B_VOL];
 
-		rightSample += biasLevel;
-		rightSample = std::clamp(rightSample, GBA_AUDIO_SAMPLE_TYPE(0), GBA_AUDIO_SAMPLE_TYPE(0x3FF));
-		rightSample -= biasLevel;
+		rightSample = std::clamp(rightSample + biasLevel, 0, 0x3FF) - 0x200;
 		rightSample *= THIRTYTWO;
 
-		// Buffer management
 		auto& accumulatedTone = pGBA_instance->GBA_state.audio.accumulatedTone;
+
+		pGBA_instance->GBA_state.audio.audioBuffer[accumulatedTone++] = static_cast<GBA_AUDIO_SAMPLE_TYPE>(leftSample);
+		pGBA_instance->GBA_state.audio.audioBuffer[accumulatedTone++] = static_cast<GBA_AUDIO_SAMPLE_TYPE>(rightSample);
 
 		if (accumulatedTone >= AUDIO_BUFFER_SIZE_FOR_GBA) MASQ_UNLIKELY
 		{
@@ -7404,22 +7462,19 @@ OPT_SPEED
 				setEmulationVolume(gain);
 			}
 
-			if (SDL_PutAudioStreamData(audioStream, pGBA_instance->GBA_state.audio.audioBuffer,
-										sizeof(pGBA_instance->GBA_state.audio.audioBuffer)) == FAILURE) MASQ_UNLIKELY
+			// Drop stale audio if we run far ahead of real time (~0.25 s cap)
+			if (SDL_GetAudioStreamQueued(audioStream) > static_cast<int>((static_cast<int>(EMULATED_AUDIO_SAMPLING_RATE_FOR_GBA) << pGBA_instance->GBA_state.audio.previousSamplingResolution) * 4 / 4))
+			{
+				SDL_ClearAudioStream(audioStream);
+			}
+
+			if (SDL_PutAudioStreamData(audioStream, pGBA_instance->GBA_state.audio.audioBuffer, sizeof(pGBA_instance->GBA_state.audio.audioBuffer)) == FAILURE) MASQ_UNLIKELY
 			{
 				SDL_Log("Could not put data on Audio stream, %s", SDL_GetError());
 				FATAL("SDL_PutAudioStreamData Error");
 			}
 
 			accumulatedTone = RESET;
-		}
-		else MASQ_LIKELY
-		{
-			pGBA_instance->GBA_state.audio.audioBuffer[accumulatedTone++] = leftSample;
-			if (accumulatedTone < AUDIO_BUFFER_SIZE_FOR_GBA) MASQ_LIKELY
-			{
-				pGBA_instance->GBA_state.audio.audioBuffer[accumulatedTone++] = rightSample;
-			}
 		}
 	}
 
@@ -11999,6 +12054,10 @@ private:
 
 		auto& chInstance = gba->pGBA_instance->GBA_state.audio.audioChannelInstance[channel];
 
+		// The event fires exactly when the timer expires, so fold the elapsed cycles in first (-> 0).
+		// Without this the stale value is added to the reload and the period grows every step.
+		gba->foldChannelFrequencyTimer(static_cast<AUDIO_CHANNELS>(channel), YES);
+
 		gba->tickChannel(static_cast<AUDIO_CHANNELS>(channel));
 
 		gba->pGBA_audio->apu_stats.lastSyncCycleCount[channel] = gba->pGBA_scheduler->get_current_cycles();
@@ -12030,9 +12089,11 @@ private:
 		gba->captureDownsampledAudioSamples();
 
 		// Schedule the Downsampler
+		const INC64 sampleInterval = gba->getAudioSampleIntervalCycles();
+		const INC64 now = gba->pGBA_scheduler->get_current_cycles();
 		gba->pGBA_scheduler->schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_APU_SAMPLE),
-			gba->pGBA_scheduler->get_current_cycles() + DOWNSAMPLE_THRESHOLD,
+			now + (sampleInterval - (now & (sampleInterval - 1))),
 			ZERO);
 	}
 
