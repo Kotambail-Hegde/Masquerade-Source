@@ -845,6 +845,7 @@ void GBA_t::initializeAudio()
 
 	// Refer : http://problemkaputt.de/gbatek-gba-sound-control-registers.htm
 	pGBA_peripherals->mSOUNDBIASHalfWord.mSOUNDBIASHalfWord = 0x200;
+	pGBA_audio->previousSamplingResolution = RESET; // matches the 32768 Hz stream opened above
 
 	// Setup the volume for audio
 	pGBA_audio->emulatorVolume = pt.get<std::float_t>("gba._volume", 0.1f);
