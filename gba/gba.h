@@ -23,11 +23,10 @@
 #define GBA_REFERENCE_CLOCK_HZ							16777216.0f
 #define GBA_FPS											60.0f
 #define EMULATED_AUDIO_SAMPLING_RATE_FOR_GBA			32768.0f
-#ifdef __EMSCRIPTEN__
-#define AUDIO_BUFFER_SIZE_FOR_GBA						1536 // (((CEIL(EMULATED_AUDIO_SAMPLING_RATE_FOR_GBA / GBA_FPS)) + ONE) & ~ONE)
-#else
-#define AUDIO_BUFFER_SIZE_FOR_GBA						1536 // (((CEIL(EMULATED_AUDIO_SAMPLING_RATE_FOR_GBA / GBA_FPS)) + ONE) & ~ONE)
-#endif
+#define EMULATED_AUDIO_CHANNELS_FOR_GBA					2 // GBA output is always stereo, interleaved L/R
+// One SDL push = 768 stereo frames (~23.4 ms at 32768 Hz, ~1.4 video frames).
+#define AUDIO_FRAMES_PER_BUFFER_FOR_GBA					768
+#define AUDIO_BUFFER_SIZE_FOR_GBA						(AUDIO_FRAMES_PER_BUFFER_FOR_GBA * EMULATED_AUDIO_CHANNELS_FOR_GBA) // in samples (L and R counted separately)
 
 #define GBA_HALFWORD									uint16_t
 #define GBA_WORD										uint32_t
@@ -6913,7 +6912,7 @@ OPT_SPEED
 		{
 			const uint16_t divisor = AUDIO_CHANNEL_4_DIVISOR[pGBA_peripherals->mSOUND4CNT_HHalfWord.mSOUND4CNT_HFields.DIV_RATIO_OF_FREQ];
 			const uint16_t shiftAmount = pGBA_peripherals->mSOUND4CNT_HHalfWord.mSOUND4CNT_HFields.SHIFT_CLK_FREQ;
-			const uint16_t resetFrequencyTimer = divisor << (shiftAmount + TWO);
+			const INC64 resetFrequencyTimer = static_cast<INC64>(divisor) << (shiftAmount + TWO);
 
 			chInstance.frequencyTimer += resetFrequencyTimer;
 
@@ -7444,6 +7443,17 @@ OPT_SPEED
 		rightSample *= THIRTYTWO;
 
 		auto& accumulatedTone = pGBA_instance->GBA_state.audio.accumulatedTone;
+
+		// The pair below needs two free slots, so the index must be a multiple of the channel count and
+		// <= SIZE - 2 here. The flush at the bottom normally guarantees that. If the state was ever
+		// restored or left uninitialised, writing would run past audioBuffer into the next audio_t field.
+		static_assert((AUDIO_BUFFER_SIZE_FOR_GBA % EMULATED_AUDIO_CHANNELS_FOR_GBA) == 0, "audio buffer must hold whole stereo frames");
+		if ((accumulatedTone + static_cast<uint32_t>(EMULATED_AUDIO_CHANNELS_FOR_GBA) > static_cast<uint32_t>(AUDIO_BUFFER_SIZE_FOR_GBA)) ||
+			(accumulatedTone % static_cast<uint32_t>(EMULATED_AUDIO_CHANNELS_FOR_GBA) != 0)) MASQ_UNLIKELY
+		{
+			SDL_Log("Audio buffer index %u out of range, resetting", accumulatedTone);
+			accumulatedTone = RESET;
+		}
 
 		pGBA_instance->GBA_state.audio.audioBuffer[accumulatedTone++] = static_cast<GBA_AUDIO_SAMPLE_TYPE>(leftSample);
 		pGBA_instance->GBA_state.audio.audioBuffer[accumulatedTone++] = static_cast<GBA_AUDIO_SAMPLE_TYPE>(rightSample);
@@ -12065,7 +12075,7 @@ private:
 		// Schedule channel step
 		gba->pGBA_scheduler->schedule(
 			static_cast<EventId>(GBA_EVENT::EVENT_APU_CHANNEL_STEP),
-			gba->pGBA_scheduler->get_current_cycles() + chInstance.frequencyTimer,
+			gba->pGBA_scheduler->get_current_cycles() + std::max<INC64>(chInstance.frequencyTimer, 1),
 			channel);
 	}
 
