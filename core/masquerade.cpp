@@ -3924,8 +3924,8 @@ public:
 			io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 			io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
 			io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-#ifndef __ANDROID__
-			io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+#if !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+			io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable; // multi-viewport needs real OS windows; in a browser it only skews mouse coordinates
 #endif
 			io.ConfigWindowsMoveFromTitleBarOnly = true;
 
