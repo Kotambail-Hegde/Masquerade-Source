@@ -630,7 +630,7 @@ jobs:
           [ ! -d "stb/stb" ]   && git clone --depth 1 https://github.com/nothings/stb.git stb/stb
           [ ! -d "rapidjson" ] && git clone --depth 1 https://github.com/Tencent/rapidjson.git rapidjson
           [ ! -d "SDL" ]       && git clone --depth 1 https://github.com/libsdl-org/SDL.git SDL
-          [ ! -d "SDL_net" ]   && git clone --depth 1 clone https://github.com/libsdl-org/SDL_net.git SDL_net
+          [ ! -d "SDL_net" ]   && git clone --depth 1 https://github.com/libsdl-org/SDL_net.git SDL_net
 
           if [ ! -d "emscripten-browser-file" ]; then
             git clone https://github.com/Armchair-Software/emscripten-browser-file.git --depth 1
