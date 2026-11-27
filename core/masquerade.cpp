@@ -4343,6 +4343,17 @@ public:
 							}
 #endif
 							ImGui::NewFrame();
+#ifdef __EMSCRIPTEN__
+							{
+								// First real mouse activity after the splash: tell the page the UI works, so its "not responding?" hint can close
+								static bool webInputSeen = false;
+								if (!webInputSeen && initScreen == NO && (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f || io.MouseDown[0]))
+								{
+									webInputSeen = true;
+									EM_ASM({ if (window.masqInputOk) window.masqInputOk(); });
+								}
+							}
+#endif
 #ifdef __ANDROID__
 							// Extend the menu bar colour into the edge margins so it still looks edge-to-edge
 							{
