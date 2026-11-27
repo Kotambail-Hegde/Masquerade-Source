@@ -30,10 +30,75 @@
             image-rendering: pixelated;
             -ms-interpolation-mode: nearest-neighbor;
         }
+
+        /* "Not responding?" hint, styled like the emulator UI (dark panel, blue accent) */
+        #masq-help {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.55);
+            z-index: 10;
+            font-family: "Segoe UI", system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif;
+        }
+        #masq-help[hidden] {
+            display: none;
+        }
+        #masq-help .card {
+            width: min(420px, calc(100vw - 48px));
+            box-sizing: border-box;
+            padding: 20px 22px 18px;
+            background: #0e0f12;
+            border: 1px solid #2a3140;
+            border-radius: 10px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+            color: #aeb4c0;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        #masq-help .title {
+            margin: 0 0 8px;
+            color: #5b9be6;
+            font-size: 18px;
+            font-weight: 600;
+        }
+        #masq-help p {
+            margin: 0 0 16px;
+        }
+        #masq-help .actions {
+            display: flex;
+            justify-content: flex-end;
+        }
+        #masq-help button {
+            min-width: 84px;
+            padding: 8px 18px;
+            background: #172033;
+            border: 1px solid #35527a;
+            border-radius: 6px;
+            color: #dbe7f7;
+            font: inherit;
+            cursor: pointer;
+        }
+        #masq-help button:hover,
+        #masq-help button:focus-visible {
+            background: #1f2d47;
+            border-color: #5b9be6;
+            outline: none;
+        }
     </style>
 </head>
 <body>
     <canvas class="emscripten" id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
+
+    <div id="masq-help" role="dialog" aria-modal="true" aria-labelledby="masq-help-title" hidden>
+        <div class="card">
+            <div class="title" id="masq-help-title">Menu not responding?</div>
+            <p>Some browsers do not deliver the first mouse events to the page right after it loads.
+               If the menu does not react, <b>minimize and restore this window</b> (or switch to another tab and back) once.</p>
+            <div class="actions"><button id="masq-help-ok" type="button">OK</button></div>
+        </div>
+    </div>
 
     <script type="text/javascript">
         var Module = {
@@ -92,13 +157,21 @@
     </script>
 
     <script type="text/javascript">
-        // Dismiss the splash from a real DOM gesture (independent of SDL's focus state), and make sure the canvas has focus.
-        // Firefox may never send 'mouseenter' when the pointer is already over the canvas at load (e.g. after a reload for a new game),
-        // so SDL never gets mouse focus; we send one ourselves on the first gesture.
+        // Dismiss the splash from a real DOM gesture, make sure the canvas has focus, and show a small "not responding?"
+        // hint after the splash (browsers sometimes do not deliver the first mouse events until the window is minimized/restored).
         (function () {
+            // true  = always show the hint after the splash
+            // false = show it only if the app has not seen any mouse input shortly after the splash (it closes by itself as soon as input arrives)
+            var ALWAYS_SHOW = false;
+            var SHOW_DELAY_MS = 1500;
+
             var canvas = document.getElementById('canvas');
+            var help = document.getElementById('masq-help');
+            var helpOk = document.getElementById('masq-help-ok');
             var dismissed = false;
             var enterSent = false;
+            var inputOk = false;
+            var showTimer = null;
 
             function focusCanvas() {
                 if (canvas && document.activeElement !== canvas) canvas.focus({ preventScroll: true });
@@ -110,23 +183,55 @@
                     bubbles: false, clientX: e.clientX || 0, clientY: e.clientY || 0
                 }));
             }
-            var focusDispatched = false;
-            function tellAppItIsFocused() {
-                if (!Module.calledRun) return;
-                if (!focusDispatched) {
-                    // let SDL see a real 'focus' event too (its keyboard focus); canvas.focus() alone never reaches SDL's window-level listener
-                    focusDispatched = true;
-                    window.dispatchEvent(new FocusEvent('focus'));
-                }
-                Module.ccall('masq_page_focused', null, [], []);
+
+            // Try to reproduce what minimize/restore does: the events SDL listens to for visibility, focus and size
+            function kick() {
+                try { document.dispatchEvent(new Event('visibilitychange')); } catch (err) { }
+                try { window.dispatchEvent(new FocusEvent('focus')); } catch (err) { }
+                try { window.dispatchEvent(new Event('resize')); } catch (err) { }
+                try {
+                    canvas.dispatchEvent(new MouseEvent('mouseenter', { bubbles: false }));
+                } catch (err) { }
+                focusCanvas();
             }
+
+            function hideHelp() {
+                if (showTimer) { clearTimeout(showTimer); showTimer = null; }
+                help.hidden = true;
+            }
+            function showHelp() {
+                showTimer = null;
+                if (inputOk && !ALWAYS_SHOW) return;
+                help.hidden = false;
+                helpOk.focus();
+            }
+
+            // Called by the app (EM_ASM) the first time it receives mouse input after the splash: the UI works, no hint needed
+            window.masqInputOk = function () {
+                inputOk = true;
+                if (!ALWAYS_SHOW) hideHelp();
+            };
+
+            helpOk.addEventListener('click', function () {
+                kick();
+                hideHelp();
+            });
+            window.addEventListener('keydown', function (e) {
+                if (!help.hidden && (e.key === 'Enter' || e.key === 'Escape')) {
+                    kick();
+                    hideHelp();
+                    e.preventDefault();
+                }
+            }, true);
+
             function onGesture(e) {
+                if (e.target === helpOk) return;
                 focusCanvas();
                 sendEnter(e);
-                tellAppItIsFocused();
                 if (dismissed || !Module.calledRun) return; // runtime not ready yet: wait for the next gesture
                 dismissed = true;
                 Module.ccall('masq_dismiss_splash', null, [], []);
+                showTimer = setTimeout(showHelp, ALWAYS_SHOW ? 400 : SHOW_DELAY_MS);
             }
 
             canvas.setAttribute('tabindex', '0');
@@ -135,7 +240,7 @@
             });
             window.addEventListener('mousemove', sendEnter, { once: true, capture: true });
             window.addEventListener('load', focusCanvas);
-            document.addEventListener('visibilitychange', function () { if (!document.hidden) { focusCanvas(); tellAppItIsFocused(); } });
+            document.addEventListener('visibilitychange', function () { if (!document.hidden) focusCanvas(); });
         })();
     </script>
 
