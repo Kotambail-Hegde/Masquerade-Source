@@ -583,7 +583,7 @@ void GBA_t::dumpCpuStateToConsole()
 	LOG_NEW_LINE;
 	LOG("------------------------------------------------------------");
 
-	/* R0–R7 */
+	/* R0Â–R7 */
 	for (uint8_t r = ZERO; r < LO_GP_REGISTERS; r++)
 	{
 		LOG("BANK NA R%-2u %-10s : 0x%08X",
@@ -792,7 +792,7 @@ void GBA_t::initializeGraphics()
 		{
 			if ((y >= this->screen_y_offset && y < this->screen_height + this->screen_y_offset)
 				&&
-				(x >= this->screen_x_offset && y < this->screen_width + this->screen_x_offset))
+				(x >= this->screen_x_offset && x < this->screen_width + this->screen_x_offset))
 			{
 				pGBA_display->gfx_bg[BG0][x - this->screen_x_offset][y - this->screen_y_offset] = RESET;
 				pGBA_display->gfx_bg[BG1][x - this->screen_x_offset][y - this->screen_y_offset] = RESET;
@@ -1396,7 +1396,7 @@ FLAG GBA_t::runEmulationLoopAtFixedRate(uint32_t currentFrame)
 
 	if (pGBA_display->wasVblankJustTriggered)
 	{
-		// at GBA VBlank — hardware accurate cheat writes
+		// at GBA VBlank Â— hardware accurate cheat writes
 		// ROM patch entries (address >= GAMEPAK_ROM_WS0_START_ADDRESS) are skipped here;
 		// those are handled by interceptCPURead in the read path.
 		for (auto engine : { CheatEngine_t::CHEATING_ENGINE::GAMESHARK,
