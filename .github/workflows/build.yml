@@ -48,7 +48,7 @@ permissions:
 #   SDL_NET : run `git -C <your SDL_net folder> rev-parse HEAD` and paste it here
 env:
   SDL_COMMIT: 9c856aea9
-  IMGUI_COMMIT: ''
+  IMGUI_COMMIT: e05bd9deb
   SDL_NET_COMMIT: ''
 
 jobs:
