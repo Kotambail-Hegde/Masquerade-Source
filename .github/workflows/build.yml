@@ -41,6 +41,16 @@ permissions:
   pages: write
   id-token: write
 
+# Pinned dependency commits for the WINDOWS build (matches the local build).
+# Short or full hashes both work. Empty = take the latest default/docking branch.
+#   SDL     : from About -> "SDL-3.3.7-prerelease-3.3.6-3-g9c856aea9"
+#   IMGUI   : run `git -C <your imgui folder> rev-parse HEAD` and paste it here
+#   SDL_NET : run `git -C <your SDL_net folder> rev-parse HEAD` and paste it here
+env:
+  SDL_COMMIT: 9c856aea9
+  IMGUI_COMMIT: ''
+  SDL_NET_COMMIT: ''
+
 jobs:
   build_windows:
     name: Build Windows (MSVC)
@@ -90,9 +100,9 @@ jobs:
             external/SDL
             external/SDL_net
             external/nativefiledialog-extended
-          key: windows-external-all-v21-${{ hashFiles('.github/workflows/*.yml') }}
+          key: windows-external-all-v22-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: |
-            windows-external-all-v21-
+            windows-external-all-v22-
 
       # --- Clone all dependencies (only if not cached)
       - name: Clone all dependencies
@@ -103,10 +113,6 @@ jobs:
           if (-not (Test-Path $externalDir)) { New-Item -ItemType Directory -Path $externalDir | Out-Null }
 
           cd external
-
-          if (-not (Test-Path "imgui")) {
-              git clone https://github.com/ocornut/imgui.git --branch docking --depth 1
-          }
 
           if (-not (Test-Path "miniz")) {
               Write-Host "=== MINIZ: not found, downloading ==="
@@ -132,14 +138,6 @@ jobs:
               git clone https://github.com/Tencent/rapidjson.git --depth 1 rapidjson
           }
 
-          if (-not (Test-Path "SDL")) {
-              git clone https://github.com/libsdl-org/SDL.git --depth 1 SDL
-          }
-
-          if (-not (Test-Path "SDL_net")) {
-              git clone https://github.com/libsdl-org/SDL_net.git --depth 1 SDL_net
-          }
-
           if (-not (Test-Path "nativefiledialog-extended")) {
               git clone https://github.com/btzy/nativefiledialog-extended.git --depth 1 --shallow-submodules
           }
@@ -156,6 +154,55 @@ jobs:
               Write-Host "=== Boost source setup complete ==="
           } else {
               Write-Host "=== Boost already exists, skipping ==="
+          }
+
+      # --- Fetch imgui / SDL / SDL_net at pinned commits (runs even on a cache hit)
+      # If the cached copy is not at the pinned commit (or no pin is set and it is
+      # missing) it is wiped and re-fetched, so a stale restore-keys cache can never
+      # leave the build on different library versions than the local build.
+      - name: Fetch pinned dependencies (imgui, SDL, SDL_net)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Test-Path "external")) { New-Item -ItemType Directory -Path "external" | Out-Null }
+
+          function Sync-Dep {
+              param([string]$Dir, [string]$Url, [string]$Rev, [string]$Branch)
+              $path = "external/$Dir"
+
+              if ([string]::IsNullOrWhiteSpace($Rev)) {
+                  if (-not (Test-Path $path)) {
+                      if ($Branch) { git clone $Url --branch $Branch --depth 1 $path }
+                      else         { git clone $Url --depth 1 $path }
+                      if ($LASTEXITCODE -ne 0) { throw "clone failed: $Dir" }
+                  }
+                  Write-Host "=== $Dir : no pin set, using what is present ==="
+                  return
+              }
+
+              $current = ''
+              if (Test-Path "$path/.git") { $current = (git -C $path rev-parse HEAD).Trim() }
+              if ($current -and $current.StartsWith($Rev)) {
+                  Write-Host "=== $Dir already at $Rev ==="
+                  return
+              }
+
+              Write-Host "=== $Dir : fetching $Rev (cached copy was '$current') ==="
+              if (Test-Path $path) { Remove-Item -Recurse -Force $path }
+              if ($Branch) { git clone --filter=blob:none --branch $Branch $Url $path }
+              else         { git clone --filter=blob:none $Url $path }
+              if ($LASTEXITCODE -ne 0) { throw "clone failed: $Dir" }
+              git -C $path checkout $Rev
+              if ($LASTEXITCODE -ne 0) { throw "checkout $Rev failed for $Dir" }
+          }
+
+          Sync-Dep -Dir "imgui"   -Url "https://github.com/ocornut/imgui.git"        -Rev $env:IMGUI_COMMIT   -Branch "docking"
+          Sync-Dep -Dir "SDL"     -Url "https://github.com/libsdl-org/SDL.git"       -Rev $env:SDL_COMMIT     -Branch ""
+          Sync-Dep -Dir "SDL_net" -Url "https://github.com/libsdl-org/SDL_net.git"   -Rev $env:SDL_NET_COMMIT -Branch ""
+
+          Write-Host "=== Resolved versions ==="
+          foreach ($d in @("imgui", "SDL", "SDL_net")) {
+              Write-Host ("{0,-8}: {1}" -f $d, (git -C "external/$d" rev-parse HEAD))
           }
 
       # --- Build Boost
@@ -265,7 +312,8 @@ jobs:
         shell: pwsh
         run: |
           cd external/SDL_net
-          if (-not (Test-Path "build")) { New-Item -ItemType Directory -Path "build" | Out-Null }
+          if (Test-Path "build") { Remove-Item -Recurse -Force "build" }
+          New-Item -ItemType Directory -Path "build" | Out-Null
           cd build
 
           cmake .. -G "Visual Studio 18 2026" -A x64 `
@@ -792,4 +840,3 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./pages
           force_orphan: true
-          
